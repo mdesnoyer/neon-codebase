@@ -1120,7 +1120,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         vals = {
             'video_url' : "http://test.mp4",
             "video_title": "test_title", 
-            'video_id'  : "vid1",
+            'video_id'  : 654321,
             "callback_url" : "http://callback",
             'custom_data' : { 'my_id' : 123456, 'my_string': 'string'},
             'duration' : 123456.5
@@ -1133,7 +1133,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         # Make sure the video metadata object is created
         video = neondata.VideoMetadata.get(
-            neondata.InternalVideoID.generate(api_key, 'vid1'))
+            neondata.InternalVideoID.generate(api_key, '654321'))
         self.assertEquals(video.custom_data, {'my_id' : 123456,
                                               'my_string' : 'string'})
         self.assertEquals(video.video_url, "http://test.mp4")

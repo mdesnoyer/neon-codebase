@@ -669,6 +669,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
             external_thumbnail_id = params.get('external_thumbnail_id', None)
+            publish_date = params.get('publish_date', None)
             i_id = params.get(INTEGRATION_ID, '0')
             # Verify essential parameters
             try:
@@ -753,7 +754,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     http_callback,
                     default_thumbnail,
                     integration_id=i_id,
-                    external_thumbnail_id=external_thumbnail_id)
+                    external_thumbnail_id=external_thumbnail_id,
+                    publish_date=publish_date)
                 statemon.state.increment('neon_requests')
             
             # API Method

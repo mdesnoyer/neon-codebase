@@ -70,7 +70,31 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         super(TestGrabNewThumb, self).tearDown()
 
     @tornado.testing.gen_test
-    def test_match_urls(self):
+    def test_no_video_in_db(self):
+        self.platform.add_video('v2', None)
+
+        with self.assertLogExists(logging.ERROR, 'Could not find video'):
+            yield self.integration.submit_one_video_object(
+                { 'id' : 'v2',
+                  'length' : 100,
+                  'FLVURL' : 'http://video.mp4',
+                  'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                  'videoStill' : {
+                      'id' : 'still_id',
+                      'referenceId' : None,
+                      'remoteUrl' : None
+                  },
+                  'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                  'thumbnail' : {
+                      'id' : 123456,
+                      'referenceId' : None,
+                      'remoteUrl' : None
+                  }
+                }
+                )
+
+    @tornado.testing.gen_test
+    def test_convert_bc_thumb_type(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/vid_still.jpg'],
                           ttype=ThumbnailType.BRIGHTCOVE,
@@ -79,6 +103,43 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         yield self.integration.submit_one_video_object(
             { 'id' : 'v1',
               'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+              'thumbnail' : {
+                  'id' : 123456,
+                  'referenceId' : None,
+                  'remoteUrl' : None
+                  }
+                  }
+            )
+
+        # Make sure the type got updated
+        thumb = ThumbnailMetadata.get('acct1_v1_bc1')
+        self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
+        self.assertEquals(thumb.external_id, 'still_id')
+        self.assertEquals(thumb.rank, 1)
+
+        # Make sure no image was uploaded
+        self.assertEquals(self.im_download_mock.call_count, 0)
+        self.assertEquals(self.cdn_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_match_urls(self):
+        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
+                          ['http://bc.com/vid_still.jpg'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=1).save()
+
+        yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
               'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
               'videoStill' : {
                   'id' : 'still_id',
@@ -106,12 +167,13 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
     def test_match_moved_bc_urls(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bcsecure01-a.akamaihd.net/4/vid_still.jpg'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1).save()
 
         yield self.integration.submit_one_video_object({
             'id' : 'v1',
             'length' : 100,
+            'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://brightcove.com/3/vid_still.jpg?x=5',
             'videoStill' : {
                 'id' : 'still_id',
@@ -139,11 +201,12 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
     def test_match_remote_urls(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://some_remote_still?c=90'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1).save()
         yield self.integration.submit_one_video_object({
             'id' : 'v1',
             'length' : 100,
+            'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
             'videoStill' : {
                 'id' : 'still_id',
@@ -171,12 +234,13 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
     def test_match_reference_id(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_moved_location'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1,
                           refid='my_thumb_ref').save()
         yield self.integration.submit_one_video_object({
             'id' : 'v1',
             'length' : 100,
+            'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
             'videoStill' : {
                 'id' : 'still_id',
@@ -204,7 +268,7 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
     def test_match_external_id(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_moved_location'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1,
                           refid='my_thumb_ref',
                           external_id='thumb_id').save()
@@ -212,6 +276,7 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         yield self.integration.submit_one_video_object({
             'id' : 'v1',
             'length' : 100,
+            'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
             'videoStill' : {
                 'id' : 'still_id',
@@ -231,17 +296,27 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.im_download_mock.call_count, 0)
         self.assertEquals(self.cdn_mock.call_count, 0)
 
+
     @tornado.testing.gen_test
     def test_new_thumb_found(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_old_thumb.jpg'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1,
                           refid='my_thumb_ref',
                           external_id='old_thumb_id').save()
+        ThumbnailMetadata('acct1_v1_bc2', 'acct1_v1',
+                          ['http://bc.com/some_newer_thumb.jpg'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=0,
+                          external_id='old_thumb_id2').save()
+        VideoMetadata('acct1_v1',
+                      ['acct1_v1_n1', 'acct1_v1_bc1', 'acct1_v1_bc2'],
+                      i_id='i1').save()
         yield self.integration.submit_one_video_object({
             'id' : 'v1',
             'length': 100,
+            'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://bc.com/new_still.jpg?x=8',
             'videoStill' : {
                 'id' : 'still_id',
@@ -259,12 +334,13 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
 
         # Make sure a new image was added to the database
         video_meta = VideoMetadata.get('acct1_v1')
-        self.assertEquals(len(video_meta.thumbnail_ids), 3)
+        self.assertEquals(len(video_meta.thumbnail_ids), 4)
         thumbs = ThumbnailMetadata.get_many(video_meta.thumbnail_ids)
         for thumb in thumbs:
-            if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1']:
-                self.assertEquals(thumb.rank, 0)
-                self.assertEquals(thumb.type, ThumbnailType.BRIGHTCOVE)
+            if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
+                                 'acct1_v1_bc2']:
+                self.assertEquals(thumb.rank, -1)
+                self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
                 self.assertEquals(thumb.urls, [
                     'some_cdn_url.jpg',
                     'http://bc.com/new_still.jpg?x=8'])
@@ -280,7 +356,7 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         self.im_download_mock.side_effect = [IOError('Image Download Error')]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_old_thumb.jpg'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
+                          ttype=ThumbnailType.DEFAULT,
                           rank=1,
                           refid='my_thumb_ref',
                           external_id='old_thumb_id').save()
@@ -289,6 +365,7 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
             yield self.integration.submit_one_video_object({
                 'id' : 'v1',
                 'length' : 100,
+                'FLVURL' : 'http://video.mp4',
                 'videoStillURL' : None,
                 'videoStill' : None,
                 'thumbnailURL' : 'http://bc.com/new_thumb.jpg?x=8',
@@ -322,9 +399,12 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         
 
         # Create the platform object
-        self.platform = neondata.BrightcovePlatform('acct1', 'i1')
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', lambda x: x, create_missing=True)
         self.integration = integrations.brightcove.BrightcoveIntegration(
             'a1', self.platform)
+
+        self.maxDiff = None
 
         super(TestSubmitVideo, self).setUp()
 
@@ -342,9 +422,100 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         return response.url, json.loads(response.body)
 
     @tornado.testing.gen_test
+    def test_unexpected_error(self):
+        self.submit_mock.side_effect = [
+            Exception('You did something very bad')
+            ]
+
+        with self.assertLogExists(logging.ERROR, 'Unexpected error'):
+            with self.assertRaises(Exception):
+                yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'referenceId': None,
+                      'name' : 'Some video',
+                      'length' : 100,
+                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                      'videoStill' : {
+                          'id' : 'still_id',
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                      },
+                      'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                      'thumbnail' : {
+                          'id' : 123456,
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                      },
+                      'FLVURL' : 'http://video.mp4'
+                      })
+
+    @tornado.testing.gen_test
+    def test_submission_error(self):
+        self.submit_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, 500, error=tornado.httpclient.HTTPError(500))
+
+        with self.assertLogExists(logging.ERROR, 'Error submitting video'):
+            with self.assertRaises(integrations.ovp.CMSAPIError):
+                yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'referenceId': None,
+                      'name' : 'Some video',
+                      'length' : 100,
+                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                      'videoStill' : {
+                          'id' : 'still_id',
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                      },
+                      'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                      'thumbnail' : {
+                          'id' : 123456,
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                      },
+                      'FLVURL' : 'http://video.mp4'
+                      })
+
+    @tornado.testing.gen_test
+    def test_submit_video_already_submitted(self):
+        self.submit_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, 409, buffer=StringIO(
+                  '{"error":"duplicate job", "job_id": "job2"}'))
+
+        with self.assertLogExists(logging.WARNING, 'Video .* already exists'):
+            job_id = yield self.integration.submit_one_video_object(
+                { 'id' : 'v1',
+                'referenceId': None,
+                'name' : 'Some video',
+                'length' : 100,
+                'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+                },
+                'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                'thumbnail' : {
+                  'id' : 123456,
+                  'referenceId' : None,
+                  'remoteUrl' : None
+                },
+                'FLVURL' : 'http://video.mp4'
+                })
+
+        self.assertEquals(job_id, 'job2')
+
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['v1'],
+            job_id)
+        self.assertEquals(self.integration.platform.videos['v1'], job_id)
+
+    @tornado.testing.gen_test
     def test_submit_typical_bc_video(self):
         job_id = yield self.integration.submit_one_video_object(
-            { 'id' : 'v1',
+            { 'id' : 123456789,
               'referenceId': None,
               'name' : 'Some video',
               'length' : 100,
@@ -369,10 +540,9 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
                   'neon_integrations/i1/create_thumbnail_api_request'))
-        self.maxDiff = None
         self.assertDictEqual(
             submission,
-            {'video_id': 'v1',
+            {'video_id': '123456789',
              'video_url': 'http://video.mp4',
              'video_title': 'Some video',
              'callback_url': None,
@@ -382,8 +552,447 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                               { 'bc_id' : 'v1', 'bc_refid': None }},
              'duration' : 0.1
              })
+
+        # Make sure the video was added to the BrightcovePlatform object
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['v1'],
+            job_id)
+        self.assertEquals(self.integration.platform.videos['v1'], job_id)
+
+    @tornado.testing.gen_test
+    def test_submit_video_using_reference_id(self):
+        def _set_id_field(x):
+            x.id_field = neondata.BrightcovePlatform.REFERENCE_ID
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_id_field)
+        self.integration.platform = self.platform
+
+        # Try a video with a reference id
+        job_id = yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'referenceId': 'video_ref',
+              'name' : 'Some video',
+              'length' : 100,
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'FLVURL' : 'http://video.mp4'
+            })
+        self.assertIsNotNone(job_id)
+
+        url, submission = self._get_video_submission()
+        self.assertDictEqual(
+            submission,
+            {'video_id': 'video_ref',
+             'video_url': 'http://video.mp4',
+             'video_title': 'Some video',
+             'callback_url': None,
+             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
+             'external_thumbnail_id': 'still_id',
+             'custom_data': { '_bc_int_data' :
+                              { 'bc_id' : 'v1', 'bc_refid': 'video_ref' }},
+             'duration' : 0.1
+             })
+
+        # Make sure the video was added to the BrightcovePlatform object
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['video_ref'],
+            job_id)
+        self.assertEquals(self.integration.platform.videos['video_ref'],
+                          job_id)
+
+        # Now try a video without a reference id
+        with self.assertLogExists(logging.ERROR, 
+                                  'No valid reference id in video'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'referenceId': None,
+                      'name' : 'Some video',
+                      'length' : 100,
+                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                      'videoStill' : {
+                          'id' : 'still_id',
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                          },
+                      'FLVURL' : 'http://video.mp4'
+                      })
         
-            
+
+    @tornado.testing.gen_test
+    def test_submit_video_using_custom_id_field(self):
+        def _set_id_field(x):
+            x.id_field = 'mediaapiid'
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_id_field)
+        self.integration.platform = self.platform
+
+        # Try a video with a reference id
+        job_id = yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'referenceId': 'video_ref',
+              'name' : 'Some video',
+              'length' : 100,
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'FLVURL' : 'http://video.mp4',
+              'customFields' : {
+                  'mediaapiid' : 465972,
+              }
+            })
+        self.assertIsNotNone(job_id)
+
+        url, submission = self._get_video_submission()
+        self.assertDictEqual(
+            submission,
+            {'video_id': '465972',
+             'video_url': 'http://video.mp4',
+             'video_title': 'Some video',
+             'callback_url': None,
+             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
+             'external_thumbnail_id': 'still_id',
+             'custom_data': { '_bc_int_data' :
+                              { 'bc_id' : 'v1', 'bc_refid': 'video_ref' },
+                              'mediaapiid' : 465972
+                              },
+             'duration' : 0.1
+             })
+
+        # Make sure the video was added to the BrightcovePlatform object
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['465972'],
+            job_id)
+        self.assertEquals(self.integration.platform.videos['465972'],
+                          job_id)
+
+        # Now try a video without a reference id
+        with self.assertLogExists(logging.ERROR, 
+                                  'No valid id in custom field .* in video'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'referenceId': None,
+                      'name' : 'Some video',
+                      'length' : 100,
+                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                      'videoStill' : {
+                          'id' : 'still_id',
+                          'referenceId' : None,
+                          'remoteUrl' : None
+                          },
+                      'FLVURL' : 'http://video.mp4',
+                      'customFields' : {
+                          'mediaapiid' : None,
+                          }
+                      })
+
+    @tornado.testing.gen_test
+    def test_submit_live_video_feeds(self):
+        with self.assertLogExists(logging.WARNING,
+                                  'Brightcove id .* for account .* is a '
+                                  'live stream'):
+            job_id = yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'length' : -1,
+                      'FLVURL' : 'http://video.mp4'
+                      })
+            self.assertIsNone(job_id)
+        logging.getLogger('integrations.brightcove').reset_sample_counters()
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Brightcove id .* for account .* is a '
+                                  'live stream'):
+            job_id = yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'length' : 0,
+                      'FLVURL' : 'http://video.m3u8'
+                      })
+            self.assertIsNone(job_id)
+        logging.getLogger('integrations.brightcove').reset_sample_counters()
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Brightcove id .* for account .* is a '
+                                  'live stream'):
+            job_id = yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'length' : 0,
+                      'FLVURL' : 'http://video.csmil'
+                      })
+            self.assertIsNone(job_id)
+        logging.getLogger('integrations.brightcove').reset_sample_counters()
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Brightcove id .* for account .* is a '
+                                  'live stream'):
+            job_id = yield self.integration.submit_one_video_object(
+                    { 'id' : 'v1',
+                      'length' : 0,
+                      'FLVURL' : 'rtmp://video.mp4'
+                      })
+            self.assertIsNone(job_id)
+        logging.getLogger('integrations.brightcove').reset_sample_counters()
+
+class TestChooseDownloadUrl(test_utils.neontest.TestCase):
+    def setUp(self):      
+        # Create the platform object
+        self.platform = neondata.BrightcovePlatform('acct1', 'i1')
+        self.integration = integrations.brightcove.BrightcoveIntegration(
+            'a1', self.platform)
+
+        super(TestChooseDownloadUrl, self).setUp()
+
+    def test_no_renditions(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4'
+            })
+        self.assertEquals(url, 'http://video.mp4')
+
+    def test_no_url(self):
+        with self.assertLogExists(logging.ERROR, 'missing flvurl .*'):
+            self.assertIsNone(self.integration._get_video_url_to_download({}))
+
+    def test_empty_renditions(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : []
+            })
+        self.assertEquals(url, 'http://video.mp4')
+
+    def test_rendition_largest_size(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 640,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_640.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_1280.mp4')
+
+    def test_rendition_higher_encoding_rate(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 640,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_85.mp4'},
+                { 'frameWidth' : 640,
+                  'encodingRate' : 1796130,
+                  'url' : 'http://video_17.mp4'},
+                { 'frameWidth' : 640,
+                  'encodingRate' : 1196130,
+                  'url' : 'http://video_11.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_17.mp4')
+
+    def test_specific_platform_width(self):
+        self.integration.platform.rendition_frame_width = 640
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 640,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_640.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_640.mp4')
+
+    def test_specific_platform_width_higher_encoding_rate(self):
+        self.integration.platform.rendition_frame_width = 640
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 640,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_85.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 640,
+                  'encodingRate' : 1796130,
+                  'url' : 'http://video_17.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_17.mp4')
+
+    def test_get_closest_size(self):
+        self.integration.platform.rendition_frame_width = 640
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 800,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_800.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_800.mp4')
+
+    def test_get_closest_size_higher_encoding(self):
+        self.integration.platform.rendition_frame_width = 640
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 800,
+                  'encodingRate' : 1796130,
+                  'url' : 'http://video_17.mp4'},
+                { 'frameWidth' : 800,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_85.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_17.mp4')
+
+    def test_remote_url(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 640,
+                  'encodingRate' : 855611,
+                  'remoteUrl' : 'http://video_640.mp4'},
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'remoteUrl' : 'http://video_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'remoteUrl' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_1280.mp4')
+
+    def test_url_trump_remote(self):
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : 1280,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4',
+                  'remoteUrl' : 'http://remote_1280.mp4'},
+                { 'frameWidth' : 320,
+                  'encodingRate' : 855611,
+                  'remoteUrl' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_1280.mp4')
+
+class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+
+        # Mock out the call to services
+        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
+        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, 201, buffer=StringIO('{"job_id": "job1"}'))
+        
+
+        # Mock out the find_modified_videos and create the platform object
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', lambda x: x, create_missing=True)
+        self.integration = integrations.brightcove.BrightcoveIntegration(
+            'a1', self.platform)
+        self.mock_find_videos = MagicMock()
+        self.integration.bc_api.find_modified_videos = \
+          self._future_wrap_mock(self.mock_find_videos)
+
+        super(TestSubmitNewVideos, self).setUp()
+
+    def tearDown(self):
+        self.submit_mocker.stop()
+        self.redis.stop()
+
+        super(TestSubmitNewVideos, self).tearDown()
+
+    def test_typical_bc_account(self):
+        self.last_process_date = datetime.datetime(2014, 1, 1)
+
+        self.mock_find_videos.side_effect = [[
+            {
+            'id' : 'v1',
+            'length' : 100,
+            'FLVURL' : 'http://video.mp4',
+            'lastModifiedDate' : 1420080400000l,
+            'name' : 'Some Video',
+            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+            'videoStill' : {
+                'id' : 'still_id',
+                'referenceId' : 'my_still_ref',
+                'remoteUrl' : None
+            },
+            }],
+            []
+            ]
+
+        yield self.integration.submit_new_videos()
+
+        # Make sure that the last processed date was updated
+        self.assertEquals(self.integration.platform.last_process_date,
+                          1420080400000l)
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
+            1420080400000l)
+        
+        # Make sure that a video was submitted
+        self.assertEquals(self.submit_mock.call_count, 1)
+
+        # Check the call to brightcove
+        cargs, kwargs = self.mock_find_videos.call_args()
+        
+        self.assertDictContainsSubset({
+            'from_date' : datetime.datetime(2014, 1, 1),
+            '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
+            'sort_by' : 'MODIFIED_DATE',
+            'sort_order' : 'DESC',
+            'video_fields' : ['id', 'videoStill', 'videoStillURL', 
+                              'thumbnail', 'thumbnailURL', 'FLVURL', 
+                              'renditions', 'length', 'name', 
+                              'publishedDate', 'lastModifiedDate', 
+                              'referenceId'],
+            'custom_fields' : None,
+            'media_delivery' : 'http'},
+            kwargs)
+    
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

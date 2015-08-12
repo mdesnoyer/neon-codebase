@@ -2,6 +2,8 @@
 Input sanitizer module to clean up _inputs and convert to particular datatype
 '''
 
+import datetime
+import dateutil.parser
 import logging
 import json
 import re
@@ -139,4 +141,15 @@ class InputSanitizer(object):
         if fl is None or fl == 'null' or fl == 'undefined':
             return None
         return float(fl)
+
+    @staticmethod
+    def sanitize_date(ip):
+        if ip is None or ip == "null" or ip == "undefined":
+            return None
+        try:
+            epoch = float(ip)
+            return datetime.datetime.utcfromtimestamp(epoch)
+        except ValueError:
+            return dateutil.parser.parse(ip)
+        return None
 

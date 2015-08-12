@@ -2984,7 +2984,7 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None # Timestamp in ms
+        self.publish_date = None # Timestamp in ms or ISO format if string
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -3741,7 +3741,8 @@ class VideoMetadata(StoredObject):
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
-                 serving_enabled=True, custom_data=None):
+                 serving_enabled=True, custom_data=None,
+                 published_date=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -3757,8 +3758,6 @@ class VideoMetadata(StoredObject):
         # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
           experiment_state if testing_enabled else ExperimentState.DISABLED
-
-        # DEPRECATED. Use VideoStatus table instead
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
@@ -3771,6 +3770,10 @@ class VideoMetadata(StoredObject):
 
         # A dictionary of extra metadata
         self.custom_data = custom_data or {}
+
+        # The time the video was published in ISO 8601 format
+        self.published_date = published_date or \
+          datetime.datetime.now().isoformat()
 
     @classmethod
     def is_valid_key(cls, key):

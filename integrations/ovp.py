@@ -43,7 +43,8 @@ class OVPIntegration(object):
                      default_thumbnail=None,
                      external_thumbnail_id=None,
                      custom_data=None,
-                     duration=None):
+                     duration=None,
+                     publish_date=None):
         '''Submits a single video for processing to the CMSAPI.
 
         Parameters:
@@ -60,7 +61,8 @@ class OVPIntegration(object):
             'external_thumbnail_id': external_thumbnail_id,
             'callback_url': callback_url,
             'custom_data': custom_data,
-            'duration': duration
+            'duration': duration,
+            'publish_date': publish_date
             }
         headers = {"X-Neon-API-Key" : self.platform.neon_api_key,
                    "Content-Type" : "application/json"}

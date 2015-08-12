@@ -948,9 +948,14 @@ class BrightcoveApi(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def find_modified_videos(self, from_date, _filter=None, page_size=100,
-                             page=0, sort_by=None, sort_order='DESC',
-                             video_fields=None, custom_fields=None,
+    def find_modified_videos(self, from_date=datetime.date(1970,1,1),
+                             _filter=None,
+                             page_size=100,
+                             page=0,
+                             sort_by=None,
+                             sort_order='DESC',
+                             video_fields=None,
+                             custom_fields=None,
                              media_delivery='http'):
         '''Find all the videos that have been modified since a given time.
 

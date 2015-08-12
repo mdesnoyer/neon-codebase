@@ -670,7 +670,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     def submit_neon_video_request(self, api_key, video_id, video_url, 
                                   video_title, topn, callback_url, 
                                   default_thumbnail, integration_id=None,
-                                  external_thumbnail_id=None):
+                                  external_thumbnail_id=None,
+                                  publish_date=None):
 
         '''
         Create the call in to the Video Server
@@ -691,6 +692,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'
+        request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
@@ -731,7 +733,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
         Endpoint for API calls to submit a video request
         '''
-        video_id = self.get_argument('video_id', None)
+        video_id = InputSanitizer.sanitize_string(
+            self.get_argument('video_id', None))
         if len(video_id) > options.max_videoid_size:
             statemon.state.increment('invalid_video_id')
             self.send_json_response(
@@ -759,6 +762,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
         duration = InputSanitizer.sanitize_float(
             self.get_argument('duration', None))
+
+        publish_date = InputSanitizer.sanitize_date(
+            self.get_argument('publish_date', None))
+        if publish_date is not None:
+            publish_date = publish_date.isoformat()
         
         if video_id is None or video_url == "": 
             _log.error("key=create_neon_thumbnail_api_request "
@@ -783,7 +791,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                        i_id=integration_id,
                                        serving_enabled=False,
                                        custom_data=custom_data,
-                                       duration=duration)
+                                       duration=duration,
+                                       publish_date=publish_date)
         yield tornado.gen.Task(video.save)
         
         #Create Neon API Request
@@ -796,7 +805,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             callback_url,
             default_thumbnail,
             integration_id,
-            external_thumb_id)
+            external_thumb_id,
+            publish_date)
 
     @tornado.gen.coroutine
     def create_neon_video_request_from_ui(self, i_id):
@@ -1069,8 +1079,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     serving_videos.append(vid)
                     status = neondata.RequestState.SERVING
 
-            pub_date = None if not request.__dict__.has_key('publish_date') \
-                            else request.publish_date
+            pub_date = request.__dict__.get('publish_date', None)
+            if pub_date is not None:
+                try:
+                    pub_date = pub_date / 1000.0
+                except ValueError:
+                    pub_date = dateutil.parser.parse(pub_date)
+                except Exception:
+                    pub_date = None
             pub_date = int(pub_date) if pub_date else None #type
             vr = neondata.VideoResponse(vid,
                               request.job_id,
