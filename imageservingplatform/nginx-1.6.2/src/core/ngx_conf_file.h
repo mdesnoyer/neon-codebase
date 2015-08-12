@@ -8,6 +8,7 @@
 #ifndef _NGX_CONF_FILE_H_INCLUDED_
 #define _NGX_CONF_FILE_H_INCLUDED_
 
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 
@@ -334,5 +335,6 @@ char *ngx_conf_set_bitmask_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 extern ngx_uint_t     ngx_max_module;
 extern ngx_module_t  *ngx_modules[];
+
 
 #endif /* _NGX_CONF_FILE_H_INCLUDED_ */

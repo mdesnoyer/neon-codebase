@@ -4,8 +4,10 @@
  * Copyright (C) Nginx, Inc.
  */
 
+
 #ifndef _NGX_BUF_H_INCLUDED_
 #define _NGX_BUF_H_INCLUDED_
+
 
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -155,5 +157,6 @@ ngx_int_t ngx_chain_add_copy(ngx_pool_t *pool, ngx_chain_t **chain,
 ngx_chain_t *ngx_chain_get_free_buf(ngx_pool_t *p, ngx_chain_t **free);
 void ngx_chain_update_chains(ngx_pool_t *p, ngx_chain_t **free,
     ngx_chain_t **busy, ngx_chain_t **out, ngx_buf_tag_t tag);
+
 
 #endif /* _NGX_BUF_H_INCLUDED_ */

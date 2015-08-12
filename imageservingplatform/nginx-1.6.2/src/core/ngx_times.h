@@ -8,6 +8,7 @@
 #ifndef _NGX_TIMES_H_INCLUDED_
 #define _NGX_TIMES_H_INCLUDED_
 
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 
@@ -45,5 +46,6 @@ extern volatile ngx_str_t    ngx_cached_http_log_iso8601;
  * used in event timers
  */
 extern volatile ngx_msec_t  ngx_current_msec;
+
 
 #endif /* _NGX_TIMES_H_INCLUDED_ */

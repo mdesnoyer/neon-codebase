@@ -249,4 +249,5 @@ ngx_write_stderr(char *text)
 extern ngx_module_t  ngx_errlog_module;
 extern ngx_uint_t    ngx_use_stderr;
 
+
 #endif /* _NGX_LOG_H_INCLUDED_ */
