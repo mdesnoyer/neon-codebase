@@ -8,10 +8,6 @@
 #ifndef _NGX_LOG_H_INCLUDED_
 #define _NGX_LOG_H_INCLUDED_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -253,7 +249,4 @@ ngx_write_stderr(char *text)
 extern ngx_module_t  ngx_errlog_module;
 extern ngx_uint_t    ngx_use_stderr;
 
-#ifdef __cplusplus
-}
-#endif
 #endif /* _NGX_LOG_H_INCLUDED_ */
