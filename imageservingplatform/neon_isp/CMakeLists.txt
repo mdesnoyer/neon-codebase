@@ -16,7 +16,7 @@ include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/os/uni
 
 add_library(NeonISP STATIC
  neon_mastermind.cpp
- neon_updater.c
+ neon_updater.cpp
  neon_utils.c
  neon_utc.c
  neon_log.c
