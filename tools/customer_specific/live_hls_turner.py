@@ -29,7 +29,7 @@ define("account_id", default="159")
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30")
 define("working_dir", default="/mnt/neon/vids")
 define("lookback_count", default=36)
-define("input", default='http://bcoveliveios-i.akamaihd.net/hls/live/215156/livemod_hls_trial/account=1845599807001/ba93e11685d24c39b6081cb985bc3bf2/1845599807001_8888_470_910.m3u8')
+define("input", default='http://androidhlslive-secure.cdn.turner.com/tnt/hls/tvetnt/east/stream.m3u8?hdnea=expires%3D1440454134%7Eaccess%3D%2F*%7Emd5%3D6b89107fe1e27229a8f4e8f48eb93ca6')
 
 from utils import statemon
 statemon.define('live_errors', int)
