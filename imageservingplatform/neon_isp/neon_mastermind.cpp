@@ -17,7 +17,6 @@
 #include "neonException.h"
 #include "mastermind.h"
 
-
 static Mastermind * mastermind_current = 0;
 static Mastermind * mastermind_old = 0;
 
@@ -153,18 +152,19 @@ neon_mastermind_account_id_lookup(const char * publisher_id,
  * Name       : neon_mastermind_image_url_lookup 
  * Parameters :  
  *********************************************************/
-NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+//NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+std::string*
 neon_mastermind_image_url_lookup(const char * accountId,
                                     const char * videoId,
                                     ngx_str_t * bucketId,
                                     int height,
-                                    int width,
-                                    char ** url)
+                                    int width)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
-    if(mastermind_current == 0)
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_FAIL;
+    if(mastermind_current == 0) { 
+        return NULL;
+    } 
 
     std::string image_url("");  
     mastermind->GetImageUrl(accountId, videoId, 
@@ -172,13 +172,16 @@ neon_mastermind_image_url_lookup(const char * accountId,
                             height, width, image_url);
     
     if(image_url.size() == 0) { 
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND; 
+        return NULL; 
     } 
     
-    *url = (char *)malloc(image_url.size()+1);
-    snprintf((*url), image_url.size()+1, "%s", image_url.c_str()); 
+    if (image_url.find("cloudinary") != std::string::npos) { 
+        ngx_log_debug3(NGX_LOG_INFO, request->connection->log, 0, 
+                        "Cloudinary URL generated for video %s h %d w %d", 
+                        video_id, height, width); 
+    }    
  
-    return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;
+    return new std::string(image_url); 
 }
 
 /*
@@ -186,16 +189,16 @@ neon_mastermind_image_url_lookup(const char * accountId,
  *
  * */
 
-NEON_MASTERMIND_TID_LOOKUP_ERROR
+//NEON_MASTERMIND_TID_LOOKUP_ERROR
+std::string* 
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId,
-                            char ** tid)
+                            ngx_str_t * bucketId)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
-        return NEON_MASTERMIND_TID_LOOKUP_FAIL;
+        return NULL;
 
     std::string thumbnailId("");  
     mastermind->GetThumbnailID(accountId, videoId, 
@@ -203,13 +206,13 @@ neon_mastermind_tid_lookup(const char * accountId,
                                         bucketId->len, 
                                         thumbnailId); 
     if (thumbnailId.size() == 0) { 
-        return NEON_MASTERMIND_TID_LOOKUP_NOT_FOUND;
+        return NULL; 
     }
  
-    *tid = (char *)malloc(thumbnailId.size()+1);
-    snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
+    //*tid = (char *)malloc(thumbnailId.size()+1);
+    //snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
 
-    return NEON_MASTERMIND_TID_LOOKUP_OK;
+    return new std::string(thumbnailId); 
 }
 
 /*
