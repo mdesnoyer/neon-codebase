@@ -48,6 +48,10 @@ import utils.statemon
 
 _log = logging.getLogger('airflow.dag.clicklogs')
 
+
+# PyCharm debugger
+# pydevd.settrace('localhost', port=55555, stdoutToServer=True, stderrToServer=True, suspend=False)
+
 # ----------------------------------------
 # Options and configurations with DAGs
 # ----------------------------------------
@@ -56,67 +60,8 @@ For a DAG to be able to use the Neon utils.options module, two wrapper objects
 are necessary to allow the eponymous Airflow command to work as normal and not
  cause an error with the OptionParser().
 """
-from utils.options import define
+from utils.options import options
 
-
-class DagOptionParser(optparse.OptionParser):
-    def error(self, msg):
-        """No-op the error() method so that Airflow command args don't print to stderr.
-        """
-        pass
-
-    def exit(self, code):
-        """No-op the exit() method so that Airflow command args don't cause a sys.exit(2).
-        """
-        pass
-
-
-class DagOptions(utils.options.OptionParser):
-    """
-
-    """
-
-    def parse_options(self, args=None, config_stream=None,
-                      usage='%prog [options]', watch_file=True, parse_command_line=True):
-        '''Parse the options.
-
-        Inputs:
-        args - Argument list. defaults to sys.argv[1:]
-        config_stream - Specify a yaml stream to get arguments from.
-                        Otherwise looks for the --config flag in the arguments.
-        usage - To display the usage.
-        watch_file - If true, the config file will be watched for changes
-                     that will be incorporated on the fly.
-        '''
-        with self.__dict__['lock']:
-            if parse_command_line:
-                # TODO: (robbwagoner): use super().parse_options()
-                cmd_options, args = self._parse_command_line(args, usage)
-
-                self._register_command_line_options()
-            else:
-                cmd_parser = DagOptionParser()
-                cmd_parser.add_option('--config', '-c', default=None,
-                                      help='Path to the config file')
-                self.__dict__['cmd_options'], args = cmd_parser.parse_args(args)
-
-            # Now, process the configuration file if it exists
-            self._process_new_config_file(config_stream,
-                                          self.cmd_options.config)
-
-            # Start the polling thread if there is a config file to read
-            if watch_file and self.cmd_options.config is not None:
-                if self.__dict__['_config_poll_timer'] is not None:
-                    self.__dict__['_config_poll_timer'].cancel()
-                    self.__dict__['_config_poll_timer'] = None
-                self._poll_config_file()
-
-        return args
-
-
-# pydevd.settrace('localhost', port=55555, stdoutToServer=True, stderrToServer=True, suspend=False)
-options = DagOptions()
-# options.__dict__['main_prefix'] = 'stats.airflow.dags.cluster'
 options.define('quiet_period', default=45, type=int, help='Number of minutes to wait before processing the most recent'
                                                           'clicklogs.')
 
@@ -143,10 +88,10 @@ options.define('output_path', default='s3://neon-tracker-logs-test-hadoop/', typ
                ' Cleaned files, relative to this setting, are prefixed <dag_id>/cleaned/<YYYY>/<MM>/<DD>/<HH>/')
 
 # Use Neon's options module for configuration parsing
-f = open(os.path.join(os.path.dirname(__file__), '{0}.conf'.format(os.path.splitext(os.path.basename(__file__))[0])))
-# Don't parse command line options, because DAGs are loaded by the airflow command
-args = options.parse_options(config_stream=f, watch_file=True, parse_command_line=False)
-f.close()
+args = options.parse_options(['-c', os.path.join(os.path.dirname(__file__),
+                                                '{0}.conf'.format(os.path.splitext(os.path.basename(__file__))[0]))],
+                             watch_file=True)
+
 
 
 
@@ -543,7 +488,6 @@ def _hdfs_maintenance(**kwargs):
     _log.info('{task}: remove old temporary files from HDFS'.format(task=task))
     remove_old_tmp = 'if hdfs dfs -test -d {tmp_dir} ; then hdfs dfs -rm -r ${tmp_dir} ; fi'.format(tmp_dir=tmp_dir)
     _run_cluster_command(remove_old_tmp)
-
 
 
 # ----------------------------------

@@ -438,6 +438,10 @@ class OptionParser(object):
             mod = inspect.getmodule(frame[0])
             if mod is None:
                 return ''
+            if re.search(r'airflow',mod.__name__):
+                # running from within Airflow, so return an empty string
+                # otherwise the result is '............usr.local.bin.airflow'
+                return ''
             if (mod.__name__ == '__main__' or
                 mod.__name__.endswith('options_test')):
                 return self._get_option_prefix(mod.__file__)
