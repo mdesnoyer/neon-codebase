@@ -52,7 +52,8 @@ def parse_schedule(uri):
         start_time = dateutil.parser.parse(episode['Program']['StartTime'])
         end_time = dateutil.parser.parse(episode['Program']['EndTime'])
         airing_id = episode['AiringID']
-        name = '%s - %s' % (episode['SeriesName'], episode['Name'])
+        name = '%s - %s' % (episode['Program']['SeriesName'],
+                            episode['Program']['Name'])
 
         retval.append((start_time, end_time, name, airing_id))
 
@@ -66,15 +67,17 @@ def get_segment_list(working_dir):
     retval = []
         
     dateRe = re.compile('segment_([0-9TZ\-:\.]+)\.ts')
-    for fn in glob.glob(os.path.join(working_dir, 'segment_*.ts')):
+    for fn in glob(os.path.join(working_dir, 'segment_*.ts')):
         dateMatch = dateRe.search(fn)
         if dateMatch:
             start_time = dateutil.parser.parse(dateMatch.group(1))
-            retval.append(start_time, fn)
+            retval.append((start_time, fn))
 
     retval = sorted(retval, key=lambda x: x[0])
     _log.info('Found %d segments starting at %s and ending %s' %
               (len(retval), retval[0][0], retval[-1][0]))
+
+    return retval
 
 def process_episode(episode, segments):
     start_time, end_time, name, airing_id = episode
@@ -95,7 +98,8 @@ def process_episode(episode, segments):
     _log.info('Stiching together segments for episode %s' % airing_id)
 
     episode_fn = '%s.mp4' % airing_id
-    with open(os.path.join(options.working_dir, episode_fn), 'wb') as out_stream:
+    episode_full_path = os.path.join(options.working_dir, episode_fn)
+    with open(episode_full_path, 'wb') as out_stream:
         for seg_time, seg_fn in ep_segments:
             with open(seg_fn, 'rb') as in_stream:
                 out_stream.write_lines(in_stream)
@@ -107,13 +111,18 @@ def process_episode(episode, segments):
     key = bucket.new_key('/dlea/live/turner/%s' % episode_fn)
     key.set_contents_from_filename(
         os.path.join(options.working_dir, episode_fn),
-        headers = {'Content-Type' : 'video/mp4'}
+        headers = {'Content-Type' : 'video/mp4'},
         policy='public-read',
         cb=lambda x, y: _log.info('Uploaded %d of %d to S3' % (x, y)))
 
     _log.info('Submitting job')
     submit_neon_job(airing_id, name,
                     's3://neon-test/dlea/live/turner/%s' % episode_fn)
+
+    _log.info('Erasing segments')
+    for seg_time, seg_fn in ep_segments:
+        os.remove(seg_fn)
+    os.remove(episode_full_path)
 
 def submit_neon_job(video_id, video_title, video_url):
     request_url = ('http://services.neon-lab.com/api/v1/accounts/'
@@ -125,7 +134,7 @@ def submit_neon_job(video_id, video_title, video_url):
     data = { 
         "video_id": video_id,
         "video_url": video_url, 
-        "video_title": video_title
+        "video_title": video_title,
         "topn" : 10
     }
     response = requests.post(request_url, json.dumps(data), headers=headers)
@@ -139,7 +148,7 @@ def submit_neon_job(video_id, video_title, video_url):
     
 
 def main():
-    schedule = parse_schedule(option.schedule)
+    schedule = parse_schedule(options.schedule)
 
     segments = get_segment_list(options.working_dir)
 
@@ -148,6 +157,7 @@ def main():
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
+    main()
     try:
         main()
 
