@@ -61,7 +61,13 @@ if __name__ == "__main__":
 
         try:
             # Get all Brightcove accounts
-            accounts = BrightcovePlatform.get_all_instances()
+            dbconn = DBConnection(BrightcovePlatform)
+            keys = dbconn.blocking_conn.keys('brightcoveplatform*')
+            accounts = []
+            for k in keys:
+                parts = k.split('_')
+                bp = BrightcovePlatform.get(parts[-2], parts[-1])
+                accounts.append(bp)
             for accnt in accounts:
                 # If not enabled for processing, skip
                 if accnt.enabled == False:
@@ -70,7 +76,6 @@ if __name__ == "__main__":
                 i_id = accnt.integration_id 
                 _log.info("key=brightcove_request msg= internal account %s "
                           "i_id %s" %(api_key, i_id))
-                #retrieve the blob and create the object
                 accnt.check_feed_and_create_api_requests()
                 accnt.check_playlist_feed_and_create_requests()
 
@@ -83,3 +88,8 @@ if __name__ == "__main__":
         os.unlink(pidfile)
     statemon.state.increment('cron_finished')
     utils.monitor.send_statemon_data()
+
+
+'''
+
+'''

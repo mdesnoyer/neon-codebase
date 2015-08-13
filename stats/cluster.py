@@ -131,12 +131,14 @@ class Cluster():
 
     # We are basing it on a combination of memory and disk space
     instance_info = {
-        'm2.2xlarge' : (1.0, 0.49),
-        'm2.4xlarge' : (2.1, 0.98),
-        'r3.4xlarge' : (3.1, 1.40),
-        'r3.8xlarge' : (6.2, 2.80),
+        #'m2.2xlarge' : (1.0, 0.49),
+        #'m2.4xlarge' : (2.1, 0.98),
+        #'r3.4xlarge' : (3.1, 1.40),
+        #'r3.8xlarge' : (6.2, 2.80),
         'hi1.4xlarge' : (6.1, 3.1),
         'cc2.8xlarge' : (9.1, 2.0),
+        'd2.2xlarge' : (6.5,1.38),
+        'd2.4xlarge' : (9.7,2.76),
         }
 
     # Possible cluster roles
@@ -254,7 +256,10 @@ class Cluster():
         extra_ops = {
             'mapreduce.output.fileoutputformat.compress' : 'true',
             'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0'
+            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+            'mapreduce.task.timeout' : 1800000,
+            'mapreduce.reduce.speculative': 'false',
+            'io.file.buffer.size': 65536
         }
 
         # If the requested map memory is different, set it
@@ -799,7 +804,9 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.resourcemanager.container.liveness-monitor.interval-ms=120000',
                  '--yarn-key-value',
-                 'yarn.log-aggregation-enable=true'])]
+                 'yarn.log-aggregation-enable=true',
+                 '--yarn-key-value',
+                 'yarn.scheduler.maximum-allocation-mb=12000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]

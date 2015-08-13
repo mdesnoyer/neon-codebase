@@ -239,8 +239,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(self.api_key, '0',
+                                               lambda x: x,
+                                               create_missing=True)
 
         # Patch the video length lookup
         self.http_patcher = patch('video_processor.server.utils.http')
@@ -250,16 +251,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         response = tornado.httpclient.HTTPResponse(request, 200,
                 buffer=StringIO(''), headers={'Content-Length': vsize})
         self.mock_http.send_request.side_effect = \
-                lambda x, callback: callback(response)
+                lambda x, callback, **kw: callback(response)
 
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self.im_download_mocker.start()
         self.random_image = PILImageUtils.create_random_image(480, 640)
         image_future = concurrent.futures.Future()
         image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.return_value = image_future
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -357,6 +358,46 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.url, 'http://testurl/video.mp4')
         self.assertEquals(video.integration_id, self.na.integration_id)
         self.assertEquals(video.job_id, json.loads(response.body)['job_id'])
+    
+
+    def test_broken_default_thumb(self):
+        vals = {
+           "api_key": self.api_key, 
+           "video_url": "http://testurl/video.mp4", 
+           "video_id": '', 
+           "topn":2, 
+           "callback_url": "http://callback_push_url", 
+           "video_title": "test_title",
+           "default_thumbnail": "http://broken_image",
+            }
+        
+        return_values = [IOError, HTTPError(404), HTTPError(500)]
+        N = len(return_values)
+        
+        def _image_exception(*args, **kwargs):
+            raise return_values.pop(0) 
+        self.im_download_mock.side_effect = _image_exception 
+        for i in range(N):
+            vid = "neonapivid123%s" % i 
+            vals['video_url'] = "http://testurl%s/video.mp4"  %vid
+            vals['video_id'] = vid 
+            response = self.make_api_request(vals)
+            self.assertEquals(response.code, 201)
+            # Check video entry in DB 
+            video = neondata.VideoMetadata.get('%s_%s' % (self.api_key, vid))
+            self.assertIsNotNone(video)
+
+            # Check request state and message
+            resp = json.loads(response.body)
+            api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+            self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
+            self.assertIsNotNone(api_request.msg)
+            
+            state_vars = video_processor.server.statemon.state.get_all_variables()
+            self.assertEqual(
+                    state_vars.get('video_processor.server.default_thumb_error').value,
+                    1)
+            video_processor.server.statemon.state._reset_values()
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -375,9 +416,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_brightcove_request(self):
 
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
+        bp = neondata.BrightcovePlatform.modify(
+            self.api_key, i_id,
+            lambda x: x, create_missing=True)
 
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
@@ -413,10 +454,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_ooyala_request(self):
 
         i_id = "i125"
-        bp = neondata.OoyalaPlatform("testaccountneonapi", i_id,
-               self.api_key)
-        bp.save()
-
+        bp = neondata.OoyalaPlatform.modify(self.api_key, i_id,
+                                            lambda x: x,
+                                            create_missing=True)
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
                 "video_id": "testid123", "topn":2, 
@@ -451,13 +491,13 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def test_brightcove_request_invalid(self):
 
         i_id = "i125"
-        bp = neondata.BrightcovePlatform("testaccountneonapi", i_id,
-                self.api_key)
-        bp.save()
+        bp = neondata.BrightcovePlatform.modify(
+            self.api_key, i_id,
+            lambda x: x, create_missing=True)
         vals = {"api_key": self.api_key, 
-                    "video_url": "http://testurl/video.mp4", 
-                    "video_id": "testid123", "topn":2, 
-                    "callback_url": "http://callback_push_url"}
+                "video_url": "http://testurl/video.mp4", 
+                "video_id": "testid123", "topn":2, 
+                "callback_url": "http://callback_push_url"}
         url = self.get_url('/api/v1/submitvideo/brightcove')
         resp = self.make_api_request(vals, url)
         self.assertEqual(resp.code, 400)
@@ -684,7 +724,7 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
         # verify that the add metadata thread ran and we were able
         # to collect some data on size of Q in # of bytes 
         state_vars = video_processor.server.statemon.state.get_all_variables()
-        qsize = ['video_processor.server.queue_size_bytes']
+        qsize = state_vars.get('video_processor.server.queue_size_bytes').value
         self.assertGreater(qsize, 0)
 
 class TestJobManager(test_utils.neontest.AsyncTestCase):
@@ -711,8 +751,9 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.nuser = neondata.NeonUserAccount(a_id)
         self.nuser.save()
         self.api_key = self.nuser.neon_api_key
-        self.na = neondata.NeonPlatform(a_id, '0', self.api_key)
-        self.na.save()
+        self.na = neondata.NeonPlatform.modify(
+            self.api_key, '0',
+            lambda x: x, create_missing=True)
 
         # Make some default jobs
         self.jobs = [

@@ -38,8 +38,10 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.escape
+import urllib2
 import utils.http
 from utils.inputsanitizer import InputSanitizer
+import utils.logs
 import utils.neon
 import utils.ps
 import utils.sync
@@ -72,6 +74,9 @@ define("isp_host", default="127.0.0.1",
        help="Host where the image serving platform is.")
 define("isp_port", default=8089,
        help="Host where the image serving platform resides")
+define('loggly_base_url',
+       default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
+       help='Base url for the loggly endpoint')
 
 from utils import statemon
 statemon.define('qsize', int)
@@ -763,6 +768,7 @@ class LogLines(TrackerDataHandler):
                 statemon.state.increment(ref=self.not_interesting_counter,
                                          safe=False)
                 self.set_status(200)
+                self.add_header("content-type", "application/javascript") 
                 self.finish()
                 return
             except Exception, err:
@@ -777,6 +783,7 @@ class LogLines(TrackerDataHandler):
                                                self.schema_url)
             try:
                 yield self.flume_buffer.send(data)
+                self.add_header("content-type", "application/javascript") 
                 self.set_status(200)
                 
             except Exception, err:
@@ -814,6 +821,46 @@ class TestTracker(TrackerDataHandler):
             return
         
         self.set_status(200)
+        self.add_header("content-type", "application/javascript") 
+        self.finish()
+
+class ErrorMessageTracker(TrackerDataHandler):
+    ''' Log error message from the tracker '''
+
+    def initialize(self, version):
+        '''Initialize the logger.'''
+        super(ErrorMessageTracker, self).initialize()
+        self.version = version
+        self.tag = 'jstracker'
+
+    @tornado.web.asynchronous
+    @tornado.gen.coroutine
+    def get(self, *args, **kwargs):
+        '''Handle a test tracking request.'''
+        try:
+            # v1 schema, change as appropriate
+            msg = {"error_msg": self.request.uri.split('?error=')[-1]}
+            log_data = ("PLAINTEXT=" + 
+                    urllib2.quote(json.dumps(msg)))
+            loggly_request = tornado.httpclient.HTTPRequest(
+                    '%s/tag/%s' % (options.loggly_base_url, self.tag), method='POST', 
+                    headers={'Content-type' : 'application/x-www-form-urlencoded',
+                        'Content-length' : len(log_data) },
+                    body=log_data)
+            # best effort
+            resp = yield tornado.gen.Task(utils.http.send_request, loggly_request)
+        except tornado.web.HTTPError as e:
+            raise
+        except NotInterestingData as e:
+            pass
+        except Exception as err:
+            _log.exception("key=test_track msg=%s", err) 
+            self.set_status(500)
+            self.finish()
+            return
+        
+        self.set_status(200)
+        self.add_header("content-type", "application/javascript") 
         self.finish()
 
 ###########################################
@@ -996,6 +1043,7 @@ class Server(threading.Thread):
                                           flume_buffer=self.flume_buffer
                                           )),
             (r"/v2/test", TestTracker, dict(version=2)),
+            (r"/v2/error", ErrorMessageTracker, dict(version=2)),
             (r"/healthcheck", HealthCheckHandler,
              dict(flume_port=options.flume_port)),
             ])

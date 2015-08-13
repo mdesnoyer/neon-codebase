@@ -396,7 +396,7 @@ class BrightcoveABController(object):
         Load account level settings for each platform account
         (abtesting enabled, testing type etc..)
         '''
-        for platform in AbstractPlatform.get_all_instances():
+        for platform in AbstractPlatform.get_all():
             self.account_settings[platform.neon_api_key] = platform 
 
     def load_directives(self, max_update_delay=0):

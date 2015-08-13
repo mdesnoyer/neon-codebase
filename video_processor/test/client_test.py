@@ -98,9 +98,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         random.seed(984695198)
         
     def tearDown(self):
+        self.utils_patch.stop()
         self.redis.stop()
         super(TestVideoClient, self).tearDown()
-        self.utils_patch.stop()
         
     def setup_video_processor(self, request_type, url='http://url.com'):
         '''
@@ -110,8 +110,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         self.na = neondata.NeonUserAccount('acc1')
         self.na.save()
         
-        self.np = neondata.NeonPlatform('acc1', '0', self.na.neon_api_key)
-        self.np.save()
+        self.np = neondata.NeonPlatform.modify(
+            self.na.neon_api_key, '0',
+            lambda x: x, create_missing=True)
 
         j_id = "j123"
         api_key = self.na.neon_api_key 
@@ -184,7 +185,14 @@ class TestVideoClient(test_utils.neontest.TestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
         
+        #TODO(Sunil): check callback response for other error responses as well
         self.assertEqual(self.uc.call_count, 1)
+        cargs, kwargs = self.uc.call_args
+        error_response_obj = cargs[0]
+        error_response = json.loads(error_response_obj.body)
+        self.assertEqual(error_response["serving_url"], None)
+        self.assertEqual(error_response["video_id"], "video1")
+        self.assertEqual(error_response["job_id"], "j123")
 
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
@@ -288,6 +296,31 @@ class TestVideoClient(test_utils.neontest.TestCase):
                  x[0].type == neondata.ThumbnailType.CENTERFRAME]), 1)
         self.assertNotIn(float('-inf'), 
                          [x[0].model_score for x in vprocessor.thumbnails])
+    
+    @unittest.skip('refactor the test')
+    def test_process_video_after_int_error(self):
+       
+        '''
+        Verify video gets in to valid state after failing a couple of times
+        and being in INT_ERROR state
+        '''
+        
+        vprocessor = self.setup_video_processor("neon", url='http://video.com')
+        self.api_request.state = neondata.RequestState.INT_ERROR
+        self.api_request.failed_count = 2
+        self.api_request.save()
+
+        vprocessor.process_video(self.test_video_file, n_thumbs=5)
+        
+        # Check that the model was called correctly
+        self.assertTrue(self.model.choose_thumbnails.called)
+        
+        api_request = neondata.NeonApiRequest.get(self.api_request.job_id,
+                                    self.na.neon_api_key)
+        self.assertEquals(api_request.state, neondata.RequestState.INT_ERROR)
+        
+        #verify video metadata has been populated
+        self.assertEqual(vprocessor.video_metadata.duration, 8.8)
 
     def test_somebody_else_processed_first(self):
         # Try when somebody else was sucessful
@@ -397,7 +430,13 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.BrightcoveApiRequest(
@@ -432,16 +471,16 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self.im_download_mocker.start()
         self.random_image = PILImageUtils.create_random_image(480, 640)
         image_future = Future()
         image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.return_value = image_future
 
         # Mock out http requests
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self.http_mocker.start()
-        self.http_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         # Mock out cloudinary
         self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
@@ -510,8 +549,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(video_data.integration_id, '0')
         self.assertEquals(video_data.model_version, 'test_version')
         self.assertTrue(video_data.serving_enabled)
-        self.assertIsNotNone(video_data.serving_url)
-
+        self.assertIsNone(video_data.serving_url) # serving_url not saved here
+        
+        
         # Check the thumbnail information in the database
         thumbs = neondata.ThumbnailMetadata.get_many(
             video_data.thumbnail_ids)
@@ -553,13 +593,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertIsNotNone(s_url)
             s3httpRe = re.compile(
                 'http://n[0-9].neon-images.com/([a-zA-Z0-9\-\._/]+)')
-            serving_url = s_url.get_serving_url(160, 120)
+            serving_url = s_url.get_serving_url(160, 90)
             self.assertRegexpMatches(serving_url, s3httpRe)
             serving_key = s3httpRe.search(serving_url).group(1)
             self.assertIsNotNone(
                 self.s3conn.get_bucket('n3.neon-images.com').get_key(
                     serving_key))
-                                
 
         # Check the response, both that it was added to the callback
         # and that it was recorded in the api request object.
@@ -568,11 +607,16 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'video_id' : 'vid1',
             'framenos' : [6],
             'thumbnails' : [n_thumbs[0].urls[0]],
-            'serving_url' : video_data.serving_url,
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,
                                       api_request.response)
+        
+        # Compare serving URL here. Ignore the i* part of serving_url; because subdomains
+        # can be different from multiple get_serving_url calls
+        self.assertEquals(api_request.response['serving_url'].split('neon-images')[1],
+                video_data.get_serving_url(save=False).split('neon-images')[1])
+        
         self.assertEquals(self.mock_sqs_manager().
                           add_callback_response.call_count, 1)
         cargs, kwargs = self.mock_sqs_manager().add_callback_response.call_args
@@ -595,6 +639,47 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(video_dict['video_id'], 'vid1')
         self.assertEquals(video_dict['title'], 'some fun video')
         self.assertEquals(len(video_dict['thumbnails']), 3)
+   
+
+        # check video object again to ensure serving_url is not set
+        video_data = neondata.VideoMetadata.get(self.video_id)
+        self.assertIsNone(video_data.serving_url)
+    
+    def test_broken_default_thumb(self):
+        '''
+        Test to validate the flow when default thumb is broken
+        '''
+        return_values = [IOError, HTTPError(404), HTTPError(500)]
+
+        # test for diff exceptions
+        def _image_exception(*args, **kwargs):
+            raise return_values.pop(0) 
+        
+        self.im_download_mock.side_effect = _image_exception
+        for i in range(3):
+            self.vprocessor.finalize_response()
+
+            # Make sure that the api request is updated
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertEquals(api_request.state,
+                    neondata.RequestState.CUSTOMER_ERROR)
+
+            # check state variable
+            state_vars = video_processor.client.statemon.state.get_all_variables()
+            self.assertEqual(
+                    state_vars.get('video_processor.client.default_thumb_error').value,
+                    1)
+            video_processor.client.statemon.state._reset_values()
+
+            # check callback scheduled 
+            self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
+                    1)
+
+            # Check the video metadata in the database
+            video_data = neondata.VideoMetadata.get(self.video_id)
+            self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
+            self.assertTrue(video_data.serving_enabled)
+            self.mock_sqs_manager().add_callback_response.reset_mock()
 
     def test_reprocess(self):
         # Add the results from the previous run to the database
@@ -691,6 +776,56 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(n_thumbs[0].urls, [
             'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
+    
+    def test_processing_after_requeue(self):
+        '''
+        Test processing video after a failed first attempt due to either internal error or
+        failed 
+        error (failed to download default thumb)
+        '''
+        
+        # create basic videometadata object 
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [],
+            duration=97.0,
+            model_version='old_model',
+            serving_enabled=False)
+        video_meta.save()
+
+        # Write the request to the db
+        api_request = neondata.BrightcoveApiRequest(
+            'job1', self.api_key, 'vid1',
+            'some fun video',
+            'http://video.mp4', None, None, 'pubid',
+            'http://callback.com', 'int1',
+            'http://default_thumb.jpg')
+        
+        for state in [neondata.RequestState.INT_ERROR,
+                neondata.RequestState.FAILED]:
+            api_request.state = state 
+            api_request.fail_count = 1
+            api_request.save()
+
+            self.vprocessor.finalize_response()
+
+            # Make sure that the api request is updated
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertEquals(api_request.state, 
+                        neondata.RequestState.FINISHED)
+
+            # Check the video metadata in the database
+            video_data = neondata.VideoMetadata.get(self.video_id)
+            self.assertEquals(video_data.url, 'http://video.mp4')
+            self.assertEquals(video_data.integration_id, '0')
+            self.assertTrue(video_data.serving_enabled)
+            self.assertIsNone(video_data.serving_url)
+            self.mock_sqs_manager().add_callback_response.reset_mock() 
+            
+            state_vars = video_processor.client.statemon.state.get_all_variables()
+            self.assertEqual(
+                state_vars.get('video_processor.client.default_thumb_error').value,
+                0)
 
     def test_default_thumb_already_saved(self):
         # Add the video and the default thumb to the database
@@ -717,7 +852,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertEquals(len(video_data.thumbnail_ids), 4)
         self.assertTrue(video_data.serving_enabled)
-        self.assertIsNotNone(video_data.serving_url)
+        self.assertIsNone(video_data.serving_url)
 
         # Check the thumbnails, we should only have one brightcove thumbnail
         thumbs = neondata.ThumbnailMetadata.get_many(
@@ -934,7 +1069,13 @@ class SmokeTest(test_utils.neontest.TestCase):
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
-        neondata.NeonPlatform('acct1', '0', self.api_key).save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
 
         self.video_id = '%s_vid1' % self.api_key
         self.api_request = neondata.OoyalaApiRequest(
@@ -979,9 +1120,9 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out http requests.
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self.http_mocker.start()
+        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
         self.job_queue = multiprocessing.Queue() # Queue of job param dics
-        def _http_response(request):
+        def _http_response(request, **kw):
             if request.url.endswith('dequeue'):
                 if not self.job_queue.empty():
                     body = json.dumps(self.job_queue.get())

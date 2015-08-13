@@ -12,9 +12,11 @@ import sys
 import StringIO
 import smtplib
 
-NEON_CMS_URL = "http://services.neon-lab.com"
+#NEON_CMS_URL = "http://services.neon-lab.com"
+NEON_CMS_URL = "http://cmsapi-test-1988789777.us-east-1.elb.amazonaws.com
+"
 
-logging.basicConfig(filename='job_serving_times.log',level=logging.DEBUG, format='%(message)s')
+logging.basicConfig(filename='/home/mdesnoyer/tmp/job_serving_times.log',level=logging.DEBUG, format='%(message)s')
 _log = logging.getLogger(__name__)
 
 def get_neon_video(account_id, api_key, video_id):
@@ -35,11 +37,13 @@ def get_neon_video(account_id, api_key, video_id):
 account_id = "159" # Turner Sports account
 API_KEY = "3yd7b8vmrj67b99f7a8o1n30"
 
-with open('job_submit_times.log') as f:
+with open('/home/mdesnoyer/tmp/job_submit_times.log') as f:
     for line in f:
         values = line.split(",")
         if len(values) < 3:
             status = get_neon_video(account_id, API_KEY, values[1])
             if status == "serving":
-                _log.info('%s,%s,%s' % (values[1], status, int(time.time())))
+                starttime = int(values[1].strip())
+                curtime = int(time.time())
+                _log.info('%s,%s,%s,%s,%s' % (values[0], status, starttime, curtime, curtime-starttime))
 

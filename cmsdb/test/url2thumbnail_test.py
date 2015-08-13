@@ -41,9 +41,11 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
 
         # Create some simple entries in the account database
         acct1 = neondata.BrightcovePlatform('acct1', 'i1', 'api1')
-        acct1.add_video('v1', 'j1')
-        acct1.add_video('v2', 'j2')
-        acct1.save()
+        neondata.BrightcovePlatform.modify('api1', 'i1',
+                                           lambda x: x.add_video('v1', 'j1'),
+                                           create_missing=True)
+        neondata.BrightcovePlatform.modify('api1', 'i1',
+                                           lambda x: x.add_video('v2', 'j2'))
         v1 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate('api1', 'v1'),
             ['api1_v1_t1', 'api1_v1_t2'], 
@@ -71,9 +73,9 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         t3.save()
         neondata.ThumbnailURLMapper('three.jpg', '%s_t3' % v2.key).save()
 
-        acct2 = neondata.BrightcovePlatform('acct2', 'i2', 'api2')
-        acct2.add_video('v3', 'j3')
-        acct2.save()
+        neondata.BrightcovePlatform.modify('api2', 'i2',
+                                           lambda x: x.add_video('v3', 'j3'),
+                                           create_missing=True)
         v3 = neondata.VideoMetadata(
             neondata.InternalVideoID.generate('api2', 'v3'), ['api2_v3_t4'], 
             '', '', 0, 0.0, 1, '')

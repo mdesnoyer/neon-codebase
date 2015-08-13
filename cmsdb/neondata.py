@@ -34,13 +34,16 @@ import copy
 import datetime
 import errno
 import hashlib
-import json
+import itertools
+import simplejson as json
 import logging
 import multiprocessing
 from PIL import Image
 import random
 import re
 import redis as blockingRedis
+import redis.exceptions
+import socket
 import string
 from StringIO import StringIO
 import tornado.ioloop
@@ -55,10 +58,12 @@ import utils.logs
 from utils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import statemon
 import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import urlparse
 import warnings
 
 
@@ -81,10 +86,56 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
+statemon.define('subscription_errors', int)
+statemon.define('pubsub_errors', int)
+
 #constants 
 BCOVE_STILL_WIDTH = 480
 
+class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
+class DBConnectionError(IOError):pass
+
+def _get_db_address(class_name, is_writeable=True):
+    '''Function that returns the address to the database for an object.
+
+    Inputs:
+    class_name - Class name of the object to lookup
+    is_writeable - If true, the connection can write to the database.
+                   Otherwise it's read only
+
+    Returns: (host, port)
+    '''
+    #TODO: Add the functionlity to talk to read only database slaves
+
+    # This function can get called a lot, so all the options lookups
+    # are done without introspection.
+    host = options.get('cmsdb.neondata.accountDB')
+    port = options.get('cmsdb.neondata.dbPort')
+    if class_name:
+        if class_name == "VideoMetadata":
+            host = options.get('cmsdb.neondata.videoDB')
+        elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper",
+                            "ThumbnailServingURLs"]:
+            host = options.get('cmsdb.neondata.thumbnailDB')
+    return (host, port)
+
+def _object_to_classname(otype=None):
+    '''Returns the class name of an object.
+
+    otype can be a class object, an instance object or the class name
+    as a string.
+    '''
+    cname = None
+    if otype is not None:
+        if isinstance(otype, basestring):
+            cname = otype
+        else:
+            #handle the case for classmethod
+            cname = otype.__class__.__name__ \
+              if otype.__class__.__name__ != "type" else otype.__name__
+    return cname
+    
 
 class DBConnection(object):
     '''Connection to the database.
@@ -103,22 +154,8 @@ class DBConnection(object):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        host = options.accountDB 
-        port = options.dbPort 
-
-        if class_name:
-            if class_name in ["AbstractPlatform", "BrightcovePlatform", "NeonApiKey"
-                    "YoutubePlatform", "NeonUserAccount", "OoyalaPlatform", "NeonApiRequest"]:
-                host = options.accountDB 
-                port = options.dbPort 
-            elif class_name == "VideoMetadata":
-                host = options.videoDB
-                port = options.dbPort 
-            elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper"]:
-                host = options.thumbnailDB 
-                port = options.dbPort 
-
-        self.conn, self.blocking_conn = RedisClient.get_client(host, port)
+        self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
+        self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
     def fetch_keys_from_db(self, key_prefix, callback=None):
         ''' fetch keys that match a prefix '''
@@ -153,14 +190,7 @@ class DBConnection(object):
                 Can be a class object, an instance object or the class name 
                 as a string.
         '''
-        cname = None
-        if otype:
-            if isinstance(otype, basestring):
-                cname = otype
-            else:
-                #handle the case for classmethod
-                cname = otype.__class__.__name__ \
-                      if otype.__class__.__name__ != "type" else otype.__name__ 
+        cname = _object_to_classname(otype)
         
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
@@ -188,28 +218,62 @@ class RedisRetryWrapper(object):
 
     '''
 
-    def __init__(self, *args, **kwargs):
-        self.client = blockingRedis.StrictRedis(*args, **kwargs)
-        self.max_tries = options.maxRedisRetries
-        self.base_wait = options.baseRedisRetryWait
+    def __init__(self, class_name, **kwargs):
+        self.conn_kwargs = kwargs
+        self.conn_address = None
+        self.class_name = class_name
+        self.client = None
+        self.connection = None
+        self._connect()
 
-    def _get_wrapped_retry_func(self, func):
+    def _connect(self):
+        db_address = _get_db_address(self.class_name)
+        if db_address != self.conn_address:
+            # Reconnect to database because the address has changed
+            self._disconnect()
+            
+            self.connection = blockingRedis.ConnectionPool(
+                host=db_address[0], port=db_address[1],
+                **self.conn_kwargs)
+            self.client = blockingRedis.StrictRedis(
+                connection_pool=self.connection)
+            self.conn_address = db_address
+
+    def _disconnect(self):
+        if self.client is not None:
+            self.connection.disconnect()
+            self.connection = None
+            self.client = None
+            self.conn_address = None
+
+    def _get_wrapped_retry_func(self, attr):
         '''Returns an blocking retry function wrapped around the given func.
         '''
         def RetryWrapper(*args, **kwargs):
             cur_try = 0
+            busy_count = 0
+            
             while True:
                 try:
+                    self._connect()
+                    func = getattr(self.client, attr)
                     return func(*args, **kwargs)
+                except redis.exceptions.BusyLoadingError as e:
+                    # Redis is busy, so wait
+                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
+                                busy_count, 5)
+                    delay = (1 << busy_count) * 0.2
+                    busy_count += 1
+                    time.sleep(delay)
                 except Exception as e:
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, e))
                     cur_try += 1
-                    if cur_try == self.max_tries:
+                    if cur_try == options.maxRedisRetries:
                         raise
 
                     # Do an exponential backoff
-                    delay = (1 << cur_try) * self.base_wait # in seconds
+                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
                     time.sleep(delay)
         return RetryWrapper
 
@@ -219,9 +283,13 @@ class RedisRetryWrapper(object):
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
-                    getattr(self.client, attr))
+                    attr)
                 
         raise AttributeError(attr)
+
+    def pubsub(self, **kwargs):
+        self._connect()
+        return self.client.pubsub(**kwargs)
 
 class RedisAsyncWrapper(object):
     '''
@@ -243,10 +311,36 @@ class RedisAsyncWrapper(object):
     _thread_pools = {}
     _pool_lock = multiprocessing.RLock()
     
-    def __init__(self, host='127.0.0.1', port=6379):
-        self.client = blockingRedis.StrictRedis(host, port, socket_timeout=10)
-        self.max_tries = options.maxRedisRetries
-        self.base_wait = options.baseRedisRetryWait
+    def __init__(self, class_name, **kwargs):
+        self.conn_kwargs = kwargs
+        self.conn_address = None
+        self.class_name = class_name
+        self.client = None
+        self.connection = None
+        self._lock = threading.RLock()
+        self._connect()
+
+    def _connect(self):
+        db_address = _get_db_address(self.class_name)
+        if db_address != self.conn_address:
+            with self._lock:
+                # Reconnect to database because the address has changed
+                self._disconnect()
+            
+                self.connection = blockingRedis.ConnectionPool(
+                    host=db_address[0], port=db_address[1],
+                    **self.conn_kwargs)
+                self.client = blockingRedis.StrictRedis(
+                    connection_pool=self.connection)
+                self.conn_address = db_address
+
+    def _disconnect(self):
+        with self._lock:
+            if self.client is not None:
+                self.connection.disconnect()
+                self.connection = None
+                self.client = None
+                self.conn_address = None
 
     @classmethod
     def _get_thread_pool(cls):
@@ -260,7 +354,7 @@ class RedisAsyncWrapper(object):
                 cls._thread_pools[os.getpid()] = pool
                 return pool
 
-    def _get_wrapped_async_func(self, func):
+    def _get_wrapped_async_func(self, attr):
         '''Returns an asynchronous function wrapped around the given func.
 
         The asynchronous call has a callback keyword added to it
@@ -279,24 +373,35 @@ class RedisAsyncWrapper(object):
                     
             io_loop = tornado.ioloop.IOLoop.current()
             
-            def _cb(future, cur_try=0):
+            def _cb(future, cur_try=0, busy_count=0):
                 if future.exception() is None:
                     callback(future.result())
+                    return
+                elif isinstance(future.exception(),
+                                redis.exceptions.BusyLoadingError):
+                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
+                                busy_count)
+                    delay = (1 << busy_count) * 0.2
+                    busy_count += 1
                 else:
                     _log.error('Error talking to redis on attempt %i: %s' % 
                                (cur_try, future.exception()))
                     cur_try += 1
-                    if cur_try == self.max_tries:
+                    if cur_try == options.maxRedisRetries:
                         raise future.exception()
 
-                    delay = (1 << cur_try) * self.base_wait # in seconds
-                    io_loop.add_timeout(
-                        time.time() + delay,
-                        lambda: io_loop.add_future(
-                            RedisAsyncWrapper._get_thread_pool().submit(
-                                func, *args, **kwargs),
-                            lambda x: _cb(x, cur_try)))
+                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
+                self._connect()
+                func = getattr(self.client, attr)
+                io_loop.add_timeout(
+                    time.time() + delay,
+                    lambda: io_loop.add_future(
+                        RedisAsyncWrapper._get_thread_pool().submit(
+                            func, *args, **kwargs),
+                        lambda x: _cb(x, cur_try, busy_count)))
 
+            self._connect()
+            func = getattr(self.client, attr)
             future = RedisAsyncWrapper._get_thread_pool().submit(
                 func, *args, **kwargs)
             io_loop.add_future(future, _cb)
@@ -307,45 +412,15 @@ class RedisAsyncWrapper(object):
         '''Allows us to wrap all of the redis-py functions.'''
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
-                return self._get_wrapped_async_func(
-                    getattr(self.client, attr))
+                return self._get_wrapped_async_func(attr)
                 
         raise AttributeError(attr)
     
     def pipeline(self):
         ''' pipeline '''
         #TODO(Sunil) make this asynchronous
+        self._connect()
         return self.client.pipeline()
-    
-class DBConnectionCheck(threading.Thread):
-
-    ''' Watchdog thread class to check the DB connection objects '''
-    def __init__(self):
-        super(DBConnectionCheck, self).__init__()
-        self.interval = options.watchdogInterval
-        self.daemon = True
-
-    def run(self):
-        ''' run loop ''' 
-        while True:
-            try:
-                for key, value in DBConnection._singleton_instance.iteritems():
-                    DBConnection.update_instance(key)
-                    value.blocking_conn.get("dummy")
-            except RuntimeError, e:
-                #ignore if dict size changes while iterating
-                #a new class just created its own dbconn object
-                pass
-            except Exception, e:
-                _log.exception("key=DBConnection check msg=%s"%e)
-            
-            time.sleep(self.interval)
-
-#start watchdog thread for the DB connection
-#Disable for now, some issue with connection pool, throws reconnection
-#error, I think its due to each object having too many stored connections
-#DBCHECK_THREAD = DBConnectionCheck()
-#DBCHECK_THREAD.start()
 
 def _erase_all_data():
     '''Erases all the data from the redis databases.
@@ -358,34 +433,297 @@ def _erase_all_data():
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
-class RedisClient(object):
-    '''
-    Static class for REDIS configuration
-    '''
-    #static variables
-    host = '127.0.0.1'
-    port = 6379
-    client = None
-    blocking_client = None
+class PubSubConnection(threading.Thread):
+    '''Handles a pubsub connection.
 
-    def __init__(self, host='127.0.0.1', port=6379):
-        self.client = RedisAsyncWrapper(host, port)
-        self.blocking_client = RedisRetryWrapper(host, port)
-    
-    @staticmethod
-    def get_client(host=None, port=None):
+    The thread, when running, will service messages on the channels
+    subscribed to.
+    '''
+
+    __singleton_lock = threading.RLock()
+    _singleton_instance = {}
+
+    def __init__(self, class_name):
+        '''Init function.
+
+        DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        return connection objects (blocking and non blocking)
+        super(PubSubConnection, self).__init__()
+        self.class_name = class_name
+        self._client = None
+        self._pubsub = None
+        self.connected = False
+        self._address = None
+
+        self._publock = threading.RLock()
+        self._running = threading.Event()
+        self._exit = False
+
+        # Futures to keep track of pending subscribe and unsubscribe
+        # responses. Keyed by channel name.
+        self._sub_futures = {}
+        self._unsub_futures = {}
+
+        # The channels subscribed to. pattern => function
+        self._channels = {}
+
+        self.connect()
+
+        self.daemon = True
+
+    def __del__(self):
+        self.close()
+        self.stop()
+
+    def connect(self):
+        '''Connects to the database. This is a blocking call.'''
+        with self._publock:
+            address = _get_db_address(self.class_name)
+            _log.info(
+                'Connecting to redis at %s for subscriptions of class %s' %
+                (address, self.class_name))
+            self._client = blockingRedis.StrictRedis(address[0],
+                                                     address[1])
+            self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
+
+            # Re-subscribe to channels
+            for pattern, func in self._channels.items():
+                self._subscribe_impl(func, pattern)
+
+            self.connected = True
+            self._address = address
+
+    def reconnect(self):
+        self.close()
+        self.connect()
+
+    def subscribed(self):
+        '''Returns true if we are subscribed to something.'''
+        return len(self._channels) > 0 or len(self._unsub_futures) > 0
+
+    def run(self):
+        error_count = 0
+        while self._running.wait() and not self._exit:            
+            try:
+                with self._publock:
+                    if not self.subscribed():
+                        # There are no more subscriptions, so wait
+                        self._running.clear()
+                        continue
+
+                    if self._address != _get_db_address(self.class_name):
+                        self.reconnect()
+                
+                    # This will cause any callbacks that aren't
+                    # subscribe/unsubscribe messages to be called.
+                    msg = self._pubsub.get_message()
+
+                    self._handle_sub_unsub_messages(msg)
+
+                    # Look for any subscription or unsubscription timeouts
+                    self._handle_timedout_futures(self._unsub_futures)
+                    self._handle_timedout_futures(self._sub_futures)
+
+                    error_count = 0
+                
+            except Exception as e:
+                _log.exception('Error in thread listening to objects %s. '
+                           ': %s' %
+                           (self.__class__.__name__, e))
+                self.connected = False
+                time.sleep((1<<error_count) * 1.0)
+                error_count += 1
+                statemon.state.increment('pubsub_errors')
+
+                # Force reconnection
+                self.reconnect()
+            time.sleep(0.05)
+
+    def close(self):
+        with self._publock:
+            if self._pubsub is not None:
+                self._pubsub.close()
+                self._pubsub = None
+                self._client = None
+                self.connected = False
+
+    def stop(self):
+        '''Stops the thread. It cannot be restarted.'''
+        self._exit = True
+        self._running.set()
+
+    def _handle_sub_unsub_messages(self, msg):
+        '''Handle a subscribe or unsubscribe messages.
+
+        Triggers their callbacks
         '''
-        if host is None:
-            host = RedisClient.host 
-        if port is None:
-            port = RedisClient.port
+        if msg is None:
+            return
         
-        RedisClient.c = RedisAsyncWrapper(host, port)
-        RedisClient.bc = RedisRetryWrapper(
-                            host, port, socket_timeout=10)
-        return RedisClient.c, RedisClient.bc 
+        future = None
+        if msg['type'] in \
+          blockingRedis.client.PubSub.UNSUBSCRIBE_MESSAGE_TYPES:
+            future = self._unsub_futures.pop(msg['channel'], None)
+        elif msg['type'] not in \
+          blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
+            future = self._sub_futures.pop(msg['channel'], None)
+
+        if future is not None:
+            if future[0].set_running_or_notify_cancel():
+                _log.debug('Changed subscription state to %s' % msg['channel'])
+                future[0].set_result(msg)
+
+    def _handle_timedout_futures(self, future_dict):
+        '''Handle any futures that have timed out.'''
+        timed_out = []
+        for channel in future_dict:
+            future, deadline = future_dict.get(channel)
+            if time.time() > deadline :
+                if future.set_running_or_notify_cancel():
+                    future.set_exception(DBConnectionError(
+                    'Timeout when changing connection state to channel '
+                    '%s' % channel))
+                    statemon.state.increment('subscription_errors')
+                timed_out.append(channel)
+
+        for channel in timed_out:
+            del future_dict[channel]
+
+    def get_parsed_message(self):
+        '''Return a parsed message from the channel(s).'''
+        with self._publock:
+            return self._pubsub.parse_response(block=False)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe(self, func, pattern='*', timeout=10.0):
+        '''Subscribe to channel(s)
+
+        func - Function to run with each data point
+        pattern - Channel to subscribe to
+
+        returns nothing
+        '''
+        with self._publock:
+            self._channels[pattern] = func
+        
+        pool = concurrent.futures.ThreadPoolExecutor(1)
+        sub_future = yield pool.submit(
+            lambda: self._subscribe_impl(func, pattern, timeout=timeout))
+
+        # Start the thread so that we can receive and service messages
+        self._running.set()
+        if not self.is_alive():
+            self.start()
+
+        yield sub_future
+
+    def _subscribe_impl(self, func, pattern='*', timeout=10.0):
+        try:
+            with self._publock:
+                if '*' in pattern:
+                    self._pubsub.psubscribe(**{pattern: func})
+                else:
+                    self._pubsub.subscribe(**{pattern: func})
+
+                if pattern in self._sub_futures:
+                    return self._sub_futures[pattern]
+                future = concurrent.futures.Future()
+                self._sub_futures[pattern] = (future, time.time()+timeout)
+                return future
+                
+        except redis.exceptions.RedisError as e:
+            msg = 'Error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg)
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+        except socket.error as e:
+            msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
+            _log.error(msg) 
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe(self, channel=None, timeout=10.0):
+        '''Unsubscribe from channel.
+
+        channel - Channel to unsubscribe from
+        '''
+        with self._publock:
+            try:
+                if channel is None:
+                    self._channels = {}
+                else:
+                    del self._channels[channel]
+            except KeyError:
+                return
+            
+        pool = concurrent.futures.ThreadPoolExecutor(1)
+        unsub_future = yield pool.submit(
+            lambda: self._unsubscribe_impl(channel, timeout))
+        yield unsub_future
+
+    def _unsubscribe_impl(self, channel=None, timeout=10.0):
+        try:
+            with self._publock:
+                if channel is None:
+                    self._pubsub.unsubscribe()
+                    self._pubsub.punsubscribe()
+                elif '*' in channel:
+                    self._pubsub.punsubscribe([channel])
+                else:
+                    self._pubsub.unsubscribe([channel])
+                self._running.set()
+                if channel in self._unsub_futures:
+                    return self._unsub_futures[channel]
+                future = concurrent.futures.Future()
+                self._unsub_futures[channel] = (future, time.time()+timeout)
+                return future
+        except redis.exceptions.RedisError as e:
+            msg = 'Error unsubscribing to channel %s: %s' % (channel, e)
+            _log.error(msg)
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+        except socket.error as e:
+            msg = 'Socket error unsubscribing to channel %s: %s' % (channel, e)
+            _log.error(msg) 
+            statemon.state.increment('subscription_errors')
+            raise DBConnectionError(msg)
+
+
+    @classmethod
+    def get(cls, otype=None):
+        '''
+        Gets a connection for a given object type.
+
+        otype - The object type to get the connection for.
+                Can be a class object, an instance object or the class name 
+                as a string.
+        '''
+        cname = _object_to_classname(otype)
+        
+        if not cls._singleton_instance.has_key(cname):
+            with cls.__singleton_lock:
+                if not cls._singleton_instance.has_key(cname):
+                    cls._singleton_instance[cname] = \
+                      PubSubConnection(cname)
+        return cls._singleton_instance[cname]
+
+    @classmethod
+    def clear_singleton_instance(cls):
+        '''
+        Clear the singleton instance for each of the classes
+
+        NOTE: To be only used by the test code
+        '''
+        with cls.__singleton_lock:
+            for inst in cls._singleton_instance.values():
+                if inst is not None:
+                    inst.stop()
+                    inst.close()
+            cls._singleton_instance = {}
+    
 
 ##############################################################################
 
@@ -436,7 +774,7 @@ class StoredObject(object):
 
     This contains common routines for interacting with the data.
     TODO: Convert all the objects to use this consistent interface.
-    '''
+    ''' 
     def __init__(self, key):
         self.key = str(key)
 
@@ -451,6 +789,19 @@ class StoredObject(object):
         if classcmp:
             return classcmp
         return cmp(self.__dict__, other.__dict__)
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        return key
+
+    @classmethod
+    def format_key(cls, key):
+        return key
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return True
 
     def to_dict(self):
         return {
@@ -501,8 +852,11 @@ class StoredObject(object):
             obj = classtype(key)
 
             #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            try:
+                for k, value in data_dict.iteritems():
+                    obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            except ValueError:
+                return None
         
             return obj
 
@@ -513,7 +867,12 @@ class StoredObject(object):
         if isinstance(value, dict):
             if '_type' in value and '_data' in value:
                 # It is a stored object, so unpack it
-                return cls._create(key, value)
+                try:
+                    classtype = globals()[value['_type']]
+                    return classtype._create(key, value)
+                except KeyError:
+                    _log.error('Unknown class of type %s' % value['_type'])
+                    raise ValueError('Bad class type %s' % value['_type'])
             else:
                 # It is a dictionary do deserialize each of the fields
                 for k, v in value.iteritems():
@@ -638,6 +997,7 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
+            
             val = d[key]
             if val is not None:
                 func(val)
@@ -690,6 +1050,7 @@ class StoredObject(object):
             pipe.multi()
 
             mappings = {}
+            orig_objects = {}
             for key, item in zip(keys, items):
                 if item is None:
                     if create_missing:
@@ -699,19 +1060,21 @@ class StoredObject(object):
                         mappings[key] = None
                 else:
                     mappings[key] = create_class._create(key, json.loads(item))
+                    orig_objects[key] = create_class._create(key,
+                                                             json.loads(item))
             try:
                 func(mappings)
             finally:
                 to_set = {}
                 for key, obj in mappings.iteritems():
-                    if obj is not None:
+                    if obj is not None and obj != orig_objects.get(key, None):
                         to_set[key] = obj.to_json()
 
                 if len(to_set) > 0:
                     pipe.mset(to_set)
             return mappings
 
-        db_connection = DBConnection.get(cls)
+        db_connection = DBConnection.get(create_class)
         if callback:
             return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
@@ -739,6 +1102,111 @@ class StoredObject(object):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+    @classmethod
+    def delete(cls, key, callback=None):
+        '''Delete an object from the database.
+
+        Returns True if the object was successfully deleted
+        '''
+        return StoredObject.delete_many([key], callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        '''Deletes many objects simultaneously
+
+        Inputs:
+        keys - List of keys to delete
+
+        Returns:
+        The number of keys that were removed
+        '''
+        db_connection = DBConnection.get(cls)
+            
+        if callback:
+            db_connection.conn.delete(*keys, callback=callback)
+        else:
+            return db_connection.blocking_conn.delete(*keys)
+        
+    @classmethod
+    def _handle_all_changes(cls, msg, func, conn, get_object):
+        '''Handles any changes to objects subscribed on pubsub.
+
+        Used with subscribe_to_changes.
+
+        Drains the channel of keys that have changed and gets them
+        from the database in one big extraction instead of a ton of
+        small ones. Then, for each object, func is called once.
+
+        Inputs:
+        func - The function to call with each object. 
+        conn - The connection we can drain from
+        msg - The message structure for the first event
+        '''
+        keys = [cls.key2id(msg['channel'].partition(':')[2])]
+        ops = [msg['data']]
+        response = conn.get_parsed_message()
+        while response is not None:
+            message_type = response[0]
+            if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
+                ops.append(response[3])
+                keys.append(cls.key2id(response[2].partition(':')[2]))
+
+            response = conn.get_parsed_message()
+
+        # Filter out the invalid keys
+        filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
+                                zip(*(keys, ops))))
+        if len(filtered) == 0:
+            return
+        keys, ops = filtered
+
+        if get_object:
+            objs = cls.get_many(keys)
+        else:
+            objs = [None for x in range(len(keys))]
+
+        for key, obj, op in zip(*(keys, objs, ops)):
+            if obj is None or isinstance(obj, cls):
+                try:
+                    func(key, obj, op)
+                except Exception as e:
+                    _log.error('Unexpected exception on db change when calling'
+                               ' %s with arguments %s: %s' % 
+                               (func, (key, obj, op), e))
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        '''Subscribes to changes in the database.
+
+        When a change occurs, func is called with the key, the updated
+        object and the operation. The function must be thread safe as
+        it will be called in a thread in a different context.
+
+        Inputs:
+        func - The function to call with signature func(key, obj, op)
+        pattern - Pattern of keys to subscribe to
+        get_object - If True, the object will be grabbed from the db.
+                     Otherwise, it will be passed into the function as None
+        '''
+        conn = PubSubConnection.get(cls)
+        
+        yield conn.subscribe(
+            lambda x: cls._handle_all_changes(x, func, conn, get_object),
+            '__keyspace@0__:%s' % cls.format_key(pattern),
+            async=True)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        conn = PubSubConnection.get(cls)
+        
+        yield conn.unsubscribe(
+            '__keyspace@0__:%s' % cls.format_key(channel),
+            async=True)
+
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
 
@@ -752,7 +1220,12 @@ class NamespacedStoredObject(StoredObject):
 
     def get_id(self):
         '''Return the non-namespaced id for the object.'''
-        return re.sub(self._baseclass_name().lower() + '_', '', self.key)
+        return self.key2id(self.key)
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        return re.sub(cls._baseclass_name().lower() + '_', '', key)
 
     @classmethod
     def _baseclass_name(cls):
@@ -824,6 +1297,34 @@ class NamespacedStoredObject(StoredObject):
                      if x is not None]
 
     @classmethod
+    def iterate_all(cls, max_request_size=100):
+        '''A synchronous function that returns an iterator across all the
+        objects in the database.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        #TODO(mdesnoyer): Figure out a way to make this
+        asynchronous. It ain't going to be easy.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        db_connection = DBConnection.get(cls)
+        keys = db_connection.blocking_conn.keys(
+            cls._baseclass_name().lower() + '_*')
+        cur_idx = 0
+        while cur_idx < len(keys):
+            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
+            for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
+                if obj is not None:
+                    yield obj
+
+            cur_idx += max_request_size
+
+    @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
         return super(NamespacedStoredObject, cls).modify(
             cls.format_key(key),
@@ -837,6 +1338,18 @@ class NamespacedStoredObject(StoredObject):
             [cls.format_key(x) for x in keys],
             func,
             create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, key, callback=None):
+        return super(NamespacedStoredObject, cls).delete(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NamespacedStoredObject, cls).delete_many(
+            [cls.format_key(k) for k in keys],
             callback=callback)
 
 class DefaultedStoredObject(NamespacedStoredObject):
@@ -964,6 +1477,9 @@ class NeonApiKey(NamespacedStoredObject):
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
     
     @staticmethod
     def generate(api_key, vid=None):
@@ -1146,18 +1662,6 @@ class NeonUserAccount(NamespacedStoredObject):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save_platform(self, new_integration, callback=None):
-        '''
-        Save Neon User account and corresponding platform object
-        '''
-        
-        #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection.get(self)
-        pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key, self.to_json())
-        pipe.set(new_integration.key, new_integration.to_json()) 
-        callback(pipe.execute())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1363,8 +1867,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
                  update_serving_urls=False,
                  rendition_sizes=None):
         self.key = key
-        
-        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+
+        # List of url prefixes to put in front of the path. If there
+        # is no transport scheme, http:// will be added. Also, there
+        # is no trailing slash
+        cdn_prefixes = cdn_prefixes or []
+        self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                                cdn_prefixes)
         
         # If true, the images should be resized into all the desired
         # renditions.
@@ -1401,17 +1910,44 @@ class CDNHostingMetadata(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
-    def save_all(self, *args, **kwargs):
+    def save_all(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify(self, *args, **kwargs):
+    def modify(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify_many(self, *args, **kwargs):
+    def modify_many(cls, *args, **kwargs):
         raise NotImplementedError()
 
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # Normalize the CDN prefixes
+        obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                               obj.cdn_prefixes)
+        
+        return obj
+
+    @staticmethod
+    def _normalize_cdn_prefix(prefix):
+      '''Normalizes a cdn prefix so that it starts with a scheme and does
+      not end with a slash.
+
+      e.g. http://neon.com
+           https://neon.com
+      '''
+      prefix_split = urlparse.urlparse(prefix, 'http')
+      if prefix_split.netloc == '':
+        path_split = prefix_split.path.partition('/')
+        prefix_split = [x for x in prefix_split]
+        prefix_split[1] = path_split[0]
+        prefix_split[2] = path_split[1]
+      scheme_added = urlparse.urlunparse(prefix_split)
+      return scheme_added.strip('/')
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
@@ -1420,7 +1956,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False, rendition_sizes=None):
+                 make_tid_folders=False, rendition_sizes=None, policy=None):
         '''
         Create the object
         '''
@@ -1439,6 +1975,9 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         # form <api_key>/<video_id>/<thumb_id>.jpg
         self.make_tid_folders = make_tid_folders
 
+        # What aws policy should the images be uploaded with
+        self.policy = policy
+
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
     Hosting on S3 using the Neon keys.
@@ -1448,7 +1987,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     def __init__(self, key=None,
                  bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
-                 folder_prefix='',
+                 folder_prefix=None,
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
@@ -1463,7 +2002,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=update_serving_urls,
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
-            rendition_sizes=rendition_sizes)
+            rendition_sizes=rendition_sizes,
+            policy='public-read')
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -1474,7 +2014,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=''):
+                 folder_prefix=None):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1482,7 +2022,8 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             resize=False,
             update_serving_urls=False,
             do_salt=False,
-            make_tid_folders=True)
+            make_tid_folders=True,
+            policy='public-read')
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1501,23 +2042,54 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
+                 folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
+                 cpcode=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
             rendition_sizes=rendition_sizes)
-        
+
+        # Host for uploading to akamai. Can have http:// or not
         self.host = host
+
+        # Parameters to talk to akamai
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        self.baseurl = baseurl
+
+        # The folder prefix to prepend to where the file will be
+        # stored and served from. Slashes at the beginning and end are
+        # optional
+        self.folder_prefix=folder_prefix
+
+        # CPCode string for uploading to Akamai. Should be something
+        # like 17645
+        self.cpcode = cpcode
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(AkamaiCDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # An old object could have had a baseurl, which was smashed
+        # together the folder prefix and cpcode. That was confusing,
+        # but in case there's an old object around, fix it. Also, in
+        # that case, the cdn_prefixes could have had the folder prefix
+        # in them, so remove them.
+        if hasattr(obj, 'baseurl'):
+            split = obj.baseurl.strip('/').partition('/')
+            obj.cpcode = split[0].strip('/')
+            obj.folder_prefix = split[2].strip('/')
+            obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
+                                for x in obj.cdn_prefixes]
+            del obj.baseurl
+        
+        return obj
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
         
         super(AbstractPlatform, self).__init__(
@@ -1536,6 +2108,9 @@ class AbstractPlatform(NamespacedStoredObject):
     
     @classmethod
     def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
         return '_'.join([api_key, i_id])
 
     @classmethod
@@ -1553,7 +2128,7 @@ class AbstractPlatform(NamespacedStoredObject):
                 'neonplatform' : NeonPlatform,
                 'brightcoveplatform' : BrightcovePlatform,
                 'ooyalaplatform' : OoyalaPlatform,
-                'youtubeplatform' : YoutubeApiRequest
+                'youtubeplatform' : YoutubePlatform
                 }
             try:
                 platform = typemap[platform_type]
@@ -1568,9 +2143,11 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
+            
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
     def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
@@ -1587,14 +2164,21 @@ class AbstractPlatform(NamespacedStoredObject):
             cls._generate_subkey(api_key, i_id), callback=callback)
     
     @classmethod
-    def modify(cls, api_key, i_id, func, callback=None):
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
         return super(AbstractPlatform, cls).modify(
             cls._generate_subkey(api_key, i_id),
-            func,
+            _set_parameters,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (api_key, i_id)
@@ -1603,6 +2187,20 @@ class AbstractPlatform(NamespacedStoredObject):
             [cls._generate_subkey(api_key, i_id) for 
              api_key, i_id in keys],
             func,
+            create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, api_key, i_id, callback=None):
+        return super(AbstractPlatform, cls).delete(
+            cls._generate_subkey(api_key, i_id),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(AbstractPlatform, cls).delete_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
             callback=callback)
 
     def to_json(self):
@@ -1615,8 +2213,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     def get_videos(self):
         ''' list of external video ids '''
-        if len(self.videos) > 0:
-            return self.videos.keys()
+        return self.videos.keys()
     
     def get_internal_video_ids(self):
         ''' return list of internal video ids for the account ''' 
@@ -1624,57 +2221,42 @@ class AbstractPlatform(NamespacedStoredObject):
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
         return i_vids
-    
-    def get_processed_internal_video_ids(self):
-        ''' return list of i_vids for an account which have been processed '''
-
-        i_vids = []
-        processed_state = [RequestState.FINISHED, 
-                            RequestState.ACTIVE,
-                            RequestState.REPROCESS, RequestState.SERVING, 
-                            RequestState.SERVING_AND_ACTIVE]
-        request_keys = [(v, self.neon_api_key) for v in
-                        self.videos.values()]
-        api_requests = NeonApiRequest.get_many(request_keys)
-        for api_request in api_requests:
-            if api_request and api_request.state in processed_state:
-                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
-                                                        api_request.video_id)) 
-                
-        return i_vids
 
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
         raise NotImplementedError
 
+
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
-        instances.extend(NeonPlatform.get_all_instances())
-        instances.extend(BrightcovePlatform.get_all_instances())
-        instances.extend(OoyalaPlatform.get_all_instances())
+        if callback:
+            lock = threading.RLock()
+            call_counter = [4]
+            def _process_instances(x):
+                instances.extend(x)
+                with lock:
+                    call_counter[0] -= 1
+                    if call_counter[0] == 0:
+                        callback(instances)
+            NeonPlatform.get_all(_process_instances)
+            BrightcovePlatform.get_all(_process_instances)
+            OoyalaPlatform.get_all(_process_instances)
+            YoutubePlatform.get_all(_process_instances)
+            return
+        else:
+            instances.extend(NeonPlatform.get_all())
+            instances.extend(BrightcovePlatform.get_all())
+            instances.extend(OoyalaPlatform.get_all())
+            instances.extend(YoutubePlatform.get_all())
         return instances
 
     @classmethod
-    def _get_all_instances_impl(cls, callback=None):
+    def _get_all_impl(cls, callback=None):
         '''Implements get_all_instances for a single platform type.'''
-        platforms = cls.get_all_platform_data()
-        instances = [] 
-        for pdata in platforms:
-            platform = None
-            
-            try:
-                obj_dict = json.loads(pdata)
-                platform = cls._create(obj_dict['key'], obj_dict)
-            except ValueError, e:
-                pass
-
-            if platform:
-                instances.append(platform)
-
-        return instances
+        return super(AbstractPlatform, cls).get_all(callback=callback)
 
     @classmethod
     def get_all_platform_data(cls):
@@ -1695,24 +2277,65 @@ class AbstractPlatform(NamespacedStoredObject):
         return platform_data
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield [
+            NeonPlatform.subscribe_to_changes(func, pattern, get_object,
+                                              async=True),
+            BrightcovePlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True),
+            YoutubePlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True),
+            OoyalaPlatform.subscribe_to_changes(
+                func, pattern, get_object, async=True)]
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _subscribe_to_changes_impl(cls, func, pattern, get_object):
+        yield super(AbstractPlatform, cls).subscribe_to_changes(
+            func, pattern, get_object, async=True)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield [
+            NeonPlatform.unsubscribe_from_changes(channel, async=True),
+            BrightcovePlatform.unsubscribe_from_changes(channel, async=True),
+            YoutubePlatform.unsubscribe_from_changes(channel, async=True),
+            OoyalaPlatform.unsubscribe_from_changes(channel, async=True)]
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _unsubscribe_from_changes_impl(cls, channel):
+        yield super(AbstractPlatform, cls).unsubscribe_from_changes(
+            channel, async=True)
+    
+
+    @classmethod
     def _erase_all_data(cls):
         ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
+ 
 
-    @classmethod
-    def _delete_many_keys(cls, keys):
-        db_connection = DBConnection.get(cls)
-        for key in keys:
-            db_connection.blocking_conn.delete(key) 
-
-    @classmethod
-    def delete_all_video_related_data(cls, platform_instance, platform_vid):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_all_video_related_data(self, platform_vid,
+            *args, **kwargs):
         '''
         Delete all data related to a given video
 
         request, vmdata, thumbs, thumb serving urls
+        
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
         '''
+        
+        do_you_want_to_delete = kwargs.get('really_delete_keys', False)
+        if do_you_want_to_delete == False:
+            return
 
         def _del_video(p_inst):
             try:
@@ -1721,30 +2344,34 @@ class AbstractPlatform(NamespacedStoredObject):
                 _log.error('no such video to delete')
                 return
         
-        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
-                                        platform_vid)
-        vm = VideoMetadata.get(i_vid)
-        keys_to_delete = []
-        
-        # get all the keys to delete 
-        keys_to_delete.append("request_%s_%s" % (
-                             platform_instance.neon_api_key, vm.job_id))
-        keys_to_delete.append(vm.key)
-        for tid in vm.thumbnail_ids:
-            keys_to_delete.append(tid)
-            #serving urls
-            keys_to_delete.append("thumbnailservingurls_%s" %tid)
-
-        cls._delete_many_keys(keys_to_delete)
-
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
+                                         platform_vid)
+        vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        NeonPlatform.modify(platform_instance.neon_api_key, '0', _del_video)
+        yield tornado.gen.Task(self.modify,
+                               self.neon_api_key, '0',
+                               _del_video)
 
+        # delete the video object
+        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
+
+        # delete the request object
+        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+                               self.neon_api_key)
+
+        # delete the thumbnails
+        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                               vm.thumbnail_ids)
+
+        # delete the serving urls
+        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                               vm.thumbnail_ids)
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+    def __init__(self, api_key, a_id=None, abtest=False):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
@@ -1758,16 +2385,28 @@ class NeonPlatform(AbstractPlatform):
         return "neon"
     
     @classmethod
-    def get_all_instances(cls, callback=None):
+    def get_all(cls, callback=None):
         ''' get all neonplatform instances'''
-        return cls._get_all_instances_impl()
+        return cls._get_all_impl(callback)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False):
+                last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -1783,12 +2422,26 @@ class BrightcovePlatform(AbstractPlatform):
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
-        self.playlist_feed_ids = [] 
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
 
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
 
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
@@ -1796,7 +2449,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created)
+            account_created=self.account_created, callback_url=self.callback_url)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
@@ -1806,10 +2459,6 @@ class BrightcovePlatform(AbstractPlatform):
         callback(True): success
         '''
         bc = self.get_api()
-      
-        #update the default still size, if set
-        if self.video_still_width != BCOVE_STILL_WIDTH:
-            bc.update_still_width(self.video_still_width) 
 
         #Get video metadata
         platform_vid = InternalVideoID.to_external(i_vid)
@@ -1844,102 +2493,61 @@ class BrightcovePlatform(AbstractPlatform):
             callback(None)
             return
         
-        #Update the database with video first
-        #Get previous thumbnail and new thumb
-        modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-            thumbnails, new_tid)
-        modified_thumbs.append(new_thumb)
-        if old_thumb is None:
-            #old_thumb can be None if there was no neon thumb before
-            _log.debug("key=update_thumbnail" 
-                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
-        else:
-            modified_thumbs.append(old_thumb)
-      
-        #Don't reflect change in the DB, used by AB Controller methods
-        if nosave == False:
-            if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                             modified_thumbs)  
-                if not res:
-                    _log.error("key=update_thumbnail msg=[pre-update]" 
-                            " ThumbnailMetadata save_all failed for %s" %new_tid)
-                    callback(False)
-                    return
-            else:
-                callback(False)
-                return
-        
 
         # Update the new_tid as the thumbnail for the video
-        thumb_res = yield tornado.gen.Task(bc.async_enable_thumbnail_from_url,
-                                           platform_vid,
-                                           t_url,
-                                           new_tid,
-                                           fsize,
-                                           image_suffix=thumb_type)
-        if thumb_res is None:
-            callback(None)
+        try:
+            image = utils.imageutils.PILImageUtils.download_image(
+                t_url)
+            update_response = yield bc.update_thumbnail_and_videostill(
+                platform_vid,
+                new_tid,
+                image=image,
+                still_size=(self.video_still_width, None))
+        except Exception as e:
+            _log.error('Error updating the thumbnail and video still to '
+                       'Brightcove for video %s %s' % (i_vid, e))
+            callback(False)
             return
 
-        tref, sref = thumb_res[0], thumb_res[1]
-        if not sref:
-            _log.error("key=update_thumbnail msg=brightcove error" 
-                    " update video still for video %s %s" %(i_vid, new_tid))
+        thumb_bc_id, still_bc_id = update_response
+
+        def _update_external_tid(thumb_obj):
+            thumb_obj.external_id = thumb_bc_id
+
+        yield tornado.gen.Task(ThumbnailMetadata.modify,
+                               new_tid,
+                               _update_external_tid)
 
         #NOTE: When the call is made from brightcove controller, do not 
         #save the changes in the db, this is just a temp change for A/B testing
         if nosave:
-            callback(tref)
+            callback(True)
             return
 
-        if not tref:
-            _log.error("key=update_thumbnail msg=failed to" 
-                    " enable thumb %s for %s" %(new_tid, i_vid))
+        # Save the correct thumb to chosen in the database
+        def _set_chosen(thumb_dict):
+            for thumb_id, thumb in thumb_dict.iteritems():
+                if thumb is not None:
+                    thumb.chosen = thumb_id == new_tid
+        ret = yield tornado.gen.Task(
+            ThumbnailMetadata.modify_many, tids, _set_chosen)
+        if not ret:
+            _log.error("Error updating thumbnails in database")
+            callback(False)
+
+        # Update the request state
+        def _set_active(obj):
+            obj.state = RequestState.ACTIVE
+        ret = yield tornado.gen.Task(
+            NeonApiRequest.modify,
+            vmdata.job_id,
+            self.neon_api_key,
+            _set_active)
+        if not ret:
+            _log.error("Error updating request state in database")
+            callback(False)
             
-            # Thumbnail was not update via the brightcove api, revert the DB changes
-            modified_thumbs = []
-            
-            #get old thumbnail tid to revert to, this was the tid 
-            #that was previously live before this request
-            old_tid = "no_thumb" if old_thumb is None \
-                    else old_thumb.key
-            new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-                                    thumbnails, old_tid)
-            modified_thumbs.append(new_thumb)
-            if old_thumb: 
-                modified_thumbs.append(old_thumb)
-            
-            if new_thumb is not None:
-                res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                             modified_thumbs)  
-                if res:
-                    callback(False) #return False coz bcove thumb not updated
-                    return
-                else:
-                    _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all" 
-                            "failed for video=%s cur_db_tid=%s cur_bcove_tid=%s," 
-                            "DB not reverted" %(i_vid, new_tid, old_tid))
-                    
-                    #The tid that was passed to the method is reflected in the DB,
-                    #but not on Brightcove.the old_tid is the current bcove thumbnail
-                    callback(False)
-            else:
-                #Why was new_thumb None?
-                _log.error("key=update_thumbnail msg=enable_thumbnail"
-                        "new_thumb data missing") 
-                callback(False)
-        else:
-            #Success      
-            #Update the request state to Active to facilitate faster filtering
-            vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
-            vid_request.state = RequestState.ACTIVE
-            ret = vid_request.save()
-            if not ret:
-                _log.error("key=update_thumbnail msg=%s state not updated to active"
-                        %vid_request.key)
-            callback(True)
+        callback(True)
 
     def create_job(self, vid, callback):
         ''' Create neon job for particular video '''
@@ -2017,21 +2625,18 @@ class BrightcovePlatform(AbstractPlatform):
         http_client.fetch(req, callback)
 
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
     # TODO(Sunil): Fix this class when Youtube is implemented 
 
-    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
+    def __init__(self, api_key, i_id=None, a_id='', access_token=None,
+                 refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        super(YoutubePlatform, self).__init__(api_key, i_id)
-        
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(api_key, i_id) #TODO: fix
+        super(YoutubePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -2050,6 +2655,18 @@ class YoutubePlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp '''
         return "youtube"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
     
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
@@ -2132,15 +2749,14 @@ class YoutubePlatform(AbstractPlatform):
         pass
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
                  o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 
@@ -2150,9 +2766,7 @@ class OoyalaPlatform(AbstractPlatform):
 
         '''
         super(OoyalaPlatform, self).__init__(api_key, i_id)
-        self.neon_api_key = api_key
         self.account_id = a_id
-        self.integration_id = i_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
@@ -2162,6 +2776,18 @@ class OoyalaPlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' return ovp name'''
         return "ooyala"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
     
     @classmethod
     def generate_signature(cls, secret_key, http_method, 
@@ -2248,7 +2874,7 @@ class OoyalaPlatform(AbstractPlatform):
         #Get previous thumbnail and new thumb
         modified_thumbs = [] 
         new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-                                    thumbnails, new_tid)
+            thumbnails, new_tid)
         modified_thumbs.append(new_thumb)
         if old_thumb is None:
             #old_thumb can be None if there was no neon thumb before
@@ -2280,9 +2906,8 @@ class OoyalaPlatform(AbstractPlatform):
         raise tornado.gen.Return(True)
     
     @classmethod
-    def get_all_instances(cls, callback=None):
-        ''' get all brightcove instances'''
-        return cls._get_all_instances_impl()
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
 
 #######################
 # Request Blobs 
@@ -2299,12 +2924,14 @@ class RequestState(object):
     FINISHED   = "finished"
     SERVING    = "serving" # Thumbnails are ready to be served 
     INT_ERROR  = "internal_error" # Neon had some code error
+    CUSTOMER_ERROR = "customer_error" # customer request had a partial error 
     ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
-    # NOTE: This state is being added to save DB lookup calls to determine the active state
-    # This is required for the UI. Re-evaluate this state for new UI
-    # For CMS API response if SERVING_AND_ACTIVE return active state
+    # NOTE: This state is being added to save DB lookup calls to
+    # determine the active state This is required for the
+    # UI. Re-evaluate this state for new UI For CMS API response if
+    # SERVING_AND_ACTIVE return active state
     SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
 class NeonApiRequest(NamespacedStoredObject):
@@ -2315,7 +2942,8 @@ class NeonApiRequest(NamespacedStoredObject):
     '''
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
-            request_type=None, http_callback=None, default_thumbnail=None):
+            request_type=None, http_callback=None, default_thumbnail=None,
+            integration_type='neon', integration_id='0'):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -2329,17 +2957,33 @@ class NeonApiRequest(NamespacedStoredObject):
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
         
-        self.integration_type = "neon"
-        self.integration_id = '0'
+        self.integration_type = integration_type
+        self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
 
-        #Save the request response
+        # Save the request response
         self.response = {}  
 
-        #API Method
+        # API Method
         self.api_method = None
         self.api_param  = None
         self.publish_date = None # Timestamp in ms
+       
+        # field used to store error message on partial error, explict error or 
+        # additional information about the request
+        self.msg = None
+
+    def set_message(self, msg):
+        ''' set message string 
+            @msg: string
+        '''
+        self.msg = msg
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        splits = key.split('_')
+        return (splits[2], splits[1])
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
@@ -2436,6 +3080,19 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, job_id, api_key, callback=None):
+        return super(NeonApiRequest, cls).delete(
+            cls._generate_subkey(job_id, api_key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NeonApiRequest, cls).delete_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
             callback=callback)
 
     @utils.sync.optional_sync
@@ -2593,10 +3250,15 @@ class ThumbnailID(AbstractHashGenerator):
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
+    VALID_REGEX = '%s_[0-9A-Za-z]+' % InternalVideoID.VALID_INTERNAL_REGEX
 
     @staticmethod
     def generate(_input, internal_video_id):
         return '%s_%s' % (internal_video_id, ThumbnailMD5.generate(_input))
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return len(key.split('_')) == 3
 
 class ThumbnailMD5(AbstractHashGenerator):
     '''Static class to generate the thumbnail md5.
@@ -2636,12 +3298,40 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     Specifically, maps:
 
     thumbnail_id -> { (width, height) -> url }
-    '''
 
-    def __init__(self, thumbnail_id, size_map=None):
+    or, instead of a full url map, there can be a base_url and a list of sizes.
+    In that case, the full url would be generated by 
+    <base_url>/FNAME_FORMAT % (thumbnail_id, width, height)
+    '''    
+    FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
+    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
+                   ThumbnailID.VALID_REGEX)
+
+    def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
+        
+        self.base_url = base_url
+        self.sizes = sizes or set([]) # List of (width, height)
 
+    def __eq__(self, other):
+        '''Sets can't do cmp, so we need to overright so that == and != works.
+        '''
+        if ((other is None) or 
+            (type(other) != type(self)) or 
+            (self.__dict__.keys() != other.__dict__.keys())):
+            return False
+        for k, v in self.__dict__.iteritems():
+            if v != other.__dict__[k]:
+                return False
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __len__(self):
+        return len(self.size_map) + len(self.sizes)
+    
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2650,13 +3340,25 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
-        return str(self.key.partition('_')[2])
+        return self.get_id()
 
     def add_serving_url(self, url, width, height):
         '''Adds a url to serve for a given width and height.
 
         If there was a previous entry, it is overwritten.
         '''
+        if self.base_url is not None:
+            urlRe = re.compile(
+                '%s/%s' % (re.escape(self.base_url),
+                           ThumbnailServingURLs.FNAME_REGEX))
+            if urlRe.match(url):
+                self.sizes.add((width, height))
+                return
+            else:
+                # TODO(mdesnoyer): once the db is cleaned, make this
+                # raise a ValueError
+                _log.warn_n('url %s does not conform to base %s' %
+                            (url, self.base_url))
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
@@ -2664,7 +3366,30 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
         Raises a KeyError if there isn't one.
         '''
+        if (width, height) in self.sizes:
+            return (self.base_url + '/' + ThumbnailServingURLs.FNAME_FORMAT %
+                    (self.get_thumbnail_id(), width, height))
         return self.size_map[(width, height)]
+
+    def get_serving_url_count(self):
+        '''Return the number of serving urls in this object.'''
+        return len(self.size_map) + len(self.sizes)
+
+    def is_valid_size(self, width, height):
+        '''Returns true if there is a url for this size image.'''
+        sz = (width, height)
+        return sz in self.sizes or sz in self.size_map
+
+    def __iter__(self):
+        '''Iterator of size, url pairs.'''
+        return itertools.chain(
+            self.size_map.iteritems(),
+            ((k, self.get_serving_url(*k)) for k in self.sizes))
+
+    @staticmethod
+    def create_filename(tid, width, height):
+        '''Creates a filename for a given thumbnail id at a specific size.'''
+        return ThumbnailServingURLs.FNAME_FORMAT % (tid, width, height)
 
     def to_dict(self):
         new_dict = {
@@ -2672,15 +3397,26 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             '_data': copy.copy(self.__dict__)
             }
         new_dict['_data']['size_map'] = self.size_map.items()
+        new_dict['_data']['sizes'] = list(self.sizes)
         return new_dict
 
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(ThumbnailServingURLs, cls)._create(key, obj_dict)
         if obj:
-            # Load in the size map as a dictionary
-            obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
-                                 x in obj.size_map])
+            # Convert the sizes into tuples and a set
+            obj.sizes = set((tuple(x) for x in obj.sizes))
+            
+            # Load in the url entries into the object
+            size_map = obj.size_map
+            obj.size_map = {}
+            # Find the base url to save that way
+            bases = set((os.path.dirname(x[1]) for x in size_map))
+            if len(bases) == 1 and obj.base_url is None:
+                obj.base_url = bases.pop()
+            for k, v in size_map:
+                width, height = k
+                obj.add_serving_url(v, width, height)
             return obj
 
         
@@ -2756,9 +3492,11 @@ class ThumbnailMetadata(StoredObject):
                  width=None, height=None, ttype=None,
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
-                 serving_frac=None, frameno=None, filtered=None, ctr=None):
+                 serving_frac=None, frameno=None, filtered=None, ctr=None,
+                 external_id=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
+        self.external_id = external_id # External id if appropriate
         self.urls = urls or []  # List of all urls associated with single image
         self.created_time = created or datetime.datetime.now().strftime(
             "%Y-%m-%d %H:%M:%S")# Timestamp when thumbnail was created 
@@ -2776,15 +3514,19 @@ class ThumbnailMetadata(StoredObject):
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
         
-        # Fraction of traffic currently being served by this thumbnail.
-        # =None indicates that Mastermind doesn't know of the fraction yet
+
+        # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
 
-        # The current click through rate seen for this thumbnail
+        # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
         
         # NOTE: If you add more fields here, modify the merge code in
-        # api/client, Add unit test to check this
+        # video_processor/client, Add unit test to check this
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return ThumbnailID.is_valid_key(key)
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
@@ -2841,11 +3583,14 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
-        self.urls.insert(0, s3_url)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:
@@ -2933,7 +3678,7 @@ class ThumbnailMetadata(StoredObject):
                   ThumbnailMetadata objects.
         '''
 
-        for platform in AbstractPlatform.get_all_instances():
+        for platform in AbstractPlatform.get_all():
             for video_id in platform.get_internal_video_ids():
                 video_metadata = VideoMetadata.get(video_id)
                 if video_metadata is None:
@@ -2944,6 +3689,24 @@ class ThumbnailMetadata(StoredObject):
                 for thumb in ThumbnailMetadata.get_many(
                         video_metadata.thumbnail_ids):
                     yield thumb
+
+class ThumbnailStatus(DefaultedStoredObject):
+    '''Holds the current status of the thumbnail in the wild.'''
+
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+        super(ThumbnailStatus, self).__init__(thumbnail_id)
+
+        # The fraction of traffic this thumbnail will get
+        self.serving_frac = serving_frac
+
+        # The currently click through rate for this thumbnail
+        self.ctr = ctr
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ThumbnailStatus.__name__
 
 class VideoMetadata(StoredObject):
     '''
@@ -2972,19 +3735,25 @@ class VideoMetadata(StoredObject):
         self.frame_size = frame_size #(w,h)
         # Is A/B testing enabled for this video?
         self.testing_enabled = testing_enabled
+
+        # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
           experiment_state if testing_enabled else ExperimentState.DISABLED
 
-        # For the multi-armed bandit strategy, the value remaining
-        # from the monte carlo analysis.
+        # DEPRECATED. Use VideoStatus table instead
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
         self.serving_enabled = serving_enabled 
         
         # Serving URL (ISP redirect URL) 
-        # NOTE: always use the get_serving_url() method to get the serving_url 
+        # NOTE: This is set by mastermind by calling get_serving_url() method
+        # after the request state has been changed to SERVING
         self.serving_url = None
+
+    @classmethod
+    def is_valid_key(cls, key):
+        return len(key.split('_')) == 2
 
     def get_id(self):
         ''' get internal video id '''
@@ -3005,46 +3774,8 @@ class VideoMetadata(StoredObject):
         '''
         Get the TID that won the A/B test
         '''
-        def almost_equal(a, b, threshold=0.001):
-            return abs(a -b) <= threshold
-
-        tmds = yield tornado.gen.Task(ThumbnailMetadata.get_many,
-                                      self.thumbnail_ids)
-        tid = None
-
-        if self.experiment_state == ExperimentState.COMPLETE:
-            #1. If serving fraction = 1.0 its the winner
-            for tmd in tmds:
-                if tmd.serving_frac == 1.0:
-                    tid = tmd.key
-                    raise tornado.gen.Return(tid)
-
-            #2. Check the experiment strategy 
-            es = ExperimentStrategy.get(self.get_account_id())
-            if es.override_when_done == False:
-
-                #Check if the experiment is in holdback state or exp state
-                if almost_equal(es.exp_frac, es.holdback_frac): 
-                    # we are in experimental state now, find the thumb with the
-                    # experimental fraction
-                    winner_tmd = filter(lambda t: almost_equal(t.serving_frac,
-                                         es.exp_frac), tmds)
-                    if len(winner_tmd) != 1:
-                        _log.error("Error in the logic to determine winner tid")
-                    else:
-                        tid = winner_tmd[0].key
-
-                    raise tornado.gen.Return(tid)
-
-                else:
-                    # Holdback state, return majoriy fraction
-                    pass
-
-            #Pick the max serving fraction
-            max_tmd = max(tmds, key=lambda t: t.serving_frac)
-            tid = max_tmd.key
-
-        raise tornado.gen.Return(tid)
+        video_status = yield tornado.gen.Task(VideoStatus.get, self.key)
+        raise tornado.gen.Return(video_status.winner_tid)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3118,8 +3849,20 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        image = yield utils.imageutils.PILImageUtils.download_image(image_url,
-                                                                    async=True)
+        try:
+            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+                    async=True)
+        except IOError, e:
+            msg = "IOError while downloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+        except tornado.httpclient.HTTPError as e:
+            msg = "HTTP Error while dowloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
@@ -3171,8 +3914,11 @@ class VideoMetadata(StoredObject):
         Get the serving URL of the video. If self.serving_url is not
         set, fetch the neon publisher id (TAI) and save the video object 
         with the serving_url set
+        
+        NOTE: any call to this function will return a valid serving url. 
+        multiple calls to this function may or may not return the same URL 
 
-        save_url - If true, the url is saved to the database
+        @save : If true, the url is saved to the database
         '''
         subdomain_index = random.randrange(1, 4)
         platform_vid = InternalVideoID.to_external(self.get_id())
@@ -3190,16 +3936,41 @@ class VideoMetadata(StoredObject):
                                                 platform_vid)
 
         if not staging:
-            # Keep information about the serving url around
-            self.serving_url = serving_url
-            
+
             def _update_serving_url(vobj):
                 vobj.serving_url = self.serving_url
             if save:
+                # Keep information about the serving url around
+                self.serving_url = serving_url
                 yield tornado.gen.Task(VideoMetadata.modify, self.key,
                                        _update_serving_url)
-
         raise tornado.gen.Return(serving_url)
+        
+
+class VideoStatus(DefaultedStoredObject):
+    '''Stores the status of the video in the wild for often changing entries.
+
+    '''
+    def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
+                 winner_tid=None,
+                 experiment_value_remaining=None):
+        super(VideoStatus, self).__init__(video_id)
+
+        # State of the experiment
+        self.experiment_state = experiment_state
+
+        # Thumbnail id of the winner thumbnail
+        self.winner_tid = winner_tid
+
+        # For the multi-armed bandit strategy, the value remaining
+        # from the monte carlo analysis.
+        self.experiment_value_remaining = experiment_value_remaining
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoStatus.__name__
 
 class AbstractJsonResponse(object):
     

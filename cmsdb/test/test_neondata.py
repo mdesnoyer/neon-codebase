@@ -2,15 +2,15 @@
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
-if sys.path[0] <> base_path:
-        sys.path.insert(0,base_path)
+if sys.path[0] != __base_path__:
+        sys.path.insert(0, __base_path__)
 
 import copy
 from concurrent.futures import Future
+import contextlib
 import logging
-_log = logging.getLogger(__name__)
 import json
 import multiprocessing
 from mock import patch, MagicMock
@@ -20,12 +20,14 @@ import redis
 import random
 import socket
 import string
+import subprocess
 import test_utils.neontest
 import test_utils.redis
 import time
 import threading
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
+import utils.neon
 from utils.options import options
 from utils.imageutils import PILImageUtils
 import unittest
@@ -42,6 +44,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
 
+_log = logging.getLogger(__name__)
+
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
     Neondata class tester
@@ -51,8 +55,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         self.maxDiff = 5000
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
+        neondata.PubSubConnection.clear_singleton_instance()
         self.redis.stop()
         super(TestNeondata, self).tearDown()
 
@@ -106,12 +112,40 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 TrackerAccountIDMapper.get_neon_account_id('tracker_3'),
                 ('account_3', TrackerAccountIDMapper.PRODUCTION))
 
+    def test_get_all_platforms_sync(self):
+        NeonPlatform.modify('acct1', '0', lambda x: x,
+                            create_missing=True)
+        BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                                  create_missing=True)
+        OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                              create_missing=True)
+        YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                               create_missing=True)
+
+        objs = AbstractPlatform.get_all()
+
+        self.assertEquals(len(objs), 4)
+
+    @tornado.testing.gen_test
+    def test_get_all_platforms_async(self):
+        NeonPlatform.modify('acct1', '0', lambda x: x,
+                            create_missing=True)
+        BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                            create_missing=True)
+        OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
+                            create_missing=True)
+        YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                            create_missing=True)
+
+        objs = yield tornado.gen.Task(AbstractPlatform.get_all)
+
+        self.assertEquals(len(objs), 4)
+
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
 
         na = NeonUserAccount('acct1')
-        na.save()
-        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
+        bp = BrightcovePlatform(na.neon_api_key, 'iid', 'aid')
 
         self.assertFalse(bp.abtest)
         self.assertFalse(bp.auto_update)
@@ -120,26 +154,44 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
 
         # Make sure that save and regenerating creates the same object
-        bp.save()
+        def _set_acct(x):
+            x.account_id = 'aid'
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'iid', _set_acct,
+                                       create_missing=True)
 
-        bp2 = BrightcovePlatform.get(bp.neon_api_key, 'iid')
+        bp2 = BrightcovePlatform.get(na.neon_api_key, 'iid')
         self.assertEqual(bp.__dict__, bp2.__dict__)
+
+    def test_bcplatform_with_callback(self):
+
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key,
+                                callback_url='http://www.callback.com')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'brightcoveplatform_%s_iid' % bp.neon_api_key)
+        self.assertEqual(bp.callback_url, 'http://www.callback.com')
 
     def test_neon_user_account(self):
         ''' nuser account '''
 
         na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
-        bp.save()
-        np = NeonPlatform('acct1', '0', na.neon_api_key)
-        np.save()
+        def _set_acct(x):
+            x.account_id = 'acct1'
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1',
+                                       _set_acct, create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 _set_acct, create_missing=True)
         na.add_platform(bp)
         na.add_platform(np)
         na.save()
 
         # Retrieve the account
         NeonUserAccount.get(na.neon_api_key,
-                                    callback=self.stop)
+                            callback=self.stop)
         account = self.wait()
         self.assertIsNotNone(account)
         self.assertEqual(account.account_id, 'acct1')
@@ -196,36 +248,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertNotEqual(self.bp_conn, self.vm_conn)
 
-    @unittest.skip("DBconn check disabled")
-    def test_db_connection_error(self):
-        ''' #Verify that database connection is re-established 
-        after config change '''
-        ap = AbstractPlatform()
-        db = DBConnection.get(ap)
-        key = "fookey"
-        val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key, val))
-        self.redis.stop()
-        
-        #try fetching the key after db has been stopped
-        try :
-            db.blocking_conn.get(key)
-        except Exception,e:
-            print e
-            #assert exception is ConnectionError 
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        
-        #Trigger a change in the options, so that the watchdog thread 
-        #can update the connection
-        options._set("cmsdb.neondata.dbPort", self.redis.port)
-        check_interval = options.get("cmsdb.neondata.watchdogInterval")
-        time.sleep(check_interval + 0.5)
-        
-        #try any db operation
-        self.assertTrue(db.blocking_conn.set(key, val))
-
     #TODO: Test Async DB Connection
     
     def test_db_connection(self):
@@ -278,10 +300,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         # create all video related objects
         
         na = NeonUserAccount('ta1')
-        bp = BrightcovePlatform('ta1', 'bp1', na.neon_api_key)
-        bp.save()
-        np = NeonPlatform('ta1', '0', na.neon_api_key)
-        np.save()
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
         na.add_platform(bp)
         na.add_platform(np)
         na.save()
@@ -296,10 +318,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         req.save()
         ThumbnailMetadata.save_all([thumb])
         VideoMetadata.save_all([vid])
-        np.add_video('dummyv', 'dummyjob')
-        np.add_video('vid1', 'job1')
-        np.save()
-        AbstractPlatform.delete_all_video_related_data(np, 'vid1')
+        NeonPlatform.modify(na.neon_api_key, '0',
+                            lambda x: x.add_video('dummyv', 'dummyjob'))
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 lambda x: x.add_video('vid1', 'job1'))
+        np.delete_all_video_related_data('vid1', really_delete_keys=True)
         
         # check the keys have been deleted
         self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
@@ -318,9 +341,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         # Build up a database structure
         na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform('acct1', 'bp1', na.neon_api_key)
-        op = OoyalaPlatform('acct1', 'op1', na.neon_api_key, 'p_code', 'o_key',
-                            'o_secret')
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        op = OoyalaPlatform.modify(na.neon_api_key, 'op1',
+                                   lambda x: x, create_missing=True)
         na.add_platform(bp)
         na.add_platform(op)
         na.save()
@@ -355,12 +379,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         v2.save()
 
 
-        bp.add_video('v0', 'r0')
-        bp.add_video('v1', 'r1')
-        bp.save()
-        op.add_video('v2', 'r2')
-        op.save()
-
+        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
+                                  lambda x: x.add_video('v0', 'r0'))
+        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
+                                  lambda x: x.add_video('v1', 'r1'))
+        OoyalaPlatform.modify(na.neon_api_key, 'op1', 
+                              lambda x: x.add_video('v2', 'r2'))
+        
         # Now make sure that the iteration goes through all the thumbnails
         found_thumb_ids = [x.key for x in  
                            ThumbnailMetadata.iterate_all_thumbnails()]
@@ -368,34 +393,104 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
-        input1.add_serving_url('http://that_800_600.jpg', 800, 600) 
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg', 800, 600)
+        input1.add_serving_url(
+            'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg', 100, 50)
         
         input1.save()
         output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
         self.assertEqual(output1.get_thumbnail_id(), input1.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         with self.assertRaises(KeyError):
-            _log.info('Output1 %s' % output1)
             output1.get_serving_url(640, 480)
+        self.assertItemsEqual(
+            list(input1),
+            [((800, 600), 'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg'),
+             ((100, 50), 'http://neon.com/neontnacct1_vid1_tid1_w100_h50.jpg')])
+        self.assertItemsEqual(list(input1), list(output1))
 
-        input1.add_serving_url('http://that_640_480.jpg', 640, 480) 
-        input2 = ThumbnailServingURLs('tid2', {(640, 480) : 'http://this.jpg'})
+        input1.add_serving_url('http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg',
+                               640, 480) 
+        input2 = ThumbnailServingURLs(
+            'acct1_vid1_tid2',
+            {(640, 480) : 'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg'})
         ThumbnailServingURLs.save_all([input1, input2])
         output1, output2 = ThumbnailServingURLs.get_many(['acct1_vid1_tid1',
-                                                          'tid2'])
+                                                          'acct1_vid1_tid2'])
         self.assertEqual(output1.get_thumbnail_id(),
                          input1.get_thumbnail_id())
         self.assertEqual(output2.get_thumbnail_id(),
                          input2.get_thumbnail_id())
         self.assertEqual(output1.get_serving_url(640, 480),
-                         'http://that_640_480.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w640_h480.jpg')
         self.assertEqual(output1.get_serving_url(800, 600),
-                         'http://that_800_600.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid1_w800_h600.jpg')
         self.assertEqual(output2.get_serving_url(640, 480),
-                         'http://this.jpg')
+                         'http://neon.com/neontnacct1_vid1_tid2_w640_h480.jpg')
+
+    def test_thumbnail_servingurl_base_url(self):
+        input1 = ThumbnailServingURLs('acct1_vid1_tid1',
+                                      base_url='http://neon-images.com/y6w')
+        url800 = \
+          'http://neon-images.com/y6w/neontnacct1_vid1_tid1_w800_h600.jpg'
+        input1.add_serving_url(url800, 800, 600)
+        url160 = 'http://neon-images.com/ppw/neontnacct1_vid1_tid1_w160_h90.jpg'
+        with self.assertLogExists(logging.WARNING, 'url.*does not conform'):
+            input1.add_serving_url(url160, 160, 90)
+        self.assertEqual(input1.get_serving_url(800, 600), url800)
+        self.assertEqual(input1.get_serving_url(160, 90), url160)
+        input1.save()
+
+        output1 = ThumbnailServingURLs.get('acct1_vid1_tid1')
+        self.assertEqual(input1.get_serving_url(800, 600),
+                         output1.get_serving_url(800, 600))
+        self.assertEqual(input1.get_serving_url(160, 90),
+                         output1.get_serving_url(160, 90))
+        
+
+    def test_backwards_compatible_thumb_serving_urls_diff_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/ZZc/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's different base urls so we keep the object in the old format
+        self.assertEquals(len(obj.size_map), 3)
+        self.assertEquals(obj.get_serving_url_count(), 3)
+        self.assertIsNone(obj.base_url)
+        self.assertEquals(len(obj.sizes), 0)
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/EaE/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+
+    def test_backwards_compatible_thumb_serving_urls_same_base(self):
+        json_str = "{\"_type\": \"ThumbnailServingURLs\", \"_data\": {\"size_map\": [[[210, 118], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w210_h118.jpg\"], [[160, 90], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg\"], [[1280, 720], \"http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w1280_h720.jpg\"]], \"key\": \"thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8\"}}"
+
+        obj = ThumbnailServingURLs._create('thumbnailservingurls_b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8', json.loads(json_str))
+
+        # It's the same base url so store in the new format
+        self.assertEquals(len(obj.size_map), 0)
+        self.assertEquals(obj.get_serving_url_count(), 3)
+        self.assertEquals(obj.base_url, 'http://n3.neon-images.com/fF7')
+        self.assertEquals(obj.sizes, set([(210,118), (160,90), (1280,720)]))
+        self.assertEquals(obj.get_serving_url(160, 90),
+                          'http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
+        self.assertEquals(obj.get_thumbnail_id(),
+                          'b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8')
+        
 
     def test_too_many_open_connections_sync(self):
+        self.maxDiff = 10000
+
+        def _get_open_connection_list():
+            fd_list = subprocess.check_output(
+                ['lsof', '-a', '-d0-65535', 
+                 '-p', str(os.getpid())]).split('\n')
+            fd_list = [x.split() for x in fd_list if x]
+            return [x for x in fd_list if 
+                    x[7] == 'TCP' and 'localhost:%d' % self.redis.port in x[8]]
+                
+        
         # When making calls on various objects, there should only be
         # one connection per object type to the redis server. We're
         # just going to make sure that that is the case
@@ -410,19 +505,24 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             (ExperimentStrategy('key'), get_func),
             (NeonUserAccount('key', 'api'),
              lambda x: x.get('key')),
-            (NeonPlatform('key', '0', 'api'),
+            (NeonPlatform('api', '0', 'a'),
              lambda x: x.get('api', '0')),
-            (BrightcovePlatform('a', 'i', 'api'),
-             lambda x: x.get('api', 'i')),
-            (OoyalaPlatform('a', 'i', 'api', 'b', 'c', 'd', 'e'),
-             lambda x: x.get('api', 'i'))]
+            (BrightcovePlatform('api', 'i1', 'a'),
+             lambda x: x.get('api', 'i1')),
+            (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
+             lambda x: x.get('api', 'i2'))
+             ]
 
         for obj, read_func in obj_types:
             # Start by saving the object
-            obj.save()
+            if isinstance(obj, AbstractPlatform):
+                obj.modify('api', obj.integration_id, lambda x: x,
+                           create_missing=True)
+            else:
+                obj.save()
 
             # Now find the number of open file descriptors
-            start_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
+            start_fd_list = _get_open_connection_list()
 
             def nop(x): pass
 
@@ -431,26 +531,10 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 read_func(obj)
 
             # Check the file descriptors
-            end_fd_count = len(os.listdir("/proc/%s/fd" % os.getpid()))
-            self.assertEqual(start_fd_count, end_fd_count)
-    
-    def test_processed_internal_video_ids(self):
-        na = NeonUserAccount('accttest')
-        na.save()
-        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key)
-        
-        vids = bp.get_processed_internal_video_ids()
-        self.assertEqual(len(vids), 0)
-
-        for i in range(10):
-            bp.add_video('vid%s' % i, 'job%s' % i)
-            r = NeonApiRequest('job%s' % i, na.neon_api_key, 'vid%s' % i, 't', 't', 'r', 'h')
-            r.state = "active"
-            r.save()
-        bp.save()
-
-        vids = bp.get_processed_internal_video_ids()
-        self.assertEqual(len(vids), 10)
+            end_fd_list = _get_open_connection_list()
+            if len(start_fd_list) != len(end_fd_list):
+                # This will give us more information if it fails
+                self.assertEqual(start_fd_list, end_fd_list)
 
     def test_hosting_metadata(self):
         '''
@@ -465,7 +549,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                                           rendition_sizes=[[360, 240]])
         self.assertTrue(neon_cdn.resize)
         self.assertTrue(neon_cdn.update_serving_urls)
-        self.assertEqual(neon_cdn.folder_prefix, '')
+        self.assertEqual(neon_cdn.folder_prefix, None)
         s3_cdn = S3CDNHostingMetadata(None,
                                       'access-key',
                                       'secret-key',
@@ -499,7 +583,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             cdn_list = CDNHostingMetadataList._create(
                 'api-key_integration0',
                 json.loads(bad_json))
-            self.assertItemsEqual(cdn_list, [])
+            self.assertIsNone(cdn_list)
 
     def test_hosting_metadata_list_bad_key(self):
         with self.assertRaises(ValueError):
@@ -507,6 +591,57 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         with self.assertRaises(ValueError):
             CDNHostingMetadataList('acct_1_integration0')
+
+    def test_old_akamai_hosting_objects(self):
+        folder_in_cdn_prefixes = neondata.AkamaiCDNHostingMetadata._create(
+            None,
+            {'akamai_key':'Bt9lrfGL9hGBs7APtg10AfCUti5FeDrJ65dZIFVTxuvd33H74C',
+             'akamai_name': 'neonuser',
+             'update_serving_urls': True,
+             'baseurl': '/17200/neon/prod',
+             'rendition_sizes': [[120, 67]],
+             'host': 'http://usatoday-nsu.akamaihd.net',
+             'key': None,
+             'cdn_prefixes': ['www.gannett-cdn.com/neon/prod'],
+             'resize': True})
+        self.assertEquals(folder_in_cdn_prefixes.cpcode, '17200')
+        self.assertEquals(folder_in_cdn_prefixes.folder_prefix, 'neon/prod')
+        self.assertEquals(folder_in_cdn_prefixes.cdn_prefixes,
+                          ['http://www.gannett-cdn.com'])
+
+        folder_not_in_cdn_prefixes = neondata.AkamaiCDNHostingMetadata._create(
+            None,
+            {'akamai_key': 'Igi93b3mTZ1Cq30N0dY0G39NjZq92nIGtUclw23hm2Iy7RF2Nj',
+             'akamai_name': 'neon',
+             'update_serving_urls': True,
+             'baseurl': '/386270/neon/prod',
+             'rendition_sizes': [[50, 50]],
+             'host': 'http://tvaiharmony-nsu.akamaihd.net',
+             'key': None,
+             'cdn_prefixes': ['static.neon.groupetva.ca'],
+             'resize': True})
+
+        self.assertEquals(folder_not_in_cdn_prefixes.cpcode, '386270')
+        self.assertEquals(folder_not_in_cdn_prefixes.folder_prefix,
+                          'neon/prod')
+        self.assertEquals(folder_not_in_cdn_prefixes.cdn_prefixes,
+                          ['http://static.neon.groupetva.ca'])
+
+    def test_old_s3_hosting_list(self):
+        old_str = "{\"_type\": \"CDNHostingMetadataList\", \"_data\": {\"_id\": \"9xmw08l4ln1rk8uhv3txwbg1_0\", \"cdns\": [{\"_type\": \"S3CDNHostingMetadata\", \"_data\": {\"access_key\": \"AKIAJZOPH5BBEXRQFCKA\", \"folder_prefix\": \"thumbs/neon/\", \"update_serving_urls\": true, \"bucket_name\": \"o.assets.ign.com\", \"key\": null, \"cdn_prefixes\": [\"assets.ign.com\", \"assets2.ignimgs.com\"], \"secret_key\": \"sdErEhAMR1XARhQ8qjKH4P4ZTjCf1WiU6+lKV4aL\", \"do_salt\": false, \"resize\": true}}], \"key\": \"cdnhostingmetadatalist_9xmw08l4ln1rk8uhv3txwbg1_0\"}}"
+
+        obj_dict = json.loads(old_str)
+        cdn_list = neondata.CDNHostingMetadataList._create(
+            obj_dict['_data']['key'],
+            obj_dict)
+        self.assertEquals(cdn_list.cdns[0].cdn_prefixes,
+                          ["http://assets.ign.com",
+                           "http://assets2.ignimgs.com"])
+        self.assertEquals(cdn_list.cdns[0].bucket_name,
+                          'o.assets.ign.com')
+        self.assertEquals(cdn_list.cdns[0].folder_prefix,
+                          'thumbs/neon/')
+        
 
     def test_internal_video_id(self):
         '''
@@ -537,61 +672,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         Test the get_winner_tid logic for a given video id
 
         '''
-        acc_id = 'acct1'
-        na = NeonUserAccount(acc_id)
-        na.save()
-        vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        
-        #Set experiment strategy
-        es = ExperimentStrategy(na.neon_api_key)
-        es.chosen_thumb_overrides = True
-        es.override_when_done = True
-        es.save()
-        
-        #Save thumbnails 
-        thumbs = [
-            ThumbnailMetadata('t1', vid, ['t1.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.8),
-            ThumbnailMetadata('t2', vid, ['t2.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.15),
-            ThumbnailMetadata('t3', vid, ['t3.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.01),
-            ThumbnailMetadata('t4', vid, ['t4.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.04),
-            ThumbnailMetadata('t5', vid, ['t5.jpg'], None, None, None,
-                              None, None, None, serving_frac=0.0)
-            ]
-        ThumbnailMetadata.save_all(thumbs)
-        
-        #Save VideoMetadata
-        tids = [thumb.key for thumb in thumbs]
-        v0 = VideoMetadata(vid, tids, 'reqid0', 'v0.mp4', 0, 0, None, 0, None,
-                            True, ExperimentState.COMPLETE)
-        v0.save()
-        
-        #Set up Serving URLs (2 per tid)
-        for thumb in thumbs:
-            inp = ThumbnailServingURLs('%s_%s' % (vid, thumb.key))
-            inp.add_serving_url('http://servingurl_800_600.jpg', 800, 600) 
-            inp.add_serving_url('http://servingurl_120_90.jpg', 120, 90) 
-            inp.save()
-
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-
-        # Case 2: chosen_thumb_overrides is False (holdback state)
-        es.chosen_thumb_overrides = False
-        es.override_when_done = False
-        es.exp_frac = 0.2
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
-    
-        # Case 3: Experiement is in experimental state
-        es.exp_frac = es.holdback_frac = 0.8
-        es.save()
-        winner_tid = v0.get_winner_tid()     
-        self.assertEqual(winner_tid, 't1')
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        video_meta = VideoMetadata(vid, ['acct1_vid1_t1', 'acct1_vid1_t2'],
+                                    'reqid0','v0.mp4')
+        video_meta.save()
+        neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
+        self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
 
     def test_video_metadata_methods(self):
         '''
@@ -627,8 +713,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         
         na = NeonUserAccount('acct1')
         na.save()
-        np = NeonPlatform('acct1', '0', na.neon_api_key)
-        np.save()
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
        
         vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
         vm = VideoMetadata(vid, [], 'reqid0', 'v0.mp4', 0, 0, None, 0, None, True)
@@ -774,7 +860,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                           'rgkAluxK9pAC26XCRusctnSfWwzrujq9cTRdmrNpWU4.')
         self.assertEquals(
             obj.get_id(),
-            'dhfaagb0z0h6n685ntysas00_e38ef7abba4c9102b26feb90bc5df3a8')
+            ('e38ef7abba4c9102b26feb90bc5df3a8', 'dhfaagb0z0h6n685ntysas00'))
 
     def test_neonplatform_account_backwards_compatibility(self):
         json_str = "{\"integration_id\": \"0\", \"account_id\": \"161\", \"videos\": {}, \"abtest\": false, \"neon_api_key\": \"hzxts57y7ywcl9onl811b0p4\", \"key\": \"neonplatform_hzxts57y7ywcl9onl811b0p4_0\"}"
@@ -782,9 +868,13 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(obj.account_id, '161')
         self.assertEqual(obj.neon_api_key, 'hzxts57y7ywcl9onl811b0p4')
         
-        # save the object and ensure that its "savable", then verify contents again
-        obj.abtest = True
-        obj.save() 
+        # save the object and ensure that its "savable", then verify
+        # contents again
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.abtest = True
+        NeonPlatform.modify(obj.neon_api_key, obj.integration_id,
+                            _set_params, create_missing=True)
         
         obj = NeonPlatform.get(obj.neon_api_key, '0')
         self.assertEqual(obj.account_id, '161')
@@ -797,12 +887,19 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         obj = BrightcovePlatform._create('brightcoveplatform_wsoruplnzkbilzj3apr05kvz_39', json.loads(json_str)) 
         self.assertEqual(obj.account_id, '145')
         self.assertEqual(obj.neon_api_key, 'wsoruplnzkbilzj3apr05kvz')
-        obj.abtest = True
-        obj.save() 
+        self.assertEqual(obj.publisher_id, '1948681880001')
+        
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.publisher_id = obj.publisher_id
+            x.abtest = True
+        BrightcovePlatform.modify(obj.neon_api_key, obj.integration_id,
+                                  _set_params, create_missing=True)
         
         obj = BrightcovePlatform.get('wsoruplnzkbilzj3apr05kvz', '39')
         self.assertEqual(obj.account_id, '145')
         self.assertEqual(obj.neon_api_key, 'wsoruplnzkbilzj3apr05kvz')
+        self.assertEqual(obj.publisher_id, '1948681880001')
         self.assertTrue(obj.abtest)
 
     def test_ooyalaplatform_account_backwards_compatibility(self):
@@ -812,13 +909,23 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEqual(obj.account_id, '136')
         self.assertEqual(obj.neon_api_key, 'qo4vtvhu2cqgdi30k63bahzh')
         self.assertEqual(obj.partner_code, 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY')
-        obj.abtest = True
-        obj.save() 
+        self.assertEqual(obj.api_secret,
+                         'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn')
+
+        def _set_params(x):
+            x.account_id = obj.account_id
+            x.partner_code = obj.partner_code
+            x.abtest = True
+            x.api_secret = obj.api_secret
+        OoyalaPlatform.modify(obj.neon_api_key, obj.integration_id,
+                              _set_params, create_missing=True)
         
         obj = OoyalaPlatform.get('qo4vtvhu2cqgdi30k63bahzh', '1')
         self.assertEqual(obj.account_id, '136')
         self.assertEqual(obj.neon_api_key, 'qo4vtvhu2cqgdi30k63bahzh')
         self.assertEqual(obj.partner_code, 's0Y3YxOp0XTCL2hFlfFS1S2MRmaY')
+        self.assertEqual(obj.api_secret, 
+                         'uwTrMevYq54eani8ViRn6Ar5-rwmmmvKwq1HDtCn')
         self.assertTrue(obj.abtest)
 
     def test_neonplatform_get_many(self):
@@ -827,11 +934,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         '''
         nps = []
         for i in range(10):
-            np = NeonPlatform('acct_%s' % i, '0', "APIKEY%s" % i)
-            np.save()
+            np = NeonPlatform.modify('acct%s' % i, '0', lambda x: x,
+                                     create_missing=True)
             nps.append(np)
 
-        keys = ['neonplatform_APIKEY%s_0' % i for i in range(10)]
+        keys = ['neonplatform_acct%s_0' % i for i in range(10)]
         r_nps = NeonPlatform.get_many(keys)
         self.assertListEqual(nps, r_nps)
 
@@ -853,348 +960,531 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                               ExperimentStrategy.get('not_in_db',
                                                      log_missing=False))
 
-class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
-    def setUp(self):
-        super(TestDbConnectionHandling, self).setUp()
-        self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
+    class ChangeTrap:
+        '''Helper class to test subscribing to changes.'''
+        def __init__(self):
+            self.args = []
+            self._event = threading.Event()
 
-        # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
-        self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        def _handler(self, *args):
+            '''Handler function to give to the subscribe_to_changes'''
+            self.args.append(args)
+            self._event.set()
 
-        self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
+        def reset(self):
+            self.args = []
+                
+        def subscribe(self, cls, pattern='*'):
+            self.reset()
+            cls.subscribe_to_changes(self._handler, pattern)
 
-        # Speed up the retry delays to make the test faster
-        self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
-        options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
+        def unsubscribe(self, cls, pattern='*'):
+            cls.unsubscribe_from_changes(pattern)
 
-    def tearDown(self):
-        self.connection_patcher.stop()
-        DBConnection.clear_singleton_instance()
-        options._set('cmsdb.neondata.baseRedisRetryWait',
-                     self.old_delay)
-        super(TestDbConnectionHandling, self).tearDown()
+        def wait(self, timeout=1.0):
+            '''Wait for an event (or timeout) and return the mock.'''
+            self._event.wait(timeout)
+            self._event.clear()
+            return self.args
+            
+    def test_subscribe_to_changes(self):
+        trap = TestNeondata.ChangeTrap()
 
-    def _mocked_get_func(self, key, callback=None):
-        if callback:
-            self.io_loop.add_callback(callback, self.mock_responses(key))
-        else:
-            return self.mock_responses(key)
+        # Try a pattern
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
-    def test_async_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+
+        # Try subscribing to a specific key
+        trap.subscribe(ThumbnailMetadata, 'acct1_vid2_t3')
+        thumb_meta = ThumbnailMetadata('acct1_vid2_t3', width=654)
+        thumb_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid2_t3', thumb_meta, 'set'))
+
+        # Try doing a namespaced object
+        trap.subscribe(NeonUserAccount, 'acct1')
+        acct_meta = NeonUserAccount('a1', 'acct1', default_size=[45,98])
+        acct_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1', acct_meta, 'set'))
+
+    def test_subscribe_changes_to_video_and_thumbs(self):
+        vid_trap = TestNeondata.ChangeTrap()
+        thumb_trap = TestNeondata.ChangeTrap()
+
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+        thumb_trap.subscribe(ThumbnailMetadata, 'acct1_vid1_*')
+        vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                 tids=['acct1_vid1_t1'])
+        vid_meta.save()
+        thumb_meta = ThumbnailMetadata('acct1_vid1_t1', width=654)
+        thumb_meta.save()
+
+        vid_events = vid_trap.wait()
+        thumb_events = thumb_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+        self.assertEquals(len(thumb_events), 1)
+        self.assertEquals(thumb_events[0],
+                          ('acct1_vid1_t1', thumb_meta, 'set'))
+
+    def test_subscribe_to_changes_with_modifies(self):
+        trap = TestNeondata.ChangeTrap()
         
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-        found_obj = self.wait()
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
 
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+        # Now do a modify that changes the object. Should see a new event
+        def _set_experiment_state(x):
+            x.experiment_state = ExperimentState.RUNNING
 
-    def test_sync_good_connection(self):
-        self.mock_responses.side_effect = [self.valid_obj.to_json()]
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertEquals(events[-1][1].experiment_state,
+                          ExperimentState.RUNNING)
+
+        # Modify again and we should not see a change event
+        VideoMetadata.modify('acct1_vid1', _set_experiment_state)
+        events = trap.wait(0.2)
+        self.assertEquals(len(events), 2)
+
+        # Do a modify that creates a new, default
+        VideoMetadata.modify('acct1_vid3', lambda x: x)
+        new_vid = VideoMetadata.modify('acct1_vid2', lambda x: x,
+                                       create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
+
+    def test_subscribe_api_request_changes(self):
+        bc_trap = TestNeondata.ChangeTrap()
+        generic_trap = TestNeondata.ChangeTrap()
+
+        bc_trap.subscribe(neondata.BrightcoveApiRequest, '*')
+        generic_trap.subscribe(NeonApiRequest)
+
+        # Test a Brightcove request
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        bc_events = bc_trap.wait()
+        all_events = generic_trap.wait()
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 1)
+        self.assertEquals(bc_events[0][1].job_id, 'jobbc')
+        self.assertEquals(all_events[0][1].job_id, 'jobbc')
+
+        # Now try a Neon request. the BC one shouldn't be listed
+        NeonApiRequest('jobneon', 'acct1').save()
+        all_events = generic_trap.wait()
+        bc_events = bc_trap.wait(0.1)
+        self.assertEquals(len(bc_events), 1)
+        self.assertEquals(len(all_events), 2)
+        self.assertEquals(all_events[1][1].job_id, 'jobneon')
+
+
+    def test_subscribe_platform_changes(self):
+        trap = TestNeondata.ChangeTrap()
+        trap.subscribe(AbstractPlatform)
+
+        def _set_acct(x):
+            x.account_id = 'a1'
+
+        BrightcovePlatform.modify('acct1','bc', _set_acct, create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertIsInstance(events[0][1], BrightcovePlatform)
+
+        NeonPlatform.modify('acct1', '0', _set_acct, create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 2)
+        self.assertIsInstance(events[-1][1], NeonPlatform)
+
+        YoutubePlatform.modify('acct1', 'yt', _set_acct, create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 3)
+        self.assertIsInstance(events[-1][1], YoutubePlatform)
+
+        OoyalaPlatform.modify('acct1', 'oo', _set_acct, create_missing=True)
+        events = trap.wait()
+        self.assertEquals(len(events), 4)
+        self.assertIsInstance(events[-1][1], OoyalaPlatform)
+
+    def test_unsubscribe_changes(self):
+        plat_trap = TestNeondata.ChangeTrap()
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap = TestNeondata.ChangeTrap()
+        request_trap.subscribe(NeonApiRequest)
+        video_trap = TestNeondata.ChangeTrap()
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        # Make sure all the subscriptions are working
+        def _set_acct(x):
+            x.account_id = 'a1'
+        BrightcovePlatform.modify('acct1','bc', _set_acct, create_missing=True)
+        plat_trap.wait()
+        NeonPlatform.modify('acct1', '0', _set_acct, create_missing=True)
+        plat_trap.wait()
+        YoutubePlatform.modify('acct1', 'yt', _set_acct, create_missing=True)
+        plat_trap.wait()
+        OoyalaPlatform.modify('acct1', 'oo', _set_acct, create_missing=True)
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
+        plat_trap.reset()
         
-        found_obj = TrackerAccountIDMapper.get("tai1")
+        neondata.BrightcoveApiRequest('jobbc', 'acct1').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct1').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
+        request_trap.reset()
 
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
+        VideoMetadata('acct1_vid1', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
+        video_trap.reset()
 
-    def test_async_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
-
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_sync_some_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.BusyLoadingError("Loading Error"),
-            socket.timeout("Socket Timeout"),
-            socket.error("Socket Error"),
-            self.valid_obj.to_json()
-            ]
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj =  TrackerAccountIDMapper.get("tai1")
-
-        self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
-    def test_async_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
-
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
+        # Now unsubscribe and make changes
+        plat_trap.unsubscribe(AbstractPlatform)
+        request_trap.unsubscribe(NeonApiRequest)
+        video_trap.unsubscribe(VideoMetadata, 'acct1_*')
         
-        with self.assertRaises(redis.ConnectionError):
-            self.wait()
+        BrightcovePlatform.modify('acct2','bc', _set_acct, create_missing=True)
+        NeonPlatform.modify('acct2', '0', _set_acct, create_missing=True)
+        YoutubePlatform.modify('acct2', 'yt', _set_acct, create_missing=True)
+        OoyalaPlatform.modify('acct2', 'oo', _set_acct, create_missing=True)
+        neondata.BrightcoveApiRequest('jobbc', 'acct2').save()
+        NeonApiRequest('jobneon', 'acct2').save()
+        VideoMetadata('acct1_vid2', request_id='req1').save()
 
-    def test_sync_too_many_errors(self):
-        self.mock_responses.side_effect = [
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            redis.ConnectionError("Connection Error"),
-            ]
+        # Now resubscribe and see the changes
+        plat_trap.subscribe(AbstractPlatform)
+        request_trap.subscribe(NeonApiRequest)
+        video_trap.subscribe(VideoMetadata, 'acct1_*')
         
-        with self.assertRaises(redis.ConnectionError):
-            TrackerAccountIDMapper.get("tai1")
+        BrightcovePlatform.modify('acct3','bc', _set_acct, create_missing=True)
+        plat_trap.wait()
+        NeonPlatform.modify('acct3', '0', _set_acct, create_missing=True)
+        plat_trap.wait()
+        YoutubePlatform.modify('acct3', 'yt', _set_acct, create_missing=True)
+        plat_trap.wait()
+        OoyalaPlatform.modify('acct3', 'oo', _set_acct, create_missing=True)
+        plat_trap.wait()
+        self.assertEquals(len(plat_trap.args), 4)
+        
+        neondata.BrightcoveApiRequest('jobbc', 'acct3').save()
+        request_trap.wait()
+        NeonApiRequest('jobneon', 'acct3').save()
+        request_trap.wait()
+        self.assertEquals(len(request_trap.args), 2)
 
-    # TODO(mdesnoyer): Add test for the modify if there is a failure
-    # on one of the underlying commands.
+        VideoMetadata('acct1_vid3', request_id='req1').save()
+        video_trap.wait()
+        self.assertEquals(len(video_trap.args), 1)
 
-class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
-    '''
-    Thumbnail ID Mapper and other thumbnail helper class tests 
-    '''
-    def setUp(self):
-        super(TestThumbnailHelperClass, self).setUp()
+    def test_subscribe_changes_after_db_connection_loss(self):
+        trap = TestNeondata.ChangeTrap()
+        
+        # Try initial change
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        trap.subscribe(VideoMetadata, 'acct2_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        trap.reset()
+        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
+        video_meta2.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
+        trap.reset()
+
+        # Now unsubscribe from account 2
+        trap.unsubscribe(VideoMetadata, 'acct2_*')
+
+        # Now force a connection loss by stopping the server
+        self.redis.stop(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            False)
+
+        # Start a new server
         self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
+        self.redis.start(clear_singleton=False)
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata).connected,
+            True)
 
-        self.image = PILImageUtils.create_random_image(360, 480)
+        # Now change the video and make sure we get the event for
+        # account 1, but not 2
+        video_meta.serving_enabled=False
+        video_meta2.save()
+        video_meta.serving_enabled=False
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
-    def tearDown(self):
-        self.redis.stop()
-        super(TestThumbnailHelperClass, self).tearDown()
-
-    def test_thumbnail_mapper(self):
-        ''' Thumbnail mappings '''
-
-        url = "http://thumbnail.jpg"
-        vid = "v123"
-        image = PILImageUtils.create_random_image(360, 480)
-        tid = ThumbnailID.generate(image, vid)
-    
-        tdata = ThumbnailMetadata(tid, vid, [], 0, 480, 360,
-                        "ttype", 0, 1, 0)
-        tdata.save()
-        tmap = ThumbnailURLMapper(url, tid)
-        tmap.save()
+    def test_subscribe_changes_db_address_change(self):
+        trap = TestNeondata.ChangeTrap()
         
-        res_tid = ThumbnailURLMapper.get_id(url)
-        self.assertEqual(tid, res_tid)
+        # Try initial change
+        trap.subscribe(VideoMetadata, 'acct1_*')
+        trap.subscribe(VideoMetadata, 'acct2_*')
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
+        trap.reset()
+        video_meta2 = VideoMetadata('acct2_vid1', request_id='req2')
+        video_meta2.save()
+        events = trap.wait()
+        self.assertEquals(len(events), 1)
+        self.assertEquals(events[0], ('acct2_vid1', video_meta2, 'set'))
+        trap.reset()
 
-    def test_thumbnail_get_data(self):
+        # Now unsubscribe from account 2
+        trap.unsubscribe(VideoMetadata, 'acct2_*')
 
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
-        self.assertEqual(tdata.get_account_id(), 'api1')
-        self.assertEqual(ThumbnailMetadata.get_video_id(tid), vid)
-        self.assertEqual(tdata.rank, 0)
-        self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
+        # Now start a new server, which will change the connection address
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        self.assertNotEquals(temp_redis.port, self.redis.port)
+        try:
+            self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata)._address,
+                ('0.0.0.0', temp_redis.port))
+            
+            # Now change the video and make sure we get the event for
+            # account 1, but not 2
+            video_meta.serving_enabled=False
+            video_meta2.save()
+            video_meta.serving_enabled=False
+            video_meta.save()
+            events = trap.wait()
+            self.assertEquals(len(events), 1)
+            self.assertEquals(events[0], ('acct1_vid1', video_meta, 'set'))
 
-    def test_atomic_modify(self):
-        vid = InternalVideoID.generate('api1', 'vid1')
-        tid = ThumbnailID.generate(self.image, vid)
-        tdata = ThumbnailMetadata(tid, vid, ['one.jpg', 'two.jpg'],
-                                  None, self.image.size[1], self.image.size[0],
-                                  'brightcove', 1.0, '1.2')
-        tdata.save()
+        finally:
+            temp_redis.stop(clear_singleton=False)
 
-        thumb = ThumbnailMetadata.modify(tid,
-                                         lambda x: x.urls.append('url3.jpg'))
-        self.assertItemsEqual(thumb.urls, ['one.jpg', 'two.jpg', 'url3.jpg'])
-        self.assertItemsEqual(ThumbnailMetadata.get(tid).urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+        self.assertWaitForEquals(
+            lambda: neondata.PubSubConnection.get(VideoMetadata)._address,
+                ('0.0.0.0', self.redis.port))
 
-        # Now try asynchronously
-        def setphash(thumb): thumb.phash = 'hash'
-        def setrank(thumb): thumb.rank = 6
+        # Now we're connected back to the first server, so make sure
+        # the state didn't get that change. We'll lose some state
+        # change, but oh well
+        self.assertTrue(VideoMetadata.get('acct1_vid1').serving_enabled)
 
-        counters = [1, 2]
-        def wrapped_callback(param):
-            counters.pop()
-            self.stop()
+    @tornado.testing.gen_test
+    def test_async_change_db_connection(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        yield tornado.gen.Task(video_meta.save)
 
-        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
-        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
-        
-        # if len(counters) is not 0, call self.wait() to service the other
-        # callbacks  
-        while len(counters) > 0:
-            self.wait()
+        # force a connection loss and restart. This will change the
+        # port we are talking to.
+        self.redis.stop(clear_singleton=False)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start(clear_singleton=False)
 
-        thumb = ThumbnailMetadata.get(tid)
-        self.assertEqual(thumb.phash, 'hash')
-        self.assertEqual(thumb.rank, 6)
-        self.assertItemsEqual(thumb.urls,
-                              ['one.jpg', 'two.jpg', 'url3.jpg'])
+        # We won't get continuity in the database, but that's ok for this test
+        yield tornado.gen.Task(video_meta.save)
+        found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+        self.assertEquals(found_val, video_meta)
 
-    def test_atomic_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        tdata2 = ThumbnailMetadata(tid2, vid2, ['1.jpg', '2.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        self.assertFalse(tdata2.chosen)
-        self.assertFalse(tdata1.chosen)
-        self.assertTrue(tdata2.enabled)
-        self.assertTrue(tdata1.enabled)
+    def test_sync_change_db_connection(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
 
-        ThumbnailMetadata.save_all([tdata1, tdata2])
+        # force a connection loss and restart. This will change the
+        # port we are talking to.
+        self.redis.stop(clear_singleton=False)
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start(clear_singleton=False)
 
-        def _change_thumb_data(d):
-            d[tid1].chosen = True
-            d[tid2].enabled = False
+        # We won't get continuity in the database, but that's ok for this test
+        video_meta.save()
+        found_val = VideoMetadata.get('acct1_vid1')
+        self.assertEquals(found_val, video_meta)
 
-        updated = ThumbnailMetadata.modify_many([tid1, tid2],
-                                                _change_thumb_data)
-        self.assertTrue(updated[tid1].chosen)
-        self.assertFalse(updated[tid2].chosen)
-        self.assertTrue(updated[tid1].enabled)
-        self.assertFalse(updated[tid2].enabled)
-        self.assertTrue(ThumbnailMetadata.get(tid1).chosen)
-        self.assertFalse(ThumbnailMetadata.get(tid2).chosen)
-        self.assertTrue(ThumbnailMetadata.get(tid1).enabled)
-        self.assertFalse(ThumbnailMetadata.get(tid2).enabled)
+    @tornado.testing.gen_test
+    def test_async_talk_to_different_db(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        yield tornado.gen.Task(video_meta.save)
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
 
-    def test_create_or_modify(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
+        # Start a new database, this should cause neondata to talk to it
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        try:
+            found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+            self.assertIsNone(found_val)
 
-        ThumbnailMetadata.modify(tid1,
-                                 lambda x: x.urls.append('http://image.jpg'),
+        finally:
+          temp_redis.stop(clear_singleton=False)
+
+        # Now try getting data from the original database again
+        found_val = yield tornado.gen.Task(VideoMetadata.get, 'acct1_vid1')
+        self.assertEquals(found_val, video_meta)
+
+    def test_sync_talk_to_different_db(self):
+        video_meta = VideoMetadata('acct1_vid1', request_id='req1')
+        video_meta.save()
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+        # Start a new database, this should cause neondata to talk to it
+        temp_redis = test_utils.redis.RedisServer()
+        temp_redis.start(clear_singleton=False)
+        try:
+            self.assertIsNone(VideoMetadata.get('acct1_vid1'))
+
+        finally:
+          temp_redis.stop(clear_singleton=False)
+
+        # Now try getting data from the original database again
+        self.assertEquals(VideoMetadata.get('acct1_vid1'), video_meta)
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_async(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      yield tornado.gen.Task(VideoMetadata.save_all, vids)
+      found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
+                                          ['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
+                                         ['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+    @tornado.testing.gen_test
+    def test_delete_videos_sync(self):
+      # Delete some video objects
+      vids = [VideoMetadata('acct1_v1'),
+              VideoMetadata('acct1_v2'),
+              VideoMetadata('acct1_v3')]
+      VideoMetadata.save_all(vids)
+      found_objs = VideoMetadata.get_many(['acct1_v1', 'acct1_v2', 'acct1_v3'])
+      self.assertEquals(found_objs, vids)
+      n_deleted = VideoMetadata.delete('acct1_v1')
+      self.assertEquals(n_deleted, 1)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
+      n_deleted = VideoMetadata.delete_many(['acct1_v2', 'acct1_v3'])
+      self.assertEquals(n_deleted, 2)
+      self.assertIsNone(VideoMetadata.get('acct1_v1'))
+      self.assertIsNone(VideoMetadata.get('acct1_v2'))
+      self.assertIsNone(VideoMetadata.get('acct1_v3'))
+
+      
+    @tornado.testing.gen_test
+    def test_delete_platforms_async(self):
+      # Do some platform objects
+      np = NeonPlatform.modify('acct1', '0', lambda x: x,
+                               create_missing=True)
+      bp = BrightcovePlatform.modify('acct2', 'ibc', lambda x: x,
+                                     create_missing=True)
+      op = OoyalaPlatform.modify('acct3', 'ioo', lambda x: x,
                                  create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    @tornado.testing.gen_test
-    def test_create_or_modify_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        self.assertIsNone(ThumbnailMetadata.get(tid1))
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify,
-            tid1,
-            lambda x: x.urls.append('http://image.jpg'),
-            create_missing=True)
-
-        val = ThumbnailMetadata.get(tid1)
-        self.assertIsNotNone(val)
-        self.assertEqual(val.urls, ['http://image.jpg'])
-
-    def test_create_or_modify_many(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        ThumbnailMetadata.modify_many(
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
+      yp = YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
+                                  create_missing=True)
+      plats = yield tornado.gen.Task(AbstractPlatform.get_all)
+      self.assertEquals(len(plats), 4)
+      deleted_counts = yield [
+        tornado.gen.Task(NeonPlatform.delete, np.neon_api_key,
+                         np.integration_id),
+        tornado.gen.Task(BrightcovePlatform.delete_many,
+                         [(bp.neon_api_key, bp.integration_id)]),
+        tornado.gen.Task(OoyalaPlatform.delete, op.neon_api_key,
+                         op.integration_id),
+        tornado.gen.Task(YoutubePlatform.delete, yp.neon_api_key,
+                         yp.integration_id)]
+      self.assertEquals(deleted_counts, [1,1,1,1])
+      self.assertIsNone(NeonPlatform.get('acct1', '0'))
+      self.assertIsNone(BrightcovePlatform.get('acct2', 'ibc'))
+      self.assertIsNone(OoyalaPlatform.get('acct3', 'ioo'))
+      self.assertIsNone(YoutubePlatform.get('acct4', 'iyt'))
 
     @tornado.testing.gen_test
-    def test_create_or_modify_many_async(self):
-        vid1 = InternalVideoID.generate('api1', 'vid1')
-        tid1 = ThumbnailID.generate(self.image, vid1)
-        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
-                                   None, self.image.size[1],
-                                   self.image.size[0],
-                                   'brightcove', 1.0, '1.2')
-        tdata1.save()
-
-        vid2 = InternalVideoID.generate('api1', 'vid2')
-        tid2 = ThumbnailID.generate(self.image, vid2)
-        self.assertIsNone(ThumbnailMetadata.get(tid2))
-
-        def _add_thumb(d):
-            for thumb in d.itervalues():
-                thumb.urls.append('%s.jpg' % thumb.key)
-
-        yield tornado.gen.Task(
-            ThumbnailMetadata.modify_many,
-            [tid1, tid2],
-            _add_thumb,
-            create_missing=True)
-
-        self.assertEqual(ThumbnailMetadata.get(tid1).urls,
-                         ['one.jpg', 'two.jpg', '%s.jpg' % tid1])
-        self.assertEqual(ThumbnailMetadata.get(tid2).urls,
-                         ['%s.jpg' % tid2])
-        
-
-    def test_read_thumbnail_old_format(self):
-        # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
-
-        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
-        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
-        self.assertEqual(thumb.chosen, False)
-        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
-        self.assertEqual(thumb.enabled, True)
-        self.assertEqual(thumb.rank, 5)
-        self.assertEqual(thumb.height, 232)
-        self.assertEqual(thumb.width, 416)
-        self.assertEqual(thumb.model_version, '20130924')
-        self.assertEqual(thumb.type, 'neon')
-        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
-        self.assertIsNone(thumb.refid)
-        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
-        
-        with self.assertRaises(AttributeError):
-            thumb.thumbnail_id
-        
+    def test_delete_requests_async(self):
+      nreq = NeonApiRequest('job1', 'acct1')
+      breq = neondata.BrightcoveApiRequest('job2', 'acct1')
+      oreq = neondata.OoyalaApiRequest('job3', 'acct1')
+      yreq = neondata.YoutubeApiRequest('job4', 'acct1')
+      NeonApiRequest.save_all([nreq, breq, oreq, yreq])
+      self.assertIsNotNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNotNone(NeonApiRequest.get('job4', 'acct1'))
+      deleted_counts = yield [
+        tornado.gen.Task(NeonApiRequest.delete, 'job1', 'acct1'),
+        tornado.gen.Task(NeonApiRequest.delete_many,
+                         [('job2', 'acct1'), ('job3', 'acct1'),
+                          ('job4', 'acct1')])]
+      self.assertEquals(deleted_counts, [1,3])
+      self.assertIsNone(NeonApiRequest.get('job1', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job2', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job3', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job4', 'acct1'))
+      
+      
+            
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
         self.connection_patcher = patch('cmsdb.neondata.blockingRedis.StrictRedis')
 
         # For the sake of this test, we will only mock the get() function
-        mock_redis = self.connection_patcher.start()
+        self.mock_redis = self.connection_patcher.start()
         self.mock_responses = MagicMock()
-        mock_redis().get.side_effect = self._mocked_get_func
+        self.mock_redis().get.side_effect = self._mocked_get_func
 
         self.valid_obj = TrackerAccountIDMapper("tai1", "api_key")
 
@@ -1214,6 +1504,19 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.io_loop.add_callback(callback, self.mock_responses(key))
         else:
             return self.mock_responses(key)
+
+    def test_subscribe_connection_error(self):
+        self.mock_redis().pubsub().psubscribe.side_effect = [
+            redis.exceptions.ConnectionError(),
+            socket.gaierror()]
+        
+        with self.assertLogExists(logging.ERROR, 'Error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
+
+        with self.assertLogExists(logging.ERROR, 'Socket error subscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
 
     def test_async_good_connection(self):
         self.mock_responses.side_effect = [self.valid_obj.to_json()]
@@ -1242,7 +1545,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj = self.wait()
@@ -1259,7 +1562,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             ]
 
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.ERROR, 'Loading Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
                         found_obj =  TrackerAccountIDMapper.get("tai1")
@@ -1543,6 +1846,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.cloudinary_mock().hoster_type = "cloudinary"
         self.cloudinary_mock().upload.side_effect = [future]
 
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._callback_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+
         random.seed(1654984)
 
         self.image = PILImageUtils.create_random_image(360, 480)
@@ -1551,6 +1860,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.s3_patcher.stop()
         self.cloudinary_patcher.stop()
+        self.cdn_check_patcher.stop()
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 
@@ -1846,4 +2156,5 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     
 
 if __name__ == '__main__':
+    utils.neon.InitNeon()
     unittest.main()

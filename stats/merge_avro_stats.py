@@ -23,8 +23,10 @@ import copy
 import cStringIO as StringIO
 from contextlib import closing
 import multiprocessing
+import psutil
 import re
 import tempfile
+import time
 import utils.neon
 
 import logging
@@ -180,6 +182,12 @@ _sub_procs = []
 
 def merge_all_subdirectories(root_dir, backup_dir, temp_dir):
     _log.info('Entering %s' % root_dir.name())
+
+    # Only fork to schedule 64 jobs max
+    global _sub_procs
+    while len(_sub_procs) >= 64:
+        _sub_procs = [x for x in _sub_procs if x.is_alive()]
+        time.sleep(5.0)
     
     # First merge any files in this directory
     #merge_files_in_directory(root_dir, backup_dir, temp_dir)

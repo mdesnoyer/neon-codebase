@@ -59,7 +59,7 @@ class MetricTypes:
 def connect():
     return impala.dbapi.connect(host=options.stats_host,
                                 port=options.stats_port,
-                                timeout=600)
+                                timeout=10000)
 
 def get_video_ids():
     _log.info('Querying for video ids')
@@ -71,7 +71,7 @@ def get_video_ids():
     thumbnail_id is not NULL and
     tai='%s' %s""" % (options.pub_id, 
                       statutils.get_time_clause(options.start_time,
-                                                  options.end_time)))
+                                                options.end_time)))
 
     vidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+')
     retval = [x[0] for x in cursor if vidRe.match(x[0])]
@@ -189,12 +189,14 @@ def collect_stats(thumb_info, video_info,
         # Find the baseline thumb
         baseline_types = options.baseline_types.split(',')
         base_thumb = None
+        base_rank = None
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
                 if cur_thumb.type == baseline_type:
-                    base_thumb = cur_thumb
-                    break
+                    if base_rank is None or cur_thumb.rank < base_rank:
+                        base_thumb = cur_thumb
+                        base_rank = cur_thumb.rank
             if base_thumb is not None:
                 break
 
@@ -229,12 +231,17 @@ def collect_stats(thumb_info, video_info,
         # Put the type and rank columns in the index
         subcols = thumb_stats[[x for x in thumb_stats.columns if x not in 
                                ['type', 'rank']]]
+        if len(subcols) == 0:
+            continue
+        
+        idx = pandas.pandas.MultiIndex.from_tuples(
+            [x for x in zip(*(thumb_stats['type'], thumb_stats['rank'],
+                              thumb_stats.index))],
+            names=['type', 'rank', 'thumbnail_id'])
         thumb_stats = pandas.DataFrame(
             subcols.values,
             columns=subcols.columns,
-            index=[thumb_stats['type'],
-                   thumb_stats['rank'],
-                   thumb_stats.index]).sortlevel()
+            index=idx).sortlevel()
 
         video_data[(video.integration_id, video_id)] = thumb_stats
 

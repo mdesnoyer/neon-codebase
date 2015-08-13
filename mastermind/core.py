@@ -167,7 +167,7 @@ class Mastermind(object):
     This object is thread safe, so only one thread is allow in at a time
     as long as you keep to the public interface.
     '''
-    PRIOR_IMPRESSION_SIZE = 100
+    PRIOR_IMPRESSION_SIZE = 10
     PRIOR_CTR = 0.1
     
     def __init__(self):
@@ -291,7 +291,8 @@ class Mastermind(object):
                 self._incr_pending_modify(1)
                 self.modify_pool.submit(
                     _modify_video_info,
-                    self, video_id, neondata.ExperimentState.DISABLED, None)
+                    self, video_id, neondata.ExperimentState.DISABLED, None,
+                    None)
 
     def is_serving_video(self, video_id):
         '''Returns true if the video is being managed.'''
@@ -386,18 +387,26 @@ class Mastermind(object):
             # There was an error, so stop here
             return 
 
-        experiment_state, new_directive, value_left = result
+        experiment_state, new_directive, value_left, winner_tid = result
                     
         try:
             old_directive = self.serving_directive[video_id][1]
-            if new_directive.items() == old_directive:
-                return
+            if len(old_directive) == len(new_directive):
+                # Don't register a change if the max change is less than 0.5%
+                diff = np.fabs(np.subtract([x[1] for x in old_directive],
+                                           new_directive.values()))
+                if max(diff) < 0.005:
+                    return
             
         except KeyError:
             pass
+         
+        except Exception as e:
+            _log.error('Unhandled exception calculating new serving directive %s old_directive = %s new_directive = %s' % (e, old_directive, new_directive.values()))
+            raise
 
         self._modify_video_state(video_id, experiment_state, value_left,
-                                 new_directive, video_info)
+                                 winner_tid, new_directive, video_info)
         
         self.serving_directive[video_id] = ((video_info.account_id,
                                              video_id),
@@ -414,9 +423,13 @@ class Mastermind(object):
         video_info - A VideoInfo object
 
         Outputs:
-        (experiment_state, {thumb_id => fraction}, value_left) or 
+        (experiment_state, {thumb_id => fraction}, value_left, winner_tid) or 
         None if we had an error
         '''
+        if len(video_info.thumbnails) == 0:
+            # There's no valid thumb yet to show. That's ok. We just ignore this video
+            return None
+        
         try:
             strategy = self.experiment_strategy[video_info.account_id]
         except KeyError:
@@ -434,6 +447,7 @@ class Mastermind(object):
         chosen = None
         default = None
         experiment_state = neondata.ExperimentState.UNKNOWN
+        winner_tid = None
         value_left=None
         candidates = set()
         run_frac = {} # thumb_id -> fraction
@@ -477,7 +491,7 @@ class Mastermind(object):
         if strategy.chosen_thumb_overrides and chosen is not None:
             run_frac[chosen.id] = 1.0
             experiment_state = neondata.ExperimentState.OVERRIDE
-            return (experiment_state, run_frac, None)
+            return (experiment_state, run_frac, None, None)
         editor = chosen or default
         if editor:
             candidates.discard(editor)
@@ -533,12 +547,12 @@ class Mastermind(object):
 
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
-            experiment_state, bandit_frac, value_left = \
+            experiment_state, bandit_frac, value_left, winner_tid = \
               self._get_bandit_fracs(strategy, baseline, editor, candidates)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
-            experiment_state, seq_frac, value_left = \
+            experiment_state, seq_frac, value_left, winner_tid = \
               self._get_sequential_fracs(strategy, baseline, editor,
                                          candidates)
             run_frac.update(seq_frac)
@@ -547,7 +561,7 @@ class Mastermind(object):
                        (video_id, strategy.experiment_type))
             statemon.state.increment('invalid_experiment_type')
             return None
-        return (experiment_state, run_frac, value_left)
+        return (experiment_state, run_frac, value_left, winner_tid)
 
     def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a multi-armed bandit strategy.
@@ -561,6 +575,7 @@ class Mastermind(object):
         valid_bandits = copy.copy(candidates)
         experiment_state = neondata.ExperimentState.RUNNING
         value_remaining = None
+        winner_tid = None
         experiment_frac = strategy.exp_frac
                 
         if (editor is not None and 
@@ -611,7 +626,7 @@ class Mastermind(object):
                              for x in valid_bandits])
 
         # Run the monte carlo series
-        MC_SAMPLES = 10000.
+        MC_SAMPLES = 1000.
         mc_series = [spstats.beta.rvs(max(1, conv[x]),
                                       max(1, imp[x]),
                                       size=MC_SAMPLES)
@@ -620,10 +635,10 @@ class Mastermind(object):
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
-                spstats.beta.rvs(conv,
-                                 Mastermind.PRIOR_IMPRESSION_SIZE * 
-                                 (1 - Mastermind.PRIOR_CTR) + 
-                                 non_exp_thumb.get_impressions() - conv,
+                spstats.beta.rvs(max(1, conv),
+                                 max(1, Mastermind.PRIOR_IMPRESSION_SIZE * 
+                                        (1 - Mastermind.PRIOR_CTR) + 
+                                        non_exp_thumb.get_impressions()-conv),
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -645,28 +660,29 @@ class Mastermind(object):
                       mc_series[:][winner_idx])
         value_remaining = np.sort(lost_value)[0.95*MC_SAMPLES]
 
-        # For all those thumbs that haven't been seen for 5x the
-        # prior, make sure that they will get some traffic
+        # For all those thumbs that haven't been seen for 1000 imp,
+        # make sure that they will get some traffic
         for i in range(len(valid_bandits)):
-            if impressions[i] < 5 * Mastermind.PRIOR_IMPRESSION_SIZE:
+            if impressions[i] < 500:
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
         if win_frac[winner_idx] >= 0.95:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                impressions[winner_idx] >= 
-                5 * Mastermind.PRIOR_IMPRESSION_SIZE):
+                impressions[winner_idx] >= 500):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
                     winner = valid_bandits[winner_idx]
                 except IndexError:
                     winner = non_exp_thumb
+                winner_tid = winner.id
                 return (experiment_state,
                         self._get_experiment_done_fracs(
                             strategy, baseline, editor, winner),
-                        value_remaining)
+                        value_remaining,
+                        winner_tid)
 
             else:
                 # Only allow the winner to have 90% of the imp
@@ -690,7 +706,7 @@ class Mastermind(object):
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
-        return (experiment_state, run_frac, value_remaining)
+        return (experiment_state, run_frac, value_remaining, winner_tid)
         
 
     def _get_prior_conversions(self, thumb_info):
@@ -788,19 +804,18 @@ class Mastermind(object):
         return None
 
     def _modify_video_state(self, video_id, experiment_state, value_left,
-                            new_directive, video_info):
+                            winner_tid, new_directive, video_info):
         '''Modifies the database with the current state of the video.'''
 
         # Update the serving percentages in the database
-        self._incr_pending_modify(1)
+        self._incr_pending_modify(2)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
             self, video_id, new_directive, video_info)
         
-        self._incr_pending_modify(1)
         self.modify_pool.submit(
             _modify_video_info,
-            self, video_id, experiment_state, value_left)
+            self, video_id, experiment_state, value_left, winner_tid)
 
 
 def _modify_many_serving_fracs(mastermind, video_id, new_directive,
@@ -809,43 +824,33 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
         ctrs = dict([(x.id, float(x.get_conversions()) / 
                       max(x.get_impressions(), 1)) for x in 
                      video_info.thumbnails])
-        thumb_ids, new_fracs, new_ctrs = zip(
-            *[('_'.join([video_id, thumb_id]), frac, ctrs[thumb_id])
-              for thumb_id, frac in new_directive.iteritems()])
-        neondata.ThumbnailMetadata.modify_many(
-            thumb_ids,
-            lambda x: _set_serving_fracs(thumb_ids, new_fracs, new_ctrs, x))
-        mastermind._incr_pending_modify(-1)
+        objs = [neondata.ThumbnailStatus(
+            '_'.join([video_id, thumb_id]),
+            serving_frac=frac,
+            ctr=ctrs[thumb_id])
+            for thumb_id, frac in new_directive.iteritems()]
+
+        neondata.ThumbnailStatus.save_all(objs)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
         statemon.state.increment('db_update_error')
         raise
+    finally:
+        mastermind._incr_pending_modify(-1)
 
-
-def _set_serving_fracs(thumb_ids, new_fracs, new_ctrs, thumb_objs):
-    '''Function to be used by modify_many in order to set the serving
-    fractions for a set of thumbnails'''
-    for thumb_id, new_frac, new_ctr in zip(thumb_ids, new_fracs, new_ctrs):
-        obj = thumb_objs[thumb_id]
-        if obj is not None:
-            obj.serving_frac = new_frac
-            obj.ctr = new_ctr
-
-def _modify_video_info(mastermind, video_id, experiment_state, value_left):
+def _modify_video_info(mastermind, video_id, experiment_state, value_left,
+                       winner_tid):
 
     try:
-        neondata.VideoMetadata.modify(
-            video_id,
-            lambda x: _update_experiment_info(experiment_state,
-                                              value_left, x))
-        mastermind._incr_pending_modify(-1)
+        full_winner = winner_tid
+        if full_winner is not None:
+            full_winner = '_'.join([video_id, full_winner])
+        neondata.VideoStatus(video_id, experiment_state,
+                             full_winner,
+                             value_left).save()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')
         raise
-
-def _update_experiment_info(experiment_state, value_left, video_obj):
-    'Function to be used by modify in order to set the video state.'
-    video_obj.experiment_state = experiment_state
-    if value_left is not None:
-        video_obj.experiment_value_remaining = value_left
+    finally:
+        mastermind._incr_pending_modify(-1)

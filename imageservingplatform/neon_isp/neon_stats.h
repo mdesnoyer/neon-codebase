@@ -1,6 +1,10 @@
 #ifndef _NEON_STATS_
 #define _NEON_STATS_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "neon_error_codes.h"
 
 
@@ -88,6 +92,9 @@ extern unsigned long long int neon_stats[];
 void neon_stats_init();
 
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 

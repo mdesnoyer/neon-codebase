@@ -7,9 +7,9 @@ Copyright 2013 Neon Labs
 
 import os.path
 import sys
-base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if sys.path[0] <> base_path:
-    sys.path.insert(0,base_path)
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import logging
 from . import net
@@ -45,18 +45,21 @@ class RedisServer:
         if self.port is None:
             self.port = net.find_free_port()
 
-    def start(self):
+    def start(self, clear_singleton=True):
         ''' Start on a random port and set cmsdb.neondata.dbPort '''
 
         # Clear the singleton instance
         # This is required so that we can use a new connection(port) 
-        neondata.DBConnection.clear_singleton_instance()
+        if clear_singleton:
+            neondata.DBConnection.clear_singleton_instance()
+            neondata.PubSubConnection.clear_singleton_instance()
 
         self.config_file = tempfile.NamedTemporaryFile()
         self.config_file.write('port %i\n' % self.port)
+        self.config_file.write('notify-keyspace-events Kgsz$')
         self.config_file.flush()
 
-        _log.info('Redis server on port %i' % self.port)
+        _log.info('Redis server started on port %i' % self.port)
 
         self.proc = subprocess.Popen([
             '/usr/bin/env', 'redis-server',
@@ -82,8 +85,13 @@ class RedisServer:
         options._set('cmsdb.neondata.dbPort', self.port)
         
 
-    def stop(self):
+    def stop(self, clear_singleton=True):
         ''' stop redis instance '''
+        # Clear the singleton instance. This is required so that the
+        # next test can use a new connection(port)
+        if clear_singleton:
+            neondata.PubSubConnection.clear_singleton_instance()
+            neondata.DBConnection.clear_singleton_instance()
 
         self.config_file.close()
         options._set('cmsdb.neondata.dbPort', self.old_port)
@@ -97,7 +105,3 @@ class RedisServer:
         
         self.proc.wait()
         _log.info('Redis server on port %i stopped' % self.port)
-
-        # Clear the singleton instance
-        # This is required so that the next test can use a new connection(port) 
-        neondata.DBConnection.clear_singleton_instance()

@@ -14,17 +14,16 @@ mrjob==0.4.1
 poster==0.8.1
 pyfakefs==2.4
 pygeoip==0.2.7
-pyleargist==2.0.2
+pyleargist==2.0.5
 Pympler==0.3.1
-redis==2.9.1
-scipy==0.9.0
+redis==2.10.3
+#scipy==0.9.0
 shortuuid==0.3
 simplejson==2.3.2
 svmlight==0.4
-tornado==4.0.2
+tornado==4.1
 coverage==3.7
 BeautifulSoup4==4.3.2
-pycurl==7.19
 pylint==1.1.0
 psutil==1.2.1
 imagehash==0.3
@@ -32,7 +31,7 @@ httpagentparser==1.6.0
 avro==1.7.6
 thrift==0.9.1
 paramiko==1.14.0
-pandas==0.14.0
+pandas==0.15.2
 impyla==0.8.1
 dateutils==0.6.6
 winpdb==1.4.8
@@ -40,4 +39,5 @@ ipdb==0.8
 nose-cov==1.6
 happybase==0.9
 pyhs2==0.6.0
-m3u8==0.2.5
+m3u8==0.2.6
+scikit-learn==0.16.1

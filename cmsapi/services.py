@@ -65,11 +65,14 @@ def CachePrimer():
 ################################################################################
 # Monitoring variables
 ################################################################################
-statemon.define('total_requests', int) #all requests 
+statemon.define('total_requests', int) #all requests
+_total_requests_ref = statemon.state.get_ref('total_requests')
 
 # HHTP 500s totals and fine-grained issues counters
 statemon.define('bad_gateway', int) # all HTTP 502s
+_bad_gateway_ref = statemon.state.get_ref('bad_gateway')
 statemon.define('internal_err', int) # all HTTP 500s
+_internal_err_ref = statemon.state.get_ref('internal_err')
 statemon.define('unexpected_exception', int)
 statemon.define('custom_thumbnail_not_added', int)
 statemon.define('brightcove_api_failure', int)
@@ -85,6 +88,7 @@ statemon.define('abtest_state_update', int)
 
 # HTTP 400s total and fine-grained issues counters
 statemon.define('bad_request', int) #all HTTP 400s
+_bad_request_ref = statemon.state.get_ref('bad_request')
 statemon.define('invalid_api_key', int)
 statemon.define('invalid_method', int)
 statemon.define('invalid_state_request', int)
@@ -95,6 +99,7 @@ statemon.define('account_id_missing', int)
 statemon.define('account_not_found', int)
 statemon.define('job_not_found', int)
 statemon.define('video_not_found', int)
+_video_not_found_ref = statemon.state.get_ref('video_not_found')
 statemon.define('api_params_missing', int)
 statemon.define('invalid_video_link', int)
 statemon.define('deprecated', int)
@@ -139,10 +144,11 @@ class GetVideoStatusResponse(object):
     def to_json(self):
         ''' to json''' 
         for item in self.items:
-            for thumb in item['thumbnails']:
-                score = thumb['model_score']
-                if score == float('-inf') or score == '-inf' or score is None:
-                    thumb['model_score'] =  -1 * sys.maxint
+            if item:
+                for thumb in item['thumbnails']:
+                    score = thumb['model_score']
+                    if score == float('-inf') or score == '-inf' or score is None:
+                        thumb['model_score'] =  -1 * sys.maxint
 
         return json.dumps(self, default=lambda o: o.__dict__)
 
@@ -155,8 +161,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     
     def prepare(self):
         ''' Called before every request is processed '''
-        
-        _log.info("Request %r" % self.request)
        
         # If POST or PUT, then decode the json arguments
         if not self.request.method == "GET":
@@ -236,13 +240,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     def send_json_response(self, data, status=200):
         '''Send response to service client '''
        
-        statemon.state.increment('total_requests')
+        statemon.state.increment(ref=_total_requests_ref, safe=False)
         if status == 400 or status == 409:
-            statemon.state.increment('bad_request')
+            statemon.state.increment(ref=_bad_request_ref, safe=False)
+            _log.warn("Bad Request %r" % self.request)
         elif status == 502:
-            statemon.state.increment('bad_gateway')
+            statemon.state.increment(ref=_bad_gateway_ref, safe=False)
+            _log.warn("Gateway Error. Request %r" % self.request)
         elif status >= 500:
-            statemon.state.increment('internal_err')
+            statemon.state.increment(ref=_internal_err_ref, safe=False)
+            _log.warn("Internal Error. Request %r" % self.request)
 
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
@@ -265,16 +272,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         # Loose comparison
         if "brightcove" in i_type:
             platform_account = yield tornado.gen.Task(
-                                        neondata.BrightcovePlatform.get,
-                                        self.api_key, i_id)
+                neondata.BrightcovePlatform.get,
+                self.api_key, i_id)
         elif "ooyala" in i_type:
             platform_account = yield tornado.gen.Task(
-                                        neondata.OoyalaPlatform.get,
-                                        self.api_key, i_id)
+                neondata.OoyalaPlatform.get,
+                self.api_key, i_id)
         elif "neon" in i_type: 
             platform_account = yield tornado.gen.Task(
-                                        neondata.NeonPlatform.get,
-                                        self.api_key, '0')
+                neondata.NeonPlatform.get,
+                self.api_key, '0')
 
         raise tornado.gen.Return(platform_account)
 
@@ -362,7 +369,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     
                     elif itype == "youtube_integrations":
                         statemon.state.increment('not_supported')
-                        self.send_json_response("not supported yet", 400)
+                        self.send_json_response(
+                            '{"error": "not supported yet"}', 400)
                        
                 elif method == "videoids":
                     yield self.get_all_video_ids(itype, i_id)
@@ -372,7 +380,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                   'msg=Invalid method in request %s method %s') 
                                   % (self.request.uri, method))
                     statemon.state.increment('invalid_method')
-                    self.send_json_response("API not supported", 400)
+                    self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
 
             elif "jobs" in self.request.uri:
                 try:
@@ -381,7 +390,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
                 except:
                     statemon.state.increment('invalid_job_id')
-                    self.send_json_response("invalid api call", 400)
+                    self.send_json_response(
+                            '{"error": "invalid api call"}', 400)
                     return
 
             else:
@@ -389,7 +399,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                               'msg=Account missing in request %s')
                               % self.request.uri)
                 statemon.state.increment('account_id_missing')
-                self.send_json_response("API not supported", 400)
+                self.send_json_response(
+                            '{"error": "api not supported yet"}', 400)
         
         except Exception, e:
             # Catch all block to send a generic message on internal failure
@@ -689,6 +700,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     % (video_id, job_id)
             self.send_json_response(data, 409)
             return
+
+        if result.code == 400:
+            data = '{"error":"bad request. check api specs","video_id":"%s"}' %\
+                        video_id
+            self.send_json_response(data, 400)
+            return
+
         if result.error:
             _log.error("key=create_neon_thumbnail_api_request "
                     "msg=thumbnail api error %s" %result.error)
@@ -861,6 +879,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
          Check cached videos to reduce the multiget ( lazy load)
          Aggregrate results and format for the client
         '''
+        
         #counters 
         c_published = 0
         c_processing = 0
@@ -874,6 +893,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         a_videos = []
         serving_videos = []
         f_videos = [] #failed videos 
+        
+        # flag that indicates if an empty video [] should be returned
+        insert_non_existent_videos = False
+        if vids is not None:
+            insert_non_existent_videos = True 
 
         page_no = 0 
         page_size = 300
@@ -889,52 +913,31 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
-                    neondata.RequestState.FAILED]
-        
-        #1 Get job ids for the videos from account, get the request status
-        platform_account = yield tornado.gen.Task(self.get_platform_account, 
-                            i_type, i_id)
-
-        if not platform_account:
-            _log.error("key=get_video_status_%s msg=account not found" %i_type)
-            statemon.state.increment('account_not_found')
-            self.send_json_response("%s account not found"%i_type, 400)
-            return
-
+                         neondata.RequestState.FAILED]
         
         # single video state, if video not found return an error
         # GET /api/v1/accounts/{account_id}/
         # {integration_type}/{integration_id}/videos/{video_id}
         if vids is not None and len(vids) == 1:
-            vid = vids[0]
-            all_vids = platform_account.get_videos()
-            i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-            if vid not in all_vids:
-                statemon.state.increment('video_not_found')
-                self.send_json_response("Video not found", 400)
+            i_vid = neondata.InternalVideoID.generate(self.api_key, vids[0])
+            v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid,
+                                       log_missing=False)
+            if not v:
+                # Video is not in the system yet.
+                statemon.state.increment(ref=_video_not_found_ref, safe=False)
+                self.send_json_response('{"total_count": 1, "items":[{}],\
+                        "error":"video not found"}', 400)
                 return
-            else:
-                v = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)   
-                if not v:
-                    # Video is in submit or processing state, 
-                    # so send dummy VResponse
-                    job_id = platform_account.videos[vid]
-                    vr = neondata.VideoResponse(vid,
-                                        job_id,
-                                        neondata.RequestState.PROCESSING,
-                                        i_type,
-                                        "0",
-                                        "title",
-                                        None, #duration
-                                        time.time() * 1000,
-                                        0, 
-                                        None)
-                    vstatus_response = GetVideoStatusResponse(
-                                        [vr.to_dict()], 0, page_no, page_size,
-                                        c_processing, c_recommended, c_published, c_serving)
-                    data = vstatus_response.to_json() 
-                    self.send_json_response(data, 200)
-                    return
+
+        #1 Get job ids for the videos from account, get the request status
+        platform_account = yield tornado.gen.Task(self.get_platform_account, 
+                            i_type, i_id)
+
+        if not platform_account:
+            _log.error("key=get_video_status_%s msg=account not found" % i_type)
+            statemon.state.increment('account_not_found')
+            self.send_json_response('{"error":"%s account not found"}' % i_type, 400)
+            return
 
         #return all videos in the account
         if vids is None:
@@ -955,16 +958,17 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             try:
                 job_request_keys.append((platform_account.videos[vid],
                                          self.api_key))
-            except:
-                pass #job id not found
+            except KeyError, e:
+                #job id not found
+                job_request_keys.append(("dummy","dummy"))
  
         #2 Get Job status
         # jobs that have completed, used to reduce # of keys to fetch 
         completed_videos = [] 
-
         # Get all requests and populate video response object in advance
         requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_many,
-                    job_request_keys) 
+                                          job_request_keys,
+                                          log_missing=False) 
         ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for request, vid in zip(requests, vids):
             if not request:
@@ -1063,10 +1067,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             self.api_key, vid) for vid in completed_videos] #get internal vids
 
         if len(keys) > 0:
-            video_results = yield tornado.gen.Task(
-                            neondata.VideoMetadata.get_many, keys)
+            video_results = yield [
+                tornado.gen.Task(neondata.VideoMetadata.get_many, keys,
+                                 log_missing=False),
+                tornado.gen.Task(neondata.VideoStatus.get_many, keys,
+                                 log_missing=False)]
             tids = []
-            for vresult in video_results:
+            for vresult, vstatus in zip(*video_results):
                 if vresult:
                     # extend list of tids
                     tids.extend(vresult.thumbnail_ids)
@@ -1076,72 +1083,80 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     result[vid].abtest = vresult.testing_enabled
 
                     # Add a Serving URL 
-                    result[vid].serving_url = yield tornado.gen.Task(
-                                                vresult.get_serving_url) 
+                    result[vid].serving_url = vresult.serving_url
 
-                    # If there is a winner, populate the winner thumbnail
-                    if vresult.experiment_state == \
-                        neondata.ExperimentState.COMPLETE:
-                            winner_tid = yield tornado.gen.Task(
-                                            vresult.get_winner_tid)
-                            if winner_tid:
-                                result[vid].winner_thumbnail = winner_tid
+                    # Populate the state of the video
+                    if vstatus is not None:
+                        result[vid].winner_thumbnail = vstatus.winner_tid
                 
             # Get all the thumbnail data for videos that are done
-            thumbnails = yield tornado.gen.Task(
-                            neondata.ThumbnailMetadata.get_many, tids)
-            for thumb in thumbnails:
+            thumbnail_results = yield [
+                tornado.gen.Task(neondata.ThumbnailMetadata.get_many, tids),
+                tornado.gen.Task(neondata.ThumbnailStatus.get_many, tids)]
+            for thumb, thumb_status in zip(*thumbnail_results):
                 # if thumbnail and thumb is not centerframe or random
                 if thumb and thumb.type not in [neondata.ThumbnailType.CENTERFRAME, 
                         neondata.ThumbnailType.RANDOM]:
                     vid = neondata.InternalVideoID.to_external(thumb.video_id)
-                    tdata = thumb.to_dict_for_video_response()
                     if not result.has_key(vid):
                         _log.debug("key=get_video_status_%s"
                                 " msg=video deleted %s"%(i_type, vid))
                     else:
+                        tdata = thumb.to_dict_for_video_response()
+                        tdata.update(
+                            ((k, v) for k,v in 
+                             thumb_status.__dict__.iteritems()
+                             if k != 'key'))
                         result[vid].thumbnails.append(tdata)
             
         #4. Set the default thumbnail for each of the video
         tid_key = "thumbnail_id"
         for res in result:
             vres = result[res]
-            platform_thumb_id = None
-            for thumb in vres.thumbnails:
-                if thumb['chosen'] == True:
-                    vres.current_thumbnail = thumb[tid_key]
-                    if "neon" in thumb['type']:
-                        vres.status = "active"
+            if vres:
+                platform_thumb_id = None
+                for thumb in vres.thumbnails:
+                    if thumb['chosen'] == True:
+                        vres.current_thumbnail = thumb[tid_key]
+                        if "neon" in thumb['type']:
+                            vres.status = "active"
 
-                if thumb['type'] == i_type:
-                    platform_thumb_id = thumb[tid_key]
+                    if thumb['type'] == i_type:
+                        platform_thumb_id = thumb[tid_key]
 
-            if vres.status == "finished" and vres.current_thumbnail == 0:
-                vres.current_thumbnail = platform_thumb_id
+                if vres.status == "finished" and vres.current_thumbnail == 0:
+                    vres.current_thumbnail = platform_thumb_id
 
         #6. Set ab test state
-        
         #convert to dict and count total counts for each state
         vresult = []
         for res in result:
             vres = result[res]
             if vres and vres.video_id in vids: #filter videos by state 
                 vresult.append(vres.to_dict())
-            
+            else:
+                if insert_non_existent_videos:
+                    vresult.append({})
         c_processing = len(p_videos)
         c_recommended = len(r_videos)
         c_published = len(a_videos)
         c_failed = len(f_videos)
         c_serving = len(serving_videos)
 
-        if i_type == "brightcove":
-            #Sort brightcove videos by video_id, since publish_date 
-            #is not currently set on ingest of videos
-            s_vresult = sorted(vresult, 
-                               key=lambda k: int(k['video_id']), reverse=True)
-        else:
-            s_vresult = sorted(vresult, 
-                               key=lambda k: k['publish_date'], reverse=True)
+        s_vresult = vresult
+        # no sorting required since csv was requested
+        if not insert_non_existent_videos:
+            if i_type == "brightcove":
+                #Sort brightcove videos by video_id, since publish_date 
+                #is not currently set on ingest of videos
+                s_vresult = sorted(
+                    vresult, 
+                    key=lambda k: k.get('submit_time', k['video_id']),
+                    reverse=True)
+            else:
+                s_vresult = sorted(vresult, 
+                                   key=lambda k: k['publish_date'],
+                                   reverse=True)
            
         #2c Pagination, case: There are more vids than page_size
         if len(s_vresult) > page_size:
@@ -1237,9 +1252,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         nuser_data = yield tornado.gen.Task(
             neondata.NeonUserAccount.get, a_id)
         if not nuser_data:
-            nplatform = neondata.NeonPlatform(a_id, '0', api_key)
+            def _create_neon_platform(x):
+                x.account_id = a_id
+            nplatform = yield tornado.gen.Task(
+                neondata.NeonPlatform.modify, api_key, '0',
+                _create_neon_platform, create_missing=True)
+            
             user.add_platform(nplatform)
-            res = yield tornado.gen.Task(user.save_platform, nplatform) 
+            res = yield tornado.gen.Task(user.save)
             if res:
                 tai_mapper = neondata.TrackerAccountIDMapper(
                     user.tracker_account_id, api_key,
@@ -1310,27 +1330,27 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 data = '{"error": "integration already exists"}'
                 self.send_json_response(data, 409)
             else:
-                curtime = time.time() #account creation time
-                bc = neondata.BrightcovePlatform(
-                    a_id, i_id, self.api_key, p_id, 
-                    rtoken,wtoken, autosync, curtime) 
-                na.add_platform(bc)
-                
-                #save & update acnt
-                res = yield tornado.gen.Task(na.save_platform, bc)
+                def _initialize_bc_plat(x):
+                    x.account_id = a_id
+                    x.publisher_id = p_id
+                    x.read_token = rtoken
+                    x.write_token = wtoken
+                    x.auto_update = autosync
+                    x.last_process_date = time.time()
+                    
+                bc = yield tornado.gen.Task(
+                    neondata.BrightcovePlatform.modify,
+                    self.api_key, i_id,
+                    _initialize_bc_plat,
+                    create_missing=True)
+
+                na = yield tornado.gen.Task(
+                    neondata.NeonUserAccount.modify,
+                    self.api_key,
+                    lambda x: x.add_platform(bc))
                 
                 #Saved platform
-                if res:
-                    # Set the default experimental strategy for
-                    # Brightcove Customers.
-                    strategy = neondata.ExperimentStrategy(
-                        self.api_key, only_exp_if_chosen=True)
-                    res = yield tornado.gen.Task(strategy.save)
-                    if not res:
-                        _log.error('Bad database response when adding '
-                                   'the default strategy for BC account %s'
-                                   % self.api_key)
-                    
+                if na:
                     response = yield tornado.gen.Task(
                         bc.verify_token_and_create_requests_for_video,
                         10)
@@ -1399,29 +1419,20 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         uri_parts = self.request.uri.split('/')
-        bc = yield tornado.gen.Task(neondata.BrightcovePlatform.get,
-                                    self.api_key, i_id)
-        if bc:
-            bc.read_token = rtoken
-            bc.write_token = wtoken
-               
-            # if auto publish is being turned on   
-            if bc.auto_update == False and autosync == True:
+
+        def _update_fields(x):
+            if x.auto_update == False and autosync == True:
                 statemon.state.increment('deprecated')
                 self.send_json_response(
-                    '{"error": "autopublish feature has been deprecated"}', 400)
+                    '{"error": "autopublish feature has been deprecated"}',
+                    400)
                 return
-
-            bc.auto_update = autosync
-            res = yield tornado.gen.Task(bc.save)
-            if res:
-                data = ''
-                self.send_json_response(data, 200)
-            else:
-                data = '{"error": "account not updated"}'
-                statemon.state.increment('account_not_updated')
-                self.send_json_response(data, 500)
-        else:
+            x.auto_update = autosync
+            x.read_token = rtoken
+            x.write_token = wtoken
+        bc = yield tornado.gen.Task(neondata.BrightcovePlatform.modify,
+                                    self.api_key, i_id, _update_fields)
+        if not bc:
             _log.error("key=update_brightcove_integration " 
                     "msg=no such account %s integration id %s"\
                     % (self.api_key, i_id))
@@ -1468,25 +1479,25 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 data = '{"error": "integration already exists"}'
                 self.send_json_response(data, 409)
             else:
-                curtime = time.time() #account creation time
-                oo_account = neondata.OoyalaPlatform(a_id, i_id, self.api_key, 
-                                    partner_code, oo_api_key, oo_secret_key,
-                                    autosync)  
-                na.add_platform(oo_account)
+                def _initialize_oo_plat(x):
+                    x.account_id = a_id
+                    x.partner_code = partner_code
+                    x.ooyala_api_key = oo_api_key
+                    x.api_secret = oo_secret_key
+                    x.auto_update = autosync
 
-                #save & update acnt
-                res = yield tornado.gen.Task(na.save_platform, oo_account)
+                oo_account = yield tornado.gen.Task(
+                    neondata.OoyalaPlatform.modify,
+                    self.api_key, i_id,
+                    _initialize_oo_plat,
+                    create_missing=True)
+
+                na = yield tornado.gen.Task(
+                    neondata.NeonUserAccount.modify,
+                    self.api_key,
+                    lambda x: x.add_platform(oo_account))
                 
-                if res:
-                    # Set the default experimental strategy for
-                    # Ooyala Customers.
-                    strategy = neondata.ExperimentStrategy(
-                        self.api_key, only_exp_if_chosen=True)
-                    res = yield tornado.gen.Task(strategy.save)
-                    if not res:
-                        _log.error('Bad database response when adding '
-                                   'the default strategy for Ooyala account %s'
-                                   % self.api_key)
+                if na:
                     
                     response = yield tornado.gen.Task(
                         oo_account.create_video_requests_on_signup, 10)
@@ -1557,21 +1568,17 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         uri_parts = self.request.uri.split('/')
 
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get,
-                                    self.api_key, i_id)
+        def _update_fields(x):
+            x.partner_code = partner_code
+            x.ooyala_api_key = oo_api_key
+            x.api_secret = oo_secret_key 
+            x.autosync = autosync
+
+        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.modify,
+                                    self.api_key, i_id, _update_fields)
         if oo:
-            oo.partner_code = partner_code
-            oo.ooyala_api_key = oo_api_key
-            oo.api_secret = oo_secret_key 
-            oo.autosync = autosync
-            res = yield tornado.gen.Task(oo.save)
-            if res:
-                data = ''
-                self.send_json_response(data, 200)
-            else:
-                data = '{"error": "account not updated"}'
-                statemon.state.increment('account_not_updated')
-                self.send_json_response(data, 500)
+            data = ''
+            self.send_json_response(data, 200)
         else:
             _log.error("key=update_ooyala_integration msg=no such account ") 
             data = '{"error": "Account doesnt exists"}'
@@ -1651,7 +1658,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("Could not find video: %s" % i_vid)
-            statemon.state.increment('video_not_found')
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response("Video not found: %s" % p_vid, 400)
 
         # Figure out the rank of the custom thumbs we know about so far
@@ -1739,7 +1746,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
         if not vmdata:
-            statemon.state.increment('video_not_found')
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response('{"error": "vid not found"}', 400)
             return
         
@@ -1783,13 +1790,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
 
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-        vmdata = yield tornado.gen.Task(neondata.VideoMetadata.get, i_vid)
-        if not vmdata:
-            statemon.state.increment('video_not_found')
+        video_status = yield tornado.gen.Task(neondata.VideoStatus.get, i_vid)
+        if not video_status:
+            statemon.state.increment(ref=_video_not_found_ref, safe=False)
             self.send_json_response('{"error": "vid not found"}', 400)
             return
 
-        state = vmdata.experiment_state
+        state = video_status.experiment_state
         
         response = {}
         response['state'] = state
@@ -1804,12 +1811,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             # If override == true, then pick highest
             # else filter all > exp_frac ; then max frac
 
-            winner_tid = yield tornado.gen.Task(vmdata.get_winner_tid)
+            winner_tid = video_status.winner_tid
             if winner_tid:
                 s_urls = yield tornado.gen.Task(
                     neondata.ThumbnailServingURLs.get,
                     winner_tid)
-                for size_tup, url in s_urls.size_map.iteritems():
+                for size_tup, url in s_urls:
                     #Add urls to data section
                     s_url = {}
                     s_url['url'] = url 
@@ -1817,12 +1824,21 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     s_url['height'] = size_tup[1]
                     rdata.append(s_url)
                 response['data'] = rdata
+
+                video_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                                    i_vid)
+                if not video_meta:
+                    statemon.state.increment(ref=_video_not_found_ref,
+                                             safe=False)
+                    self.send_json_response('{"error": "vid not found"}', 400)
+                    return
                 
                 # Get original sized thumbnail or max resolution 
                 try:
-                    o_url = s_urls.get_serving_url(vmdata.frame_size[0],
-                        vmdata.frame_size[1])
-                except KeyError, e:
+                    o_url = s_urls.get_serving_url(video_meta.frame_size[0],
+                        video_meta.frame_size[1])
+                except Exception, e:
+                    # On any kind of exception
                     # TODO: get nearest to original frame_size
                     # For IGN this is sufficient, enhance this when needed
                     s_tup = max(s_urls.size_map, key=lambda item:item[0])

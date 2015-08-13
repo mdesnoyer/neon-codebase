@@ -15,6 +15,8 @@ import sys
 from boto.s3.key import Key
 from boto.exception import S3ResponseError
 from optparse import OptionParser
+import os
+import os.path
 from StringIO import StringIO
 
 def main(options):
@@ -49,29 +51,42 @@ def main(options):
 
     try:
         # This overwrites the destination file
-        data = k.get_contents_as_string()
-        ctype = k.content_type
-        if ctype and ctype == "application/x-gzip":
-            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
-            with open(destination, 'w') as f:
-                gzip_data = gz.read()
-                f.write(gzip_data)
-        else:
-            with open(destination, 'w') as f:
-                try:
-                    gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
-                    gzip_data = gz.read()
-                    f.write(gzip_data)
-                except IOError, e:
-                    f.write(data)
+        gzip_fn = '%s.gz' % destination
+        print 'Downloading %s' % options.s3URL
+        if os.path.exists(gzip_fn):
+            os.remove(gzip_fn)
+        def _print_status(rec, tot):
+            print 'Received %i of %i bytes' % (rec, tot)
+        k.get_contents_to_filename(
+            gzip_fn,
+            cb=_print_status)
+        try:
+            ctype = k.content_type
+            if ctype and ctype == "application/x-gzip":
+                print 'Opening gzip file %s' % gzip_fn
+                gz = gzip.GzipFile(gzip_fn, mode='rb')
+                with open(destination, 'w') as f:
+                    f.writelines(gz)
+            else:
+                with open(destination, 'w') as f:
+                    try:
+                        gz = gzip.GzipFile(gzip_fn, mode='rb')
+                        f.writelines(gz)
+                    except IOError, e:
+                        with open(gzip_fn) as in_stream:
+                            f.writelines(in_stream)
+        finally:
+            os.remove(gzip_fn)
 
         # TODO (Sunil/Pierre) : test and refactor md5 check
         #downloaded_md5 = hashlib.md5(open(destination).read()).hexdigest()
         #if downloaded_md5 != k.md5:
         #    print "Error MD5 mismatch of the s3file and downloaded file"
+
+        print 'Successfully downloaded mastermind file'
     except Exception, e:
         #TODO: more friendly exception messages
-        print "Error downloading or writing the file", e
+        print "Error downloading or writing the file %s" % e
         sys.exit(1)
 
 if __name__ == '__main__':

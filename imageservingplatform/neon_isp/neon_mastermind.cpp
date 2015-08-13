@@ -17,7 +17,6 @@
 #include "neonException.h"
 #include "mastermind.h"
 
-
 static Mastermind * mastermind_current = 0;
 static Mastermind * mastermind_old = 0;
 
@@ -149,33 +148,40 @@ neon_mastermind_account_id_lookup(const char * publisher_id,
 }
 
 
-/*
- * Lookup logic
- */
-NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+/*********************************************************
+ * Name       : neon_mastermind_image_url_lookup 
+ * Parameters :  
+ *********************************************************/
+//NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+std::string*
 neon_mastermind_image_url_lookup(const char * accountId,
                                     const char * videoId,
                                     ngx_str_t * bucketId,
                                     int height,
-                                    int width,
-                                    const char ** url,
-                                    int * size){
-    
+                                    int width)
+{
     Mastermind * mastermind = neon_get_mastermind();
     
-    if(mastermind_current == 0)
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_FAIL;
+    if(mastermind_current == 0) { 
+        return NULL;
+    } 
 
+    std::string image_url("");  
+    mastermind->GetImageUrl(accountId, videoId, 
+                            bucketId->data, bucketId->len,
+                            height, width, image_url);
     
-    (*url) = mastermind->GetImageUrl(accountId, videoId, 
-                                      bucketId->data, bucketId->len,
-                                      height, width, *size);
+    if(image_url.size() == 0) { 
+        return NULL; 
+    } 
     
-    if(*url == 0)
-        return NEON_MASTERMIND_IMAGE_URL_LOOKUP_NOT_FOUND;
-    
-
-    return NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK;
+    if (image_url.find("cloudinary") != std::string::npos) { 
+        ngx_log_debug3(NGX_LOG_INFO, request->connection->log, 0, 
+                        "Cloudinary URL generated for video %s h %d w %d", 
+                        video_id, height, width); 
+    }    
+ 
+    return new std::string(image_url); 
 }
 
 /*
@@ -183,30 +189,30 @@ neon_mastermind_image_url_lookup(const char * accountId,
  *
  * */
 
-NEON_MASTERMIND_TID_LOOKUP_ERROR
+//NEON_MASTERMIND_TID_LOOKUP_ERROR
+std::string* 
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId,
-                            const char ** tid,
-                            int * size){
-
+                            ngx_str_t * bucketId)
+{
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0)
-        return NEON_MASTERMIND_TID_LOOKUP_FAIL;
+        return NULL;
 
-    
-    (*tid) = mastermind->GetThumbnailID(accountId, videoId, 
+    std::string thumbnailId("");  
+    mastermind->GetThumbnailID(accountId, videoId, 
                                         bucketId->data, 
                                         bucketId->len, 
-                                        *size); 
+                                        thumbnailId); 
+    if (thumbnailId.size() == 0) { 
+        return NULL; 
+    }
+ 
+    //*tid = (char *)malloc(thumbnailId.size()+1);
+    //snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
 
-    
-    if(*tid == 0)
-        return NEON_MASTERMIND_TID_LOOKUP_NOT_FOUND;
-    
-
-    return NEON_MASTERMIND_TID_LOOKUP_OK;
+    return new std::string(thumbnailId); 
 }
 
 /*

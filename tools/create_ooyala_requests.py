@@ -19,11 +19,6 @@ import utils.neon
 from utils.options import define, options
 
 import logging
-logging.basicConfig(level=logging.DEBUG,
-        format='%(asctime)s %(levelname)s %(message)s',
-        datefmt='%m-%d %H:%M',
-        filename='/mnt/logs/neon/ooyala.log',
-        filemode='a')
 _log = logging.getLogger(__name__)
 
 if __name__ == "__main__":
@@ -43,22 +38,20 @@ if __name__ == "__main__":
         file(pidfile, 'w').write(pid)
 
         try:
-            skip_accounts = []
-            # Get all Ooyala accounts
-            host = "10.249.34.227"
-            port = 6379
-            rclient = blockingRedis.StrictRedis(host, port)
-            accounts = rclient.keys('ooyalaplatform*')
+            dbconn = DBConnection(OoyalaPlatform)
+            keys = dbconn.blocking_conn.keys('ooyalaplatform*')
+            accounts = []
+            for k in keys:
+                parts = k.split('_')
+                op = OoyalaPlatform.get(parts[-2], parts[-1])
+                accounts.append(op)
             for accnt in accounts:
-                if accnt in skip_accounts:
+                if accnt.enabled == False:
                     continue
-                api_key = accnt.split('_')[-2]
-                i_id = accnt.split('_')[-1]
+                api_key = accnt.neon_api_key
+                i_id = accnt.integration_id 
                 _log.debug("key=ooyala_request msg= internal account %s i_id %s" %(api_key,i_id))
-                #retrieve the blob and create the object
-                jdata = rclient.get(accnt)
-                oo = OoyalaPlatform.create(jdata)
-                oo.check_feed_and_create_requests()
+                accnt.check_feed_and_create_requests()
 
         except Exception as e:
             _log.exception('key=create_ooyala_requests msg=Unhandled exception %s'

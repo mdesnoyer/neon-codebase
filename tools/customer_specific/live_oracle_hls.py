@@ -141,7 +141,7 @@ if __name__ == '__main__':
         cipher=None
         if m3u8_obj.key is not None:
             encr_key = urllib2.urlopen(m3u8_obj.key.uri)
-            iv = binascii.unhexlify(m3u8_obj.key.iv.split('X')[1])
+            iv = binascii.unhexify(m3u8_obj.key.iv.split('X')[1])
             cipher = AES.new(encr_key.read(), AES.MODE_CBC, IV=iv)
 
         # for AK live, we need to download and save the last 12 in the list

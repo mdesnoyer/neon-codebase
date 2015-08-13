@@ -10,6 +10,7 @@ sys.path.insert(0,os.path.abspath(
 
 import logging
 import Queue
+import random
 import socket
 import threading
 import time
@@ -25,7 +26,7 @@ _log = logging.getLogger(__name__)
 # being called.
 
 def send_request(request, ntries=5, callback=None, cur_try=0,
-                 do_logging=True):
+                 do_logging=True, base_delay=0.2):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -40,6 +41,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
                returns with its response as the parameter. If it is None,
                this call blocks and returns the HTTPResponse.
     do_logging - True if logging should be turned on
+    base_delay - Time in seconds for the first delay on the retry
 
     '''
 
@@ -65,6 +67,8 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
                         _log.warning(('key=http_response_error '
                                       'msg=Response err from %s: %s') %
                                       (request.url, data['error']))
+                    response.error = tornado.httpclient.HTTPError(
+                        500, str(data['error']))
                 else:
                     return finish_request(response)
 
@@ -88,21 +92,24 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
         # Handling the retries
         cur_try += 1
         if cur_try >= ntries:
-            response.error = tornado.httpclient.HTTPError(
-                503, 'Too many errors connecting to %s' % request.url)
+            if do_logging:
+                _log.warn_n('Too many errors connecting to %s' % request.url,
+                            3)
             return finish_request(response)
 
 
-        delay = (1 << cur_try) * 0.1 # in seconds
+        delay = (1 << cur_try) * base_delay * random.random() # in seconds
         if callback is None:
             time.sleep(delay)
             return send_request(request, ntries, cur_try=cur_try,
-                                do_logging=do_logging)
+                                do_logging=do_logging,
+                                base_delay=base_delay)
         else:
             ioloop = tornado.ioloop.IOLoop.current()
             ioloop.add_callback(ioloop.add_timeout, time.time()+delay,
                                 lambda: send_request(request, ntries, callback,
-                                                     cur_try, do_logging))
+                                                     cur_try, do_logging,
+                                                     base_delay))
 
         # TODO(mdesnoyer): Return a future
         return None
@@ -139,7 +146,7 @@ def send_request(request, ntries=5, callback=None, cur_try=0,
 
 class RequestThread(threading.Thread):
     '''A thread that serially sends http requests.'''
-    def __init__(self, q, max_tries):
+    def __init__(self, q, max_tries, rc=None):
         '''Constructor
 
         q - A Queue.Queue that this thread will consume from.
@@ -152,6 +159,7 @@ class RequestThread(threading.Thread):
         self.max_tries = max_tries
         self.daemon = True
         self._stopped = threading.Event()
+        self.retry_codes = rc or [400, 401, 402, 403, 405, 408, 501, 502, 503]
 
     def stop(self):
         self._stopped.set()
@@ -172,7 +180,9 @@ class RequestThread(threading.Thread):
 
                 response = send_request(request, ntries=1,
                                         do_logging=do_logging)
-                if response.error is not None:
+                if response.error is not None and response.code not in\
+                    self.retry_codes:
+                   
                     # Do retry logic
                     if (ntries + 1) >= self.max_tries:
                         if do_logging:
@@ -185,7 +195,8 @@ class RequestThread(threading.Thread):
                         callback(response)
                         self.q.task_done()
                     else:
-                        delay = (1 << ntries) * 0.1 # in seconds
+                        # in seconds
+                        delay = (1 << ntries) * 0.2 * random.random()
                         ntries += 1
                         self._delayed_requeue(request, callback, ntries, 
                                               do_logging, delay)

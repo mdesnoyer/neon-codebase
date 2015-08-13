@@ -1,6 +1,9 @@
 #ifndef _NEON_LOG_C_
 #define _NEON_LOG_C_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdarg.h>
 
@@ -16,5 +19,8 @@ void neon_log_alert(const char * line, ...);
 void neon_log_emergency(const char * line, ...);
 
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 

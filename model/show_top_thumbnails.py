@@ -37,9 +37,11 @@ def run_one_video(mod, video_file, n, output_file, batch):
     # Plot the examples
     plt.figure(figsize=(16, 4), dpi=80)
     curThumb = 0
+    #output_file = "basketball_%s.jpg"
     for image, score, frame_no, timecode, attribute in thumbs:
         # Output the image
         if output_file is not None:
+            print 'Saving %s'%(output_file%curThumb)
             cv2.imwrite(output_file % curThumb, image)
 
 
