@@ -21,9 +21,9 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-# PyCharm Debugger - TODO(robbwagoner): remove
-sys.path.append(os.path.join(__base_path__, 'pycharm-debug.egg'))
-import pydevd
+# PyCharm Debugger
+#sys.path.append(os.path.join(__base_path__, 'pycharm-debug.egg'))
+#import pydevd
 
 from airflow import DAG
 from airflow.hooks.S3_hook import S3Hook
@@ -122,26 +122,28 @@ options.define('quiet_period', default=45, type=int, help='Number of minutes to 
 
 options.define('public_ip', default='52.5.151.15', type=str, help='')
 options.define('public_dns', default='', type=str, help='')
-options.define('cluster_name', default='Neon Serving Stack V2 test hadoop (Airflow)', type=str, help='')
+options.define('cluster_name', default='Neon Events Cluster', type=str, help='')
 options.define('cluster_type', default='airflow_test_hadoop', type=str, help='')
 options.define('cluster_subnet_id', default='subnet-b0d884c7', type=str, help='VPC Subnet Id where to launch the EMR'
                                                                               'cluster.')
 options.define('n_core_instances', default=2, type=int, help='The number of CORE instances for the EMR cluster. This'
                                                              'setting affects the total HDFS storage available to the'
                                                              'cluster.')
-options.define('ssh_key', default='')
+options.define('ssh_key', default='s3://neon-keys/emr-runner-2015.pem')
 options.define('cluster_log_uri', default='s3://neon-cluster-logs', type=str, help='')
 options.define('mr_jar', default='/opt/neon/neon-codebase/statsmanager/stats/java/target/neon-stats-1.0-job.jar')
 
 options.define('input_path', default='s3://neon-tracker-logs-v2/v2.2', type=str,
                help='S3 URI base path to source files for staging.')
 options.define('staging_path', default='s3://neon-tracker-logs-test-hadoop/', type=str,
-               help='S3 URI base path where to stage files for input to Map/Reduce jobs.')
+               help='S3 URI base path where to stage files for input to Map/Reduce jobs.'
+               ' Staged files, relative to this setting, are prefixed <dag_id>/staging/<YYYY>/<MM>/<DD>/<HH>/.')
 options.define('output_path', default='s3://neon-tracker-logs-test-hadoop/', type=str,
-               help='S3 URI base path where to put cleaned files from Map/Reduce jobs.')
+               help='S3 URI base path where to put cleaned files from Map/Reduce jobs.'
+               ' Cleaned files, relative to this setting, are prefixed <dag_id>/cleaned/<YYYY>/<MM>/<DD>/<HH>/')
 
 # Use Neon's options module for configuration parsing
-f = open(os.path.join(os.path.dirname(__file__), 'cluster.conf'))  # TODO(robbwagoner): change to basename
+f = open(os.path.join(os.path.dirname(__file__), '{0}.conf'.format(os.path.splitext(os.path.basename(__file__))[0])))
 # Don't parse command line options, because DAGs are loaded by the airflow command
 args = options.parse_options(config_stream=f, watch_file=True, parse_command_line=False)
 f.close()
@@ -681,7 +683,7 @@ load_impala_tables = PythonOperator(
     provide_context=True,
     op_kwargs=dict(output_path=options.output_path),
     retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-    sla=timedelta(minutes=options.quiet_period+90))
+    sla=timedelta(minutes=options.quiet_period+180))
     # depends_on_past=True)
 load_impala_tables.set_upstream(mr_cleaning_job)
 

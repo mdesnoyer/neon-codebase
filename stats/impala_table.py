@@ -205,7 +205,7 @@ class ImpalaTable(object):
             s3conn = S3Connection()
             bucket = s3conn.get_bucket(s3url.netloc)
             key = boto.s3.key.Key(bucket, s3url.path)
-            _log.debug("Uploading compiled schema file %s to %s/%s" % (self.schema_file, bucket.name, key.key))
+            _log.debug("Uploading compiled schema file %s to s3://%s%s" % (self.schema_file, bucket.name, key.key))
             # Create object in S3
             key.set_contents_from_filename(
                 os.path.join(options.compiled_schema_path,
