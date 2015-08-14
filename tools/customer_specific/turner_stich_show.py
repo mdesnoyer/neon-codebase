@@ -56,7 +56,10 @@ def parse_schedule(uri):
     data = response.json()
 
     retval = []
-    for episode in data['LiveFeed']['tveLiveSched']['SchedItem']:
+    episodes = data['LiveFeed']['tveLiveSched']['SchedItem']
+    if isinstance(episodes, dict):
+        episodes = [episodes]
+    for episode in episodes:
         start_time = dateutil.parser.parse(episode['Program']['StartTime'])
         end_time = dateutil.parser.parse(episode['Program']['EndTime'])
         airing_id = episode['AiringID']
