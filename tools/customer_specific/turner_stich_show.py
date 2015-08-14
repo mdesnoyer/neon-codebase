@@ -124,6 +124,8 @@ def process_episode(episode, segments):
 
             # Don't take this segment, but start counting down
             skip_count -= 1
+            continue
+        filt_segments.append((seg_time, seg_fn))
 
     _log.info('Stiching together segments for episode %s' % airing_id)
 
