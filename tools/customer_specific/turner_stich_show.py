@@ -102,7 +102,7 @@ def process_episode(episode, segments):
     with open(episode_full_path, 'wb') as out_stream:
         for seg_time, seg_fn in ep_segments:
             with open(seg_fn, 'rb') as in_stream:
-                out_stream.write_lines(in_stream)
+                out_stream.writelines(in_stream)
 
     _log.info('Uploading episode to s3://neon-test/dlea/live/turner/%s' % 
               episode_fn)
