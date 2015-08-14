@@ -513,7 +513,10 @@ class ThumbnailHandler(tornado.web.RequestHandler):
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
-            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create,  
+            video_id = args['video_id'] 
+
+            video = yield tornado.gen.Task(neondata.VideoMetadata.get, video_id)
+            #thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create,  
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
     def put(self, account_id): 
