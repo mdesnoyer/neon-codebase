@@ -139,6 +139,8 @@ def process_episode(episode, segments):
 
     _log.info('Transmuxing file to mp4')
 
+    if os.path.exists(full_ts_fn):
+        os.remove(full_ts_fn)
     subprocess.check_call('/usr/bin/ffmpeg -i %s  -absf aac_adtstoasc '
                           '-vcodec copy -acodec copy %s' % 
                           (full_ts_fn, episode_full_path),
@@ -166,6 +168,7 @@ def process_episode(episode, segments):
     for seg_time, seg_fn in ep_segments:
         os.remove(seg_fn)
     os.remove(episode_full_path)
+    os.remove(full_ts_fn)
 
 def submit_neon_job(video_id, video_title, video_url, publish_date,
                     duration=None):
