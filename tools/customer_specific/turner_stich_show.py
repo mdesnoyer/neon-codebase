@@ -13,14 +13,17 @@ if sys.path[0] != __base_path__:
 
 import boto
 import boto.s3.connection
+import copy
 import datetime
 import dateutil.parser
 from glob import glob
 import json
 import logging
+import math
 import re
 import requests
 import shutil
+import subprocess
 import utils.monitor
 import utils.neon
 
@@ -29,7 +32,12 @@ define("working_dir", default="/mnt/neon/vids")
 define("schedule", default="http://data.tntdrama.com/processors/TNTE.json")
 define("account_id", default="325")
 define("api_key", default="u21ep2m88rapp50dmbpjj2un")
-define("segment_length", default=10, help='Length in seconds of each segment')
+define("segment_length", default=10.0, type=float,
+       help='Length in seconds of each segment')
+define("break_buffer", default=30.0, type=float,
+       help=('Number of seconds to ignore at around breaks, wether it is an '
+             'ad or the beginning and end of the episode.'))
+
 
 from utils import statemon
 statemon.define('turner_stich_errors', int)
@@ -95,14 +103,45 @@ def process_episode(episode, segments):
     if segment_time < 0.5 * ep_time:
         return
 
+    # Throw out segments around an ad break or at the beginning and
+    # end of the video.
+    n_seg_cut = math.ceil(options.break_buffer / options.segment_length)
+    filt_segments = []
+    skip_count = n_seg_cut
+    for seg_time, seg_fn in ep_segments[n_seg_cut:-n_seg_cut]:
+        if len(filt_segments) == 0 or skip_count == 0:
+            filt_segments.append((seg_time, seg_fn))
+            skip_count = n_seg_cut
+            continue
+
+        time_diff = (seg_time - filt_segments[-1][0]).total_seconds()
+        if time_diff > options.segment_length:
+            # We found a discontinuity
+            if skip_count == n_seg_cut:
+                # It's the start of the discontinuty so throw out the
+                # most recent segments.
+                filt_segments = filt_segments[:-n_seg_cut]
+
+            # Don't take this segment, but start counting down
+            skip_count -= 1
+
     _log.info('Stiching together segments for episode %s' % airing_id)
 
+    full_ts_fn = os.path.join(options.working_dir, '%s.ts' % airing_id)
     episode_fn = '%s.mp4' % airing_id
     episode_full_path = os.path.join(options.working_dir, episode_fn)
     with open(episode_full_path, 'wb') as out_stream:
-        for seg_time, seg_fn in ep_segments:
+        for seg_time, seg_fn in filt_segments:
             with open(seg_fn, 'rb') as in_stream:
                 out_stream.writelines(in_stream)
+
+    _log.info('Transmuxing file to mp4')
+
+     subprocess.check_call('/usr/bin/ffmpeg -i %s  -absf aac_adtstoasc '
+                           '-vcodec copy -acodec copy %s' % 
+                           (full_ts_fn, episode_full_path),
+                           shell=True)
+    
 
     _log.info('Uploading episode to s3://neon-test/dlea/live/turner/%s' % 
               episode_fn)
