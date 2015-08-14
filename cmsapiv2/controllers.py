@@ -516,22 +516,54 @@ class ThumbnailHandler(tornado.web.RequestHandler):
             video_id = args['video_id'] 
 
             video = yield tornado.gen.Task(neondata.VideoMetadata.get, video_id)
-            #thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create,  
+            #TODO what to do about CDN we need an integration id there???
+            #thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create, 
+            #TODO figure out rank, update rank of new thumbnail 
+            #TODO save thumbnail  
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+
     def put(self, account_id): 
-        self.success({'account_id', account_id})  
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('thumbnail_id') : All(str, Length(min=1, max=512)),
+          'enabled': All(int, Range(min=0, max=1))
+        })
+        try:
+            args = self.parse_args()
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+            thumbnail_id = args['thumbnail_id'] 
+            enabled = bool(args['enabled'])
+            
+            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                               thumbnail_id) 
+        #self.success({'account_id', account_id})  
+
+    def get(self, account_id): 
+        schema = Schema({
+          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('thumbnail_id') : All(str, Length(min=1, max=512))
+        })
+        try:
+            args = self.parse_args()
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+            thumbnail_id = args['thumbnail_id'] 
+            
+            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                               thumbnail_id) 
+            self.success(thumbnail.to_json())
+
+        except MultipleInvalid as e: 
+            self.error('%s %s' % (e.path[0], e.msg))
+
 
 '''*********************************************************************
 VideoHelper      : helper class responsible for creating new video jobs 
                    for any and all integration types
 *********************************************************************'''
 class VideoHelper():
-    @staticmethod 
-    @tornado.gen.coroutine 
-    def filterFields(video, requested_fields): 
-        return video
-
     @staticmethod 
     @tornado.gen.coroutine
     def addVideo(request, account_id):
