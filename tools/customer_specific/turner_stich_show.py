@@ -206,7 +206,6 @@ def main():
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
-    main()
     try:
         main()
 
