@@ -137,10 +137,10 @@ def process_episode(episode, segments):
 
     _log.info('Transmuxing file to mp4')
 
-     subprocess.check_call('/usr/bin/ffmpeg -i %s  -absf aac_adtstoasc '
-                           '-vcodec copy -acodec copy %s' % 
-                           (full_ts_fn, episode_full_path),
-                           shell=True)
+    subprocess.check_call('/usr/bin/ffmpeg -i %s  -absf aac_adtstoasc '
+                          '-vcodec copy -acodec copy %s' % 
+                          (full_ts_fn, episode_full_path),
+                          shell=True)
     
 
     _log.info('Uploading episode to s3://neon-test/dlea/live/turner/%s' % 
