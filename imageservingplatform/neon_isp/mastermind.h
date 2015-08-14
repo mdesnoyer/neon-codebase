@@ -70,7 +70,7 @@ public:
                         const char * c_videoId, 
                         unsigned char * bucketId,
                         int bucketIdLen,
-                        std::string& tid);
+                        std::string & tid);
    
 
 protected:

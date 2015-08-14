@@ -75,12 +75,13 @@ typedef enum  {
     
 } NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR;
     
-std::string*
+void
 neon_mastermind_image_url_lookup(const char * accountId,
                                  const char * videoId,
                                  ngx_str_t * ipAddress,
                                  int height,
-                                 int width);
+                                 int width, 
+                                 std::string & image_url);
     
 typedef enum  {
     NEON_MASTERMIND_TID_LOOKUP_OK = 0,
@@ -89,10 +90,11 @@ typedef enum  {
     
 } NEON_MASTERMIND_TID_LOOKUP_ERROR;
 
-std::string*
+void
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId);
+                            ngx_str_t * bucketId, 
+                            std::string & thumbnailId);
      
 /*
  * Check if current mastermind has expired
