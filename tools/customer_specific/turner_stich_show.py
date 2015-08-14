@@ -132,7 +132,7 @@ def process_episode(episode, segments):
     full_ts_fn = os.path.join(options.working_dir, '%s.ts' % airing_id)
     episode_fn = '%s.mp4' % airing_id
     episode_full_path = os.path.join(options.working_dir, episode_fn)
-    with open(episode_full_path, 'wb') as out_stream:
+    with open(full_ts_fn, 'wb') as out_stream:
         for seg_time, seg_fn in filt_segments:
             with open(seg_fn, 'rb') as in_stream:
                 out_stream.writelines(in_stream)
