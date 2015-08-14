@@ -105,7 +105,7 @@ def process_episode(episode, segments):
 
     # Throw out segments around an ad break or at the beginning and
     # end of the video.
-    n_seg_cut = math.ceil(options.break_buffer / options.segment_length)
+    n_seg_cut = int(math.ceil(options.break_buffer / options.segment_length))
     filt_segments = []
     skip_count = n_seg_cut
     for seg_time, seg_fn in ep_segments[n_seg_cut:-n_seg_cut]:
