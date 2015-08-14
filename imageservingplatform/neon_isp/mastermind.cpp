@@ -520,10 +520,12 @@ Mastermind::GetImageUrl(const char * account_id,
         }
         const ScaledImage * si = def->GetScaledImage(height, width);
         
-        if (si)  
+        if (si) {  
             image_url = *si->scoped_url();
-        else 
+        } 
+        else { 
             image_url = def->default_url();
+        } 
  
         return;  
     }
@@ -543,24 +545,14 @@ Mastermind::GetImageUrl(const char * account_id,
         // Didn't get a "pre-sized" image so send default URL 
         if (image == 0){
             image_url = *fraction->default_url();
-            // NOTE: IGN Doesn't want to use cloudinary, hence we'll return a
-            // default URL for non-standard sizes
-            // re-enable when needed
-
-            //char buffer[1024]; // sufficiently large buffer for the URL
-            //const char * tid = fraction->GetThumbnailID();
-            //sprintf(buffer, cloudinary_image_format, width, height, tid);
-            //const char * url = strdup(buffer);
-            //size = strlen(url);
-            //return url;
         }
+        // we are using the old directive format send back url
         else if (image->scoped_url() != NULL) {
             image_url = *image->scoped_url(); 
         } 
+        // generate a url given information in the mastermind file 
         else { 
-            boost::scoped_ptr<std::string> new_url; 
-            new_url.reset(url_utils::GenerateUrl(fraction->base_url(), *fraction->tid(), image->GetHeight(), image->GetWidth())); 
-            image_url = *new_url; 
+            image_url = url_utils::GenerateUrl(fraction->base_url(), *fraction->tid(), image->GetHeight(), image->GetWidth()); 
         }
     }  
 }
@@ -573,7 +565,8 @@ Mastermind::GetThumbnailID(const char * c_accountId,
                             const char * c_videoId,
                             unsigned char * bucketId,
                             int bucketIdLen,
-                            std::string& tid){
+                            std::string & tid)
+{
     
     string accountId = c_accountId;
     string videoId = c_videoId;
@@ -594,7 +587,6 @@ Mastermind::GetThumbnailID(const char * c_accountId,
     }
 
     tid = *fraction->tid();
-    //size = strlen(tid);    
 } 
 
 /*

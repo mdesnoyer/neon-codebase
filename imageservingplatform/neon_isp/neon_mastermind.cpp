@@ -152,27 +152,27 @@ neon_mastermind_account_id_lookup(const char * publisher_id,
  * Name       : neon_mastermind_image_url_lookup 
  * Parameters :  
  *********************************************************/
-//NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
-std::string*
+
+void 
 neon_mastermind_image_url_lookup(const char * accountId,
                                     const char * videoId,
                                     ngx_str_t * bucketId,
                                     int height,
-                                    int width)
+                                    int width, 
+                                    std::string & image_url)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
     if(mastermind_current == 0) { 
-        return NULL;
+        return;
     } 
 
-    std::string image_url("");  
     mastermind->GetImageUrl(accountId, videoId, 
                             bucketId->data, bucketId->len,
                             height, width, image_url);
     
     if(image_url.size() == 0) { 
-        return NULL; 
+        return; 
     } 
     
     if (image_url.find("cloudinary") != std::string::npos) { 
@@ -180,8 +180,6 @@ neon_mastermind_image_url_lookup(const char * accountId,
                         "Cloudinary URL generated for video %s h %d w %d", 
                         video_id, height, width); 
     }    
- 
-    return new std::string(image_url); 
 }
 
 /*
@@ -189,30 +187,25 @@ neon_mastermind_image_url_lookup(const char * accountId,
  *
  * */
 
-//NEON_MASTERMIND_TID_LOOKUP_ERROR
-std::string* 
+void 
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId)
+                            ngx_str_t * bucketId, 
+                            std::string & thumbnailId)
 {
     Mastermind * mastermind = neon_get_mastermind();
     
-    if(mastermind_current == 0)
-        return NULL;
+    if(mastermind_current == 0) { 
+        return;
+    } 
 
-    std::string thumbnailId("");  
     mastermind->GetThumbnailID(accountId, videoId, 
                                         bucketId->data, 
                                         bucketId->len, 
                                         thumbnailId); 
     if (thumbnailId.size() == 0) { 
-        return NULL; 
+        return; 
     }
- 
-    //*tid = (char *)malloc(thumbnailId.size()+1);
-    //snprintf((*tid), thumbnailId.size()+1, "%s", thumbnailId.c_str()); 
-
-    return new std::string(thumbnailId); 
 }
 
 /*
