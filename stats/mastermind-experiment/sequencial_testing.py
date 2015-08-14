@@ -97,6 +97,8 @@ class StatsOptimizingSimulator(object):
         new_end_count = 0
         traditional_err_count = 0
         new_err_count = 0
+        traditional_err_end_count = 0
+        new_err_end_count = 0
         traditional_inconclusive_count = 0
         new_inconclusive_count = 0
         total_missed_traditional_conversion_count = 0
@@ -135,10 +137,13 @@ class StatsOptimizingSimulator(object):
                 threshold_new_array.append(threshold_new)
 
                 if not is_traditional_reached and threshold_traditional > 0:
+                    if total_conversion_count < Param.MIN_CONVERSION:
+                        continue
                     is_traditional_reached = True
                     traditional_end_count = traditional_end_count + impression_counter
                     if mean_diff < 0:
                         traditional_err_count = traditional_err_count + 1
+                        traditional_err_end_count = traditional_err_end_count + impression_counter
                     missed_traditional_conversion_count = total_optimal_conversion_count - total_conversion_count
                     optimal_traditional_conversion_count = optimal_traditional_conversion_count + total_optimal_conversion_count
 
@@ -147,6 +152,7 @@ class StatsOptimizingSimulator(object):
                     new_end_count = new_end_count + impression_counter
                     if mean_diff < 0:
                         new_err_count = new_err_count + 1
+                        new_err_end_count = new_err_end_count + impression_counter
                     missed_new_conversion_count = total_optimal_conversion_count - total_conversion_count
                     optimal_new_conversion_count = optimal_new_conversion_count + total_optimal_conversion_count
 
@@ -177,6 +183,16 @@ class StatsOptimizingSimulator(object):
             missed_new_conversion_avg = total_missed_new_conversion_count / (self.experiment_number - new_inconclusive_count)
             optimal_new_conversion_avg = optimal_new_conversion_count / (self.experiment_number - new_inconclusive_count)
 
+        if traditional_err_count == 0:
+            traditional_err_end_avg = 0
+        else:
+            traditional_err_end_avg = traditional_err_end_count / traditional_err_count
+
+        if new_err_count == 0:
+            new_err_end_avg = 0
+        else:
+            new_err_end_avg = new_err_end_count / new_err_count
+
         if self.is_display:
             plt.plot(threshold_traditional_array)
             plt.plot(threshold_new_array)
@@ -186,6 +202,7 @@ class StatsOptimizingSimulator(object):
         return (traditional_avg, new_avg, traditional_inconclusive_count,
             new_inconclusive_count, traditional_err_count, new_err_count,
             missed_traditional_conversion_avg, missed_new_conversion_avg,
+            traditional_err_end_avg, new_err_end_avg,
             optimal_traditional_conversion_avg, optimal_new_conversion_avg
             )
 
@@ -194,6 +211,7 @@ class StatsOptimizingSimulator(object):
 
         bandit_end_count = 0
         bandit_err_count = 0
+        bandit_err_end_count = 0
         bandit_inconclusive_count = 0
         total_missed_bandit_conversion_count = 0
         value_remaining_array = []
@@ -230,10 +248,13 @@ class StatsOptimizingSimulator(object):
                 winner_index, value_remaining, fractions, is_stopped = \
                     bandit_method.get_bandit_fractions(impressions, conversions)
                 if not is_bandit_reached and is_stopped:
+                    if total_conversion_count < Param.MIN_CONVERSION:
+                        continue
                     is_bandit_reached = True
                     bandit_end_count = bandit_end_count + impression_counter
                     if winner_index != 1:
                         bandit_err_count = bandit_err_count + 1
+                        bandit_err_end_count = bandit_err_end_count + impression_counter
                     missed_bandit_conversion_count = total_optimal_conversion_count - total_conversion_count
                     optimal_bandit_conversion_count = optimal_bandit_conversion_count + total_optimal_conversion_count
                 iteration_counter = iteration_counter + 1
@@ -255,6 +276,11 @@ class StatsOptimizingSimulator(object):
             missed_bandit_conversion_avg = total_missed_bandit_conversion_count / (self.experiment_number - bandit_inconclusive_count)
             optimal_bandit_conversion_avg = optimal_bandit_conversion_count / (self.experiment_number - bandit_inconclusive_count)
 
+        if bandit_err_count == 0:
+            bandit_err_end_avg = 0
+        else:
+            bandit_err_end_avg = bandit_err_end_count / bandit_err_count
+
         if self.is_display:
             plt.plot(value_remaining_array)
             fractions_array = np.array(fractions_array)
@@ -263,14 +289,17 @@ class StatsOptimizingSimulator(object):
             plt.plot(np.zeros(len(value_remaining_array)))
             plt.show()
 
-        return (bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, optimal_bandit_conversion_avg)
+        return (bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)
 
-BASE_PERCENT = 0.04
-LIFT = 1.25
+class Param(object):
+    BASE_PERCENT = 0.04
+    LIFT = 1.25
+    EXP_RATE = 0.02
+    EXP_STOP = 0.1
+    MIN_CONVERSION = 200
 
 def random_walk(total_amount, step_size = 0.01):
-    global BASE_PERCENT
-    ctr_start_pt = BASE_PERCENT
+    ctr_start_pt = Param.BASE_PERCENT
     steps = np.random.normal(0, step_size, total_amount)
     walk = ctr_start_pt
     walks = np.zeros(total_amount)
@@ -282,9 +311,7 @@ def random_walk(total_amount, step_size = 0.01):
     return walks
 
 def simulator_function_simple(bin_size, count):
-    global BASE_PERCENT
-    global LIFT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT * LIFT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT * Param.LIFT]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -293,8 +320,7 @@ def simulator_function_simple(bin_size, count):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_type1_err(bin_size, count):
-    global BASE_PERCENT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -303,12 +329,10 @@ def simulator_function_type1_err(bin_size, count):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_exp_ctr(bin_size, count):
-    global BASE_PERCENT
-    global LIFT
-    ctr_array = np.array([BASE_PERCENT, BASE_PERCENT * LIFT])
-    ctr_array = ctr_array**(1.02 * count)
-    if ctr_array[0] < 0.2 * BASE_PERCENT:
-        ctr_array = np.array([0.2 * BASE_PERCENT, 0.2 * BASE_PERCENT * LIFT])
+    ctr_array = np.array([Param.BASE_PERCENT, Param.BASE_PERCENT * Param.LIFT])
+    ctr_array = ctr_array * np.exp(-count * Param.EXP_RATE)
+    if ctr_array[0] < Param.EXP_STOP * Param.BASE_PERCENT:
+        ctr_array = np.array([Param.EXP_STOP * Param.BASE_PERCENT, Param.EXP_STOP * Param.BASE_PERCENT * Param.LIFT])
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -317,11 +341,10 @@ def simulator_function_exp_ctr(bin_size, count):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_exp_ctr_type1_err(bin_size, count):
-    global BASE_PERCENT
-    ctr_array = np.array([BASE_PERCENT, BASE_PERCENT])
-    ctr_array = ctr_array**(1.02 * count)
-    if ctr_array[0] < 0.01:
-        ctr_array = np.array([0.05, 0.05])
+    ctr_array = np.array([Param.BASE_PERCENT, Param.BASE_PERCENT])
+    ctr_array = ctr_array * np.exp(-count * Param.EXP_RATE)
+    if ctr_array[0] < Param.EXP_STOP * Param.BASE_PERCENT:
+        ctr_array = np.array([Param.EXP_STOP * Param.BASE_PERCENT, Param.EXP_STOP * Param.BASE_PERCENT])
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -330,8 +353,7 @@ def simulator_function_exp_ctr_type1_err(bin_size, count):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_random_walk_preset(bin_size, count, walk_array):
-    global LIFT
-    ctr_array = [walk_array[count], walk_array[count] * LIFT]
+    ctr_array = [walk_array[count], walk_array[count] * Param.LIFT]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -349,9 +371,7 @@ def simulator_function_random_walk_preset_type1_err(bin_size, count, walk_array)
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_simple(bin_size, count, fractions):
-    global BASE_PERCENT
-    global LIFT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT * LIFT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT * Param.LIFT]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -360,8 +380,7 @@ def simulator_function_bandit_simple(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_simple_type1_err(bin_size, count, fractions):
-    global BASE_PERCENT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT]
     impression_1 = bin_size / 2
     impression_2 = bin_size / 2
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -370,9 +389,7 @@ def simulator_function_bandit_simple_type1_err(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_constant(bin_size, count, fractions):
-    global BASE_PERCENT
-    global LIFT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT * LIFT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT * Param.LIFT]
     impression_1 = bin_size * fractions[0]
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -381,8 +398,7 @@ def simulator_function_bandit_constant(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_constant_type1_err(bin_size, count, fractions):
-    global BASE_PERCENT
-    ctr_array = [BASE_PERCENT, BASE_PERCENT]
+    ctr_array = [Param.BASE_PERCENT, Param.BASE_PERCENT]
     impression_1 = bin_size * fractions[0]
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -391,12 +407,10 @@ def simulator_function_bandit_constant_type1_err(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_exp(bin_size, count, fractions):
-    global BASE_PERCENT
-    global LIFT
-    ctr_array = np.array([BASE_PERCENT, BASE_PERCENT * LIFT])
-    ctr_array = ctr_array**(1.02 * count)
-    if ctr_array[0] < 0.01:
-        ctr_array = np.array([0.04, 0.05])
+    ctr_array = np.array([Param.BASE_PERCENT, Param.BASE_PERCENT * Param.LIFT])
+    ctr_array = ctr_array * np.exp(-count * Param.EXP_RATE)
+    if ctr_array[0] < Param.EXP_STOP * Param.BASE_PERCENT:
+        ctr_array = np.array([Param.EXP_STOP * Param.BASE_PERCENT, Param.EXP_STOP * Param.BASE_PERCENT * Param.LIFT])
     impression_1 = bin_size * fractions[0]
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -405,11 +419,10 @@ def simulator_function_bandit_exp(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_exp_type1_err(bin_size, count, fractions):
-    global BASE_PERCENT
-    ctr_array = np.array([BASE_PERCENT, BASE_PERCENT])
-    ctr_array = ctr_array**(1.02 * count)
-    if ctr_array[0] < 0.01:
-        ctr_array = np.array([0.05, 0.05])
+    ctr_array = np.array([Param.BASE_PERCENT, Param.BASE_PERCENT])
+    ctr_array = ctr_array * np.exp(-count * Param.EXP_RATE)
+    if ctr_array[0] < Param.EXP_STOP * Param.BASE_PERCENT:
+        ctr_array = np.array([Param.EXP_STOP * Param.BASE_PERCENT, Param.EXP_STOP * Param.BASE_PERCENT])
     impression_1 = bin_size * fractions[0]
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -418,8 +431,7 @@ def simulator_function_bandit_exp_type1_err(bin_size, count, fractions):
     return (conversion_1, conversion_2, impression_1, impression_2, optimal_conversions)
 
 def simulator_function_bandit_random_walk_preset(bin_size, count, fractions, walk_array):
-    global LIFT
-    ctr_array = [walk_array[count], walk_array[count] * LIFT]
+    ctr_array = [walk_array[count], walk_array[count] * Param.LIFT]
     impression_1 = bin_size * fractions[0]
     impression_2 = bin_size - impression_1
     conversion_1 = np.random.binomial(impression_1, ctr_array[0], 1)
@@ -444,24 +456,25 @@ def simulator():
     print "(traditional_avg, new_avg, traditional_inconclusive_count,",\
           "new_inconclusive_count, traditional_err_count, new_err_count,",\
           "missed_traditional_conversion_avg, missed_new_conversion_avg,",\
+          "traditional_err_end_avg, new_err_end_avg,",\
           "optimal_traditional_conversion_avg, optimal_new_conversion_avg)"
     print stat_simulator.run_sequencial_experiment(simulator_function_simple)
-    print stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
+    # print stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
     print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr)
-    print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
-    print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset(x, y, random_walk_array))
-    print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset_type1_err(x, y, random_walk_array))
+    # print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
+    # print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset(x, y, random_walk_array))
+    # print stat_simulator.run_sequencial_experiment(lambda x, y: simulator_function_random_walk_preset_type1_err(x, y, random_walk_array))
     
     print "Bandit Testing"
-    print "(bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, optimal_bandit_conversion_avg)"
+    print "(bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)"
     print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
     print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
-    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
-    print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
+    # print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
+    # print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset_type1_err(x, y, z, random_walk_array))
 
 if __name__ == '__main__':
     simulator()
