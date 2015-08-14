@@ -624,24 +624,28 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     neon_service_add_to_chain(request, chain, buf); 
     
     buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
-    boost::scoped_ptr<std::string> scoped_url; 
  
-    scoped_url.reset(neon_mastermind_image_url_lookup(account_id,
+    std::string image_url("");  
+    neon_mastermind_image_url_lookup(account_id,
                      (char*)video_id,
                      &bucket_id,
                      height,
-                     width));
+                     width, 
+                     image_url);
     
-    if (scoped_url.get() == NULL) {  
+    if (image_url.size() == 0) {  
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
         neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;
     }
-
-    buf->pos = (u_char*)scoped_url.get()->c_str(); 
-    buf->last = buf->pos + scoped_url.get()->length(); 
-    content_length += scoped_url.get()->length();  
+    
+    // a copy here to avoid invalid reads when trying to free image_url
+    u_char* new_url = (u_char *)ngx_pnalloc(request->pool, image_url.length());
+    ngx_copy(new_url, (u_char*)image_url.c_str(), image_url.length());
+    buf->pos = new_url; 
+    buf->last = buf->pos + image_url.length();  
+    content_length += image_url.length();  
 
     neon_service_add_to_chain(request, chain, buf);
 
@@ -730,23 +734,26 @@ neon_service_client_api(ngx_http_request_t *request,
     buf->last = buf->pos + redirect_str.len;  
     neon_service_add_to_chain(request, chain, buf); 
  
-    boost::scoped_ptr<std::string> scoped_url;  
-    scoped_url.reset(neon_mastermind_image_url_lookup(account_id,
+    std::string image_url(""); 
+    neon_mastermind_image_url_lookup(account_id,
                      (char*)video_id,
                       &bucket_id,
                       height,
-                      width));
+                      width, 
+                      image_url);
 
-    if (scoped_url.get() == NULL) { 
+    if (image_url.size() == 0) { 
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
         return NEON_CLIENT_API_FAIL;
     }
 
     buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
-
-    buf->pos = (u_char*)scoped_url.get()->c_str(); 
-    buf->last = buf->pos + scoped_url.get()->length();
+    // a copy here to avoid invalid reads when trying to free image_url
+    u_char* new_url = (u_char *)ngx_pnalloc(request->pool, image_url.length());
+    ngx_copy(new_url, (u_char*)image_url.c_str(), image_url.length());
+    buf->pos = new_url; 
+    buf->last = buf->pos + image_url.length();  
  
     // we don't want to add the url to the chain here, since we are 
     // simply redirecting, set the headers with the url information 
@@ -863,17 +870,17 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
             neon_service_set_bucket_id(&ipAddress, &vid_str, &bucket_id, request->pool);
         }
 
-        //char *tid = NULL; 
-        boost::scoped_ptr<std::string> scoped_url;  
-        scoped_url.reset(neon_mastermind_tid_lookup(account_id, (const char*)video_id, &bucket_id));
+        std::string tid(""); 
+        neon_mastermind_tid_lookup(account_id, (const char*)video_id, &bucket_id, tid);
 
-        // allocate a buffer and its chain
         buf = (ngx_buf_t *)ngx_calloc_buf(request->pool);
 
-        if(scoped_url.get() != NULL) {
-            buf->start = buf->pos  = (u_char*)scoped_url.get()->c_str();
-            buf->end = buf->last = buf->pos + scoped_url.get()->length();
-            clen += scoped_url.get()->length();
+        if(tid.length() > 0) {
+            u_char* new_tid = (u_char *)ngx_pnalloc(request->pool, tid.length());
+            ngx_copy(new_tid, (u_char*)tid.c_str(), tid.length());
+            buf->pos = new_tid; 
+            buf->last = buf->pos + tid.length();  
+            clen += tid.length();
         }
         else {
             buf->start = buf->pos = noimage.data;

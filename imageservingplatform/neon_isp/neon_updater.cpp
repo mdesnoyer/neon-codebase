@@ -155,20 +155,21 @@ neon_runloop(void * arg){
              *  Validate expiry of new file 
              */
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
-            if (new_mastermind_expiry < time(0)){
+            if (new_mastermind_expiry < time(0)) {
                 
-                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
+                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE) {
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
                             "updater: fetched mastermind is expired but ahead of current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
-                }else{ 
+                }
+                else { 
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
                             "updater: fetched mastermind is expired and older than current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                     neon_sleep(sleep_time);
                     continue;
                 }
-	        } 
+	    } 
             
             /*
              *  Parse and process new mastermind file into memory
