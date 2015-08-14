@@ -115,7 +115,7 @@ def process_episode(episode, segments):
             continue
 
         time_diff = (seg_time - filt_segments[-1][0]).total_seconds()
-        if time_diff > options.segment_length:
+        if time_diff > (options.segment_length + 0.1):
             # We found a discontinuity
             if skip_count == n_seg_cut:
                 # It's the start of the discontinuty so throw out the
