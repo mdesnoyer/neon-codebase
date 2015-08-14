@@ -3036,7 +3036,15 @@ class NeonApiRequest(NamespacedStoredObject):
                     '_type': typemap[obj_dict['request_type']].__name__,
                     '_data': copy.deepcopy(obj_dict)
                     }
-            return super(NeonApiRequest, cls)._create(key, obj_dict)
+            obj = super(NeonApiRequest, cls)._create(key, obj_dict)
+
+            try:
+                obj.publish_date = datetime.datetime.utcfromtimestamp(
+                    obj.publish_date / 1000.)
+                obj.publish_date = obj.publish_date.isoformat()
+            except ValueError:
+                pass
+            return obj
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 

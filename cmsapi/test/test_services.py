@@ -1123,7 +1123,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             'video_id'  : 654321,
             "callback_url" : "http://callback",
             'custom_data' : { 'my_id' : 123456, 'my_string': 'string'},
-            'duration' : 123456.5
+            'duration' : 123456.5,
+            'publish_date' : '2015-06-03T13:04:33Z'
             }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request' % (self.a_id, "61"))
@@ -1139,12 +1140,14 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.video_url, "http://test.mp4")
         self.assertEquals(video.integration_id, "61")
         self.assertEquals(video.duration, 123456.5)
+        self.assertEquals(video.publish_date, '2015-06-03T13:04:33Z')
 
         job = neondata.NeonApiRequest.get(video.job_id, api_key)
         self.assertEquals(job.integration_id, '61')
         self.assertEquals(job.callback_url, "http://callback")
         self.assertIsNone(job.default_thumbnail)
         self.assertIsNone(job.external_thumbnail_id)
+        self.assertEquals(job.publish_date, '2015-06-03T13:04:33Z')
 
     def test_create_video_with_default_thumb(self):
         self.cp_mock_async_client().fetch.side_effect = \
