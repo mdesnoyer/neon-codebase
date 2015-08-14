@@ -158,14 +158,17 @@ def process_episode(episode, segments):
 
     _log.info('Submitting job')
     submit_neon_job(airing_id, name,
-                    's3://neon-test/dlea/live/turner/%s' % episode_fn)
+                    's3://neon-test/dlea/live/turner/%s' % episode_fn,
+                    start_time,
+                    len(filt_segments) * options.segment_length)
 
     _log.info('Erasing segments')
     for seg_time, seg_fn in ep_segments:
         os.remove(seg_fn)
     os.remove(episode_full_path)
 
-def submit_neon_job(video_id, video_title, video_url):
+def submit_neon_job(video_id, video_title, video_url, publish_date,
+                    duration=None):
     request_url = ('http://services.neon-lab.com/api/v1/accounts/'
                    '%s/neon_integrations/0/create_thumbnail_api_request' %
                    options.account_id)
@@ -176,7 +179,9 @@ def submit_neon_job(video_id, video_title, video_url):
         "video_id": video_id,
         "video_url": video_url, 
         "video_title": video_title,
-        "topn" : 10
+        "topn" : 10,
+        "duration" : duration,
+        "publish_date" : publish_date.isoformat()
     }
     response = requests.post(request_url, json.dumps(data), headers=headers)
     if response.status_code == 409:
