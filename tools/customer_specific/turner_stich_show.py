@@ -30,8 +30,8 @@ import utils.neon
 from utils.options import define, options
 define("working_dir", default="/mnt/neon/vids")
 define("schedule", default="http://data.tntdrama.com/processors/TNTE.json")
-define("account_id", default="325")
-define("api_key", default="u21ep2m88rapp50dmbpjj2un")
+define("account_id", default="257")
+define("api_key", default="8gnmm5kkmzwrgw89xekwl84n")
 define("segment_length", default=10.0, type=float,
        help='Length in seconds of each segment')
 define("break_buffer", default=30.0, type=float,
