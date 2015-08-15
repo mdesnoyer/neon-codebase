@@ -141,9 +141,9 @@ def process_episode(episode, segments):
                 out_stream.writelines(in_stream)
 
     _log.info('Transmuxing file to mp4')
+    if os.path.exists(episode_full_path):
+        os.remove(episode_full_path)
 
-    if os.path.exists(full_ts_fn):
-        os.remove(full_ts_fn)
     subprocess.check_call('/usr/bin/ffmpeg -i %s  -absf aac_adtstoasc '
                           '-vcodec copy -acodec copy %s' % 
                           (full_ts_fn, episode_full_path),
