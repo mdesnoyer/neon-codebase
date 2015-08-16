@@ -397,7 +397,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 http_callback=params.get('callback_url', None),
                 default_thumbnail=params.get('default_thumbnail', None),
                 external_thumbnail_id=params.get('external_thumbnail_id',
-                                                 None)).save()
+                                                 None),
+                publish_date=params.get('publish_date', None)).save()
             
             response = tornado.httpclient.HTTPResponse(http_request, 200,
                 buffer=StringIO('{"job_id":"%s"}'%job_id))
@@ -1140,14 +1141,14 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(video.video_url, "http://test.mp4")
         self.assertEquals(video.integration_id, "61")
         self.assertEquals(video.duration, 123456.5)
-        self.assertEquals(video.publish_date, '2015-06-03T13:04:33Z')
+        self.assertEquals(video.publish_date, '2015-06-03T13:04:33+00:00')
 
         job = neondata.NeonApiRequest.get(video.job_id, api_key)
         self.assertEquals(job.integration_id, '61')
         self.assertEquals(job.callback_url, "http://callback")
         self.assertIsNone(job.default_thumbnail)
         self.assertIsNone(job.external_thumbnail_id)
-        self.assertEquals(job.publish_date, '2015-06-03T13:04:33Z')
+        self.assertEquals(job.publish_date, '2015-06-03T13:04:33+00:00')
 
     def test_create_video_with_default_thumb(self):
         self.cp_mock_async_client().fetch.side_effect = \

@@ -422,7 +422,8 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
             i_id='iid2',
             serving_enabled=False,
             duration=12345.6,
-            custom_data={'some_key': 'some_fun_data'}).save()
+            custom_data={'some_key': 'some_fun_data'},
+            publish_date='2015-07-02T13:09:00Z').save()
         
         vals = {
             "api_key": self.api_key, 
@@ -431,7 +432,8 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
             "topn":2, 
             "callback_url": "http://callback_push_url", 
             "video_title": "test_title",
-            "integration_id" : 'iid2'
+            "integration_id" : 'iid2',
+            "publish_date": '2015-07-02T13:10:00Z'
             }
         resp = self.make_api_request(vals)
         self.assertEqual(resp.code, 201)
@@ -443,6 +445,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(video.url, "http://testurl/video.mp4")
         self.assertEqual(video.custom_data, {'some_key': 'some_fun_data'})
         self.assertEqual(video.duration, 12345.6)
+        self.assertEqual(video.publish_date, '2015-07-02T13:10:00Z')
         self.assertFalse(video.serving_enabled)
         self.assertEqual(video.job_id, job_id)
         self.assertEqual(video.thumbnail_ids, [])
@@ -451,6 +454,7 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(job.integration_id, 'iid2')
         self.assertEqual(job.callback_url, 'http://callback_push_url')
         self.assertEqual(job.video_title, 'test_title')
+        self.assertEqual(job.publish_date, '2015-07-02T13:10:00Z')
 
     def test_default_thubmnail(self):
         internal_video_id = \

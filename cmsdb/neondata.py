@@ -2959,7 +2959,7 @@ class NeonApiRequest(NamespacedStoredObject):
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
-            external_thumbnail_id=None):
+            external_thumbnail_id=None, publish_date=None):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -2984,7 +2984,7 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None # Timestamp in ms or ISO format if string
+        self.publish_date = publish_date # ISO date format of when video is published
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -3043,6 +3043,8 @@ class NeonApiRequest(NamespacedStoredObject):
                     obj.publish_date / 1000.)
                 obj.publish_date = obj.publish_date.isoformat()
             except ValueError:
+                pass
+            except TypeError:
                 pass
             return obj
 
@@ -3750,7 +3752,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 published_date=None):
+                 publish_date=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -3780,7 +3782,7 @@ class VideoMetadata(StoredObject):
         self.custom_data = custom_data or {}
 
         # The time the video was published in ISO 8601 format
-        self.published_date = published_date or \
+        self.publish_date = publish_date or \
           datetime.datetime.now().isoformat()
 
     @classmethod

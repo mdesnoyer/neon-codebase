@@ -820,6 +820,8 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     video_obj.integration_id = api_request.integration_id
                     video_obj.serving_enabled = \
                       len(video_obj.thumbnail_ids) > 0
+                    video_obj.publish_date = publish_date or \
+                      video_obj.publish_date
                 internal_video_id = \
                   neondata.InternalVideoID.generate(api_key, vid)
                 yield tornado.gen.Task(
