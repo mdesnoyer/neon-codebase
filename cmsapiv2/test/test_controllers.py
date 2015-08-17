@@ -389,13 +389,19 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+                                    tids=['testing_vtid_one', 'testing_vtid_two'])
         vm.save()
         url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
-       
+        rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['video_count'], 1)
+
+        thumbnail_array = rjson['videos'][0]['thumbnails']
+        self.assertEquals(len(thumbnail_array), 2)
+        self.assertEquals(thumbnail_array[0]['width'], 500)
 
     @tornado.testing.gen_test
     def test_update_video_does_not_exist(self):

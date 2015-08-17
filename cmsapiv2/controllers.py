@@ -431,8 +431,13 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             args['account_id'] = str(account_id)
             schema(args)
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.BRIGHTCOVE)
-            yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, neondata.IntegrationType.BRIGHTCOVE)
+            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, 
+                                              acct, 
+                                              args, 
+                                              neondata.IntegrationType.BRIGHTCOVE)
+            yield tornado.gen.Task(IntegrationHelper.addStrategy, 
+                                   acct, 
+                                   neondata.IntegrationType.BRIGHTCOVE)
             self.success(platform.to_json())
         except SaveError as e:
             self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id}, e.code)  
@@ -601,8 +606,8 @@ class VideoHelper():
           'video_url': All(str, Length(min=1, max=512)), 
           'callback_url': All(str, Length(min=1, max=512)), 
           'video_title': All(str, Length(min=1, max=256)),
-          'default_thumbnail_id': All(str, Length(min=1, max=128)),
-          'external_thumbnail_ref': All(str, Length(min=1, max=512))
+          'default_thumbnail_url': All(str, Length(min=1, max=128)),
+          'thumbnail_ref': All(str, Length(min=1, max=512))
         })
         args = parse_args(request)
         args['account_id'] = str(account_id)
@@ -611,24 +616,28 @@ class VideoHelper():
         integration_id = args.get('integration_id', None) 
  
         user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
-        if integration_id: 
-            integration_type = user_account.integrations[integration_id] 
-            # TODO investigate the data layer to see if we can get a 
-            # top-level platform object that gets rid of having these ifs
-            if integration_type == neondata.IntegrationType.BRIGHTCOVE:
-                platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
-                                                  account_id_api_key, 
-                                                  integration_id) 
-                # create the proper api request 
-            elif integration_type == neondata.IntegrationType.OOYALA:
-                platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
-                                                  account_id_api_key, 
-                                                  integration_id)  
-                # create the proper api request 
-        #else: 
-            # just create a neon api request 
-           
+
+        def _createNeonApiRequest(r): 
+            job_id = uuid.uuid1().hex
+            r.job_id = job_id
+            r.api_key = account_id_api_key 
+            r.video_id = args['external_video_ref'] 
+            if integration_id: 
+                r.integration_id = integration_id
+                r.integration_type = user_account.integrations[integration_id]
+            r.video_url = args.get('video_url', None) 
+            r.callback_url = args.get('callback_url', None)
+            r.video_title = args.get('video_title', None) 
+            r.default_thumbnail = args.get('default_thumbnail_url', None) 
+            r.external_thumbnail_ref = args.get('thumbnail_ref', None)  
+            
+        api_request = yield tornado.gen.Task(neondata.NeonApiRequest.modify, 
+                                             job_id, 
+                                             _createNeonApiRequest, 
+                                             create_missing=True) 
+      
         # result = add the job
+        # this should be done with a call to video_server.add_job, or via http
         if result: 
             raise tornado.gen.Return(result) 
         else: 
@@ -637,7 +646,12 @@ class VideoHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def getThumbnailsFromIds(tids):
-        raise tornado.gen.Return('{1: "1"}')
+        if tids: 
+            thumbnails = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
+                                                tids)
+            thumbnails = [obj.__dict__ for obj in thumbnails] 
+
+        raise tornado.gen.Return(thumbnails)
      
 '''*********************************************************************
 VideoHandler     : class responsible for creating/updating/getting a
@@ -698,7 +712,7 @@ class VideoHandler(APIV2Handler):
                        new_video = {} 
                        for field in field_set: 
                            if field == 'thumbnails':
-                               new_video['thumbnails'] = VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids']) 
+                               new_video['thumbnails'] = yield VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids'])
                            elif field in obj: 
                                new_video[field] = obj[field] 
                        if new_video: 
