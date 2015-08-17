@@ -90,6 +90,16 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 'lastModifiedDate',
                 'referenceId']
 
+    def get_custom_fields(self):
+        '''Return a list of custom fields to request.'''
+        custom_fields = None
+        if self.platform.id_field not in [
+                neondata.BrightcovePlatform.REFERENCE_ID, 
+                neondata.BrightcovePlatform.BRIGHTCOVE_ID]:
+            custom_fields = [self.platform.id_field]
+
+        return custom_fields
+
     def _get_video_url_to_download(self, b_json_item):
         '''
         Return a video url to download from a brightcove json item 
@@ -151,39 +161,47 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         
 
     @tornado.gen.coroutine
-    def lookup_and_submit_videos(self, ovp_video_ids):
+    def lookup_and_submit_videos(self, ovp_video_ids, continue_on_error=False):
         '''Looks up a list of video ids and submits them.
 
-        Returns: dictionary of video_id => job_id
+        Returns: dictionary of video_id => job_id or exception
         '''
         try:
             bc_video_info = yield self.bc_api.find_videos_by_ids(
                 ovp_video_ids,
-                BrightcoveIntegration.get_submit_video_fields(),
+                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                custom_fields=self.get_custom_fields(),
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
             statemon.state.increment('bc_api_errors')
             _log.error('Error getting data from Brightcove: %s' % e)
             raise integrations.ovp.OVPError(e)
 
-        retval = yield self.submit_many_videos(bc_video_info)
+        retval = yield self.submit_many_videos(
+            bc_video_info,
+            continue_on_error=continue_on_error)
 
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
     def submit_playlist_videos(self):
-        '''Submits any playlist videos for this account.'''
+        '''Submits any playlist videos for this account.
+
+        Returns: dictionary of video_id => job_id
+        '''                
         retval = {}
         for playlist_id in self.platform.playlist_feed_ids:
             try:
                 cur_results = yield self.bc_api.find_playlist_by_id(
                     playlist_id,
-                    BrightcoveIntegration.get_submit_video_fields(),
-                    ['videos'],
+                    video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                    playlist_fields=['id', 'videos'],
+                    custom_fields=self.get_custom_fields(),
                     async=True)
             except brightcove_api.BrightcoveApiServerError as e:
                 statemon.state.increment('bc_api_errors')
-                _log.error('Error getting playlist from Brightcove: %s' % e)
+                _log.error('Error getting playlist %s from Brightcove: %s' 
+                           % (playlist_id, e))
                 raise integrations.ovp.OVPError(e)
 
             cur_jobs = yield self.submit_many_videos(cur_results['videos'])
@@ -194,17 +212,11 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def submit_new_videos(self):
         '''Submits new videos in the account.'''
-        from_date = datetime.datetime(2000, 1, 1)
+        from_date = datetime.datetime(1980, 1, 1)
         if (self.platform.last_process_date is not None and 
             not self.platform.uses_batch_provisioning):
             from_date = datetime.datetime.utcfromtimestamp(
                 self.platform.last_process_date)
-
-        custom_fields = None
-        if self.platform.id_field not in [
-                neondata.BrightcovePlatform.REFERENCE_ID, 
-                neondata.BrightcovePlatform.BRIGHTCOVE_ID]:
-            custom_fields = [self.platform.id_field]
 
         video_iter = self.bc_api.find_modified_videos_iter(
             from_date=from_date,
@@ -212,7 +224,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             sort_by='MODIFIED_DATE',
             sort_order='DESC',
             video_fields=BrightcoveIntegration.get_submit_video_fields(),
-            custom_fields=custom_fields)
+            custom_fields=self.get_custom_fields())
 
         count = 0
         last_mod_date = None
@@ -222,9 +234,15 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 # New account, so only process the most recent videos
                 break
 
-            item = yield video_iter.next(async=True)
-            if item == StopIteration:
-                break
+            try:
+                item = yield video_iter.next(async=True)
+                if item == StopIteration:
+                    break
+            except brightcove_api.BrightcoveApiServerError as e:
+                statemon.state.increment('bc_api_errors')
+                _log.error('Error getting new videos from Brightcove: %s' %
+                           e)
+                raise integrations.ovp.OVPError(e)
 
             if (self.platform.last_process_date is not None and 
                 int(item['lastModifiedDate']) <=  
@@ -271,8 +289,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         for data in vid_objs:
             try:
                 retval[data['id']] = yield self.submit_one_video_object(
-                    data['id'],
-                    data)
+                    data, grab_new_thumb)
             except Exception as e:
                 if continue_on_error:
                     retval[data['id']] = e
@@ -363,7 +380,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         publish_date = vid_obj.get('publishedDate', None)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(
-                publish_date / 1000.0).isoformat()
+                int(publish_date) / 1000.0).isoformat()
 
         if not video_id in self.platform.videos:
             # The video hasn't been submitted before
