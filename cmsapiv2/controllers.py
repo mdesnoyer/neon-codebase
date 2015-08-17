@@ -524,13 +524,43 @@ class ThumbnailHandler(APIV2Handler):
             video_id = args['video_id'] 
 
             video = yield tornado.gen.Task(neondata.VideoMetadata.get, video_id)
-            #TODO what to do about CDN we need an integration_id there 
-            # if the video has an integration id we can grab the CDN stuff 
-            # if not i'm not sure what to do here 
-            
-            #thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create, 
-            #TODO figure out rank, update rank of new thumbnail 
-            #TODO save thumbnail  
+            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,video_id)
+
+            current_thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+                                                        video.thumbnail_ids)
+            cdn_key = neondata.CDNHostingMetadataList.create_key(account_id_api_key,
+                                                                 video.integration_id)
+            cdn_metadata = yield tornado.gen.Task(neondata.CDNHostingMetadataList.get,
+                                                  cdn_key)
+            # ranks can be negative 
+            min_rank = 1
+            for thumb in current_thumbnails:
+                if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
+                    thumb.rank < min_rank):
+                    min_rank = thumb.rank
+            cur_rank = min_rank - 1
+ 
+            new_thumbnail = neondata.ThumbnailMetadata(None,
+                                                       interval_vid=internal_video_id, 
+                                                       ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
+                                                       rank=cur_rank)
+            # upload image to cdn 
+            yield video.download_and_add_thumbnail(new_thumbnail,
+                                                   args['thumbnail_location'],
+                                                   cdn_metadata,
+                                                   async=True))
+            # save the thumbnail 
+            result = yield tornado.gen.Task(neondata.ThumbnailMetadata.save, 
+                                            new_thumbnail)
+            # save the video 
+            new_video = yield tornado.gen.Task(neondata.VideoMetadata,modify, 
+                                               internal_video_id, 
+                                               lambda x: x.thumbnail_ids.extend(result.key))
+            if new_video: 
+                #self.success 
+            else: 
+                #self.error 
+              
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
 
@@ -638,6 +668,7 @@ class VideoHelper():
       
         # result = add the job
         # this should be done with a call to video_server.add_job, or via http
+        # add the video, save the default thumbnail
         if result: 
             raise tornado.gen.Return(result) 
         else: 
