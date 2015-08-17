@@ -1109,11 +1109,14 @@ class BrightcoveFeedIterator(object):
     If you want to do this iteration so that any calls are
     asynchronous, then you have to manually create a loop like:
 
-    try:
-      while True:
-        item = yield iter.next(async=True)
-    except StopIteration:
-      pass      
+    while True:
+       item = yield iter.next(async=True)
+       if item == StopIteration:
+          break
+
+    Note, in the asynchronous case, you have to catch the special
+    api.brightcove_api.FeedStopIteration because StopIteration is
+    dealt with specially by the tornado framework
     
     '''
     def __init__(self, func, page_size=100, max_results=None, **kwargs):
@@ -1143,7 +1146,9 @@ class BrightcoveFeedIterator(object):
     def next(self):
         if (self.max_results is not None and 
             self.items_returned >= self.max_results):
-            raise StopIteration()
+            e = StopIteration()
+            e.value = StopIteration
+            raise e
         
         if len(self.page_data) == 0:
             # Get more entries
@@ -1152,7 +1157,9 @@ class BrightcoveFeedIterator(object):
 
         if len(self.page_data) == 0:
             # We've gotten all the data
-            raise StopIteration()
+            e = StopIteration()
+            e.value = StopIteration
+            raise e
 
         self.items_returned += 1
         raise tornado.gen.Return(self.page_data.pop())

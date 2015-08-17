@@ -10,6 +10,7 @@ import api.brightcove_api
 from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
 from cStringIO import StringIO
+import datetime
 import integrations.brightcove
 import json
 import logging
@@ -56,7 +57,7 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
                             ['acct1_v1_n1', 'acct1_v1_bc1'],
                             i_id='i1')
         vid.save()
-        self.platform.add_video('v1', None)
+        self.platform.add_video('v1', 'job1')
         ThumbnailMetadata('acct1_v1_n1', 'acct1_v1',
                           ttype=ThumbnailType.NEON, rank=1).save()
 
@@ -519,6 +520,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
               'referenceId': None,
               'name' : 'Some video',
               'length' : 100,
+              'publishedDate' : 1439768747000,
               'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
               'videoStill' : {
                   'id' : 'still_id',
@@ -540,7 +542,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
                   'neon_integrations/i1/create_thumbnail_api_request'))
-        self.assertDictEqual(
+        self.assertEquals(
             submission,
             {'video_id': '123456789',
              'video_url': 'http://video.mp4',
@@ -549,15 +551,16 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
              'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
              'external_thumbnail_id': 'still_id',
              'custom_data': { '_bc_int_data' :
-                              { 'bc_id' : 'v1', 'bc_refid': None }},
-             'duration' : 0.1
+                              { 'bc_id' : 123456789, 'bc_refid': None }},
+             'duration' : 0.1,
+             'publish_date' : '2015-08-16T23:45:47'
              })
 
         # Make sure the video was added to the BrightcovePlatform object
         self.assertEquals(
-            neondata.BrightcovePlatform.get('acct1', 'i1').videos['v1'],
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['123456789'],
             job_id)
-        self.assertEquals(self.integration.platform.videos['v1'], job_id)
+        self.assertEquals(self.integration.platform.videos['123456789'], job_id)
 
     @tornado.testing.gen_test
     def test_submit_video_using_reference_id(self):
@@ -594,7 +597,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
              'external_thumbnail_id': 'still_id',
              'custom_data': { '_bc_int_data' :
                               { 'bc_id' : 'v1', 'bc_refid': 'video_ref' }},
-             'duration' : 0.1
+             'duration' : 0.1,
+             'publish_date' : None
              })
 
         # Make sure the video was added to the BrightcovePlatform object
@@ -663,6 +667,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                               { 'bc_id' : 'v1', 'bc_refid': 'video_ref' },
                               'mediaapiid' : 465972
                               },
+             'publish_date' : None,
              'duration' : 0.1
              })
 
@@ -932,9 +937,9 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'acct1', 'i1', lambda x: x, create_missing=True)
         self.integration = integrations.brightcove.BrightcoveIntegration(
             'a1', self.platform)
-        self.mock_find_videos = MagicMock()
-        self.integration.bc_api.find_modified_videos = \
-          self._future_wrap_mock(self.mock_find_videos)
+        find_modified_mock = MagicMock()
+        self.integration.bc_api.find_modified_videos = find_modified_mock
+        self.mock_find_videos =  self._future_wrap_mock(find_modified_mock)
 
         super(TestSubmitNewVideos, self).setUp()
 
@@ -944,43 +949,50 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
 
         super(TestSubmitNewVideos, self).tearDown()
 
-    def test_typical_bc_account(self):
-        self.last_process_date = datetime.datetime(2014, 1, 1)
+    def _get_video_submission(self):
+        '''Returns, the url, parsed json submition'''
+        cargs, kwargs = self.submit_mock.call_args
 
-        self.mock_find_videos.side_effect = [[
-            {
-            'id' : 'v1',
-            'length' : 100,
-            'FLVURL' : 'http://video.mp4',
-            'lastModifiedDate' : 1420080400000l,
-            'name' : 'Some Video',
-            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-            'videoStill' : {
-                'id' : 'still_id',
-                'referenceId' : 'my_still_ref',
-                'remoteUrl' : None
-            },
-            }],
-            []
-            ]
+        response = cargs[0]
+        return response.url, json.loads(response.body)
+
+    @tornado.testing.gen_test
+    def test_typical_bc_account(self):
+        self.integration.platform.last_process_date = \
+          1420080300l
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000l,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+
+        self.mock_find_videos.side_effect = [[video_obj],[]]
 
         yield self.integration.submit_new_videos()
 
         # Make sure that the last processed date was updated
         self.assertEquals(self.integration.platform.last_process_date,
-                          1420080400000l)
+                          1420080400l)
         self.assertEquals(
             neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
-            1420080400000l)
+            1420080400l)
         
         # Make sure that a video was submitted
         self.assertEquals(self.submit_mock.call_count, 1)
 
         # Check the call to brightcove
-        cargs, kwargs = self.mock_find_videos.call_args()
+        cargs, kwargs = self.mock_find_videos.call_args
         
         self.assertDictContainsSubset({
-            'from_date' : datetime.datetime(2014, 1, 1),
+            'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
             'sort_order' : 'DESC',
@@ -989,8 +1001,94 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
                               'renditions', 'length', 'name', 
                               'publishedDate', 'lastModifiedDate', 
                               'referenceId'],
-            'custom_fields' : None,
-            'media_delivery' : 'http'},
+            'custom_fields' : None},
+            kwargs)
+
+        # Submit new videos again and this time, there should be no new ones
+        self.submit_mock.reset_mock()
+        self.mock_find_videos.side_effect = [[]]
+
+        yield self.integration.submit_new_videos()
+
+        self.assertEquals(self.submit_mock.call_count, 0)
+        cargs, kwargs = self.mock_find_videos.call_args
+        self.assertDictContainsSubset({
+            'from_date' : datetime.datetime(2015, 1, 1, 2, 46, 40),
+            '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
+            'sort_by' : 'MODIFIED_DATE',
+            'sort_order' : 'DESC',
+            'video_fields' : ['id', 'videoStill', 'videoStillURL', 
+                              'thumbnail', 'thumbnailURL', 'FLVURL', 
+                              'renditions', 'length', 'name', 
+                              'publishedDate', 'lastModifiedDate', 
+                              'referenceId'],
+            'custom_fields' : None},
+            kwargs)
+        
+
+    @tornado.testing.gen_test
+    def test_new_account_added(self):
+        self.integration.platform.last_process_date = None
+
+        self.mock_find_videos.side_effect = [[
+            { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000l,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            },
+            { 'id' : 'v2',
+              'length' : 100,
+              'FLVURL' : 'http://video2.mp4',
+              'lastModifiedDate' : 1420080300000l,
+              'name' : 'Some Video 2',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=2',
+              'videoStill' : {
+                  'id' : 'still_id2',
+                  'referenceId' : 'my_still_ref2',
+                  'remoteUrl' : None
+                  },
+            }
+            ],
+            []
+            ]
+
+        with options._set_bounded(
+                'integrations.brightcove.max_vids_for_new_account', 1):
+            yield self.integration.submit_new_videos()
+
+        # Make sure that the last processed date was updated
+        self.assertEquals(self.integration.platform.last_process_date,
+                          1420080400l)
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
+            1420080400l)
+        
+        # Make sure that only one video was submitted
+        self.assertEquals(self.submit_mock.call_count, 1)
+        url, submission = self._get_video_submission()
+        self.assertEquals(submission['video_id'], 'v1')
+
+        # Check the call to brightcove
+        cargs, kwargs = self.mock_find_videos.call_args
+        
+        self.assertDictContainsSubset({
+            'from_date' : datetime.datetime(2000, 1, 1),
+            '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
+            'sort_by' : 'MODIFIED_DATE',
+            'sort_order' : 'DESC',
+            'video_fields' : ['id', 'videoStill', 'videoStillURL', 
+                              'thumbnail', 'thumbnailURL', 'FLVURL', 
+                              'renditions', 'length', 'name', 
+                              'publishedDate', 'lastModifiedDate', 
+                              'referenceId'],
+            'custom_fields' : None},
             kwargs)
     
 if __name__ == '__main__':

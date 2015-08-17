@@ -2420,7 +2420,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        #The publish date of the last processed video - UTC timestamp in seconds
+        #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation

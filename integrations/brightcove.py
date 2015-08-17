@@ -12,6 +12,7 @@ if sys.path[0] != __base_path__:
 
 from api import brightcove_api
 from cmsdb import neondata
+import datetime
 import integrations.ovp
 import logging
 import re
@@ -193,16 +194,16 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def submit_new_videos(self):
         '''Submits new videos in the account.'''
-        from_date = datetime.date(2000, 1, 1)
+        from_date = datetime.datetime(2000, 1, 1)
         if (self.platform.last_process_date is not None and 
             not self.platform.uses_batch_provisioning):
-            from_date = datetime.datetimefromtimestamp(
+            from_date = datetime.datetime.utcfromtimestamp(
                 self.platform.last_process_date)
 
         custom_fields = None
         if self.platform.id_field not in [
-                neondata.BrighcovePlatform.REFERENCE_ID, 
-                neondata.BrighcovePlatform.BRIGHTCOVE_ID]:
+                neondata.BrightcovePlatform.REFERENCE_ID, 
+                neondata.BrightcovePlatform.BRIGHTCOVE_ID]:
             custom_fields = [self.platform.id_field]
 
         video_iter = self.bc_api.find_modified_videos_iter(
@@ -215,32 +216,31 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         count = 0
         last_mod_date = None
-        try:
-            while True:
-                if (self.platform.last_process_date is None and 
-                    count > options.max_vids_for_new_account):
-                    # New account, so only process the most recent videos
-                    raise StopIteration
-                
-                item = yield video_iter.next(async=True)
+        while True:
+            if (self.platform.last_process_date is None and 
+                count >= options.max_vids_for_new_account):
+                # New account, so only process the most recent videos
+                break
 
-                if (self.platform.last_process_date is not None and 
-                    int(item['lastModifiedDate']) >  
-                    (self.platform.last_process_date * 1000)):
-                    # No new videos
-                    raise StopIteration
+            item = yield video_iter.next(async=True)
+            if item == StopIteration:
+                break
 
-                yield self.submit_one_video_object(item)
+            if (self.platform.last_process_date is not None and 
+                int(item['lastModifiedDate']) <=  
+                (self.platform.last_process_date * 1000)):
+                # No new videos
+                break
 
-                count += 1
-                last_mod_date = max(last_mod_date,
-                                    int(item['lastModifiedDate']))
-        except StopIteration:
-            pass
+            yield self.submit_one_video_object(item)
+
+            count += 1
+            last_mod_date = max(last_mod_date,
+                                int(item['lastModifiedDate']))
 
         if last_mod_date is not None:
             def _set_mod_date(x):
-                x.last_process_date = last_mod_date / 1000
+                x.last_process_date = last_mod_date / 1000.0
             self.platform = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,
@@ -360,9 +360,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         video_id = unicode(video_id)
 
         # Get the published date
-        publish_date = data.get('publishedDate', None)
+        publish_date = vid_obj.get('publishedDate', None)
         if publish_date is not None:
-            publish_date = publish_date / 1000.0
+            publish_date = datetime.datetime.utcfromtimestamp(
+                publish_date / 1000.0).isoformat()
 
         if not video_id in self.platform.videos:
             # The video hasn't been submitted before
@@ -389,14 +390,15 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             job_id = response['job_id']
         else:
             job_id = self.platform.videos[video_id]
-            yield self._update_video_info(vid_obj, video_id)
+            if job_id is not None:
+                yield self._update_video_info(vid_obj, video_id, job_id)
             if grab_new_thumb:
                 yield self._grab_new_thumb(vid_obj, video_id)
 
         raise tornado.gen.Return(job_id)
 
     @tornado.gen.coroutine
-    def _update_video_info(self, data, bc_video_id):
+    def _update_video_info(self, data, bc_video_id, job_id):
         '''Update information in the database about the video.
 
         Inputs:
@@ -410,20 +412,24 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         publish_date = data.get('publishedDate', None)
         if publish_date is not None:
             publish_date = publish_date / 1000.0
-        video_title = data['name']
+        video_title = data.get('name', '')
 
         # Update the video object
         def _update_publish_date(x):
             x.publish_date = publish_date
-        video = yield neondata.VideoMetadata.modify(video_id,
-                                                    _update_publish_date)
+            x.job_id = job_id
+        video = yield tornado.gen.Task(
+            neondata.VideoMetadata.modify,
+            video_id,
+            _update_publish_date)
 
         # Update the request object
         def _update_request(x):
             x.publish_date = publish_date
             x.video_title = video_title
-        yield neondata.NeonApiRequest.modify(
-            video.job_id, self.platform.neon_api_key, _update_request)
+        yield tornado.gen.Task(
+            neondata.NeonApiRequest.modify,
+            job_id, self.platform.neon_api_key, _update_request)
         
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, bc_video_id):
