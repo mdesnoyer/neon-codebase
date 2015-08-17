@@ -299,6 +299,10 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
         user.save() 
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
+        thumbnail_one = neondata.ThumbnailMetadata('testing_vtid_one', width=500)
+        thumbnail_two = neondata.ThumbnailMetadata('testing_vtid_two', width=500)
+        thumbnail_one.save()
+        thumbnail_two.save()
         defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         super(TestVideoHandler, self).setUp()
@@ -355,7 +359,7 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
     def test_get_single_video_with_fields(self):
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
@@ -381,6 +385,16 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
         rjson = json.loads(response.body)
         self.assertTrue(rjson['testing_enabled'])
+        self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_get_single_video_with_thumbnails_field(self):
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm.save()
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+       
         self.assertEquals(response.code, 200)
 
     @tornado.testing.gen_test

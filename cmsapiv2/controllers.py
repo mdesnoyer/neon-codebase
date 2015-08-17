@@ -541,7 +541,6 @@ class ThumbnailHandler(APIV2Handler):
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
             thumbnail_id = args['thumbnail_id'] 
-            #enabled = bool(args['enabled'])
             
             thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
                                                thumbnail_id)
@@ -635,6 +634,11 @@ class VideoHelper():
         else: 
             raise SaveError('unable to add to video, unable to process')
 
+    @staticmethod 
+    @tornado.gen.coroutine
+    def getThumbnailsFromIds(tids):
+        raise tornado.gen.Return('{1: "1"}')
+     
 '''*********************************************************************
 VideoHandler     : class responsible for creating/updating/getting a
                    video
@@ -694,7 +698,7 @@ class VideoHandler(APIV2Handler):
                        new_video = {} 
                        for field in field_set: 
                            if field == 'thumbnails':
-                               new_video['thumbnails'] = 'TODOthumbnails' 
+                               new_video['thumbnails'] = VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids']) 
                            elif field in obj: 
                                new_video[field] = obj[field] 
                        if new_video: 
