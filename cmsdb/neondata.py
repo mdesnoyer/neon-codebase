@@ -772,6 +772,10 @@ class IntegrationType(object):
     OOYALA = 'ooyala'
     OPTIMIZELY = 'optimizely'
 
+class DefaultSizes(object): 
+    WIDTH = 160 
+    HEIGHT = 90 
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -1571,7 +1575,11 @@ class NeonUserAccount(NamespacedStoredObject):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id=None, api_key=None, default_size=(160,90), customer_name=None):
+    def __init__(self, 
+                 a_id=None, 
+                 api_key=None, 
+                 default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
+                 customer_name=None):
         if a_id is None: 
             # this will become the default TODO fix the tests surrounding this 
             # generate a unique account_id instead of letting it be chosen via the api

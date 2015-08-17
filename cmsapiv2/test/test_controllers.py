@@ -28,6 +28,17 @@ class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application
 
+    @tornado.testing.gen_test 
+    def test_create_new_account(self):
+        url = '/api/v2/accounts?customer_name=meisnew'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew') 
+
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
         try: 
@@ -42,6 +53,10 @@ class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase):
 class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application
+    def setUp(self):
+        self.user = neondata.NeonUserAccount(customer_name='testingaccount')
+        self.user.save() 
+        super(TestAccountHandler, self).setUp()
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -105,8 +120,66 @@ class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
         self.assertEquals(rjson['customer_name'], '123abc') 
 
     @tornado.testing.gen_test 
-    def test_update_acct(self):  
-        self.assertEquals(1,1)
+    def test_update_acct_base(self): 
+        url = '/api/v2/accounts/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+         
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        default_size = rjson['default_size']
+        self.assertEquals(default_size[0],1500)
+        self.assertEquals(default_size[1],1200)
+
+    @tornado.testing.gen_test 
+    def test_update_acct_height_only(self): 
+        # do an extra get here, in case we've been modifying this user elsewhere
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        orig_user = json.loads(response.body)
+        default_size_old = orig_user['default_size'] 
+
+        url = '/api/v2/accounts/%s?default_height=1200' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+         
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        new_user = json.loads(response.body)
+        default_size_new = new_user['default_size']
+        self.assertEquals(default_size_new[1],1200)
+        self.assertEquals(default_size_new[0],default_size_old[0])
+
+    @tornado.testing.gen_test 
+    def test_update_acct_width_only(self): 
+        # do a get here to test and make sure the height wasn't messed up
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        orig_user = json.loads(response.body)
+        default_size_old = orig_user['default_size'] 
+
+        url = '/api/v2/accounts/%s?default_width=1200' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+         
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        new_user = json.loads(response.body)
+        default_size_new = new_user['default_size']
+        self.assertEquals(default_size_new[0],1200)
+        self.assertEquals(default_size_new[1],default_size_old[1])
  
 class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase): 
     def get_app(self): 
@@ -320,8 +393,84 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
                                                     allow_nonstandard_methods=True)
 	except Exception as e:
             self.assertEquals(e.code, 400)
-             
-        
+
+class TestThumbnailHandler(tornado.testing.AsyncHTTPTestCase): 
+    def get_app(self): 
+        return controllers.application
+    def setUp(self):
+        user = neondata.NeonUserAccount(customer_name='testingme')
+        user.save() 
+        self.account_id_api_key = user.neon_api_key
+        thumbnail = neondata.ThumbnailMetadata('testingtid', width=500)
+        thumbnail.save()
+        super(TestThumbnailHandler, self).setUp()
+
+    @tornado.testing.gen_test
+    def test_get_thumbnail_exists(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['width'],500)
+        self.assertEquals(rjson['key'],'testingtid')
+
+    @tornado.testing.gen_test
+    def test_get_thumbnail_does_not_exist(self):
+        try: 
+            url = '/api/v2/%s/thumbnails?thumbnail_id=testingtiddoesnotexist' % (self.account_id_api_key) 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method='GET')
+	except Exception as e:
+            self.assertEquals(e.code, 400)
+
+    @tornado.testing.gen_test
+    def test_thumbnail_update_enabled(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        old_tn = json.loads(response.body)
+
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=0' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        new_tn = json.loads(response.body)
+        self.assertEquals(new_tn['enabled'],False)
+
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=1' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        new_tn = json.loads(response.body) 
+        self.assertEquals(new_tn['enabled'],True)
+
+    @tornado.testing.gen_test
+    def test_thumbnail_update_no_params(self):
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        old_tn = json.loads(response.body)
+
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        new_tn = json.loads(response.body) 
+        self.assertEquals(response.code,200)
+        self.assertEquals(new_tn['enabled'],old_tn['enabled'])
+
+    @tornado.testing.gen_test
+    def test_delete_thumbnail_not_implemented(self):
+        try: 
+            url = '/api/v2/%s/thumbnails?thumbnail_id=12234' % (self.account_id_api_key)  
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method='DELETE')
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 501) 
+	    pass 
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

@@ -22,8 +22,6 @@ import tornado.web
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
-#import tornado_json
-#from tornado_json.requesthandlers import APIHandler
 
 import traceback
 
@@ -129,9 +127,11 @@ class NewAccountHandler(APIV2Handler):
             schema(args) 
             user = neondata.NeonUserAccount(customer_name=args['customer_name'])
             try:
-                user.default_size[0] = args['default_width'] 
-                user.default_size[1] = args['default_height']
-                user.default_thumbnail_id = args['default_thumbnail_id']
+                user.default_size = list(user.default_size) 
+                user.default_size[0] = args.get('default_width', neondata.DefaultSizes.WIDTH)
+                user.default_size[1] = args.get('default_height', neondata.DefaultSizes.HEIGHT)
+                user.default_size = tuple(user.default_size)
+                user.default_thumbnail_id = args.get('default_thumbnail_id', None)
             except KeyError as e: 
                 pass 
             output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
@@ -170,10 +170,10 @@ class AccountHandler(APIV2Handler):
             rv_account['updated'] = user_account.updated
             output = json.dumps(rv_account)
             self.success(output) 
-        except AttributeError as e: 
-            self.error('could not retrieve the account', {'account_id': account_id})  
         except MultipleInvalid as e:  
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('could not retrieve the account', {'account_id': account_id})  
  
     '''**********************
     AccountHandler.put
@@ -193,18 +193,20 @@ class AccountHandler(APIV2Handler):
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
             def _update_account(a):
                 try: 
-                    a.default_size[0] = args['default_width'] 
-                    a.default_size[1] = args['default_height']
-                    a.default_thumbnail_id = args['default_thumbnail_id']
+                    a.default_size = list(a.default_size) 
+                    a.default_size[0] = args.get('default_width', acct.default_size[0])
+                    a.default_size[1] = args.get('default_height', acct.default_size[1])
+                    a.default_size = tuple(a.default_size)
+                    a.default_thumbnail_id = args.get('default_thumbnail_id', a.default_thumbnail_id) 
                 except KeyError as e: 
                     pass 
             result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
             output = result.to_json()
             self.success(output)
-        except AttributeError as e:  
-            self.error('could not retrieve the account', {'account_id': account_id})  
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('could not update the account', {'account_id': account_id})  
 
 '''*********************************************************************
 IntegrationHelper : class responsible for helping the integration 
@@ -502,7 +504,8 @@ ThumbnailHandler : class responsible for creating/updating/getting a
                    thumbnail 
 HTTP Verbs       : get, post, put
 *********************************************************************'''
-class ThumbnailHandler(tornado.web.RequestHandler):
+class ThumbnailHandler(APIV2Handler):
+    @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
@@ -516,13 +519,17 @@ class ThumbnailHandler(tornado.web.RequestHandler):
             video_id = args['video_id'] 
 
             video = yield tornado.gen.Task(neondata.VideoMetadata.get, video_id)
-            #TODO what to do about CDN we need an integration id there???
+            #TODO what to do about CDN we need an integration_id there 
+            # if the video has an integration id we can grab the CDN stuff 
+            # if not i'm not sure what to do here 
+            
             #thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.create, 
             #TODO figure out rank, update rank of new thumbnail 
             #TODO save thumbnail  
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
 
+    @tornado.gen.coroutine
     def put(self, account_id): 
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
@@ -534,12 +541,31 @@ class ThumbnailHandler(tornado.web.RequestHandler):
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
             thumbnail_id = args['thumbnail_id'] 
-            enabled = bool(args['enabled'])
+            #enabled = bool(args['enabled'])
             
             thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
-                                               thumbnail_id) 
-        #self.success({'account_id', account_id})  
+                                               thumbnail_id)
+            def _update_thumbnail(t):
+                try:
+                    t.enabled = bool(args.get('enabled', thumbnail.enabled))
+                except KeyError as e: 
+                    pass
 
+            yield tornado.gen.Task(neondata.ThumbnailMetadata.modify, 
+                                   thumbnail_id, 
+                                   _update_thumbnail)
+
+            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                               thumbnail_id)
+ 
+            self.success(json.dumps(thumbnail.__dict__))
+
+        except MultipleInvalid as e: 
+            self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:
+            self.error('unable to update thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
+ 
+    @tornado.gen.coroutine
     def get(self, account_id): 
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
@@ -550,13 +576,15 @@ class ThumbnailHandler(tornado.web.RequestHandler):
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
             thumbnail_id = args['thumbnail_id'] 
-            
             thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
                                                thumbnail_id) 
-            self.success(thumbnail.to_json())
+            self.success(json.dumps(thumbnail.__dict__))
 
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+
+        except Exception as e:
+            self.error('unable to get thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
 
 
 '''*********************************************************************
@@ -720,17 +748,18 @@ OptimizelyIntegrationHandler : class responsible for creating/updating/
 HTTP Verbs                   : get, post, put
 Notes                        : not yet implemented, likely phase 2
 *********************************************************************'''
-#class OptimizelyIntegrationHandler(tornado.web.RequestHandler): 
+class OptimizelyIntegrationHandler(tornado.web.RequestHandler):
+    def __init__(self): 
+        super(OptimizelyIntegrationHandler, self).__init__() 
 
 '''*********************************************************************
 LiveStreamHandler : class responsible for creating a new live stream job 
    HTTP Verbs     : post
         Notes     : outside of scope of phase 1, future implementation
 *********************************************************************'''
-#class LiveStreamHandler(tornado.web.RequestHandler): 
-#    @tornado.gen.coroutine 
-#    def post(self, *args, **kwargs):
-#        print 'posting a live stream job' 
+class LiveStreamHandler(tornado.web.RequestHandler): 
+    def __init__(self): 
+        super(OptimizelyIntegrationHandler, self).__init__() 
 
 '''*********************************************************************
 Controller Defined Exceptions 
@@ -755,11 +784,11 @@ application = tornado.web.Application([
     (r'/api/v2/accounts/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', BrightcoveIntegrationHandler),
-    #(r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler)
-    #(r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
+    (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
+    (r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
 ], gzip=True)
 
 def main():
