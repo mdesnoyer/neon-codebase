@@ -46,9 +46,6 @@ class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 
-READ_URL = "http://api.brightcove.com/services/library"
-WRITE_URL = "http://api.brightcove.com/services/post"
-
 class BrightcoveApi(object): 
 
     ''' Brighcove API Interface class
@@ -59,6 +56,8 @@ class BrightcoveApi(object):
                                    options.max_retries)
     read_connection = RequestPool(options.max_read_connections,
                                   options.max_retries)
+    READ_URL = "http://api.brightcove.com/services/library"
+    WRITE_URL = "http://api.brightcove.com/services/post"
     
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None, autosync=False, publish_date=None,
@@ -187,7 +186,7 @@ class BrightcoveApi(object):
             body = "".join([data for data in datagen])
         
         #send request
-        req = tornado.httpclient.HTTPRequest(url=WRITE_URL,
+        req = tornado.httpclient.HTTPRequest(url=BrightcoveApi.WRITE_URL,
                                              method="POST",
                                              headers=headers, 
                                              body=body,
@@ -379,7 +378,7 @@ class BrightcoveApi(object):
         data['get_item_count'] = "true"
         data['cache_buster'] = time.time() 
 
-        url = self.format_get(READ_URL, data)
+        url = self.format_get(BrightcoveApi.READ_URL, data)
         req = tornado.httpclient.HTTPRequest(url=url,
                                              method="GET",
                                              request_timeout=60.0,
@@ -610,7 +609,7 @@ class BrightcoveApi(object):
         data["filter"] = "UNSCHEDULED,INACTIVE"
         data['cache_buster'] = time.time() 
 
-        url = self.format_get(READ_URL, data)
+        url = self.format_get(BrightcoveApi.READ_URL, data)
         req = tornado.httpclient.HTTPRequest(url=url,
                                              method = "GET",
                                              request_timeout = 60.0
@@ -849,7 +848,8 @@ class BrightcoveApi(object):
                 url_params['custom_fields'] = ','.join(set(custom_fields))
 
             request = tornado.httpclient.HTTPRequest(
-                '%s?%s' % (READ_URL, urllib.urlencode(url_params)),
+                '%s?%s' % (BrightcoveApi.READ_URL,
+                           urllib.urlencode(url_params)),
                 request_timeout = 60.0)
             
             response = yield tornado.gen.Task(
@@ -927,7 +927,7 @@ class BrightcoveApi(object):
             url_params['custom_fields'] = ','.join(set(custom_fields))
 
         request = tornado.httpclient.HTTPRequest(
-            '%s?%s' % (READ_URL, urllib.urlencode(url_params)),
+            '%s?%s' % (BrightcoveApi.READ_URL, urllib.urlencode(url_params)),
             decompress_response=True,
             request_timeout = 120.0)
 
@@ -1004,7 +1004,7 @@ class BrightcoveApi(object):
             url_params['custom_fields'] = ','.join(set(custom_fields))
 
         request = tornado.httpclient.HTTPRequest(
-            '%s?%s' % (READ_URL, urllib.urlencode(url_params)),
+            '%s?%s' % (BrightcoveApi.READ_URL, urllib.urlencode(url_params)),
             decompress_response=True,
             request_timeout = 120.0)
 
@@ -1061,7 +1061,7 @@ class BrightcoveApi(object):
             url_params['custom_fields'] = ','.join(set(custom_fields))
 
         request = tornado.httpclient.HTTPRequest(
-            '%s?%s' % (READ_URL, urllib.urlencode(url_params)),
+            '%s?%s' % (BrightcoveApi.READ_URL, urllib.urlencode(url_params)),
             decompress_response=True,
             request_timeout = 120.0)
 
