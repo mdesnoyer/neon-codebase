@@ -685,6 +685,7 @@ class VideoHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def getThumbnailsFromIds(tids):
+        thumbnails = []
         if tids: 
             thumbnails = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
                                                 tids)
