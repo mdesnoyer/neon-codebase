@@ -91,6 +91,8 @@ class OVPIntegration(object):
                                                           response.error))
             raise CMSAPIError('Error submitting video: %s' % response.error)
 
+        _log.info('New video was submitted for account %s video id %s'
+                  % (self.platform.neon_api_key, video_id))
         statemon.state.increment('new_job_submitted')
         raise tornado.gen.Return(json.loads(response.body))
 
