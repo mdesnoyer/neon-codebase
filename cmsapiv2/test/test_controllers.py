@@ -14,11 +14,13 @@ import tornado.httpclient
 import test_utils.redis
 import unittest
 import utils.neon
+import utils.http
 import urllib
 import test_utils.neontest
 from mock import patch
 from cmsdb import neondata
 from StringIO import StringIO
+from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 
@@ -414,16 +416,69 @@ class TestVideoHandler(tornado.testing.AsyncHTTPTestCase):
 	except Exception as e:
             self.assertEquals(e.code, 400)
 
-class TestThumbnailHandler(tornado.testing.AsyncHTTPTestCase): 
+class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
+
     def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         user = neondata.NeonUserAccount(customer_name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
-        thumbnail = neondata.ThumbnailMetadata('testingtid', width=500)
-        thumbnail.save()
+        neondata.ThumbnailMetadata('testingtid', width=500).save()
+        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+                             'tn_test_vid1')).save()
+        neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+                             'tn_test_vid2')).save()
+
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
+        self.im_download_mocker = patch(
+            'utils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image] 
         super(TestThumbnailHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
+    
+    @tornado.testing.gen_test
+    def test_add_new_thumbnail(self):
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid1&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code,202)
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'tn_test_vid1')
+        video = neondata.VideoMetadata.get(internal_video_id)
+         
+        self.assertEquals(len(video.thumbnail_ids), 1)
+
+    @tornado.testing.gen_test
+    def test_add_two_new_thumbnails(self):
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code,202)
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code,202)
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'tn_test_vid2')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEquals(len(video.thumbnail_ids), 2)
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):

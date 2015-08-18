@@ -44,14 +44,15 @@ import uuid
 define("port", default=8084, help="run on the given port", type=int)
 
 class ResponseCode(object): 
-    HTTP_OK = 200 
+    HTTP_OK = 200
+    HTTP_ACCEPTED = 202 
     HTTP_BAD_REQUEST = 400 
     HTTP_INTERNAL_SERVER_ERROR = 500
     HTTP_NOT_IMPLEMENTED = 501
 
 class APIV2Sender(object): 
-    def success(self, data):
-        self.set_status(ResponseCode.HTTP_OK) 
+    def success(self, data, code=ResponseCode.HTTP_OK):
+        self.set_status(code) 
         self.write(data) 
         self.finish()
 
@@ -522,9 +523,9 @@ class ThumbnailHandler(APIV2Handler):
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
             video_id = args['video_id'] 
-
-            video = yield tornado.gen.Task(neondata.VideoMetadata.get, video_id)
             internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,video_id)
+
+            video = yield tornado.gen.Task(neondata.VideoMetadata.get, internal_video_id)
 
             current_thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
                                                         video.thumbnail_ids)
@@ -541,28 +542,31 @@ class ThumbnailHandler(APIV2Handler):
             cur_rank = min_rank - 1
  
             new_thumbnail = neondata.ThumbnailMetadata(None,
-                                                       interval_vid=internal_video_id, 
+                                                       internal_vid=internal_video_id, 
                                                        ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
                                                        rank=cur_rank)
             # upload image to cdn 
             yield video.download_and_add_thumbnail(new_thumbnail,
                                                    args['thumbnail_location'],
                                                    cdn_metadata,
-                                                   async=True))
-            # save the thumbnail 
-            result = yield tornado.gen.Task(neondata.ThumbnailMetadata.save, 
-                                            new_thumbnail)
+                                                   async=True)
+            #save the thumbnail
+            new_thumbnail.save() 
+
             # save the video 
-            new_video = yield tornado.gen.Task(neondata.VideoMetadata,modify, 
+            new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
                                                internal_video_id, 
-                                               lambda x: x.thumbnail_ids.extend(result.key))
+                                               lambda x: x.thumbnail_ids.append(new_thumbnail.key))
+
             if new_video: 
-                #self.success 
+                self.success('{ "message": "thumbnail accepted for processing" }', code=ResponseCode.HTTP_ACCEPTED)  
             else: 
-                #self.error 
+                self.error('unable to save thumbnail to video', {'thumbnail_location' : args['thumbnail_location']})  
               
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('unable to add thumbnail', {'thumbnail_location' : args['thumbnail_location']}) 
 
     @tornado.gen.coroutine
     def put(self, account_id): 
