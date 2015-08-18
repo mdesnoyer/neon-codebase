@@ -17,6 +17,7 @@ from PIL import Image
 import re
 from StringIO import StringIO
 import cmsdb.neondata 
+import math
 import time
 import tornado.gen
 import tornado.httpclient
@@ -973,8 +974,9 @@ class BrightcoveApi(object):
         Returns:
         list of video objects
         '''
-        from_date_mins = (from_date - 
-                          datetime.datetime(1970, 1, 1)).total_seconds() / 60.0
+        from_date_mins = int(math.floor(
+            (from_date - datetime.datetime(1970, 1, 1)).total_seconds() / 
+            60.0))
         
         # Build the request
         url_params = {
@@ -1078,7 +1080,7 @@ def _handle_response(response):
     Returns: a list of video objects
     '''
     if response.error:
-        _log.error('Error calling getting video info from brightcove: %s' %
+        _log.error('Error getting video info from brightcove: %s' %
                    response.body)
         try:
             json_data = json.load(response.buffer)
