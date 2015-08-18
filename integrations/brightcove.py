@@ -444,7 +444,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             self.platform.neon_api_key, bc_video_id)
         publish_date = data.get('publishedDate', None)
         if publish_date is not None:
-            publish_date = publish_date / 1000.0
+            publish_date = datetime.datetime.utcfromtimestamp(
+                int(publish_date) / 1000.0).isoformat()
         video_title = data.get('name', '')
 
         # Update the video object

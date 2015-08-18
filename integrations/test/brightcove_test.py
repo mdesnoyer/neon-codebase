@@ -26,7 +26,7 @@ from utils.imageutils import PILImageUtils
 from utils.options import define, options
 import utils.neon
 
-class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
+class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -61,14 +61,16 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         ThumbnailMetadata('acct1_v1_n1', 'acct1_v1',
                           ttype=ThumbnailType.NEON, rank=1).save()
 
-        super(TestGrabNewThumb, self).setUp()
+        neondata.NeonApiRequest('job1', 'acct1', 'v1', 'Original title').save()
+
+        super(TestUpdateExistingThumb, self).setUp()
 
     def tearDown(self):
         self.im_download_mocker.stop()
         self.cdn_mocker.stop()
         self.redis.stop()
 
-        super(TestGrabNewThumb, self).tearDown()
+        super(TestUpdateExistingThumb, self).tearDown()
 
     @tornado.testing.gen_test
     def test_no_video_in_db(self):
@@ -297,6 +299,49 @@ class TestGrabNewThumb(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.im_download_mock.call_count, 0)
         self.assertEquals(self.cdn_mock.call_count, 0)
 
+    
+    @tornado.testing.gen_test
+    def test_update_title_and_published_date(self):
+        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
+                          ['http://bc.com/some_moved_location'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=1,
+                          refid='my_thumb_ref',
+                          external_id='123456').save()
+        
+        yield self.integration.submit_one_video_object({
+            'id' : 'v1',
+            'length' : 100,
+            'FLVURL' : 'http://video.mp4',
+            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+            'publishedDate' : "1439768747000",
+            'name' : 'A new title',
+            'videoStill' : {
+                'id' : 'still_id',
+                'referenceId' : None,
+                'remoteUrl' : None
+                },
+            'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+            'thumbnail' : {
+                'id' : 123456,
+                'referenceId' : None,
+                'remoteUrl' : None
+                }
+                }
+            )
+
+        # Make sure no image was uploaded
+        self.assertEquals(self.im_download_mock.call_count, 0)
+        self.assertEquals(self.cdn_mock.call_count, 0)
+
+        # Check the video object
+        video = neondata.VideoMetadata.get('acct1_v1')
+        self.assertEquals(video.publish_date, '2015-08-16T23:45:47')
+
+        # Check the request object
+        req = neondata.NeonApiRequest.get(video.job_id, 'acct1')
+        self.assertEquals(req.publish_date, '2015-08-16T23:45:47')
+        self.assertEquals(req.video_title, 'A new title')
 
     @tornado.testing.gen_test
     def test_new_thumb_found(self):
