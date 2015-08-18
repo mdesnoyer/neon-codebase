@@ -24,7 +24,8 @@ from utils import statemon
 define('max_vids_for_new_account', default=100, 
        help='Maximum videos to process for a new account')
 
-statemon.define('bc_api_errors', int)
+statemon.define('bc_apiserver_errors', int)
+statemon.define('bc_apiclient_errors', int)
 statemon.define('unexpected_submition_error', int)
 statemon.define('new_images_found', int)
 statemon.define('cant_get_image', int)
@@ -173,9 +174,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 custom_fields=self.get_custom_fields(),
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
-            statemon.state.increment('bc_api_errors')
-            _log.error('Error getting data from Brightcove: %s' % e)
+            statemon.state.increment('bc_apiserver_errors')
+            _log.error('Server error getting data from Brightcove: %s' % e)
             raise integrations.ovp.OVPError(e)
+        except brightcove_api.BrightcoveApiClientError as e:
+            statemon.state.increment('bc_apiclient_errors')
+            _log.error('Client error getting data from Brightcove: %s' % e)
+            raise integrations.ovp.OVPError(e)
+            
 
         retval = yield self.submit_many_videos(
             bc_video_info,
@@ -199,9 +205,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     custom_fields=self.get_custom_fields(),
                     async=True)
             except brightcove_api.BrightcoveApiServerError as e:
-                statemon.state.increment('bc_api_errors')
-                _log.error('Error getting playlist %s from Brightcove: %s' 
-                           % (playlist_id, e))
+                statemon.state.increment('bc_apiserver_errors')
+                _log.error('Server error getting playlist %s from '
+                           'Brightcove: %s' % (playlist_id, e))
+                raise integrations.ovp.OVPError(e)
+            except brightcove_api.BrightcoveApiClientError as e:
+                statemon.state.increment('bc_apiclient_errors')
+                _log.error('Client error getting playlist %s from '
+                           'Brightcove: %s' % (playlist_id, e))
                 raise integrations.ovp.OVPError(e)
 
             cur_jobs = yield self.submit_many_videos(cur_results['videos'])
@@ -239,9 +250,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 if item == StopIteration:
                     break
             except brightcove_api.BrightcoveApiServerError as e:
-                statemon.state.increment('bc_api_errors')
-                _log.error('Error getting new videos from Brightcove: %s' %
-                           e)
+                statemon.state.increment('bc_apiserver_errors')
+                _log.error('Server error getting new videos from '
+                           'Brightcove: %s' % e)
+                raise integrations.ovp.OVPError(e)
+            except brightcove_api.BrightcoveApiClientError as e:
+                statemon.state.increment('bc_apiclient_errors')
+                _log.error('Client error getting new videos from '
+                           'Brightcove: %s' % e)
                 raise integrations.ovp.OVPError(e)
 
             if (self.platform.last_process_date is not None and 

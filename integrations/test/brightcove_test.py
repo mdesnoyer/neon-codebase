@@ -1177,11 +1177,17 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_brightcove_server_error(self):
         self.mock_find_videos.side_effect = [
-            api.brightcove_api.BrightcoveApiServerError('Oops BC went down')
+            api.brightcove_api.BrightcoveApiServerError('Oops BC went down'),
+            api.brightcove_api.BrightcoveApiClientError('Oops you messed up')
             ]
 
         with self.assertLogExists(
-            logging.ERROR, 'Error getting new videos from Brightcove'):
+            logging.ERROR, 'Server error getting new videos from Brightcove'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.submit_new_videos()
+
+        with self.assertLogExists(
+            logging.ERROR, 'Client error getting new videos from Brightcove'):
             with self.assertRaises(integrations.ovp.OVPError):
                 yield self.integration.submit_new_videos()
 
@@ -1342,10 +1348,17 @@ class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
             'acct1', 'i1', _set_platform)
         
         self.mock_get_playlists.side_effect = [
-            api.brightcove_api.BrightcoveApiServerError('Big Fail!')]
+            api.brightcove_api.BrightcoveApiServerError('Big Fail!'),
+            api.brightcove_api.BrightcoveApiClientError('You Fail!'),
+            ]
 
         with self.assertLogExists(
-            logging.ERROR, 'Error getting playlist 156 from Brightcove'):
+            logging.ERROR, 'Server error getting playlist 156 from Brightcove'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.submit_playlist_videos()
+
+        with self.assertLogExists(
+            logging.ERROR, 'Client error getting playlist 156 from Brightcove'):
             with self.assertRaises(integrations.ovp.OVPError):
                 yield self.integration.submit_playlist_videos()
 
@@ -1481,11 +1494,18 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_brightcove_error(self):
         self.mock_get_videos.side_effect = [
-            api.brightcove_api.BrightcoveApiServerError('Oops BC went down')
+            api.brightcove_api.BrightcoveApiServerError('Oops BC went down'),
+            api.brightcove_api.BrightcoveApiClientError('You messed up')
             ]
 
         with self.assertLogExists(
-            logging.ERROR, 'Error getting data from Brightcove'):
+            logging.ERROR, 'Server error getting data from Brightcove'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.lookup_and_submit_videos(
+                    [1234567, 'v2'])
+
+        with self.assertLogExists(
+            logging.ERROR, 'Client error getting data from Brightcove'):
             with self.assertRaises(integrations.ovp.OVPError):
                 yield self.integration.lookup_and_submit_videos(
                     [1234567, 'v2'])
