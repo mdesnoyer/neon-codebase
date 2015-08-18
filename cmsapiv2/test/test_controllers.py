@@ -26,9 +26,18 @@ from tornado.httputil import HTTPServerRequest
 
 #from tornado.testing import AsyncHTTPTestCase
 
-class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase): 
+#class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase): 
+class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application
+
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        super(TestNewAccountHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
 
     @tornado.testing.gen_test 
     def test_create_new_account(self):
@@ -52,13 +61,19 @@ class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase):
 	    pass 
 
 
-class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
+class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application
+
     def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         self.user = neondata.NeonUserAccount(customer_name='testingaccount')
         self.user.save() 
         super(TestAccountHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -183,16 +198,22 @@ class TestAccountHandler(tornado.testing.AsyncHTTPTestCase):
         self.assertEquals(default_size_new[0],1200)
         self.assertEquals(default_size_new[1],default_size_old[1])
  
-class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase): 
+class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
+
     def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         user = neondata.NeonUserAccount(customer_name='testingme')
-        user.save() 
+        user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
         defop = neondata.OoyalaPlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         super(TestOoyalaIntegrationHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -238,16 +259,22 @@ class TestOoyalaIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key)  
 
-class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase): 
+class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
+
     def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         user = neondata.NeonUserAccount(customer_name='testingme')
-        user.save() 
+        user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
         defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         super(TestBrightcoveIntegrationHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -293,21 +320,25 @@ class TestBrightcoveIntegrationHandler(tornado.testing.AsyncHTTPTestCase):
 
         self.assertEquals(platform.read_token, read_token)  
 
-class TestVideoHandler(tornado.testing.AsyncHTTPTestCase): 
+class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
+
     def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         user = neondata.NeonUserAccount(customer_name='testingme')
-        user.save() 
+        user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
-        thumbnail_one = neondata.ThumbnailMetadata('testing_vtid_one', width=500)
-        thumbnail_two = neondata.ThumbnailMetadata('testing_vtid_two', width=500)
-        thumbnail_one.save()
-        thumbnail_two.save()
+        thumbnail_one = neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
+        thumbnail_two = neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
         defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         super(TestVideoHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
     
     @unittest.skip("not implemented yet") 
     @patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
