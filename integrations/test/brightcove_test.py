@@ -891,6 +891,49 @@ class TestChooseDownloadUrl(test_utils.neontest.TestCase):
             })
         self.assertEquals(url, 'http://video_17.mp4')
 
+    def test_frame_width_missing_with_rendition_frame(self):
+        self.integration.platform.rendition_frame_width = 640
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : None,
+                  'encodingRate' : 755611,
+                  'url' : 'http://video_85.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 1796130,
+                  'url' : 'http://video_17.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 655611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_17.mp4')
+
+    def test_frame_width_missing(self):
+
+        url = self.integration._get_video_url_to_download({
+            'FLVURL' : 'http://video.mp4',
+            'renditions' : [
+                { 'frameWidth' : None,
+                  'encodingRate' : 755611,
+                  'url' : 'http://video_85.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 855611,
+                  'url' : 'http://video_1280.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 1796130,
+                  'url' : 'http://video_17.mp4'},
+                { 'frameWidth' : None,
+                  'encodingRate' : 655611,
+                  'url' : 'http://video_200.mp4'},
+                ]
+            })
+        self.assertEquals(url, 'http://video_17.mp4')
+
     def test_get_closest_size(self):
         self.integration.platform.rendition_frame_width = 640
 

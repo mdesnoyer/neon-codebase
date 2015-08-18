@@ -121,13 +121,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         renditions = b_json_item['renditions']
         for rend in renditions:
-            key = (rend["frameWidth"], rend["encodingRate"])
             url = rend.get("url", None)
             if url is not None:
-                video_urls.append((rend["frameWidth"], rend["encodingRate"],
+                video_urls.append(((rend["frameWidth"] or -1),
+                                   (rend["encodingRate"] or -1),
                                   url))
             elif rend['remoteUrl'] is not None:
-                video_urls.append((rend["frameWidth"], rend["encodingRate"],
+                video_urls.append(((rend["frameWidth"] or -1),
+                                   (rend["encodingRate"] or -1),
                                   rend['remoteUrl']))
        
         # no renditions
@@ -175,11 +176,13 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
             statemon.state.increment('bc_apiserver_errors')
-            _log.error('Server error getting data from Brightcove: %s' % e)
+            _log.error('Server error getting data from Brightcove for '
+                       'platform %s: %s' % (self.platform.get_id(), e))
             raise integrations.ovp.OVPError(e)
         except brightcove_api.BrightcoveApiClientError as e:
             statemon.state.increment('bc_apiclient_errors')
-            _log.error('Client error getting data from Brightcove: %s' % e)
+            _log.error('Client error getting data from Brightcove for '
+                       'platform %s: %s' % (self.platform.get_id(), e))
             raise integrations.ovp.OVPError(e)
             
 
@@ -207,12 +210,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             except brightcove_api.BrightcoveApiServerError as e:
                 statemon.state.increment('bc_apiserver_errors')
                 _log.error('Server error getting playlist %s from '
-                           'Brightcove: %s' % (playlist_id, e))
+                           'Brightcove for platform %s: %s' % 
+                           (playlist_id, self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
             except brightcove_api.BrightcoveApiClientError as e:
                 statemon.state.increment('bc_apiclient_errors')
                 _log.error('Client error getting playlist %s from '
-                           'Brightcove: %s' % (playlist_id, e))
+                           'Brightcove for platform %s: %s' % 
+                           (playlist_id, self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
 
             cur_jobs = yield self.submit_many_videos(cur_results['videos'])
@@ -252,12 +257,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             except brightcove_api.BrightcoveApiServerError as e:
                 statemon.state.increment('bc_apiserver_errors')
                 _log.error('Server error getting new videos from '
-                           'Brightcove: %s' % e)
+                           'Brightcove for platform %s: %s' % 
+                           (self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
             except brightcove_api.BrightcoveApiClientError as e:
                 statemon.state.increment('bc_apiclient_errors')
                 _log.error('Client error getting new videos from '
-                           'Brightcove: %s' % e)
+                           'Brightcove for platform %s: %s' % 
+                           (self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
 
             if (self.platform.last_process_date is not None and 
