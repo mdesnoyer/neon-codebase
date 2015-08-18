@@ -11,6 +11,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
+from integrations.exceptions import IntegrationError
 import json
 import logging
 import tornado.gen
@@ -28,8 +29,8 @@ define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
 
 _log = logging.getLogger(__name__)
 
-class OVPError(Exception): pass
-class CMSAPIError(Exception): pass
+class OVPError(IntegrationError): pass
+class CMSAPIError(IntegrationError): pass
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
