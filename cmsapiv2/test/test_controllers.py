@@ -209,7 +209,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
-        defop = neondata.OoyalaPlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.OoyalaIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -224,7 +224,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
-        platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+        platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           rjson['neon_api_key'], 
                                           rjson['integration_id'])
 
@@ -237,7 +237,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 method='GET')
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
-        platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+        platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
@@ -253,7 +253,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
 
         self.assertEquals(response.code, 200)
-        platform = yield tornado.gen.Task(neondata.OoyalaPlatform.get, 
+        platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
@@ -270,7 +270,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
-        defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -285,7 +285,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
-        platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['neon_api_key'], 
                                           rjson['integration_id'])
 
@@ -298,7 +298,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 method='GET')
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
-        platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
@@ -314,7 +314,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
 
         self.assertEquals(response.code, 200)
-        platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get, 
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
@@ -331,9 +331,9 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
-        thumbnail_one = neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
-        thumbnail_two = neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
-        defop = neondata.BrightcovePlatform.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         super(TestVideoHandler, self).setUp()
 
@@ -341,7 +341,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.redis.stop()
     
     @unittest.skip("not implemented yet") 
-    @patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
+    #@patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
     @tornado.testing.gen_test
     def test_post_video(self, http_mock):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)

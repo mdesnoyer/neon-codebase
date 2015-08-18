@@ -1647,7 +1647,7 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-        for plat in [NeonPlatform, BrightcovePlatform, YoutubePlatform]:
+        for plat in [NeonPlatform, BrightcovePlatform, BrightcoveIntegration, YoutubePlatform, OoyalaIntegration]:
             ovp_map[plat.get_ovp()] = plat
 
         calls = []
@@ -2110,6 +2110,276 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
         
         return obj
 
+class AbstractIntegration(NamespacedStoredObject):
+    ''' Abstract Integration class '''
+
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
+                serving_enabled=True, serving_controller="imageplatform"):
+        
+        super(AbstractIntegration, self).__init__(
+            self._generate_subkey(api_key, i_id))
+        self.neon_api_key = api_key 
+        self.integration_id = i_id 
+        self.videos = {} # External video id (Original Platform VID) => Job ID
+        self.abtest = abtest # Boolean on wether AB tests can run
+        self.enabled = enabled # Account enabled for auto processing of videos 
+
+        # Will thumbnails be served by our system?
+        self.serving_enabled = serving_enabled
+
+        # What controller is used to serve the image? Default to imageplatform
+        self.serving_controller = serving_controller 
+    
+    @classmethod
+    def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
+        return '_'.join([api_key, i_id])
+
+    @classmethod
+    def _baseclass_name(cls):
+        return cls.__name__.lower() 
+   
+    @classmethod
+    def _create(cls, key, obj_dict):
+        def __get_type(key):
+            '''
+            Get the integration type
+            '''
+            integration_type = key.split('_')[0]
+            typemap = {
+                'brightcoveintegration' : BrightcoveIntegration,
+                'ooyalaintegration' : OoyalaIntegration
+                }
+            try:
+                integration = typemap[integration_type]
+                return integration.__name__
+            except KeyError, e:
+                _log.exception("Invalid Integration Object")
+                raise ValueError() # is this the right exception to throw?
+
+        if obj_dict:
+            if not '_type' in obj_dict or not '_data' in obj_dict:
+                obj_dict = {
+                    '_type': __get_type(obj_dict['key']),
+                    '_data': copy.deepcopy(obj_dict)
+                }
+            
+            return super(AbstractIntegration, cls)._create(key, obj_dict)
+
+    def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
+        # since we need a default constructor with empty strings for the 
+        # eval magic to work, check here to ensure apikey and i_id aren't empty
+        # since the key is generated based on them
+        if self.neon_api_key == '' or self.integration_id == '':
+            raise Exception('Invalid initialization of AbstractIntegration or its\
+                subclass object. api_key and i_id should not be empty')
+
+        super(AbstractIntegration, self).save(callback)
+
+    @classmethod
+    def get(cls, api_key, i_id, callback=None):
+        ''' get instance '''
+        return super(AbstractIntegration, cls).get(
+            cls._generate_subkey(api_key, i_id), callback=callback)
+    
+    @classmethod
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
+        return super(AbstractIntegration, cls).modify(
+            cls._generate_subkey(api_key, i_id),
+            _set_parameters,
+            create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
+        '''Modify many keys.
+
+        Each key must be a tuple of (api_key, i_id)
+        '''
+        return super(AbstractIntegration, cls).modify_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
+            func,
+            create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, api_key, i_id, callback=None):
+        return super(AbstractIntegration, cls).delete(
+            cls._generate_subkey(api_key, i_id),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(AbstractIntegration, cls).delete_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
+            callback=callback)
+
+    def to_json(self):
+        ''' to json '''
+        return json.dumps(self, default=lambda o: o.__dict__) 
+
+    def add_video(self, vid, job_id):
+        ''' external video id => job_id '''
+        self.videos[str(vid)] = job_id
+
+    def get_videos(self):
+        ''' list of external video ids '''
+        return self.videos.keys()
+    
+    def get_internal_video_ids(self):
+        ''' return list of internal video ids for the account ''' 
+        i_vids = [] 
+        for vid in self.videos.keys(): 
+            i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
+        return i_vids
+
+    @classmethod
+    def get_ovp(cls):
+        ''' ovp string '''
+        raise NotImplementedError
+
+
+    @classmethod
+    def get_all(cls, callback=None):
+        '''Returns a list of all the integration instances from the db.'''
+        instances = []
+        if callback:
+            lock = threading.RLock()
+            call_counter = [4]
+            def _process_instances(x):
+                instances.extend(x)
+                with lock:
+                    call_counter[0] -= 1
+                    if call_counter[0] == 0:
+                        callback(instances)
+            BrightcoveIntegration.get_all(_process_instances)
+            OoyalaIntegration.get_all(_process_instances)
+            return
+        else:
+            instances.extend(BrightcoveIntegration.get_all())
+            instances.extend(OoyalaIntegration.get_all())
+        return instances
+
+    @classmethod
+    def _get_all_impl(cls, callback=None):
+        '''Implements get_all_instances for a single integration type.'''
+        return super(AbstractIntegration, cls).get_all(callback=callback)
+
+    @classmethod
+    def get_all_integration_data(cls):
+        ''' get all integration data '''
+        db_connection = DBConnection.get(cls)
+        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
+        integration_data = []
+        for accnt in accounts:
+            api_key = accnt.split('_')[-2]
+            i_id = accnt.split('_')[-1]
+            jdata = db_connection.blocking_conn.get(accnt) 
+            if jdata:
+                integration_data.append(jdata)
+            else:
+                _log.debug("key=get_all_integration data"
+                            " msg=no data for acc %s i_id %s" % (api_key, i_id))
+        
+        return integration_data
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield [
+            BrightcoveIntegration.subscribe_to_changes(
+                func, pattern, get_object, async=True),
+            OoyalaIntegration.subscribe_to_changes(
+                func, pattern, get_object, async=True)]
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _subscribe_to_changes_impl(cls, func, pattern, get_object):
+        yield super(AbstractIntegration, cls).subscribe_to_changes(
+            func, pattern, get_object, async=True)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield [
+            BrightcoveIntegration.unsubscribe_from_changes(channel, async=True),
+            OoyalaIntegration.unsubscribe_from_changes(channel, async=True)]
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _unsubscribe_from_changes_impl(cls, channel):
+        yield super(AbstractIntegration, cls).unsubscribe_from_changes(
+            channel, async=True)
+    
+
+    @classmethod
+    def _erase_all_data(cls):
+        ''' erase all data ''' 
+        db_connection = DBConnection.get(cls)
+        db_connection.clear_db()
+ 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_all_video_related_data(self, integration_vid,
+            *args, **kwargs):
+        '''
+        Delete all data related to a given video
+
+        request, vmdata, thumbs, thumb serving urls
+        
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
+        '''
+        
+        do_you_want_to_delete = kwargs.get('really_delete_keys', False)
+        if do_you_want_to_delete == False:
+            return
+
+        def _del_video(p_inst):
+            try:
+                p_inst.videos.pop(integration_vid)
+            except KeyError, e:
+                _log.error('no such video to delete')
+                return
+        
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
+                                         integration_vid)
+        vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
+        # update integration instance
+        yield tornado.gen.Task(self.modify,
+                               self.neon_api_key, '0',
+                               _del_video)
+
+        # delete the video object
+        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
+
+        # delete the request object
+        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+                               self.neon_api_key)
+
+        # delete the thumbnails
+        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                               vm.thumbnail_ids)
+
+        # delete the serving urls
+        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                               vm.thumbnail_ids)
+
+# DEPRECATED use AbstractIntegration instead
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
@@ -2425,6 +2695,235 @@ class NeonPlatform(AbstractPlatform):
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
 
+class BrightcoveIntegration(AbstractIntegration):
+    ''' Brightcove Integration class '''
+    
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
+                rtoken=None, wtoken=None, auto_update=False,
+                last_process_date=None, abtest=False, callback_url=None):
+
+        ''' On every request, the job id is saved '''
+
+        super(BrightcoveIntegration, self).__init__(api_key, i_id, abtest)
+        self.account_id = a_id
+        self.publisher_id = p_id
+        self.read_token = rtoken
+        self.write_token = wtoken
+        self.auto_update = auto_update 
+        #The publish date of the last processed video - UTC timestamp 
+        self.last_process_date = last_process_date 
+        self.linked_youtube_account = False
+        self.account_created = time.time() #UTC timestamp of account creation
+        self.rendition_frame_width = None #Resolution of video to process
+        self.video_still_width = 480 #default brightcove still width
+        # the ids of playlist to create video requests from
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
+
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "brightcove"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
+
+    def get_api(self, video_server_uri=None):
+        '''Return the Brightcove API object for this integration.'''
+        return api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token, self.auto_update,
+            self.last_process_date, neon_video_server=video_server_uri,
+            account_created=self.account_created, callback_url=self.callback_url)
+
+    @tornado.gen.engine
+    def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
+        ''' method to keep video metadata and thumbnail data consistent 
+        callback(None): bad request
+        callback(False): internal error
+        callback(True): success
+        '''
+        bc = self.get_api()
+
+        #Get video metadata
+        integration_vid = InternalVideoID.to_external(i_vid)
+        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
+        if not vmdata:
+            _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
+            callback(None)
+            return
+        
+        #Thumbnail ids for the video
+        tids = vmdata.thumbnail_ids
+        
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
+        #Get all thumbnails
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
+        t_url = None
+        
+        # Get the type of thumbnail (Neon/ Brighcove)
+        thumb_type = "" #type_rank
+
+        #Check if the new tid exists
+        for thumbnail in thumbnails:
+            if thumbnail.key == new_tid:
+                t_url = thumbnail.urls[0]
+                thumb_type = "bc" if thumbnail.type == "brightcove" else ""
+        
+        if not t_url:
+            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
+            callback(None)
+            return
+        
+
+        # Update the new_tid as the thumbnail for the video
+        try:
+            image = utils.imageutils.PILImageUtils.download_image(
+                t_url)
+            update_response = yield bc.update_thumbnail_and_videostill(
+                integration_vid,
+                new_tid,
+                image=image,
+                still_size=(self.video_still_width, None))
+        except Exception as e:
+            _log.error('Error updating the thumbnail and video still to '
+                       'Brightcove for video %s %s' % (i_vid, e))
+            callback(False)
+            return
+
+        thumb_bc_id, still_bc_id = update_response
+
+        def _update_external_tid(thumb_obj):
+            thumb_obj.external_id = thumb_bc_id
+
+        yield tornado.gen.Task(ThumbnailMetadata.modify,
+                               new_tid,
+                               _update_external_tid)
+
+        #NOTE: When the call is made from brightcove controller, do not 
+        #save the changes in the db, this is just a temp change for A/B testing
+        if nosave:
+            callback(True)
+            return
+
+        # Save the correct thumb to chosen in the database
+        def _set_chosen(thumb_dict):
+            for thumb_id, thumb in thumb_dict.iteritems():
+                if thumb is not None:
+                    thumb.chosen = thumb_id == new_tid
+        ret = yield tornado.gen.Task(
+            ThumbnailMetadata.modify_many, tids, _set_chosen)
+        if not ret:
+            _log.error("Error updating thumbnails in database")
+            callback(False)
+
+        # Update the request state
+        def _set_active(obj):
+            obj.state = RequestState.ACTIVE
+        ret = yield tornado.gen.Task(
+            NeonApiRequest.modify,
+            vmdata.job_id,
+            self.neon_api_key,
+            _set_active)
+        if not ret:
+            _log.error("Error updating request state in database")
+            callback(False)
+            
+        callback(True)
+
+    def create_job(self, vid, callback):
+        ''' Create neon job for particular video '''
+        def created_job(result):
+            if not result.error:
+                try:
+                    job_id = tornado.escape.json_decode(result.body)["job_id"]
+                    self.add_video(vid, job_id)
+                    self.save(callback)
+                except Exception,e:
+                    callback(False)
+            else:
+                callback(False)
+        
+        vserver = options.video_server
+        self.get_api(vserver).create_video_request(vid, self.integration_id,
+                                            created_job)
+
+    def check_feed_and_create_api_requests(self):
+        ''' Use this only after you retreive the object from DB '''
+
+        vserver = options.video_server
+        bc = self.get_api(vserver)
+        bc.create_neon_api_requests(self.integration_id)    
+        bc.create_requests_unscheduled_videos(self.integration_id)
+
+    def check_feed_and_create_request_by_tag(self):
+        ''' Temp method to support backward compatibility '''
+        self.get_api().create_brightcove_request_by_tag(self.integration_id)
+
+    def check_playlist_feed_and_create_requests(self):
+        ''' Get playlists and create requests '''
+        
+        for pid in self.playlist_feed_ids:
+            self.get_api().create_request_from_playlist(pid, self.integration_id)
+
+    @tornado.gen.coroutine
+    def verify_token_and_create_requests_for_video(self, n):
+        ''' Method to verify brightcove token on account creation 
+            And create requests for processing
+            @return: Callback returns job id, along with brightcove vid metadata
+        '''
+
+        vserver = options.video_server
+        bc = self.get_api(vserver)
+        val = yield bc.verify_token_and_create_requests(
+            self.integration_id, n)
+        raise tornado.gen.Return(val)
+
+    def sync_individual_video_metadata(self):
+        ''' sync video metadata from bcove individually using 
+        find_video_id api '''
+        self.get_api().bcove_api.sync_individual_video_metadata(
+            self.integration_id)
+
+    def set_rendition_frame_width(self, f_width):
+        ''' Set framewidth of the video resolution to process '''
+        self.rendition_frame_width = f_width
+
+    def set_video_still_width(self, width):
+        ''' Set framewidth of the video still to be used 
+            when the still is updated in the brightcove account '''
+        self.video_still_width = width
+
+    @staticmethod
+    def find_all_videos(token, limit, callback=None):
+        ''' find all brightcove videos '''
+
+        # Get the names and IDs of recently published videos:
+        url = 'http://api.brightcove.com/services/library?\
+                command=find_all_videos&sort_by=publish_date&token=' + token
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
+                request_timeout=60.0, connect_timeout=10.0)
+        http_client.fetch(req, callback)
+
+    @classmethod
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
+
+# DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     
@@ -2433,8 +2932,6 @@ class BrightcovePlatform(AbstractPlatform):
                 last_process_date=None, abtest=False, callback_url=None):
 
         ''' On every request, the job id is saved '''
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
 
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
@@ -2779,6 +3276,169 @@ class YoutubePlatform(AbstractPlatform):
     def get_all(cls, callback=None):
         return cls._get_all_impl(callback)
 
+class OoyalaIntegration(AbstractIntegration):
+    '''
+    OOYALA Integration
+    '''
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
+                 o_api_key=None, api_secret=None, auto_update=False): 
+        '''
+        Init ooyala platform 
+        
+        Partner code, o_api_key & api_secret are essential 
+        for api calls to ooyala 
+
+        '''
+
+        #if i_id is None: 
+        #    i_id = uuid.uuid1().hex
+
+        super(OoyalaIntegration, self).__init__(api_key, i_id)
+ 
+        self.account_id = a_id
+        self.partner_code = p_code
+        self.ooyala_api_key = o_api_key
+        self.api_secret = api_secret 
+        self.auto_update = auto_update 
+    
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "ooyala"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
+    
+    @classmethod
+    def generate_signature(cls, secret_key, http_method, 
+                    request_path, query_params, request_body=''):
+        ''' Generate signature for ooyala requests'''
+        signature = secret_key + http_method.upper() + request_path
+        for key, value in query_params.iteritems():
+            signature += key + '=' + value
+            signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
+            signature = urllib.quote_plus(signature)
+            return signature
+
+    def check_feed_and_create_requests(self):
+        '''
+        #check feed and create requests
+        '''
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
+                neon_video_server=options.video_server)
+        oo.process_publisher_feed(copy.deepcopy(self)) 
+
+    #verify token and create requests on signup
+    def create_video_requests_on_signup(self, n, callback=None):
+        ''' Method to verify ooyala token on account creation 
+            And create requests for processing
+            @return: Callback returns job id, along with ooyala vid metadata
+        '''
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
+                neon_video_server=options.video_server)
+        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def update_thumbnail(self, i_vid, new_tid):
+        '''
+        Update the Preview image on Ooyala video 
+        
+        callback(None): bad request/ Gateway error
+        callback(False): internal error
+        callback(True): success
+
+        '''
+        #Get video metadata
+        integration_vid = InternalVideoID.to_external(i_vid)
+        
+        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
+        if not vmdata:
+            _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
+            raise tornado.gen.Return(None)
+        
+        #Thumbnail ids for the video
+        tids = vmdata.thumbnail_ids
+        
+        #Aspect ratio of the video 
+        fsize = vmdata.get_frame_size()
+
+        #Get all thumbnails
+        thumbnails = yield tornado.gen.Task(
+                ThumbnailMetadata.get_many, tids)
+        t_url = None
+        
+        #Check if the new tid exists
+        for thumb in thumbnails:
+            if thumb.key == new_tid:
+                t_url = thumb.urls[0]
+        
+        if not t_url:
+            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
+            raise tornado.gen.Return(None)
+            
+        
+        # Update the new_tid as the thumbnail for the video
+        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
+        update_result = yield tornado.gen.Task(oo.update_thumbnail,
+                                               integration_vid,
+                                               t_url,
+                                               new_tid,
+                                               fsize)
+        #check if thumbnail was updated 
+        if not update_result:
+            raise tornado.gen.Return(None)
+            
+      
+        #Update the database with video
+        #Get previous thumbnail and new thumb
+        modified_thumbs = [] 
+        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
+            thumbnails, new_tid)
+        modified_thumbs.append(new_thumb)
+        if old_thumb is None:
+            #old_thumb can be None if there was no neon thumb before
+            _log.debug("key=update_thumbnail" 
+                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
+        else:
+            modified_thumbs.append(old_thumb)
+       
+        #Verify that new_thumb data is not empty 
+        if new_thumb is not None:
+            res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
+                                         modified_thumbs)  
+            if not res:
+                _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
+                                " failed for %s" %new_tid)
+                raise tornado.gen.Return(False)
+                
+        else:
+            _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
+            raise tornado.gen.Return(False)
+            
+
+        vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
+        vid_request.state = RequestState.ACTIVE
+        ret = vid_request.save()
+        if not ret:
+            _log.error("key=update_thumbnail msg=%s state not updated to active"
+                        %vid_request.key)
+        raise tornado.gen.Return(True)
+    
+    @classmethod
+    def get_all(cls, callback=None):
+        return cls._get_all_impl(callback)
+
+# DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
