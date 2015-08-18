@@ -351,24 +351,31 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
         defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
+        self.im_download_mocker = patch(
+            'utils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image] 
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
     
-    @unittest.skip("not implemented yet") 
-    #@patch('api.brightcove_api.BrightcoveApi.read_connection.send_request') 
     @tornado.testing.gen_test
-    def test_post_video(self, http_mock):
+    def test_post_video(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        #send_request_mock = self._callback_wrap_mock(http_mock.send_request)
-        #send_request_mock.fetch().side_effect = [HTTPResponse(HTTPRequest('http://test_bc'), 200, buffer=StringIO('{"job_id":"j123"}'))]
-        #request = HTTPServerRequest(uri=self.get_url(url), method='POST') 
-        #response = yield controllers.VideoHelper.addVideo(request, self.account_id_api_key)
-        #rv = yield self.http_client.fetch(self.get_url(url),
-        #                                   body='',
-        #                                   method='POST',
-        #                                   allow_nonstandard_methods=True)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        print response.body
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
         try: 

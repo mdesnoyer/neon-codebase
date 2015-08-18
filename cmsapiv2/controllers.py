@@ -632,53 +632,43 @@ VideoHelper      : helper class responsible for creating new video jobs
 *********************************************************************'''
 class VideoHelper():
     @staticmethod 
-    @tornado.gen.coroutine
-    def addVideo(request, account_id):
-        schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
-          Required('external_video_ref') : All(str, Length(min=1, max=512)),
-          'integration_id' : All(str, Length(min=1, max=256)),
-          'video_url': All(str, Length(min=1, max=512)), 
-          'callback_url': All(str, Length(min=1, max=512)), 
-          'video_title': All(str, Length(min=1, max=256)),
-          'default_thumbnail_url': All(str, Length(min=1, max=128)),
-          'thumbnail_ref': All(str, Length(min=1, max=512))
-        })
-        args = parse_args(request)
-        args['account_id'] = str(account_id)
-        schema(args)
-        account_id_api_key = args['account_id'] 
-        integration_id = args.get('integration_id', None) 
- 
+    @tornado.gen.coroutine 
+    def createApiRequest(args, account_id_api_key): 
         user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
+        job_id = uuid.uuid1().hex
+        integration_id = args.get('integration_id', None) 
 
-        def _createNeonApiRequest(r): 
-            job_id = uuid.uuid1().hex
-            r.job_id = job_id
-            r.api_key = account_id_api_key 
-            r.video_id = args['external_video_ref'] 
-            if integration_id: 
-                r.integration_id = integration_id
-                r.integration_type = user_account.integrations[integration_id]
-            r.video_url = args.get('video_url', None) 
-            r.callback_url = args.get('callback_url', None)
-            r.video_title = args.get('video_title', None) 
-            r.default_thumbnail = args.get('default_thumbnail_url', None) 
-            r.external_thumbnail_ref = args.get('thumbnail_ref', None)  
-            
-        api_request = yield tornado.gen.Task(neondata.NeonApiRequest.modify, 
-                                             job_id, 
-                                             _createNeonApiRequest, 
-                                             create_missing=True) 
-        result = api_request 
-        # result = add the job
-        # this should be done with a call to video_server.add_job, or via http
-        # add the video, save the default thumbnail
+        request = neondata.NeonApiRequest(job_id, api_key=account_id_api_key)
+        request.video_id = args['external_video_ref'] 
+        if integration_id: 
+            request.integration_id = integration_id
+            request.integration_type = user_account.integrations[integration_id]
+        request.video_url = args.get('video_url', None) 
+        request.callback_url = args.get('callback_url', None)
+        request.video_title = args.get('video_title', None) 
+        request.default_thumbnail = args.get('default_thumbnail_url', None) 
+        request.external_thumbnail_ref = args.get('thumbnail_ref', None)  
+        yield tornado.gen.Task(request.save)
+
+        if request: 
+            raise tornado.gen.Return(request) 
+
+    @staticmethod 
+    @tornado.gen.coroutine 
+    def createVideo(args, account_id_api_key, api_request):
+        video_id = args['external_video_ref'] 
+        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                       neondata.InternalVideoID.generate(account_id_api_key, video_id))
+        if video is None:
+            video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
+                          request_id=api_request.job_id,
+                          video_url=args.get('video_url', None),
+                          i_id=api_request.integration_id,
+                          serving_enabled=False)
+            yield tornado.gen.Task(video.save)
+ 
+        raise tornado.gen.Return(video) 
         
-        if result: 
-            raise tornado.gen.Return(result) 
-        else: 
-            raise SaveError('unable to add to video, unable to process')
 
     @staticmethod 
     @tornado.gen.coroutine
@@ -703,10 +693,41 @@ class VideoHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         try:
-            video = yield tornado.gen.Task(VideoHelper.addVideo, 
-                                           self.request, 
-                                           account_id) 
-            self.success(video.to_json())
+            schema = Schema({
+              Required('account_id') : All(str, Length(min=1, max=256)),
+              Required('external_video_ref') : All(str, Length(min=1, max=512)),
+              'integration_id' : All(str, Length(min=1, max=256)),
+              'video_url': All(str, Length(min=1, max=512)), 
+              'callback_url': All(str, Length(min=1, max=512)), 
+              'video_title': All(str, Length(min=1, max=256)),
+              'default_thumbnail_url': All(str, Length(min=1, max=128)),
+              'thumbnail_ref': All(str, Length(min=1, max=512))
+            })
+            args = self.parse_args()
+            args['account_id'] = account_id_api_key = str(account_id)
+            schema(args)
+          
+            # create the api request 
+            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
+                                                 args, 
+                                                 account_id_api_key)
+            # add the video  
+            new_video = yield tornado.gen.Task(VideoHelper.createVideo, 
+                                               args, 
+                                               account_id_api_key, 
+                                               api_request) 
+            # save the default thumbnail
+            yield api_request.save_default_thumbnail(async=True)
+ 
+            # modify the video if there is a thumbnail set serving_enabled 
+            def _set_serving_enabled(v):
+                v.serving_enabled = len(v.thumbnail_ids) > 0
+            yield tornado.gen.Task(neondata.VideoMetadata.modify,
+                                   new_video.key,
+                                   _set_serving_enabled)
+
+            # add the job 
+            
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
         except SaveError as e: 
