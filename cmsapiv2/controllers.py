@@ -76,13 +76,11 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         # if we have query_arguments only use them 
         if self.request.query_arguments is not None: 
             for key, value in self.request.query_arguments.iteritems():
-                #TODO hack(and it's gonna break on a double value passed in)
-                # let's use Coerce inside voluptuous instead of using isdigit
-                args[key] = int(value[0]) if value[0].isdigit() else value[0]
+                args[key] = value[0]
         # otherwise let's use what we find in the body
         elif self.request.body_arguments is not None: 
             for key, value in self.request.body_arguments.iteritems():
-                args[key] = int(value[0]) if value[0].isdigit() else value[0]
+                args[key] = value[0]
 
         return args
 
@@ -119,8 +117,8 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         schema = Schema({ 
           Required('customer_name') : All(str, Length(min=1, max=1024)),
-          'default_width': All(int, Range(min=1, max=8192)), 
-          'default_height': All(int, Range(min=1, max=8192)),
+          'default_width': All(Coerce(int), Range(min=1, max=8192)), 
+          'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
         })
         try:
@@ -185,8 +183,8 @@ class AccountHandler(APIV2Handler):
     def put(self, account_id):
         schema = Schema({ 
           Required('account_id') : All(str, Length(min=1, max=256)),
-          'default_width': All(int, Range(min=1, max=8192)), 
-          'default_height': All(int, Range(min=1, max=8192)),
+          'default_width': All(Coerce(int), Range(min=1, max=8192)), 
+          'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
         })
         try:
@@ -197,8 +195,8 @@ class AccountHandler(APIV2Handler):
             def _update_account(a):
                 try: 
                     a.default_size = list(a.default_size) 
-                    a.default_size[0] = args.get('default_width', acct.default_size[0])
-                    a.default_size[1] = args.get('default_height', acct.default_size[1])
+                    a.default_size[0] = int(args.get('default_width', acct.default_size[0]))
+                    a.default_size[1] = int(args.get('default_height', acct.default_size[1]))
                     a.default_size = tuple(a.default_size)
                     a.default_thumbnail_id = args.get('default_thumbnail_id', a.default_thumbnail_id) 
                 except KeyError as e: 
@@ -229,7 +227,7 @@ class IntegrationHelper():
                 p.partner_code = args['publisher_id'] 
                 p.ooyala_api_key = args.get('ooyala_api_key', None)
                 p.api_secret = args.get('ooyala_api_secret', None)
-                p.auto_update = args.get('autosync', False)
+                p.auto_update = bool(int(args.get('autosync', False)))
             except KeyError as e: 
                 pass 
              
@@ -335,7 +333,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
           'ooyala_api_key': All(str, Length(min=1, max=1024)), 
           'ooyala_api_secret': All(str, Length(min=1, max=1024)), 
-          'autosync': All(int, Range(min=0, max=1))
+          'autosync': All(Coerce(int), Range(min=0, max=1))
         })
         try: 
             args = self.parse_args()
@@ -576,7 +574,7 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : All(str, Length(min=1, max=256)),
           Required('thumbnail_id') : All(str, Length(min=1, max=512)),
-          'enabled': All(int, Range(min=0, max=1))
+          'enabled': All(Coerce(int), Range(min=0, max=1))
         })
         try:
             args = self.parse_args()
@@ -588,7 +586,7 @@ class ThumbnailHandler(APIV2Handler):
                                                thumbnail_id)
             def _update_thumbnail(t):
                 try:
-                    t.enabled = bool(args.get('enabled', thumbnail.enabled))
+                    t.enabled = bool(int(args.get('enabled', thumbnail.enabled)))
                 except KeyError as e: 
                     pass
 
@@ -672,7 +670,7 @@ class VideoHelper():
                                              job_id, 
                                              _createNeonApiRequest, 
                                              create_missing=True) 
-        result = api_request      
+        result = api_request 
         # result = add the job
         # this should be done with a call to video_server.add_job, or via http
         # add the video, save the default thumbnail
@@ -779,13 +777,13 @@ class VideoHandler(APIV2Handler):
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
               Required('video_id') : All(str, Length(min=1, max=256)),
-              'testing_enabled': All(int, Range(min=0, max=1))
+              'testing_enabled': All(Coerce(int), Range(min=0, max=1))
             })
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
 
-            abtest = bool(args['testing_enabled'])
+            abtest = bool(int(args['testing_enabled']))
             internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
             def _update_video(v): 
                 v.testing_enabled = abtest
@@ -848,7 +846,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
-    (r'/api/v2/(\d+)/jobs/live_stream', LiveStreamHandler)
+    (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 
 def main():

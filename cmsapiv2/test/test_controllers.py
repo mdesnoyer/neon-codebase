@@ -257,7 +257,23 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
-        self.assertEquals(platform.ooyala_api_key, ooyala_api_key)  
+        self.assertEquals(platform.ooyala_api_key, ooyala_api_key) 
+ 
+    @tornado.testing.gen_test 
+    def test_post_integration_autosync(self):
+        ooyala_api_key = 'testapikey' 
+        url = '/api/v2/%s/integrations/ooyala?publisher_id=12423abc&autosync=1' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body) 
+        integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+                                          rjson['neon_api_key'], 
+                                          rjson['integration_id'])
+        self.assertEquals(integration.auto_update, True)  
 
 class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
