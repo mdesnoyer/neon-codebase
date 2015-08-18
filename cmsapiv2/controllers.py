@@ -140,6 +140,8 @@ class NewAccountHandler(APIV2Handler):
             self.success(user.to_json())
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg)) 
+        except Exception as e:  
+            self.error('could not create the account', {'customer_name': customer_name})  
         
 '''*****************************************************************
 AccountHandler : class responsible for updating and getting accounts 
@@ -345,10 +347,12 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.success(platform.to_json()) 
         except SaveError as e: 
             self.error(e.msg, {'account_id': account_id, 'publisher_id': args['publisher_id']}, e.code)  
-        except AttributeError as e:  
-            self.error(e.msg, {'account_id': account_id, 'publisher_id': args['publisher_id']})  
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('unable to create ooyala integration', 
+                        {'account_id': account_id, 
+                         'publisher_id': args['publisher_id']})  
 
     '''**********************
     OoyalaIntegration.get
@@ -363,10 +367,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.success(platform.to_json())
         except GetError as e:
             self.error('error getting the integration')  
-        except AttributeError as e:  
-            self.error('error getting the integration', {'account_id': account_id})
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('error getting the integration', {'account_id': account_id})
  
     '''**********************
     OoyalaIntegration.put
@@ -403,11 +407,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                      args['integration_id']) 
             self.success(ooyala_integration.to_json())
              
-        except AttributeError as e:  
-            self.error('error updating the integration', {'integration_id': integration_id})
-
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg))
+        except Exception as e:  
+            self.error('error updating the integration', {'integration_id': integration_id})
 
 '''*********************************************************************
 BrightcoveIntegrationHandler : class responsible for creating/updating/
@@ -445,7 +448,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
         except Exception as e:  
-            self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id})  
+            self.error('unable to create brightcove integration', {'account_id' : account_id, 'publisher_id' : publisher_id})  
 
     '''*********************
     BrightcoveIntegration.get 
@@ -463,7 +466,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg))
         except Exception as e: 
-            self.error(e.msg, {'account_id' : account_id}) 
+            self.error('unable to get brightcove integration', {'account_id' : account_id}) 
  
     '''*********************
     BrightcoveIntegration.put 
