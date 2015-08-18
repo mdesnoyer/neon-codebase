@@ -9,10 +9,8 @@ if sys.path[0] != __base_path__:
 import datetime
 import json
 import hashlib
-import PIL.Image as Image
 import logging
 import os
-import random
 import signal
 import time
 
@@ -23,15 +21,11 @@ import tornado.escape
 import tornado.gen
 import tornado.httpclient
 
-import traceback
-
 import utils.neon
 import utils.logs
 import utils.http
 
-from StringIO import StringIO
 from cmsdb import neondata
-from utils.inputsanitizer import InputSanitizer
 from utils import statemon
 import utils.sync
 from utils.options import define, options
@@ -726,7 +720,8 @@ class VideoHandler(APIV2Handler):
                                    new_video.key,
                                    _set_serving_enabled)
 
-            # add the job 
+            # add the job
+            
             
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))

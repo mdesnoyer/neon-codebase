@@ -375,7 +375,6 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 body='',
                                                 method='POST',
                                                 allow_nonstandard_methods=True)
-        print response.body
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
         try: 
