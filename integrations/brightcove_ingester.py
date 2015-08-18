@@ -59,8 +59,9 @@ def process_one_account(platform):
         # Exceptions are logged in the integration object already
         pass
     except Exception as e:
-        _log.error('Unexpected exception when processing publisher stream %s'
-                   % e)
+        _log.exception(
+            'Unexpected exception when processing publisher stream %s'
+            % e)
         statemon.state.increment('unexpected_processing_error')
 
 @tornado.gen.coroutine
