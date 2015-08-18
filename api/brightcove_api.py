@@ -947,7 +947,7 @@ class BrightcoveApi(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def find_modified_videos(self, from_date=datetime.date(1970,1,1),
+    def find_modified_videos(self, from_date=datetime.datetime(1970,1,1),
                              _filter=None,
                              page_size=100,
                              page=0,
@@ -974,7 +974,7 @@ class BrightcoveApi(object):
         list of video objects
         '''
         from_date_mins = (from_date - 
-                          datetime.date(1970, 1, 1)).total_seconds() / 60.0
+                          datetime.datetime(1970, 1, 1)).total_seconds() / 60.0
         
         # Build the request
         url_params = {
