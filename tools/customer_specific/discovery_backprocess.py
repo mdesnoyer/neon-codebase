@@ -110,13 +110,13 @@ def main():
         except Exception as e:
             _log.error('Error submitting video: %s' % e)
 
-        n_errors += len([x for x in results.values() 
+        n_errors += len([x for x in results
                          if isinstance(x, Exception)])
         n_processed += len(videos)
 
         job_id = None
         if len(results) > 0:
-            job_id = results.values()[0]
+            job_id = results[0]
 
         _log.info('Processed %i videos. %i failed. Recent job %s' % 
                   (n_processed, n_errors, job_id))
