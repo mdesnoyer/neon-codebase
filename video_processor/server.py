@@ -816,7 +816,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # creation cron
                 # TODO: Change this so that any source will have the video
                 # added here.
-                if request_type == 'neon':
+                if request_type == 'neon' and i_id == '0':
                     nplatform = yield tornado.gen.Task(
                         neondata.NeonPlatform.get, api_key, '0')
                     if nplatform:
