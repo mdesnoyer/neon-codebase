@@ -24,12 +24,49 @@ import utils.neon
 from utils.options import define, options
 define('max_submit_rate', default=60.0,
        help='Maximum number of jobs to submit per hour')
+define('clear_account', default=0,
+       help='If 1, the videos in the account are deleted first')
 
 _log = logging.getLogger(__name__)
 
+API_KEY = 'gvs3vytvg20ozp78rolqmdfa'
+INTEGRATION_ID = '71'
+
+@tornado.gen.coroutine
+def delete_all_videos():
+    _log.warn('All videos are being deleted in the account')
+    raw_input('Press ENTER to continue. Ctrl-C to cancel')
+
+    # Get the video keys to delete
+    vid_map = {}
+    def _delete_vids(plat):
+        vid_map.update(plat.videos)
+        plat.videos = {}
+    plat = neondata.BrightcovePlatform.modify(API_KEY, INTEGRATION_ID,
+                                              _delete_vids)
+
+    db_connection = neondata.DBConnection.get(neondata.NeonUserAccount)
+
+    # Get the video and thumbnail keys to delete
+    cur_keys = db_connection.fetch_keys_from_db('%s_*' % API_KEY)
+    neondata.StoredObject.delete_many(cur_keys)
+
+    # Get the serving url keys to delete
+    cur_keys = db_connection.fetch_keys_from_db('thumbnailservingurls_%s_*' %
+                                                API_KEY)
+    neondata.StoredObject.delete_many(cur_keys)
+
+    # Get the api requests to delete
+    cur_keys = db_connection.fetch_keys_from_db('request_%s_*' %
+                                                API_KEY)
+    neondata.StoredObject.delete_many(cur_keys)
+
 @tornado.gen.coroutine
 def main():
-    plat = neondata.BrightcovePlatform.get('gvs3vytvg20ozp78rolqmdfa', '71')
+    if options.clear_account:
+        yield delete_all_videos()
+    
+    plat = neondata.BrightcovePlatform.get(API_KEY, INTEGRATION_ID)
     integration = BrightcoveIntegration('314', plat)
 
     bc_api = plat.get_api()
@@ -39,43 +76,46 @@ def main():
     
     cur_page = 0
     n_processed = 0
+    n_errors = 0
     while True:
 
         videos = yield bc_api.search_videos(
             _all=[('network', 'dsc')],
             exact=True,
             video_fields=video_fields,
-            sort_by='REFERENCE_ID:ASC',
+            sort_by='CREATION_DATE:DESC',
             page=cur_page,
             async=True)
+        cur_page += 1
+                    
         if len(videos) == 0:
             break
-
+        
         videos = [x for x in videos if 
                   'newmediapaid' in x['customFields'] and 
                   x['customFields']['newmediapaid'] 
                   not in plat.videos]
 
+        if len(videos) == 0:
+            continue
+
         _log.info('Found %i videos to submit on this page' % len(videos))
 
-    
-        for video in videos:
-            video['id'] = video['customFields']['newmediapaid']
+        results = yield integration.submit_many_videos(
+            videos, grab_new_thumb=False, continue_on_error=True)
 
-            try:
-                job_id = yield integration.submit_one_video_object(video)
-            except Exception as e:
-                _log.exception('Unexpected error submitting video')
-                continue
+        n_errors += len([x for x in results.values() 
+                         if isinstance(x, Exception)])
+        n_processed += len(videos)
 
-            n_processed += 1
-            if n_processed % 100 == 0:
-                _log.info('Processed %i videos. Last job %s' % 
-                          (n_processed, job_id))
+        job_id = None
+        if len(results) > 0:
+            job_id = results.values()[0]
 
-            time.sleep(3600.0/options.max_submit_rate)
+        _log.info('Processed %i videos. %i failed. Recent job %s' % 
+                  (n_processed, n_errors, job_id))
 
-        cur_page += 1
+        time.sleep(3600.0 / options.max_submit_rate * len(videos))
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
