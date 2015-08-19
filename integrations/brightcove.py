@@ -413,6 +413,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 video_title=unicode(vid_obj['name']),
                 default_thumbnail=thumb_url,
                 external_thumbnail_id=thumb_id,
+                callback_url=self.platform.callback_url,
                 custom_data = custom_data,
                 duration=float(vid_obj['length']) / 1000.0,
                 publish_date=publish_date)

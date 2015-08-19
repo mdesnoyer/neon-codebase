@@ -605,14 +605,16 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             neondata.BrightcovePlatform.get('acct1', 'i1').videos['123456789'],
             job_id)
-        self.assertEquals(self.integration.platform.videos['123456789'], job_id)
+        self.assertEquals(self.integration.platform.videos['123456789'],
+                          job_id)
 
     @tornado.testing.gen_test
     def test_submit_video_using_reference_id(self):
-        def _set_id_field(x):
+        def _set_platform(x):
             x.id_field = neondata.BrightcovePlatform.REFERENCE_ID
+            x.callback_url = 'http://callback'
         self.platform = neondata.BrightcovePlatform.modify(
-            'acct1', 'i1', _set_id_field)
+            'acct1', 'i1', _set_platform)
         self.integration.platform = self.platform
 
         # Try a video with a reference id
@@ -637,7 +639,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             {'video_id': 'video_ref',
              'video_url': 'http://video.mp4',
              'video_title': 'Some video',
-             'callback_url': None,
+             'callback_url': 'http://callback',
              'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
              'external_thumbnail_id': 'still_id',
              'custom_data': { '_bc_int_data' :
