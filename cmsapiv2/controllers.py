@@ -36,6 +36,7 @@ _log = logging.getLogger(__name__)
 import uuid
 
 define("port", default=8084, help="run on the given port", type=int)
+define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -687,6 +688,7 @@ class VideoHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         try:
+            # TODO add custom_data (dictionary) as well as publish_date, and duration
             schema = Schema({
               Required('account_id') : All(str, Length(min=1, max=256)),
               Required('external_video_ref') : All(str, Length(min=1, max=512)),
@@ -719,10 +721,15 @@ class VideoHandler(APIV2Handler):
             yield tornado.gen.Task(neondata.VideoMetadata.modify,
                                    new_video.key,
                                    _set_serving_enabled)
-
+            
             # add the job
-            
-            
+            vs_job_url = 'http://%s:8081/job' % options.video_server
+            request = yield tornado.httpclient.HTTPRequest(url=vs_job_url,
+                                                           method="POST",
+                                                           body=api_request.to_json(),
+                                                           request_timeout=30.0,
+                                                           connect_timeout=10.0)
+             
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
         except SaveError as e: 
