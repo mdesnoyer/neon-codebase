@@ -97,6 +97,25 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
                 )
 
     @tornado.testing.gen_test
+    def test_no_thumb_data(self):
+        yield self.integration.submit_one_video_object(
+                { 'id' : 'v1',
+                  'length' : 100,
+                  'FLVURL' : 'http://video.mp4',
+                  'thumbnailURL' : None,
+                  'thumbnail' : {
+                      'id' : 123456,
+                      'referenceId' : None,
+                      'remoteUrl' : None
+                  }
+                }
+                )
+
+        # Make sure no image was uploaded
+        self.assertEquals(self.im_download_mock.call_count, 0)
+        self.assertEquals(self.cdn_mock.call_count, 0)
+
+    @tornado.testing.gen_test
     def test_convert_bc_thumb_type(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/vid_still.jpg'],
