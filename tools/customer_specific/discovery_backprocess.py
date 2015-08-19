@@ -104,6 +104,7 @@ def main():
         futures = [integration.submit_one_video_object(x, grab_new_thumb=False)
                    for x in videos]
 
+        results = []
         try:
             results = yield futures
         except Exception as e:
