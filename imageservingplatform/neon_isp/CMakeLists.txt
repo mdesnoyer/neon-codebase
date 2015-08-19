@@ -16,7 +16,7 @@ include_directories(${imageservingplatform_SOURCE_DIR}/../nginx-1.6.2/src/os/uni
 
 add_library(NeonISP STATIC
  neon_mastermind.cpp
- neon_updater.c
+ neon_updater.cpp
  neon_utils.c
  neon_utc.c
  neon_log.c
@@ -35,7 +35,7 @@ add_library(NeonISP STATIC
  neon_error_codes.c
  neon_stats.c
  neon_service_helper.c
-
+ url_utils.cpp
 )
 
 ######## All tests after this point #########
@@ -48,6 +48,8 @@ add_cc_test(NeonISPTest
   test/neon_directivehashtable_test.cc
   test/neon_service_helper_test.cc
   test/fractions_test.cc
+  test/default_thumbnail_test.cc
+  test/test_utils.cc
 )
 
 target_link_libraries( NeonISPTest 

@@ -34,6 +34,7 @@ import copy
 import datetime
 import errno
 import hashlib
+import itertools
 import simplejson as json
 import logging
 import multiprocessing
@@ -62,6 +63,7 @@ import utils.sync
 import utils.s3
 import utils.http 
 import urllib
+import urlparse
 import warnings
 
 
@@ -125,7 +127,7 @@ def _object_to_classname(otype=None):
     as a string.
     '''
     cname = None
-    if otype:
+    if otype is not None:
         if isinstance(otype, basestring):
             cname = otype
         else:
@@ -742,8 +744,8 @@ class ThumbnailType(object):
     ''' Thumbnail type enumeration '''
     NEON        = "neon"
     CENTERFRAME = "centerframe"
-    BRIGHTCOVE  = "brightcove"
-    OOYALA      = "ooyala"
+    BRIGHTCOVE  = "brightcove" # DEPRECATED. Will be DEFAULT instead
+    OOYALA      = "ooyala" # DEPRECATED. Will be DEFAULT instead
     RANDOM      = "random"
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
@@ -772,7 +774,7 @@ class StoredObject(object):
 
     This contains common routines for interacting with the data.
     TODO: Convert all the objects to use this consistent interface.
-    '''
+    ''' 
     def __init__(self, key):
         self.key = str(key)
 
@@ -850,8 +852,11 @@ class StoredObject(object):
             obj = classtype(key)
 
             #populate the object dictionary
-            for k, value in data_dict.iteritems():
-                obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            try:
+                for k, value in data_dict.iteritems():
+                    obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+            except ValueError:
+                return None
         
             return obj
 
@@ -862,7 +867,12 @@ class StoredObject(object):
         if isinstance(value, dict):
             if '_type' in value and '_data' in value:
                 # It is a stored object, so unpack it
-                return cls._create(key, value)
+                try:
+                    classtype = globals()[value['_type']]
+                    return classtype._create(key, value)
+                except KeyError:
+                    _log.error('Unknown class of type %s' % value['_type'])
+                    raise ValueError('Bad class type %s' % value['_type'])
             else:
                 # It is a dictionary do deserialize each of the fields
                 for k, v in value.iteritems():
@@ -987,6 +997,7 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
+            
             val = d[key]
             if val is not None:
                 func(val)
@@ -1063,7 +1074,7 @@ class StoredObject(object):
                     pipe.mset(to_set)
             return mappings
 
-        db_connection = DBConnection.get(cls)
+        db_connection = DBConnection.get(create_class)
         if callback:
             return db_connection.conn.transaction(_getandset, *keys,
                                                   callback=callback,
@@ -1091,6 +1102,31 @@ class StoredObject(object):
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
 
+    @classmethod
+    def delete(cls, key, callback=None):
+        '''Delete an object from the database.
+
+        Returns True if the object was successfully deleted
+        '''
+        return StoredObject.delete_many([key], callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        '''Deletes many objects simultaneously
+
+        Inputs:
+        keys - List of keys to delete
+
+        Returns:
+        The number of keys that were removed
+        '''
+        db_connection = DBConnection.get(cls)
+            
+        if callback:
+            db_connection.conn.delete(*keys, callback=callback)
+        else:
+            return db_connection.blocking_conn.delete(*keys)
+        
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
@@ -1304,6 +1340,18 @@ class NamespacedStoredObject(StoredObject):
             create_missing=create_missing,
             callback=callback)
 
+    @classmethod
+    def delete(cls, key, callback=None):
+        return super(NamespacedStoredObject, cls).delete(
+            cls.format_key(key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NamespacedStoredObject, cls).delete_many(
+            [cls.format_key(k) for k in keys],
+            callback=callback)
+
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
 
@@ -1429,6 +1477,9 @@ class NeonApiKey(NamespacedStoredObject):
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
     
     @staticmethod
     def generate(api_key, vid=None):
@@ -1612,18 +1663,6 @@ class NeonUserAccount(NamespacedStoredObject):
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
-    
-    def save_platform(self, new_integration, callback=None):
-        '''
-        Save Neon User account and corresponding platform object
-        '''
-        
-        #temp: changing this to a blocking pipeline call   
-        db_connection = DBConnection.get(self)
-        pipe = db_connection.blocking_conn.pipeline()
-        pipe.set(self.key, self.to_json())
-        pipe.set(new_integration.key, new_integration.to_json()) 
-        callback(pipe.execute())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1849,8 +1888,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
                  update_serving_urls=False,
                  rendition_sizes=None):
         self.key = key
-        
-        self.cdn_prefixes = cdn_prefixes # List of url prefixes
+
+        # List of url prefixes to put in front of the path. If there
+        # is no transport scheme, http:// will be added. Also, there
+        # is no trailing slash
+        cdn_prefixes = cdn_prefixes or []
+        self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                                cdn_prefixes)
         
         # If true, the images should be resized into all the desired
         # renditions.
@@ -1887,17 +1931,44 @@ class CDNHostingMetadata(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
-    def save_all(self, *args, **kwargs):
+    def save_all(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify(self, *args, **kwargs):
+    def modify(cls, *args, **kwargs):
         raise NotImplementedError()
 
     @classmethod
-    def modify_many(self, *args, **kwargs):
+    def modify_many(cls, *args, **kwargs):
         raise NotImplementedError()
 
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(CDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # Normalize the CDN prefixes
+        obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
+                               obj.cdn_prefixes)
+        
+        return obj
+
+    @staticmethod
+    def _normalize_cdn_prefix(prefix):
+      '''Normalizes a cdn prefix so that it starts with a scheme and does
+      not end with a slash.
+
+      e.g. http://neon.com
+           https://neon.com
+      '''
+      prefix_split = urlparse.urlparse(prefix, 'http')
+      if prefix_split.netloc == '':
+        path_split = prefix_split.path.partition('/')
+        prefix_split = [x for x in prefix_split]
+        prefix_split[1] = path_split[0]
+        prefix_split[2] = path_split[1]
+      scheme_added = urlparse.urlunparse(prefix_split)
+      return scheme_added.strip('/')
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
     If the images are to be uploaded to S3 bucket use this formatter  
@@ -1906,7 +1977,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False, rendition_sizes=None):
+                 make_tid_folders=False, rendition_sizes=None, policy=None):
         '''
         Create the object
         '''
@@ -1925,6 +1996,9 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         # form <api_key>/<video_id>/<thumb_id>.jpg
         self.make_tid_folders = make_tid_folders
 
+        # What aws policy should the images be uploaded with
+        self.policy = policy
+
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
     Hosting on S3 using the Neon keys.
@@ -1934,7 +2008,7 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     def __init__(self, key=None,
                  bucket_name='n3.neon-images.com',
                  cdn_prefixes=None,
-                 folder_prefix='',
+                 folder_prefix=None,
                  resize=True,
                  update_serving_urls=True,
                  do_salt=True,
@@ -1949,7 +2023,8 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=update_serving_urls,
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
-            rendition_sizes=rendition_sizes)
+            rendition_sizes=rendition_sizes,
+            policy='public-read')
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -1960,7 +2035,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=''):
+                 folder_prefix=None):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -1968,7 +2043,8 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             resize=False,
             update_serving_urls=False,
             do_salt=False,
-            make_tid_folders=True)
+            make_tid_folders=True,
+            policy='public-read')
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -1987,24 +2063,54 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
-            baseurl=None, cdn_prefixes=None, rendition_sizes=None):
+                 folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
+                 cpcode=None):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
             rendition_sizes=rendition_sizes)
-        
+
+        # Host for uploading to akamai. Can have http:// or not
         self.host = host
+
+        # Parameters to talk to akamai
         self.akamai_key = akamai_key
         self.akamai_name = akamai_name
-        # Base upload url. Should be something like '/17645/neon/prod'
-        self.baseurl = baseurl 
+
+        # The folder prefix to prepend to where the file will be
+        # stored and served from. Slashes at the beginning and end are
+        # optional
+        self.folder_prefix=folder_prefix
+
+        # CPCode string for uploading to Akamai. Should be something
+        # like 17645
+        self.cpcode = cpcode
+
+    @classmethod
+    def _create(cls, key, obj_dict):
+        obj = super(AkamaiCDNHostingMetadata, cls)._create(key, obj_dict)
+
+        # An old object could have had a baseurl, which was smashed
+        # together the folder prefix and cpcode. That was confusing,
+        # but in case there's an old object around, fix it. Also, in
+        # that case, the cdn_prefixes could have had the folder prefix
+        # in them, so remove them.
+        if hasattr(obj, 'baseurl'):
+            split = obj.baseurl.strip('/').partition('/')
+            obj.cpcode = split[0].strip('/')
+            obj.folder_prefix = split[2].strip('/')
+            obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
+                                for x in obj.cdn_prefixes]
+            del obj.baseurl
+        
+        return obj
 
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
-    def __init__(self, api_key, i_id='0', abtest=False, enabled=True, 
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True, serving_controller="imageplatform"):
         
         super(AbstractPlatform, self).__init__(
@@ -2023,6 +2129,9 @@ class AbstractPlatform(NamespacedStoredObject):
     
     @classmethod
     def _generate_subkey(cls, api_key, i_id):
+        if i_id is None or api_key.endswith('_%s' % i_id):
+            # It's already the correct key
+            return api_key
         return '_'.join([api_key, i_id])
 
     @classmethod
@@ -2055,9 +2164,11 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
+            
             return super(AbstractPlatform, cls)._create(key, obj_dict)
 
     def save(self, callback=None):
+        raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
@@ -2074,14 +2185,21 @@ class AbstractPlatform(NamespacedStoredObject):
             cls._generate_subkey(api_key, i_id), callback=callback)
     
     @classmethod
-    def modify(cls, api_key, i_id, func, callback=None):
+    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+        def _set_parameters(x):
+            api_key, i_id = x.get_id().split('_')
+            x.neon_api_key = api_key
+            x.integration_id = i_id
+            func(x)
+            
         return super(AbstractPlatform, cls).modify(
             cls._generate_subkey(api_key, i_id),
-            func,
+            _set_parameters,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (api_key, i_id)
@@ -2090,6 +2208,20 @@ class AbstractPlatform(NamespacedStoredObject):
             [cls._generate_subkey(api_key, i_id) for 
              api_key, i_id in keys],
             func,
+            create_missing=create_missing,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, api_key, i_id, callback=None):
+        return super(AbstractPlatform, cls).delete(
+            cls._generate_subkey(api_key, i_id),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(AbstractPlatform, cls).delete_many(
+            [cls._generate_subkey(api_key, i_id) for 
+             api_key, i_id in keys],
             callback=callback)
 
     def to_json(self):
@@ -2109,25 +2241,6 @@ class AbstractPlatform(NamespacedStoredObject):
         i_vids = [] 
         for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
-        return i_vids
-    
-    def get_processed_internal_video_ids(self):
-        ''' return list of i_vids for an account which have been processed '''
-
-        i_vids = []
-        processed_state = [RequestState.FINISHED, 
-                            RequestState.ACTIVE,
-                            RequestState.REPROCESS, 
-                            RequestState.SERVING, 
-                            RequestState.CUSTOMER_ERROR,
-                            RequestState.SERVING_AND_ACTIVE]
-        request_keys = [(v, self.neon_api_key) for v in
-                        self.videos.values()]
-        api_requests = NeonApiRequest.get_many(request_keys)
-        for api_request in api_requests:
-            if api_request and api_request.state in processed_state:
-                i_vids.append(InternalVideoID.generate(self.neon_api_key, 
-                                                        api_request.video_id)) 
         return i_vids
 
     @classmethod
@@ -2226,24 +2339,19 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
+ 
 
-    @classmethod
-    def _delete_many_keys(cls, keys):
-        #TODO: (Sunil/ Mark) have individual methods in each
-        # of the stored objects to delete the keys
-        db_connection = DBConnection.get(cls)
-        for key in keys:
-            db_connection.blocking_conn.delete(key) 
-
-    @classmethod
-    def delete_all_video_related_data(cls, platform_instance, platform_vid,
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_all_video_related_data(self, platform_vid,
             *args, **kwargs):
         '''
         Delete all data related to a given video
 
         request, vmdata, thumbs, thumb serving urls
         
-        #NOTE: Don't you dare call this method unless you really want to delete 
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
         '''
         
         do_you_want_to_delete = kwargs.get('really_delete_keys', False)
@@ -2257,30 +2365,34 @@ class AbstractPlatform(NamespacedStoredObject):
                 _log.error('no such video to delete')
                 return
         
-        i_vid = InternalVideoID.generate(platform_instance.neon_api_key, 
-                                        platform_vid)
-        vm = VideoMetadata.get(i_vid)
-        keys_to_delete = []
-        
-        # get all the keys to delete 
-        keys_to_delete.append("request_%s_%s" % (
-                             platform_instance.neon_api_key, vm.job_id))
-        keys_to_delete.append(vm.key)
-        for tid in vm.thumbnail_ids:
-            keys_to_delete.append(tid)
-            #serving urls
-            keys_to_delete.append("thumbnailservingurls_%s" %tid)
-
-        cls._delete_many_keys(keys_to_delete)
-
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
+                                         platform_vid)
+        vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        cls.modify(platform_instance.neon_api_key, '0', _del_video)
+        yield tornado.gen.Task(self.modify,
+                               self.neon_api_key, '0',
+                               _del_video)
 
+        # delete the video object
+        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
+
+        # delete the request object
+        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+                               self.neon_api_key)
+
+        # delete the thumbnails
+        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                               vm.thumbnail_ids)
+
+        # delete the serving urls
+        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                               vm.thumbnail_ids)
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
-    def __init__(self, a_id, i_id='0', api_key='', abtest=False):
+    def __init__(self, api_key, a_id=None, abtest=False):
         # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
         
@@ -2312,10 +2424,15 @@ class NeonPlatform(AbstractPlatform):
 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
+
+    REFERENCE_ID = '_reference_id'
+    BRIGHTCOVE_ID = '_bc_id'
     
-    def __init__(self, a_id, i_id='', api_key='', p_id=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False):
+                last_process_date=None, abtest=False, callback_url=None,
+                uses_batch_provisioning=False,
+                id_field=BRIGHTCOVE_ID):
 
         ''' On every request, the job id is saved '''
         super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
@@ -2324,14 +2441,26 @@ class BrightcovePlatform(AbstractPlatform):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        #The publish date of the last processed video - UTC timestamp 
+        #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
-        self.playlist_feed_ids = [] 
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
+
+        # Does the customer use batch provisioning (i.e. FTP
+        # uploads). If so, we cannot rely on the last modified date of
+        # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
+        self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Which custom field to use for the video id. If it is
+        # BrightcovePlatform.REFERENCE_ID, then the reference_id field
+        # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
+        self.id_field = id_field
 
     @classmethod
     def get_ovp(cls):
@@ -2356,7 +2485,7 @@ class BrightcovePlatform(AbstractPlatform):
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
             self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created)
+            account_created=self.account_created, callback_url=self.callback_url)
 
     @tornado.gen.engine
     def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
@@ -2540,12 +2669,10 @@ class YoutubePlatform(AbstractPlatform):
 
     # TODO(Sunil): Fix this class when Youtube is implemented 
 
-    def __init__(self, a_id, i_id='', api_key='', access_token=None, refresh_token=None,
+    def __init__(self, api_key, i_id=None, a_id='', access_token=None,
+                 refresh_token=None,
                 expires=None, auto_update=False, abtest=False):
-        super(YoutubePlatform, self).__init__(api_key, i_id)
-        
-        self.key = self.__class__.__name__.lower()  + '_%s_%s' \
-                %(api_key, i_id) #TODO: fix
+        super(YoutubePlatform, self).__init__(api_key, i_id, abtest)
         self.account_id = a_id
         self.access_token = access_token
         self.refresh_token = refresh_token
@@ -2665,7 +2792,7 @@ class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, a_id, i_id='', api_key='', p_code=None, 
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
                  o_api_key=None, api_secret=None, auto_update=False): 
         '''
         Init ooyala platform 
@@ -2675,9 +2802,7 @@ class OoyalaPlatform(AbstractPlatform):
 
         '''
         super(OoyalaPlatform, self).__init__(api_key, i_id)
-        self.neon_api_key = api_key
         self.account_id = a_id
-        self.integration_id = i_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
         self.api_secret = api_secret 
@@ -2854,7 +2979,8 @@ class NeonApiRequest(NamespacedStoredObject):
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
-            integration_type='neon', integration_id='0'):
+            integration_type='neon', integration_id='0',
+            external_thumbnail_id=None, publish_date=None):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -2871,6 +2997,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.integration_type = integration_type
         self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
+        self.external_thumbnail_id = external_thumbnail_id
 
         # Save the request response
         self.response = {}  
@@ -2878,7 +3005,7 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None # Timestamp in ms
+        self.publish_date = publish_date # ISO date format of when video is published
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -2930,7 +3057,17 @@ class NeonApiRequest(NamespacedStoredObject):
                     '_type': typemap[obj_dict['request_type']].__name__,
                     '_data': copy.deepcopy(obj_dict)
                     }
-            return super(NeonApiRequest, cls)._create(key, obj_dict)
+            obj = super(NeonApiRequest, cls)._create(key, obj_dict)
+
+            try:
+                obj.publish_date = datetime.datetime.utcfromtimestamp(
+                    obj.publish_date / 1000.)
+                obj.publish_date = obj.publish_date.isoformat()
+            except ValueError:
+                pass
+            except TypeError:
+                pass
+            return obj
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
@@ -2991,6 +3128,19 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,
+            callback=callback)
+
+    @classmethod
+    def delete(cls, job_id, api_key, callback=None):
+        return super(NeonApiRequest, cls).delete(
+            cls._generate_subkey(job_id, api_key),
+            callback=callback)
+
+    @classmethod
+    def delete_many(cls, keys, callback=None):
+        return super(NeonApiRequest, cls).delete_many(
+            [cls._generate_subkey(job_id, api_key) for 
+             job_id, api_key in keys],
             callback=callback)
 
     @utils.sync.optional_sync
@@ -3055,7 +3205,8 @@ class NeonApiRequest(NamespacedStoredObject):
         meta = ThumbnailMetadata(
             None,
             ttype=thumb_type,
-            rank=cur_rank)
+            rank=cur_rank,
+            external_id=self.external_thumbnail_id)
         yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,
@@ -3148,6 +3299,7 @@ class ThumbnailID(AbstractHashGenerator):
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
+    VALID_REGEX = '%s_[0-9A-Za-z]+' % InternalVideoID.VALID_INTERNAL_REGEX
 
     @staticmethod
     def generate(_input, internal_video_id):
@@ -3195,12 +3347,40 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     Specifically, maps:
 
     thumbnail_id -> { (width, height) -> url }
-    '''
 
-    def __init__(self, thumbnail_id, size_map=None):
+    or, instead of a full url map, there can be a base_url and a list of sizes.
+    In that case, the full url would be generated by 
+    <base_url>/FNAME_FORMAT % (thumbnail_id, width, height)
+    '''    
+    FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
+    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
+                   ThumbnailID.VALID_REGEX)
+
+    def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
+        
+        self.base_url = base_url
+        self.sizes = sizes or set([]) # List of (width, height)
 
+    def __eq__(self, other):
+        '''Sets can't do cmp, so we need to overright so that == and != works.
+        '''
+        if ((other is None) or 
+            (type(other) != type(self)) or 
+            (self.__dict__.keys() != other.__dict__.keys())):
+            return False
+        for k, v in self.__dict__.iteritems():
+            if v != other.__dict__[k]:
+                return False
+        return True
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __len__(self):
+        return len(self.size_map) + len(self.sizes)
+    
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -3209,13 +3389,25 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def get_thumbnail_id(self):
         '''Return the thumbnail id for this mapping.'''
-        return str(self.key.partition('_')[2])
+        return self.get_id()
 
     def add_serving_url(self, url, width, height):
         '''Adds a url to serve for a given width and height.
 
         If there was a previous entry, it is overwritten.
         '''
+        if self.base_url is not None:
+            urlRe = re.compile(
+                '%s/%s' % (re.escape(self.base_url),
+                           ThumbnailServingURLs.FNAME_REGEX))
+            if urlRe.match(url):
+                self.sizes.add((width, height))
+                return
+            else:
+                # TODO(mdesnoyer): once the db is cleaned, make this
+                # raise a ValueError
+                _log.warn_n('url %s does not conform to base %s' %
+                            (url, self.base_url))
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
@@ -3223,7 +3415,30 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
         Raises a KeyError if there isn't one.
         '''
+        if (width, height) in self.sizes:
+            return (self.base_url + '/' + ThumbnailServingURLs.FNAME_FORMAT %
+                    (self.get_thumbnail_id(), width, height))
         return self.size_map[(width, height)]
+
+    def get_serving_url_count(self):
+        '''Return the number of serving urls in this object.'''
+        return len(self.size_map) + len(self.sizes)
+
+    def is_valid_size(self, width, height):
+        '''Returns true if there is a url for this size image.'''
+        sz = (width, height)
+        return sz in self.sizes or sz in self.size_map
+
+    def __iter__(self):
+        '''Iterator of size, url pairs.'''
+        return itertools.chain(
+            self.size_map.iteritems(),
+            ((k, self.get_serving_url(*k)) for k in self.sizes))
+
+    @staticmethod
+    def create_filename(tid, width, height):
+        '''Creates a filename for a given thumbnail id at a specific size.'''
+        return ThumbnailServingURLs.FNAME_FORMAT % (tid, width, height)
 
     def to_dict(self):
         new_dict = {
@@ -3231,15 +3446,26 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             '_data': copy.copy(self.__dict__)
             }
         new_dict['_data']['size_map'] = self.size_map.items()
+        new_dict['_data']['sizes'] = list(self.sizes)
         return new_dict
 
     @classmethod
     def _create(cls, key, obj_dict):
         obj = super(ThumbnailServingURLs, cls)._create(key, obj_dict)
         if obj:
-            # Load in the size map as a dictionary
-            obj.size_map = dict([[tuple(x[0]), str(x[1])] for 
-                                 x in obj.size_map])
+            # Convert the sizes into tuples and a set
+            obj.sizes = set((tuple(x) for x in obj.sizes))
+            
+            # Load in the url entries into the object
+            size_map = obj.size_map
+            obj.size_map = {}
+            # Find the base url to save that way
+            bases = set((os.path.dirname(x[1]) for x in size_map))
+            if len(bases) == 1 and obj.base_url is None:
+                obj.base_url = bases.pop()
+            for k, v in size_map:
+                width, height = k
+                obj.add_serving_url(v, width, height)
             return obj
 
         
@@ -3406,11 +3632,14 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
-        self.urls.insert(0, s3_url)
+        s3_url = None
+        if len(s3_url_list) == 1:
+            s3_url = s3_url_list[0][0]
+            self.urls.insert(0, s3_url)
 
         # Host the image on the CDN
         if cdn_metadata is None:
@@ -3543,11 +3772,12 @@ class VideoMetadata(StoredObject):
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
-                 serving_enabled=True):
+                 serving_enabled=True, custom_data=None,
+                 publish_date=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
-        self.duration = duration
+        self.duration = duration # in seconds
         self.video_valence = vid_valence 
         self.model_version = model_version
         self.job_id = request_id
@@ -3559,8 +3789,6 @@ class VideoMetadata(StoredObject):
         # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
           experiment_state if testing_enabled else ExperimentState.DISABLED
-
-        # DEPRECATED. Use VideoStatus table instead
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
@@ -3570,6 +3798,13 @@ class VideoMetadata(StoredObject):
         # NOTE: This is set by mastermind by calling get_serving_url() method
         # after the request state has been changed to SERVING
         self.serving_url = None
+
+        # A dictionary of extra metadata
+        self.custom_data = custom_data or {}
+
+        # The time the video was published in ISO 8601 format
+        self.publish_date = publish_date or \
+          datetime.datetime.now().isoformat()
 
     @classmethod
     def is_valid_key(cls, key):

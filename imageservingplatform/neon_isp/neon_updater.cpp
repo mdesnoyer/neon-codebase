@@ -135,15 +135,19 @@ neon_runloop(void * arg){
             /*
              *  fetch new mastermind file from S3
              */
-            if(neon_fetch(mastermind_url, mastermind_filepath, s3port, s3downloader, fetch_timeout) == NEON_FETCH_FAIL) {
-                
+            char *error_msg = NULL; 
+            if(neon_fetch(mastermind_url, mastermind_filepath, s3port, s3downloader, fetch_timeout, &error_msg) == NEON_FETCH_FAIL) {
                 // log
                 ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
-                        "updater: failed to fetch mastermind file: %s", neon_fetch_error);
+                        "updater: failed to fetch mastermind file: %s", error_msg);
                 neon_stats[NEON_UPDATER_HTTP_FETCH_FAIL]++; 
                 neon_sleep(sleep_time);
                 continue;
             }
+            if (error_msg) {
+                free(error_msg); 
+            } 
+
             
             neon_stats[MASTERMIND_FILE_FETCH_SUCCESS]++; 
             
@@ -151,20 +155,21 @@ neon_runloop(void * arg){
              *  Validate expiry of new file 
              */
             time_t new_mastermind_expiry = neon_get_expiry(mastermind_filepath);
-            if (new_mastermind_expiry < time(0)){
+            if (new_mastermind_expiry < time(0)) {
                 
-                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE){
+                if(neon_mastermind_is_expiry_greater_than_current(new_mastermind_expiry) == NEON_TRUE) {
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
                             "updater: fetched mastermind is expired but ahead of current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
-                }else{ 
+                }
+                else { 
                     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, 
                             "updater: fetched mastermind is expired and older than current");
                     neon_stats[NEON_UPDATER_MASTERMIND_EXPIRED]++;
                     neon_sleep(sleep_time);
                     continue;
                 }
-	        } 
+	    } 
             
             /*
              *  Parse and process new mastermind file into memory

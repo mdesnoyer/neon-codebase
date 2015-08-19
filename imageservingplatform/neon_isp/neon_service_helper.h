@@ -1,3 +1,7 @@
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -22,5 +26,9 @@ neon_service_parse_number(ngx_str_t * value);
  */
 void
 remove_jpg_extention(unsigned char * item);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 

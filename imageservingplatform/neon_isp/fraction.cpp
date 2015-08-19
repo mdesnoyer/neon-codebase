@@ -3,50 +3,31 @@
  *
  * Fraction data present in the mastermind json file
  * */
-
-
 #include <iostream>
+#include <sstream>
 #include "neonException.h"
 #include "fraction.h"
 #include "neon_stats.h"
 
 #define SMALLEST_FRACTION 0.001
 
-Fraction::Fraction()
-{
-   defaultURL = 0;
-   tid = 0;  
-   initialized = false;
-}
+Fraction::Fraction() { }
 
-
-Fraction::~Fraction()
-{
-     defaultURL = 0;
-     tid = 0;
-     initialized = false;
-}
+Fraction::~Fraction() { }
 
 int
 Fraction::Init(double floor, const rapidjson::Value& frac)
 {
     try {
         int ret = InitSafe(floor, frac);
-
         // success
         if (ret == 0)
             return 0;
     }
 
-    // on any error, clean up 
-    catch (NeonException * e) {
-    }
-    catch (std::bad_alloc e) {
-    }
     catch (...) {
     }
-    
-    Dealloc();
+
     return -1;
 }
 
@@ -54,11 +35,6 @@ Fraction::Init(double floor, const rapidjson::Value& frac)
 int
 Fraction::InitSafe(double floor, const rapidjson::Value& frac)
 {
-    if(initialized == true) {
-        neon_stats[NEON_FRACTION_INVALID_INIT]++;
-        return -1;
-    }
-
     /*
      *  Percentage of being selected at random
      */
@@ -79,64 +55,86 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
         pct = 0.0;
 
     threshold = floor + pct;
-
-    // Default URL
-    if (frac.HasMember("default_url") == false)  {
-        neon_stats[NEON_FRACTION_PARSE_ERROR]++;
-        return -1;
-    }
-
-    defaultURL = 0;
-    defaultURL = strdup(frac["default_url"].GetString());
     
-    if(defaultURL == 0) {
-       neon_stats[NGINX_OUT_OF_MEMORY]++;
-       return -1;
-    }
-
     // Thumbnail ID
-    if (frac.HasMember("tid") == false) {
+    if (frac.HasMember("tid") && frac["tid"].IsString()) {
+        tid_.reset(new std::string(frac["tid"].GetString())); 
+    }
+    else { 
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
         return -1; 
-    }
+    } 
 
-    tid = 0;
-    tid = strdup(frac["tid"].GetString());
-
-    if(tid == 0) {
+    if(tid()->empty()) {
        neon_stats[NGINX_OUT_OF_MEMORY]++;
        return -1;
     }
 
-    /*
-     *  Images array
-     */
-    const rapidjson::Value& imageArray = frac["imgs"];
-    
-    if(imageArray.IsArray() == false) {
+    // Default URL
+    if (frac.HasMember("default_url"))  {
+        default_url_.reset(new std::string(frac["default_url"].GetString())); 
+    }
+    else if (frac.HasMember("base_url") && frac["base_url"].IsString()) { 
+        base_url_ = frac["base_url"].GetString();
+        if (base_url_.empty()) { 
+           neon_stats[NGINX_OUT_OF_MEMORY]++;
+           return -1;
+        }
+
+        // TODO Kevin when we delete the old code above, move the default url logic outta here
+        if (frac.HasMember("default_size") == false) { 
+            neon_stats[NEON_FRACTION_PARSE_ERROR]++;
+            return -1; 
+        } 
+        const rapidjson::Value& defaultSize = frac["default_size"]; 
+        if (defaultSize["h"].IsInt() && defaultSize["w"].IsInt()) {  
+            default_url_.reset(new std::string(url_utils::GenerateUrl(base_url_, *tid(), frac["default_size"]["h"].GetInt(), frac["default_size"]["w"].GetInt()))); 
+        }
+        else { 
+            neon_stats[NEON_FRACTION_PARSE_ERROR]++;
+            return -1; 
+        }
+    } 
+    else { 
         neon_stats[NEON_FRACTION_PARSE_ERROR]++;
         return -1;
     }
-
-    rapidjson::SizeType numOfImages = imageArray.Size();
     
+    if (frac.HasMember("imgs")) { 
+        const rapidjson::Value& imgs = frac["imgs"];  
+        return ProcessImages(imgs); 
+    } 
+    else if (frac.HasMember("img_sizes")) { 
+        const rapidjson::Value& img_sizes = frac["img_sizes"];  
+        return ProcessImages(img_sizes); 
+    } 
+
+    return 0;
+}
+
+int 
+Fraction::ProcessImages(const rapidjson::Value & imgs) 
+{ 
+    if(imgs.IsArray() == false) {
+        neon_stats[NEON_DEFAULT_THUMBNAIL_PARSE_ERROR]++;
+        return -1;
+    }
+
+    rapidjson::SizeType numOfImages = imgs.Size();
+
     if(numOfImages == 0) {
         neon_stats[NEON_FRACTION_INVALID]++;
         return -1;
     }
-
-    images.reserve(numOfImages);
     
-    // parse all images
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
         
         ScaledImage * img = new ScaledImage();
-        
-        // store immediately so that Shutdown can delete it in case of error
-        images.push_back(img);
+
+        images_.push_back(img); 
         
         // get image from the json array
-        const rapidjson::Value& elem = imageArray[i];
+        const rapidjson::Value& elem = imgs[i];
         
         // init the image instance with json elem
         int ret = img->Init(elem);
@@ -146,74 +144,36 @@ Fraction::InitSafe(double floor, const rapidjson::Value& frac)
             return -1;
         }
     }
-
-    initialized = true;
-    return 0;
-}
-
-
-void
-Fraction::Shutdown()
-{
-    if(initialized == false) {
-        neon_stats[NEON_FRACTION_INVALID_SHUTDOWN]++;
-        return;
-    }
-    
-    Dealloc();
-    initialized = false;
-}
-
-
-void
-Fraction::Dealloc()  {
-
-    for(std::vector<ScaledImage*>::iterator it = images.begin(); it != images.end(); it ++)
-    {
-        ScaledImage * img = (*it);
-        (*it) = 0;
-
-        if(img == NULL) {
-            neon_stats[NEON_SCALED_IMAGE_SHUTDOWN_NULL_POINTER]++;
-            continue;
-        }
-
-        img->Shutdown();
-        delete img;
-        img = 0;
-    }   
-
-    if(defaultURL != 0)
-        free((void *)defaultURL);
-    if(tid != 0)
-        free((void *)tid);
+    return 0; 
 }
 
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
-ScaledImage*
+// TODO Kevin this needs to be combined with DefaultThumbnail::GetScaledImage
+const ScaledImage*
 Fraction::GetScaledImage(int height, int width) const{
 
     static const int pixelRange = 6; 
 
     // go through all images again and pick the first approximate fit
-    unsigned numOfImages = images.size();
+    unsigned numOfImages = images_.size();
 
     if(numOfImages == 0)
         return 0; 
 
     // try to find an exact fit
     for(unsigned i=0; i < numOfImages; i++){
-        if(images[i]->GetHeight() == height &&
-           images[i]->GetWidth() == width)
-             return images[i];
+        if(images_[i].GetHeight() == height &&
+           images_[i].GetWidth() == width)
+             return &images_[i];
     }
 
     // otherwise try to find pick an approximate fit
     for(unsigned i=0; i < numOfImages; i++){
-        if(ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
-           ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange))
-            return images[i];
+        if(ScaledImage::ApproxEqual(images_[i].GetHeight(), height, pixelRange) &&
+           ScaledImage::ApproxEqual(images_[i].GetWidth(), width, pixelRange)) { 
+            return &images_[i];
+        } 
     }
     
     // no fit found
@@ -238,15 +198,20 @@ Fraction::GetPct() const
     return pct;
 }
 
-const char *
-Fraction::GetDefaultURL() const
+std::string * 
+Fraction::default_url() const
 {
-    return defaultURL;
+    return default_url_.get();
 }
 
-const char *
-Fraction::GetThumbnailID() const
+std::string * 
+Fraction::tid() const
 {
-    return tid;
+    return tid_.get();
 }
 
+const std::string& 
+Fraction::base_url() const 
+{ 
+    return base_url_; 
+}

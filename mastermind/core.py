@@ -400,6 +400,10 @@ class Mastermind(object):
             
         except KeyError:
             pass
+         
+        except Exception as e:
+            _log.error('Unhandled exception calculating new serving directive %s old_directive = %s new_directive = %s' % (e, old_directive, new_directive.values()))
+            raise
 
         self._modify_video_state(video_id, experiment_state, value_left,
                                  winner_tid, new_directive, video_info)

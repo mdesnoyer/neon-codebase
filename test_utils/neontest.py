@@ -106,6 +106,39 @@ class TestCase(unittest.TestCase):
         self.fail('Timed out waiting for %s to equal %s. '
                   'Its value was %s' % (func, expected, found))
 
+    def _callback_wrap_mock(self, outer_mock):
+        '''Sets up a mock that mocks out a call that acts on a callback.
+
+        So, if you are trying to mock out a function that looks like:
+        def my_callback_func(x, callback=None):
+           pass
+
+        You would mock it by:
+        patcher = patch('my_callback_func')
+        mock = self._callback_wrap_mock(patcher.start())
+
+        And you can treat the mock as if it is a normal, synchronous function.
+        e.g. mock.side_effect = [response]
+
+        Input: outer_mock - Mock of the function that does a callback
+        Returns: 
+        mock that can be used to set the actual function return value/exception
+        '''
+        inner_mock = MagicMock()
+        def _do_callback(*args, **kwargs):
+            callback = kwargs.get('callback', None)
+            if 'callback' in kwargs:
+                del kwargs['callback']
+                
+            response = inner_mock(*args, **kwargs)
+            if callback:
+                callback(response)
+            else:
+                return response
+
+        outer_mock.side_effect = _do_callback
+        return inner_mock
+
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''
     def __init__(self):
@@ -131,7 +164,16 @@ class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     def _future_wrap_mock(self, outer_mock):
         '''Sets up a mock that mocks out a call that returns a future.
 
-        Input: outer_mock - Mock of the function that needs a future
+        For example, if a function that returns a future is patched with
+        func_patch, then do:
+        
+        self.func_mock = self._future_wrap_mock(func_patcher.start())
+
+        and the following will do what you expect
+        self.func_mock.side_effect = [67, Exception('oops')]
+
+        Input:
+        outer_mock - Mock of the function that needs a future
         Returns: 
         mock that can be used to set the actual function return value/exception
         '''

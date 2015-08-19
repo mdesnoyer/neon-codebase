@@ -1,15 +1,16 @@
 #ifndef _NEON_SERVICE_
 #define _NEON_SERVICE_
 
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include <ngx_http.h>
-#include "neon_error_codes.h"
-
+#include <boost/scoped_ptr.hpp>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include "neon_error_codes.h"
 
 typedef enum  {
     
@@ -40,7 +41,6 @@ NEON_SERVER_API_ERROR neon_service_server_api(ngx_http_request_t *req,
 
 NEON_GETTHUMB_API_ERROR neon_service_getthumbnailid(ngx_http_request_t *req,
                                                  ngx_chain_t  ** chain);
-
 
 #ifdef __cplusplus
 } // extern "C"
