@@ -724,11 +724,20 @@ class VideoHandler(APIV2Handler):
             
             # add the job
             vs_job_url = 'http://%s:8081/job' % options.video_server
-            request = yield tornado.httpclient.HTTPRequest(url=vs_job_url,
-                                                           method="POST",
-                                                           body=api_request.to_json(),
-                                                           request_timeout=30.0,
-                                                           connect_timeout=10.0)
+            request = tornado.httpclient.HTTPRequest(url=vs_job_url,
+                                                     method="POST",
+                                                     body=api_request.to_json(),
+                                                     request_timeout=30.0,
+                                                     connect_timeout=10.0)
+
+            response = utils.http.send_request(request)
+
+            if response: 
+                job_info = {} 
+                job_info['job_id'] = api_request.job_id
+                self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
+            else: 
+                self.error('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR) 
              
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))

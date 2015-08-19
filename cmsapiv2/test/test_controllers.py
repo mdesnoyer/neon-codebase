@@ -52,13 +52,10 @@ class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError):  
             url = '/api/v2/accounts' 
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method="GET")
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 501) 
-	    pass 
 
 
 class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
@@ -360,21 +357,30 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.random_image = PILImageUtils.create_random_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image] 
+        self.im_download_mock.side_effect = [self.random_image]
+        #self.http_mocker = patch('utils.http.tornado.httpclient.HTTPClient.fetch')
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start()) 
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
+        self.http_mocker.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
                                                 allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 201) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
         try: 
