@@ -1122,7 +1122,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             'video_url' : "http://test.mp4",
             "video_title": "test_title", 
             'video_id'  : 654321,
-            "callback_url" : "http://callback",
+            "callback_url" : "null",
             'custom_data' : { 'my_id' : 123456, 'my_string': 'string'},
             'duration' : 123456.5,
             'publish_date' : '2015-06-03T13:04:33Z'
@@ -1145,7 +1145,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         job = neondata.NeonApiRequest.get(video.job_id, api_key)
         self.assertEquals(job.integration_id, '61')
-        self.assertEquals(job.callback_url, "http://callback")
+        self.assertIsNone(job.callback_url)
         self.assertIsNone(job.default_thumbnail)
         self.assertIsNone(job.external_thumbnail_id)
         self.assertEquals(job.publish_date, '2015-06-03T13:04:33+00:00')
@@ -1159,7 +1159,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             "video_title": "test_title", 
             'video_id'  : "vid1",
             'default_thumbnail' : 'default_thumb.jpg',
-            'external_thumbnail_id' : 'ext_tid'
+            'external_thumbnail_id' : 'ext_tid',
+            'callback_url' : 'http://callback'
             }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request' % (self.a_id, "61"))
@@ -1174,7 +1175,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         job = neondata.NeonApiRequest.get(video.job_id, api_key)
         self.assertEquals(job.default_thumbnail, 'default_thumb.jpg')
         self.assertEquals(job.external_thumbnail_id, 'ext_tid')
-        self.assertIsNone(job.callback_url)
+        self.assertEquals(job.callback_url, 'http://callback')
 
     def test_create_video_request_custom_data_via_url_string(self):
         self.cp_mock_async_client().fetch.side_effect = \

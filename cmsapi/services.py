@@ -747,7 +747,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         video_title = InputSanitizer.sanitize_string(
             self.get_argument('video_title', None))
         topn = self.get_argument('topn', 1)
-        callback_url = self.get_argument('callback_url', None)
+        callback_url = InputSanitizer.sanitize_string(
+            self.get_argument('callback_url', None))
         default_thumbnail = self.get_argument('default_thumbnail', None)
         external_thumb_id = None
         if default_thumbnail is not None:
