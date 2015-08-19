@@ -52,6 +52,7 @@ import tornado.ioloop
 import time
 import urllib
 import urllib2
+import urlparse
 from utils.imageutils import PILImageUtils
 import utils.neon
 import utils.pycvutils
@@ -314,7 +315,10 @@ class VideoProcessor(object):
                     statemon.state.increment('s3url_download_error')
             
             # Use urllib2
-            req = urllib2.Request(urllib.quote(self.video_url),
+            url_parse = urlparse.urlparse(self.video_url)
+            url_parse = list(url_parse)
+            url_parse[2] = urllib.quote(url_parse[2])
+            req = urllib2.Request(urlparse.urlunparse(url_parse),
                                   headers=self.headers)
             response = urllib2.urlopen(req, timeout=self.timeout)
             last_time = time.time()
