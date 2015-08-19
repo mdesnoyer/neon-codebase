@@ -57,7 +57,7 @@ def delete_all_videos():
     #neondata.StoredObject.delete_many(cur_keys)
 
     # Get the api requests to delete
-    cur_keys = db_connection.fetch_keys_from_db('requests_%s_*' %
+    cur_keys = db_connection.fetch_keys_from_db('request_%s_*' %
                                                 API_KEY)
     #neondata.StoredObject.delete_many(cur_keys)    
     print 'a'
