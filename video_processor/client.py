@@ -314,7 +314,8 @@ class VideoProcessor(object):
                     statemon.state.increment('s3url_download_error')
             
             # Use urllib2
-            req = urllib2.Request(self.video_url, headers=self.headers)
+            req = urllib2.Request(urllib.quote(self.video_url),
+                                  headers=self.headers)
             response = urllib2.urlopen(req, timeout=self.timeout)
             last_time = time.time()
             data = response.read(CHUNK_SIZE)
