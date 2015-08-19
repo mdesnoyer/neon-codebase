@@ -41,7 +41,7 @@ def delete_all_videos():
     vid_map = {}
     def _delete_vids(plat):
         vid_map.update(plat.videos)
-        #plat.videos = {}
+        plat.videos = {}
     plat = neondata.BrightcovePlatform.modify(API_KEY, INTEGRATION_ID,
                                               _delete_vids)
 
@@ -49,18 +49,17 @@ def delete_all_videos():
 
     # Get the video and thumbnail keys to delete
     cur_keys = db_connection.fetch_keys_from_db('%s_*' % API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)
+    neondata.StoredObject.delete_many(cur_keys)
 
     # Get the serving url keys to delete
     cur_keys = db_connection.fetch_keys_from_db('thumbnailservingurls_%s_*' %
                                                 API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)
+    neondata.StoredObject.delete_many(cur_keys)
 
     # Get the api requests to delete
     cur_keys = db_connection.fetch_keys_from_db('request_%s_*' %
                                                 API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)    
-    print 'a'
+    neondata.StoredObject.delete_many(cur_keys)
 
 @tornado.gen.coroutine
 def main():
