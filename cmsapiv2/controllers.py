@@ -38,6 +38,42 @@ import uuid
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 
+statemon.define('post_account_oks', int) 
+statemon.define('post_account_fails', int) 
+statemon.define('put_account_oks', int) 
+statemon.define('put_account_fails', int) 
+statemon.define('get_account_oks', int) 
+statemon.define('get_account_fails', int)
+
+statemon.define('post_ooyala_oks', int)  
+statemon.define('post_ooyala_fails', int)  
+statemon.define('put_ooyala_oks', int)  
+statemon.define('put_ooyala_fails', int)  
+statemon.define('get_ooyala_oks', int)  
+statemon.define('get_ooyala_fails', int)  
+
+statemon.define('post_brightcove_oks', int)  
+statemon.define('post_brightcove_fails', int)  
+statemon.define('put_brightcove_oks', int)  
+statemon.define('put_brightcove_fails', int)  
+statemon.define('get_brightcove_oks', int)  
+statemon.define('get_brightcove_fails', int) 
+
+statemon.define('post_thumbnail_oks', int) 
+statemon.define('post_thumbnail_fails', int) 
+statemon.define('put_thumbnail_oks', int) 
+statemon.define('put_thumbnail_fails', int) 
+statemon.define('get_thumbnail_oks', int) 
+statemon.define('get_thumbnail_fails', int) 
+
+statemon.define('put_videos_fails', int) 
+statemon.define('post_videos_oks', int) 
+statemon.define('post_videos_fails', int) 
+statemon.define('put_videos_oks', int) 
+statemon.define('put_videos_fails', int) 
+statemon.define('get_videos_oks', int) 
+statemon.define('get_videos_fails', int) 
+ 
 class ResponseCode(object): 
     HTTP_OK = 200
     HTTP_ACCEPTED = 202 
@@ -130,11 +166,22 @@ class NewAccountHandler(APIV2Handler):
                 pass 
             output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
             user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
+
+            _log.debug(('key=NewAccountHandler.post '
+                       'msg=New Account has been added : name = %s id = %s') 
+                       % (user.customer_name, user.account_id))
+            statemon.state.increment('post_account_oks')
+ 
             self.success(user.to_json())
+
         except MultipleInvalid as e:
+            statemon.state.increment('post_account_fails') 
             self.error('%s %s' % (e.path[0], e.msg)) 
-        except Exception as e:  
-            self.error('could not create the account', {'customer_name': customer_name})  
+
+        except Exception as e: 
+            statemon.state.increment('post_new_account_failures') 
+            _log.exception('key=NewAccountHandler.post msg=%s' % e)  
+            self.error('could not create the account', {'customer_name': args['customer_name']})  
         
 '''*****************************************************************
 AccountHandler : class responsible for updating and getting accounts 
@@ -165,10 +212,16 @@ class AccountHandler(APIV2Handler):
             rv_account['created'] = user_account.created 
             rv_account['updated'] = user_account.updated
             output = json.dumps(rv_account)
-            self.success(output) 
+            statemon.state.increment('get_account_oks')
+            self.success(output)
+ 
         except MultipleInvalid as e:  
+            statemon.state.increment('get_account_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('get_account_fails')
+            _log.exception('key=AccountHandler.get msg=%s' % e)  
             self.error('could not retrieve the account', {'account_id': account_id})  
  
     '''**********************
@@ -198,10 +251,16 @@ class AccountHandler(APIV2Handler):
                     pass 
             result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
             output = result.to_json()
+            statemon.state.increment('put_account_oks')
             self.success(output)
+
         except MultipleInvalid as e: 
+            statemon.state.increment('put_account_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('put_account_fails')
+            _log.exception('key=AccountHandler.put msg=%s' % e)  
             self.error('could not update the account', {'account_id': account_id})  
 
 '''*********************************************************************
@@ -337,12 +396,20 @@ class OoyalaIntegrationHandler(APIV2Handler):
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
             platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
             yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, neondata.IntegrationType.OOYALA)
-            self.success(platform.to_json()) 
+            statemon.state.increment('post_ooyala_oks')
+            self.success(platform.to_json())
+ 
         except SaveError as e: 
+            statemon.state.increment('post_ooyala_fails')
             self.error(e.msg, {'account_id': account_id, 'publisher_id': args['publisher_id']}, e.code)  
+
         except MultipleInvalid as e: 
+            statemon.state.increment('post_ooyala_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('post_ooyala_fails')
+            _log.exception('key=OoyalaIntegrationHandler.post msg=%s' % e)  
             self.error('unable to create ooyala integration', 
                         {'account_id': account_id, 
                          'publisher_id': args['publisher_id']})  
@@ -357,12 +424,21 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                               self,
                                               account_id,  
                                               neondata.IntegrationType.OOYALA) 
+            statemon.state.increment('get_ooyala_oks')
             self.success(platform.to_json())
+
         except GetError as e:
+            statemon.state.increment('get_ooyala_fails')
+            _log.exception('key=OoyalaIntegrationHandler.get.GetError msg=%s' % e)  
             self.error('error getting the integration')  
+
         except MultipleInvalid as e: 
+            statemon.state.increment('get_ooyala_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('get_ooyala_fails')
+            _log.exception('key=OoyalaIntegrationHandler.get msg=%s' % e)  
             self.error('error getting the integration', {'account_id': account_id})
  
     '''**********************
@@ -398,11 +474,16 @@ class OoyalaIntegrationHandler(APIV2Handler):
             ooyala_integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                                      args['account_id'], 
                                                      args['integration_id']) 
+            statemon.state.increment('put_ooyala_oks')
             self.success(ooyala_integration.to_json())
              
         except MultipleInvalid as e:
+            statemon.state.increment('put_ooyala_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('put_ooyala_fails')
+            _log.exception('key=OoyalaIntegrationHandler.put msg=%s' % e)  
             self.error('error updating the integration', {'integration_id': integration_id})
 
 '''*********************************************************************
@@ -435,12 +516,20 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             yield tornado.gen.Task(IntegrationHelper.addStrategy, 
                                    acct, 
                                    neondata.IntegrationType.BRIGHTCOVE)
+            statemon.state.increment('post_brightcove_oks')
             self.success(platform.to_json())
+
         except SaveError as e:
+            statemon.state.increment('post_brightcove_fails')
             self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id}, e.code)  
+
         except MultipleInvalid as e: 
+            statemon.state.increment('post_brightcove_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('post_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.post msg=%s' % e)  
             self.error('unable to create brightcove integration', {'account_id' : account_id, 'publisher_id' : publisher_id})  
 
     '''*********************
@@ -453,12 +542,20 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                               self,
                                               account_id,  
                                               neondata.IntegrationType.BRIGHTCOVE) 
+            statemon.state.increment('get_brightcove_oks')
             self.success(platform.to_json())
+
         except GetError as e: 
+            statemon.state.increment('get_brightcove_fails')
             self.error(e.msg) 
+
         except MultipleInvalid as e:
+            statemon.state.increment('get_brightcove_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e: 
+            statemon.state.increment('get_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.get msg=%s' % e)  
             self.error('unable to get brightcove integration', {'account_id' : account_id}) 
  
     '''*********************
@@ -495,10 +592,16 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                               account_id, 
                                               integration_id) 
+            statemon.state.increment('put_brightcove_oks')
             self.success(platform.to_json())
+
         except MultipleInvalid as e: 
+            statemon.state.increment('put_brightcove_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('put_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.put msg=%s' % e)  
             self.error('unable to update integration', {'integration_id' : integration_id}) 
 
 '''*********************************************************************
@@ -555,13 +658,18 @@ class ThumbnailHandler(APIV2Handler):
                                                lambda x: x.thumbnail_ids.append(new_thumbnail.key))
 
             if new_video: 
+                statemon.state.increment('post_thumbnail_oks')
                 self.success('{ "message": "thumbnail accepted for processing" }', code=ResponseCode.HTTP_ACCEPTED)  
             else: 
                 self.error('unable to save thumbnail to video', {'thumbnail_location' : args['thumbnail_location']})  
               
         except MultipleInvalid as e: 
+            statemon.state.increment('post_thumbnail_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:  
+            statemon.state.increment('post_thumbnail_fails')
+            _log.exception('key=ThumbnailHandler.post msg=%s' % e)  
             self.error('unable to add thumbnail', {'thumbnail_location' : args['thumbnail_location']}) 
 
     @tornado.gen.coroutine
@@ -592,11 +700,16 @@ class ThumbnailHandler(APIV2Handler):
             thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
                                                thumbnail_id)
  
+            statemon.state.increment('put_thumbnail_oks')
             self.success(json.dumps(thumbnail.__dict__))
 
         except MultipleInvalid as e: 
+            statemon.state.increment('put_thumbnail_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:
+            statemon.state.increment('put_thumbnail_fails')
+            _log.exception('key=ThumbnailHandler.put msg=%s' % e)  
             self.error('unable to update thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
  
     @tornado.gen.coroutine
@@ -612,12 +725,16 @@ class ThumbnailHandler(APIV2Handler):
             thumbnail_id = args['thumbnail_id'] 
             thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
                                                thumbnail_id) 
+            statemon.state.increment('get_thumbnail_oks')
             self.success(json.dumps(thumbnail.__dict__))
 
         except MultipleInvalid as e: 
+            statemon.state.increment('get_thumbnail_fails')
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:
+            statemon.state.increment('get_thumbnail_fails')
+            _log.exception('key=ThumbnailHandler.get msg=%s' % e)  
             self.error('unable to get thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
 
 
@@ -670,7 +787,7 @@ class VideoHelper():
     def getThumbnailsFromIds(tids):
         thumbnails = []
         if tids: 
-            thumbnails = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
+            thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many, 
                                                 tids)
             thumbnails = [obj.__dict__ for obj in thumbnails] 
 
@@ -742,8 +859,10 @@ class VideoHandler(APIV2Handler):
         except MultipleInvalid as e: 
             self.error('%s %s' % (e.path[0], e.msg))
         except SaveError as e: 
+            _log.exception('key=VideoHandler.post.saveError msg=%s' % e)  
             self.error(e.msg, code=e.code) 
         except Exception as e:
+            _log.exception('key=VideoHandler.post msg=%s' % e)  
             self.error('unable to create video request', {'account_id': account_id})  
     
     '''**********************
@@ -798,6 +917,7 @@ class VideoHandler(APIV2Handler):
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg))
         except Exception as e:
+            _log.exception('key=VideoHandler.get msg=%s' % e)  
             self.error('unable to get videos', {'account_id': account_id, 'video_id': video_id})  
  
     '''**********************
@@ -830,6 +950,7 @@ class VideoHandler(APIV2Handler):
         except MultipleInvalid as e:
             self.error('%s %s' % (e.path[0], e.msg)) 
         except Exception as e:
+            _log.exception('key=VideoHandler.put msg=%s' % e)  
             self.error('unable to update video', {'account_id': account_id})  
 
 '''*********************************************************************
@@ -849,7 +970,7 @@ LiveStreamHandler : class responsible for creating a new live stream job
 *********************************************************************'''
 class LiveStreamHandler(tornado.web.RequestHandler): 
     def __init__(self): 
-        super(OptimizelyIntegrationHandler, self).__init__() 
+        super(LiveStreamHandler, self).__init__() 
 
 '''*********************************************************************
 Controller Defined Exceptions 

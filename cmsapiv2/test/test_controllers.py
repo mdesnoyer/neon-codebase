@@ -378,7 +378,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 body='',
                                                 method='POST',
                                                 allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 201) 
+        self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
     @tornado.testing.gen_test
