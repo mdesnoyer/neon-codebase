@@ -274,6 +274,38 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
                           ttype=ThumbnailType.DEFAULT,
                           rank=1,
                           refid='my_thumb_ref',
+                          external_id=123456).save()
+        
+        yield self.integration.submit_one_video_object({
+            'id' : 'v1',
+            'length' : 100,
+            'FLVURL' : 'http://video.mp4',
+            'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+            'videoStill' : {
+                'id' : 'still_id',
+                'referenceId' : None,
+                'remoteUrl' : None
+                },
+            'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+            'thumbnail' : {
+                'id' : 123456,
+                'referenceId' : None,
+                'remoteUrl' : None
+                }
+                }
+            )
+
+        # Make sure no image was uploaded
+        self.assertEquals(self.im_download_mock.call_count, 0)
+        self.assertEquals(self.cdn_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_match_external_id_string(self):
+        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
+                          ['http://bc.com/some_moved_location'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=1,
+                          refid='my_thumb_ref',
                           external_id='123456').save()
         
         yield self.integration.submit_one_video_object({
@@ -365,7 +397,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
             'FLVURL' : 'http://video.mp4',
             'videoStillURL' : 'http://bc.com/new_still.jpg?x=8',
             'videoStill' : {
-                'id' : 'still_id',
+                'id' : 1234568,
                 'referenceId' : None,
                 'remoteUrl' : None
             },
@@ -390,7 +422,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
                 self.assertEquals(thumb.urls, [
                     'some_cdn_url.jpg',
                     'http://bc.com/new_still.jpg?x=8'])
-                self.assertEquals(thumb.external_id, 'still_id')
+                self.assertEquals(thumb.external_id, '1234568')
 
         # Make sure the new image was uploaded
         self.im_download_mock.assert_called_with(
@@ -440,7 +472,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
         self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
         
 
@@ -498,7 +530,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_submission_error(self):
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 500, error=tornado.httpclient.HTTPError(500))
 
         with self.assertLogExists(logging.ERROR, 'Error submitting video'):
@@ -526,7 +558,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_submit_video_already_submitted(self):
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 409, buffer=StringIO(
                   '{"error":"duplicate job", "job_id": "job2"}'))
 
@@ -1018,7 +1050,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
         self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
         
 
@@ -1290,7 +1322,7 @@ class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
         self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
         self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
         
 
@@ -1461,7 +1493,7 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
         self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
         self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
         self.submit_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
         
 
