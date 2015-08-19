@@ -32,6 +32,8 @@ import tornado.ioloop
 import tornado.web
 import tornado.escape
 import threading
+import urlparse
+import urllib
 import utils.botoutils
 import utils.http
 import utils.neon
@@ -118,13 +120,18 @@ class RequestData(object):
     Instance of this classs is stored in the Q
     '''
 
-    def __init__(self, key, api_request):
+    def __init__(self, key, api_request, duration=None):
         '''
         @api_request: NeonApiRequest Object
         '''
         self.key = key
         self.api_request = api_request
-        self.video_size = None # in bytes
+        if duration is not None:
+            # approximate the video size
+            self.video_size = duration * 8.0 * 1024 * 800
+        else:
+            self.video_size = None # in bytes
+        self.duration = duration # in seconds
 
     def get_key(self):
         return self.key
@@ -225,7 +232,7 @@ class FairWeightedRequestQueue(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def put(self, api_request):
+    def put(self, api_request, duration=None):
         # Based on customer priority put in the appropriate Q
         p = yield DBCache.get_customer_priority(api_request.api_key, async=True)
         
@@ -233,7 +240,7 @@ class FairWeightedRequestQueue(object):
         # the lowest priority
         pindex = min(p, len(self.pqs) -1)
         key = api_request.key
-        item = RequestData(key, api_request)
+        item = RequestData(key, api_request, duration=duration)
         ret = self.pqs[pindex].put(key, item)
 
         # TODO(Sunil): Remove the complexity of looking up the
@@ -271,7 +278,7 @@ class FairWeightedRequestQueue(object):
         pq = self.pqs[pqid]
         item = pq.peek(key)
         # if the item still exists in the Q
-        if item:
+        if item and item.duration is None:
             video_url = item.get_video_url()
 
             # Get content length of the video
@@ -281,7 +288,7 @@ class FairWeightedRequestQueue(object):
                 if nbytes is not None:
                     statemon.state.increment('queue_size_bytes', nbytes)
                     _log.info("Request %s had video file of size %s",
-                              item, nbytes)
+                              item.key, nbytes)
                     # add video size 
                     item.set_video_size(nbytes)
             except Exception as e:
@@ -308,10 +315,14 @@ class FairWeightedRequestQueue(object):
                 _log.warn('Error getting video url %s via boto. '
                           'Falling back on http: %s' % (video_url, e))
                 
-        
-        req = tornado.httpclient.HTTPRequest(method='HEAD',
-                                             url=video_url,
-                                             request_timeout=5.0) 
+
+        url_parse = urlparse.urlparse(video_url)
+        url_parse = list(url_parse)
+        url_parse[2] = urllib.quote(url_parse[2])
+        req = tornado.httpclient.HTTPRequest(
+            method='HEAD',
+            url=urlparse.urlunparse(url_parse),
+            request_timeout=5.0) 
             
         result = yield tornado.gen.Task(utils.http.send_request, req)
 
@@ -376,7 +387,9 @@ class JobManager(object):
             # video of 800 kbps or 15 min if we don't know
             # the length of the video.
             approx_video_length = self.base_time*15.0
-            if job.video_size:
+            if job.duration:
+                approx_video_length = job.duration
+            elif job.video_size:
                 approx_video_length = job.video_size * 8.0 / 1024 / 800
             deadline = datetime.datetime.now() + datetime.timedelta(
                 seconds=approx_video_length*2.0)
@@ -519,7 +532,16 @@ class JobManager(object):
         
         Returns False if the job is already in the queue.
         '''
-        retval = yield self.q.put(api_request, async=True)
+        # Try to get the duration of the video
+        duration = None
+        video = yield tornado.gen.Task(
+            neondata.VideoMetadata.get,
+            neondata.InternalVideoID.generate(api_request.api_key,
+                                              api_request.video_id))
+        if video is not None:
+            duration = video.duration
+                    
+        retval = yield self.q.put(api_request, duration, async=True)
         statemon.state.server_queue = self.q.qsize()
         _log.info('Add job %s for account %s to the queue' % 
                   (api_request.job_id, api_request.api_key))

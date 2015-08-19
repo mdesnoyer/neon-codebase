@@ -215,6 +215,17 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
         # kinda hacky, but we need to get the raw RequestData object
         item = self.fwq.get()
         self.assertEqual(item.get_video_size(), vsize)
+
+    @tornado.testing.gen_test
+    def test_with_duration(self):
+        req = neondata.NeonApiRequest('job0', self.nuser1.neon_api_key,
+                                      url='http://someurl', vid='v1')
+
+        yield self.fwq.put(req, duration=50.3, async=True)
+        self.assertFalse(self.mock_send_request.called)
+
+        item = self.fwq.get()
+        self.assertEqual(item.duration, 50.3)
     
 class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     ''' Video Server test'''
@@ -826,7 +837,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
 
         # Make some default jobs
         self.jobs = [
-            neondata.NeonApiRequest('job0', self.api_key,
+            neondata.NeonApiRequest('job0', self.api_key, vid='vid1',
                                     url='http://somewhere.mp4')]
         neondata.NeonApiRequest.save_all(self.jobs)
 
@@ -845,6 +856,16 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         future = concurrent.futures.Future()
         self.io_loop.call_later(timeout, future.set_result, None)
         return future
+
+    @tornado.testing.gen_test
+    def test_job_with_duration(self):
+        neondata.VideoMetadata('%s_vid1' % self.api_key,
+                               duration=50.3).save()
+
+        #TODO(mdesnoyer): Test the time calculation
+        yield self.job_manager.add_job(self.jobs[0])
+        job = self.job_manager.get_job()
+        self.assertIsNotNone(job)
 
     @tornado.testing.gen_test
     def test_job_times_out(self):
