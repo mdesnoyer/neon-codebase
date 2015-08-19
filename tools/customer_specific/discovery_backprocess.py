@@ -101,8 +101,13 @@ def main():
 
         _log.info('Found %i videos to submit on this page' % len(videos))
 
-        results = yield integration.submit_many_videos(
-            videos, grab_new_thumb=False, continue_on_error=True)
+        futures = [integration.submit_one_video_object(x, grab_new_thumb=False)
+                   for x in videos]
+
+        try:
+            results = yield futures
+        except Exception as e:
+            _log.error('Error submitting video: %s' % e)
 
         n_errors += len([x for x in results.values() 
                          if isinstance(x, Exception)])
