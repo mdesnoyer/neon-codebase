@@ -287,6 +287,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 self.platform.neon_api_key,
                 self.platform.integration_id,
                 _set_mod_date)
+            
+            _log.info('updated last process date for account %s integration %s'
+                      % (self.platform.neon_api_key,
+                         self.platform.integration_id))
 
     @tornado.gen.coroutine
     def process_publisher_stream(self):
