@@ -86,13 +86,18 @@ def main():
             sort_by='CREATION_DATE:DESC',
             page=cur_page,
             async=True)
+        cur_page += 1
+                    
+        if len(videos) == 0:
+            break
+        
         videos = [x for x in videos if 
                   'newmediapaid' in x['customFields'] and 
                   x['customFields']['newmediapaid'] 
                   not in plat.videos]
-                    
+
         if len(videos) == 0:
-            break
+            continue
 
         _log.info('Found %i videos to submit on this page' % len(videos))
 
@@ -111,8 +116,6 @@ def main():
                   (n_processed, n_errors, job_id))
 
         time.sleep(3600.0 / options.max_submit_rate * len(videos))
-
-        cur_page += 1
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
