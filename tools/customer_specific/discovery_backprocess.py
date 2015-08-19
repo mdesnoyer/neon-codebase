@@ -45,7 +45,7 @@ def delete_all_videos():
     plat = neondata.BrightcovePlatform.modify(API_KEY, INTEGRATION_ID,
                                               _delete_vids)
 
-    db_connection = neondata.DBConnection.get(NeonUserAccount)
+    db_connection = neondata.DBConnection.get(neondata.NeonUserAccount)
 
     # Get the video and thumbnail keys to delete
     cur_keys = db_connection.fetch_keys_from_db('%s_*' % API_KEY)
