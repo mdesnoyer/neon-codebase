@@ -393,12 +393,10 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
              'name': 'myvid2',
              'accountId': 'acct1'}])
 
-        self.assertEquals(
+        self.assertItemsEqual(
             self.api.find_videos_by_ids(['vid2', 'vid1']),
-            {'vid2' : {'id' : 'vid2', 'name': 'myvid2',
-                       'accountId' : 'acct1'},
-             'vid1' : {'id' : 'vid1', 'name': 'myvid1',
-                       'accountId' : 'acct1'}})
+            [{'id' : 'vid2', 'name': 'myvid2', 'accountId' : 'acct1'},
+             {'id' : 'vid1', 'name': 'myvid1', 'accountId' : 'acct1'}])
 
         cargs, kwargs = self.http_mock.call_args
         urlparsed = urlparse.urlparse(cargs[0].url)
@@ -416,9 +414,9 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
              'name': 'myvid2',
              'accountId': 'acct1'}])
 
-        self.assertEquals(
+        self.assertItemsEqual(
             self.api.find_videos_by_ids(['vid2'], video_fields=['name']),
-            {'vid2' : {'id': 'vid2', 'name': 'myvid2'}})
+            [{'id': 'vid2', 'name': 'myvid2'}])
 
     def test_find_videos_by_ids_errors(self):
         self._set_http_response(

@@ -668,6 +668,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
+            external_thumbnail_id = params.get('external_thumbnail_id', None)
+            publish_date = params.get('publish_date', None)
+            i_id = params.get(INTEGRATION_ID, '0')
             # Verify essential parameters
             try:
                 api_key = params[API_KEY]
@@ -682,7 +685,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
                 if not default_thumbnail:
-                    _log.info("no default image for the video %s" % vid)
+                    _log.debug("no default image for the video %s" % vid)
                 
 
             except KeyError, e:
@@ -706,13 +709,13 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             job_id = hashlib.md5(intermediate).hexdigest()
           
             # Identify Request Type
+            # TODO: Remove the special treatment for brightcove and ooyala
             if "brightcove" in self.request.uri:
                 pub_id  = params[PUBLISHER_ID] #publisher id
                 rtoken = params[BCOVE_READ_TOKEN]
                 wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
                     rtoken, wtoken, pub_id, http_callback, i_id,
@@ -725,7 +728,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_api_key = params["oo_api_key"]
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.OoyalaApiRequest(
                     job_id,
                     api_key, 
@@ -742,11 +744,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
             else:
                 request_type = "neon"
-                api_request = neondata.NeonApiRequest(job_id, api_key, vid,
-                                                      title, url,
-                                                      request_type,
-                                                      http_callback,
-                                                      default_thumbnail)
+                api_request = neondata.NeonApiRequest(
+                    job_id,
+                    api_key,
+                    vid,
+                    title,
+                    url,
+                    request_type,
+                    http_callback,
+                    default_thumbnail,
+                    integration_id=i_id,
+                    external_thumbnail_id=external_thumbnail_id,
+                    publish_date=publish_date)
                 statemon.state.increment('neon_requests')
             
             # API Method
@@ -805,23 +814,27 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                         return
 
                 # Save the video metadata and the default thumbnail
-                video = yield tornado.gen.Task(
-                    neondata.VideoMetadata.get,
-                    neondata.InternalVideoID.generate(api_key, vid))
-                if video is None:
-                    video = neondata.VideoMetadata(
-                        neondata.InternalVideoID.generate(api_key, vid),
-                        request_id=api_request.job_id,
-                        video_url=url,
-                        i_id=api_request.integration_id,
-                        serving_enabled=False)
-                    yield tornado.gen.Task(video.save)
+                def _merge_video_data(video_obj):
+                    video_obj.job_id = api_request.job_id
+                    video_obj.url = url
+                    video_obj.integration_id = api_request.integration_id
+                    video_obj.serving_enabled = \
+                      len(video_obj.thumbnail_ids) > 0
+                    video_obj.publish_date = publish_date or \
+                      video_obj.publish_date
+                internal_video_id = \
+                  neondata.InternalVideoID.generate(api_key, vid)
+                yield tornado.gen.Task(
+                    neondata.VideoMetadata.modify,
+                    internal_video_id,
+                    _merge_video_data,
+                    create_missing=True)
                 yield api_request.save_default_thumbnail(async=True)
                 def _set_serving_enabled(video_obj):
                     video_obj.serving_enabled = \
                       len(video_obj.thumbnail_ids) > 0
                 yield tornado.gen.Task(neondata.VideoMetadata.modify,
-                                       video.key,
+                                       internal_video_id,
                                        _set_serving_enabled)
                 
                 self.set_status(201)
