@@ -60,6 +60,7 @@ def delete_all_videos():
     cur_keys = db_connection.fetch_keys_from_db('requests_%s_*' %
                                                 API_KEY)
     #neondata.StoredObject.delete_many(cur_keys)    
+    print 'a'
 
 @tornado.gen.coroutine
 def main():
