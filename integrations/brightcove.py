@@ -488,6 +488,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         # Function that will set the external id in the ThumbnailMetadata
         external_id = thumb_data.get('id', None)
+        if external_id is not None:
+            external_id = unicode(external_id)
         def _set_external_id(obj):
             obj.external_id = external_id
 
@@ -527,8 +529,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             if thumb.external_id is not None:
                 # We know about this thumb was in Brightcove so see if it
                 # is still there.
-                if thumb.external_id in _extract_image_info_from_bc_response(
-                        data, 'id'):
+                if (unicode(thumb.external_id) in 
+                    _extract_image_info_from_bc_response(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
                 # For legacy thumbs, we specified a reference id. Look for it
