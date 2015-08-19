@@ -86,7 +86,7 @@ class OVPIntegration(object):
 
         if response.code == 409:
             _log.warn('Video %s for account %s already exists' % 
-                      (video_id, self.account_id))
+                      (video_id, self.platform.neon_api_key))
             raise tornado.gen.Return(json.loads(response.body))
         elif response.error is not None:
             statemon.state.increment('job_submission_error')

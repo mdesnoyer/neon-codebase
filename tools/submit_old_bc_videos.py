@@ -61,7 +61,8 @@ def main(input_file):
         cur_vids = bcove_vids[0:options.max_submit_rate]
         bcove_vids = bcove_vids[options.max_submit_rate:]
 
-        yield bc_integration.lookup_and_submit_videos(cur_vids)
+        yield bc_integration.lookup_and_submit_videos(
+            cur_vids, continue_on_error=True)
         _log.info('%i videos left' % len(bcove_vids))
         time.sleep(60.0)
             
