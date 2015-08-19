@@ -78,7 +78,7 @@ class OVPIntegration(object):
             method='POST',
             headers=headers,
             body=json.dumps(body),
-            request_timeout=300.0
+            request_timeout=300.0,
             connect_timeout=30.0)
 
         response = yield tornado.gen.Task(utils.http.send_request, request,
