@@ -470,7 +470,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
             # Create thumbnail API
             elif method == "create_thumbnail_api_request":
-                yield self.create_neon_thumbnail_api_request()
+                if i_id is None:
+                    data = '{"error":"integration id not specified"}'
+                    statemon.state.increment('integration_id_missing')
+                    self.send_json_response(data, 400)
+                    return
+                yield self.create_neon_thumbnail_api_request(i_id)
             elif method == "reprocess_video_request":
                 #TODO(Sunil): Implement this endpoint
                 self.method_not_supported()
@@ -663,7 +668,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
     ## Submit a video request to Neon Video Server
     @tornado.gen.coroutine
     def submit_neon_video_request(self, api_key, video_id, video_url, 
-                    video_title, topn, callback_url, default_thumbnail):
+                                  video_title, topn, callback_url, 
+                                  default_thumbnail, integration_id=None,
+                                  external_thumbnail_id=None,
+                                  publish_date=None):
 
         '''
         Create the call in to the Video Server
@@ -677,11 +685,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["video_url"] = video_url
         request_body["default_thumbnail"] = default_thumbnail 
+        request_body["external_thumbnail_id"] = external_thumbnail_id
         client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
                         % options.video_server 
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         request_body["callback_url"] = callback_url 
+        request_body["integration_id"] = integration_id or '0'
+        request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
@@ -718,11 +729,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(result.body, 201)
     
     @tornado.gen.coroutine
-    def create_neon_thumbnail_api_request(self):
+    def create_neon_thumbnail_api_request(self, integration_id):
         '''
         Endpoint for API calls to submit a video request
         '''
-        video_id = self.get_argument('video_id', None)
+        video_id = InputSanitizer.sanitize_string(
+            self.get_argument('video_id', None))
         if len(video_id) > options.max_videoid_size:
             statemon.state.increment('invalid_video_id')
             self.send_json_response(
@@ -732,10 +744,29 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         video_url = self.get_argument('video_url', "")
         video_url = video_url.replace("www.dropbox.com", 
                                 "dl.dropboxusercontent.com")
-        video_title = self.get_argument('video_title', None)
+        video_title = InputSanitizer.sanitize_string(
+            self.get_argument('video_title', None))
         topn = self.get_argument('topn', 1)
         callback_url = self.get_argument('callback_url', None)
         default_thumbnail = self.get_argument('default_thumbnail', None)
+        external_thumb_id = None
+        if default_thumbnail is not None:
+            external_thumb_id = InputSanitizer.sanitize_string(
+                self.get_argument('external_thumbnail_id', None))
+        try:
+            custom_data = InputSanitizer.to_dict(
+                self.get_argument('custom_data', {}))
+        except ValueError:
+            self.send_json_response(
+                '{"error":"custom data must be a dictionary"}', 400)
+            return
+        duration = InputSanitizer.sanitize_float(
+            self.get_argument('duration', None))
+
+        publish_date = InputSanitizer.sanitize_date(
+            self.get_argument('publish_date', None))
+        if publish_date is not None:
+            publish_date = publish_date.isoformat()
         
         if video_id is None or video_url == "": 
             _log.error("key=create_neon_thumbnail_api_request "
@@ -743,11 +774,39 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('malformed_request')
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
+
+        # Create the video metadata object
+        internal_video_id = neondata.InternalVideoID.generate(self.api_key,
+                                                              video_id)
+        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
+                                       internal_video_id)
+        if video is not None:
+            data = {'error' : 'request already processed',
+                    'video_id' : video_id,
+                    'job_id' : video.job_id}
+            self.send_json_response(json.dumps(data), 409)
+            return
+        video = neondata.VideoMetadata(internal_video_id,
+                                       video_url=video_url,
+                                       i_id=integration_id,
+                                       serving_enabled=False,
+                                       custom_data=custom_data,
+                                       duration=duration,
+                                       publish_date=publish_date)
+        yield tornado.gen.Task(video.save)
         
         #Create Neon API Request
-        yield self.submit_neon_video_request(self.api_key, video_id, video_url,
-                                             video_title, topn, callback_url,
-                                             default_thumbnail)
+        yield self.submit_neon_video_request(
+            self.api_key,
+            video_id,
+            video_url,
+            video_title,
+            topn,
+            callback_url,
+            default_thumbnail,
+            integration_id,
+            external_thumb_id,
+            publish_date)
 
     @tornado.gen.coroutine
     def create_neon_video_request_from_ui(self, i_id):
@@ -1020,8 +1079,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     serving_videos.append(vid)
                     status = neondata.RequestState.SERVING
 
-            pub_date = None if not request.__dict__.has_key('publish_date') \
-                            else request.publish_date
+            pub_date = request.__dict__.get('publish_date', None)
+            if pub_date is not None:
+                try:
+                    pub_date = pub_date / 1000.0
+                except ValueError:
+                    pub_date = dateutil.parser.parse(pub_date)
+                except Exception:
+                    pub_date = None
             pub_date = int(pub_date) if pub_date else None #type
             vr = neondata.VideoResponse(vid,
                               request.job_id,

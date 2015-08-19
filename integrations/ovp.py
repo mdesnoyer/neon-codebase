@@ -11,6 +11,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
+from integrations.exceptions import IntegrationError
 import json
 import logging
 import tornado.gen
@@ -20,6 +21,7 @@ from utils import statemon
 import utils.sync
 
 statemon.define('job_submission_error', int)
+statemon.define('new_job_submitted', int)
 
 define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
@@ -27,8 +29,8 @@ define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
 
 _log = logging.getLogger(__name__)
 
-class OVPError(Exception): pass
-class CMSAPIError(Exception): pass
+class OVPError(IntegrationError): pass
+class CMSAPIError(IntegrationError): pass
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
@@ -40,7 +42,10 @@ class OVPIntegration(object):
                      callback_url=None,
                      video_title=None,
                      default_thumbnail=None,
-                     external_thumbnail_id=None):
+                     external_thumbnail_id=None,
+                     custom_data=None,
+                     duration=None,
+                     publish_date=None):
         '''Submits a single video for processing to the CMSAPI.
 
         Parameters:
@@ -55,11 +60,14 @@ class OVPIntegration(object):
             'video_title': video_title,
             'default_thumbnail': default_thumbnail,
             'external_thumbnail_id': external_thumbnail_id,
-            'callback_url': callback_url
+            'callback_url': callback_url,
+            'custom_data': custom_data,
+            'duration': duration,
+            'publish_date': publish_date
             }
         headers = {"X-Neon-API-Key" : self.platform.neon_api_key,
                    "Content-Type" : "application/json"}
-        url = ('http://%s:%s/api/v1/accounts/%s/brightcove_integrations/%s/'
+        url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
                'create_thumbnail_api_request') % (
                    options.cmsapi_host,
                    options.cmsapi_port,
@@ -74,7 +82,8 @@ class OVPIntegration(object):
         response = yield tornado.gen.Task(utils.http.send_request, request)
 
         if response.code == 409:
-            _log.warn('Video already exists')
+            _log.warn('Video %s for account %s already exists' % 
+                      (video_id, self.account_id))
             raise tornado.gen.Return(json.loads(response.body))
         elif response.error is not None:
             statemon.state.increment('job_submission_error')
@@ -82,6 +91,9 @@ class OVPIntegration(object):
                                                           response.error))
             raise CMSAPIError('Error submitting video: %s' % response.error)
 
+        _log.info('New video was submitted for account %s video id %s'
+                  % (self.platform.neon_api_key, video_id))
+        statemon.state.increment('new_job_submitted')
         raise tornado.gen.Return(json.loads(response.body))
 
     @tornado.gen.coroutine
