@@ -41,25 +41,25 @@ def delete_all_videos():
     vid_map = {}
     def _delete_vids(plat):
         vid_map.update(plat.videos)
-        #plat.videos = {}
+        plat.videos = {}
     plat = neondata.BrightcovePlatform.modify(API_KEY, INTEGRATION_ID,
                                               _delete_vids)
 
-    db_connection = neondata.DBConnection.get(NeonUserAccount)
+    db_connection = neondata.DBConnection.get(neondata.NeonUserAccount)
 
     # Get the video and thumbnail keys to delete
     cur_keys = db_connection.fetch_keys_from_db('%s_*' % API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)
+    neondata.StoredObject.delete_many(cur_keys)
 
     # Get the serving url keys to delete
     cur_keys = db_connection.fetch_keys_from_db('thumbnailservingurls_%s_*' %
                                                 API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)
+    neondata.StoredObject.delete_many(cur_keys)
 
     # Get the api requests to delete
-    cur_keys = db_connection.fetch_keys_from_db('requests_%s_*' %
+    cur_keys = db_connection.fetch_keys_from_db('request_%s_*' %
                                                 API_KEY)
-    #neondata.StoredObject.delete_many(cur_keys)    
+    neondata.StoredObject.delete_many(cur_keys)
 
 @tornado.gen.coroutine
 def main():
@@ -86,13 +86,18 @@ def main():
             sort_by='CREATION_DATE:DESC',
             page=cur_page,
             async=True)
+        cur_page += 1
+                    
+        if len(videos) == 0:
+            break
+        
         videos = [x for x in videos if 
                   'newmediapaid' in x['customFields'] and 
                   x['customFields']['newmediapaid'] 
                   not in plat.videos]
-                    
+
         if len(videos) == 0:
-            break
+            continue
 
         _log.info('Found %i videos to submit on this page' % len(videos))
 
@@ -111,8 +116,6 @@ def main():
                   (n_processed, n_errors, job_id))
 
         time.sleep(3600.0 / options.max_submit_rate * len(videos))
-
-        cur_page += 1
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
