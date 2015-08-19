@@ -39,41 +39,41 @@ def main():
     
     cur_page = 0
     n_processed = 0
+    n_errors = 0
     while True:
 
         videos = yield bc_api.search_videos(
             _all=[('network', 'dsc')],
             exact=True,
             video_fields=video_fields,
-            sort_by='REFERENCE_ID:ASC',
+            sort_by='CREATION_DATE:DESC',
             page=cur_page,
             async=True)
-        if len(videos) == 0:
-            break
-
         videos = [x for x in videos if 
                   'newmediapaid' in x['customFields'] and 
                   x['customFields']['newmediapaid'] 
                   not in plat.videos]
+                    
+        if len(videos) == 0:
+            break
 
         _log.info('Found %i videos to submit on this page' % len(videos))
 
-    
-        for video in videos:
-            video['id'] = video['customFields']['newmediapaid']
+        results = yield integration.submit_many_videos(
+            videos, grab_new_thumbs=False, continue_on_error=True)
 
-            try:
-                job_id = yield integration.submit_one_video_object(video)
-            except Exception as e:
-                _log.exception('Unexpected error submitting video')
-                continue
+        n_errors += len([x for x in results.values() 
+                         if isinstance(x, Exception)])
+        n_processed += len(videos)
 
-            n_processed += 1
-            if n_processed % 100 == 0:
-                _log.info('Processed %i videos. Last job %s' % 
-                          (n_processed, job_id))
+        job_id = None
+        if len(results) > 0:
+            job_id = results.values()[0]
 
-            time.sleep(3600.0/options.max_submit_rate)
+        _log.info('Processed %i videos. %i failed. Recent job %s' % 
+                  (n_processed, n_errors, job_id))
+
+        time.sleep(3600.0 / options.max_submit_rate * len(videos))
 
         cur_page += 1
 
