@@ -3659,23 +3659,6 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True) for x in hosters]
 
     @classmethod
-    def _create(cls, key, data_dict):
-        ''' create object '''
-        obj = super(ThumbnailMetadata, cls)._create(key, data_dict)
-        if obj:
-
-            # For backwards compatibility, check to see if there is a
-            # json entry for thumbnail_metadata. If so, grab all
-            # entries from there.
-            if 'thumbnail_metadata' in data_dict:
-                for key, value in data_dict['thumbnail_metadata'].items():
-                    if key != 'thumbnail_id':
-                        obj.__dict__[str(key)] = value
-                del data_dict['thumbnail_metadata']
-
-            return obj
-
-    @classmethod
     def get_video_id(cls, tid, callback=None):
         '''Given a thumbnail id, retrieves the internal video id 
             asscociated with thumbnail
