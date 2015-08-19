@@ -20,11 +20,17 @@ import logging
 import utils.neon
 from utils.options import define, options
 
+define('api_key', default=None,
+       help='If set, only do this account')
+
 _log = logging.getLogger(__name__)
 
 def main():
-    for acct in neondata.NeonUserAccount.iterate_all():
-    #for acct in neondata.NeonUserAccount.get_many(['6dobatsoj3fwwtlfx66v1eaj']):
+    if options.api_key is None:
+        accts = neondata.NeonUserAccount.iterate_all()
+    else:
+        accts = neondata.NeonUserAccount.get_many([options.api_key])
+    for acct in accts:
         _log.info('Processing account %s' % acct.get_id())
         for plat in acct.get_platforms():
             vids_to_add = [] # (video_id, job_id)
