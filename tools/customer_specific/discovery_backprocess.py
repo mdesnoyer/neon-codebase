@@ -97,7 +97,7 @@ def main():
         _log.info('Found %i videos to submit on this page' % len(videos))
 
         results = yield integration.submit_many_videos(
-            videos, grab_new_thumbs=False, continue_on_error=True)
+            videos, grab_new_thumb=False, continue_on_error=True)
 
         n_errors += len([x for x in results.values() 
                          if isinstance(x, Exception)])
