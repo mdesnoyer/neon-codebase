@@ -119,8 +119,8 @@ def main():
         n_processed += len(videos)
 
         job_id = None
-        if len(results) > 0:
-            job_id = results[0]
+        #if len(results) > 0:
+        #    job_id = results[0]
 
         _log.info('Processed %i videos. %i failed. Recent job %s' % 
                   (n_processed, n_errors, job_id))
