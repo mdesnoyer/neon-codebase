@@ -87,6 +87,7 @@ def main():
                 video_fields=video_fields,
                 sort_by='CREATION_DATE:DESC',
                 page=cur_page,
+                page_size=20,
                 async=True)
             cur_page += 1
                     
@@ -103,18 +104,18 @@ def main():
 
             _log.info('Found %i videos to submit on this page' % len(videos))
 
-            #futures = [integration.submit_one_video_object(x, grab_new_thumb=False)
-            #           for x in videos]
-            #
-            #results = []
-            #try:
-            #    results = yield futures
-            #except Exception as e:
-            #    _log.error('Error submitting video: %s' % e)
+            futures = [integration.submit_one_video_object(x, grab_new_thumb=False)
+                       for x in videos]
+            
+            results = []
+            try:
+                results = yield futures
+            except Exception as e:
+                _log.error('Error submitting video: %s' % e)
 
-            results = yield integration.submit_many_videos(
-                videos, grab_new_thumb=False,
-                continue_on_error=True)
+            #results = yield integration.submit_many_videos(
+            #    videos, grab_new_thumb=False,
+            #    continue_on_error=True)
 
             n_errors += len([x for x in results
                              if isinstance(x, Exception)])
