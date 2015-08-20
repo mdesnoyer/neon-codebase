@@ -745,8 +745,8 @@ class ThumbnailType(object):
     ''' Thumbnail type enumeration '''
     NEON        = "neon"
     CENTERFRAME = "centerframe"
-    BRIGHTCOVE  = "brightcove"
-    OOYALA      = "ooyala"
+    BRIGHTCOVE  = "brightcove" # DEPRECATED. Will be DEFAULT instead
+    OOYALA      = "ooyala" # DEPRECATED. Will be DEFAULT instead
     RANDOM      = "random"
     FILTERED    = "filtered"
     DEFAULT     = "default" #sent via api request
@@ -1647,7 +1647,8 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-        for plat in [NeonPlatform, BrightcovePlatform, BrightcoveIntegration, YoutubePlatform, OoyalaIntegration]:
+        for plat in [NeonPlatform, BrightcovePlatform, BrightcoveIntegration, 
+                     YoutubePlatform, OoyalaIntegration]:
             ovp_map[plat.get_ovp()] = plat
 
         calls = []
@@ -1753,14 +1754,7 @@ class NeonUserAccount(NamespacedStoredObject):
     @classmethod 
     def get_all_accounts(cls):
         ''' Get all NeonUserAccount instances '''
-        nuser_accounts = []
-        db_connection = DBConnection.get(cls)
-        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
-        for accnt in accounts:
-            api_key = accnt.split('_')[-1]
-            nu = NeonUserAccount.get(api_key)
-            nuser_accounts.append(nu)
-        return nuser_accounts
+        return cls.get_all()
     
     @classmethod
     def get_neon_publisher_id(cls, api_key):
@@ -1770,6 +1764,33 @@ class NeonUserAccount(NamespacedStoredObject):
         na = cls.get(api_key)
         if nc:
             return na.tracker_account_id
+
+    def iterate_all_videos(self, max_request_size=100):
+        '''A synchronous function that returns an iterator across all the
+        videos for this account in the database.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        #TODO(mdesnoyer): Figure out a way to make this
+        asynchronous. It ain't going to be easy.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        db_connection = DBConnection.get(VideoMetadata)
+        keys = db_connection.blocking_conn.keys(self.neon_api_key + '_*')
+        keys = [x for x in keys if len(x.split('_')) == 2]
+        cur_idx = 0
+        while cur_idx < len(keys):
+            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
+            for obj in VideoMetadata.get_many(cur_keys):
+                if obj is not None and isinstance(obj, VideoMetadata):
+                    yield obj
+
+            cur_idx += max_request_size
 
 
 class ExperimentStrategy(DefaultedStoredObject):
@@ -2697,10 +2718,15 @@ class NeonPlatform(AbstractPlatform):
 
 class BrightcoveIntegration(AbstractIntegration):
     ''' Brightcove Integration class '''
+
+    REFERENCE_ID = '_reference_id'
+    BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False, callback_url=None):
+                last_process_date=None, abtest=False, callback_url=None,
+                uses_batch_provisioning=False,
+                id_field=BRIGHTCOVE_ID):
 
         ''' On every request, the job id is saved '''
 
@@ -2710,7 +2736,7 @@ class BrightcoveIntegration(AbstractIntegration):
         self.read_token = rtoken
         self.write_token = wtoken
         self.auto_update = auto_update 
-        #The publish date of the last processed video - UTC timestamp 
+        #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
@@ -2720,6 +2746,16 @@ class BrightcoveIntegration(AbstractIntegration):
         self.playlist_feed_ids = []
         # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
+
+        # Does the customer use batch provisioning (i.e. FTP
+        # uploads). If so, we cannot rely on the last modified date of
+        # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
+        self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Which custom field to use for the video id. If it is
+        # BrightcovePlatform.REFERENCE_ID, then the reference_id field
+        # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
+        self.id_field = id_field
 
     @classmethod
     def get_ovp(cls):
@@ -3635,7 +3671,8 @@ class NeonApiRequest(NamespacedStoredObject):
 
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
-            integration_type='neon', integration_id='0'):
+            integration_type='neon', integration_id='0',
+            external_thumbnail_id=None, publish_date=None):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -3652,6 +3689,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.integration_type = integration_type
         self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
+        self.external_thumbnail_id = external_thumbnail_id
 
         # Save the request response
         self.response = {}  
@@ -3659,7 +3697,7 @@ class NeonApiRequest(NamespacedStoredObject):
         # API Method
         self.api_method = None
         self.api_param  = None
-        self.publish_date = None # Timestamp in ms
+        self.publish_date = publish_date # ISO date format of when video is published
        
         # field used to store error message on partial error, explict error or 
         # additional information about the request
@@ -3679,6 +3717,8 @@ class NeonApiRequest(NamespacedStoredObject):
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
+        if job_id is None or api_key is None:
+            return None
         if job_id.startswith('request'):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
@@ -3711,7 +3751,17 @@ class NeonApiRequest(NamespacedStoredObject):
                     '_type': typemap[obj_dict['request_type']].__name__,
                     '_data': copy.deepcopy(obj_dict)
                     }
-            return super(NeonApiRequest, cls)._create(key, obj_dict)
+            obj = super(NeonApiRequest, cls)._create(key, obj_dict)
+
+            try:
+                obj.publish_date = datetime.datetime.utcfromtimestamp(
+                    obj.publish_date / 1000.)
+                obj.publish_date = obj.publish_date.isoformat()
+            except ValueError:
+                pass
+            except TypeError:
+                pass
+            return obj
 
     def get_default_thumbnail_type(self):
         '''Return the thumbnail type that should be used for a default 
@@ -3849,7 +3899,8 @@ class NeonApiRequest(NamespacedStoredObject):
         meta = ThumbnailMetadata(
             None,
             ttype=thumb_type,
-            rank=cur_rank)
+            rank=cur_rank,
+            external_id=self.external_thumbnail_id)
         yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,
@@ -4302,23 +4353,6 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True) for x in hosters]
 
     @classmethod
-    def _create(cls, key, data_dict):
-        ''' create object '''
-        obj = super(ThumbnailMetadata, cls)._create(key, data_dict)
-        if obj:
-
-            # For backwards compatibility, check to see if there is a
-            # json entry for thumbnail_metadata. If so, grab all
-            # entries from there.
-            if 'thumbnail_metadata' in data_dict:
-                for key, value in data_dict['thumbnail_metadata'].items():
-                    if key != 'thumbnail_id':
-                        obj.__dict__[str(key)] = value
-                del data_dict['thumbnail_metadata']
-
-            return obj
-
-    @classmethod
     def get_video_id(cls, tid, callback=None):
         '''Given a thumbnail id, retrieves the internal video id 
             asscociated with thumbnail
@@ -4415,11 +4449,12 @@ class VideoMetadata(StoredObject):
                  i_id=None, frame_size=None, testing_enabled=True,
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
-                 serving_enabled=True):
+                 serving_enabled=True, custom_data=None,
+                 publish_date=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
-        self.duration = duration
+        self.duration = duration # in seconds
         self.video_valence = vid_valence 
         self.model_version = model_version
         self.job_id = request_id
@@ -4431,8 +4466,6 @@ class VideoMetadata(StoredObject):
         # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
           experiment_state if testing_enabled else ExperimentState.DISABLED
-
-        # DEPRECATED. Use VideoStatus table instead
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
@@ -4445,6 +4478,13 @@ class VideoMetadata(StoredObject):
 
         # when was this object created or updated, set to current time on creation
         self.created = self.updated = str(datetime.datetime.utcnow())
+        
+        # A dictionary of extra metadata
+        self.custom_data = custom_data or {}
+
+        # The time the video was published in ISO 8601 format
+        self.publish_date = publish_date or \
+          datetime.datetime.now().isoformat()
 
     @classmethod
     def is_valid_key(cls, key):

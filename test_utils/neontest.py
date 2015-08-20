@@ -164,7 +164,16 @@ class AsyncTestCase(tornado.testing.AsyncTestCase, TestCase):
     def _future_wrap_mock(self, outer_mock):
         '''Sets up a mock that mocks out a call that returns a future.
 
-        Input: outer_mock - Mock of the function that needs a future
+        For example, if a function that returns a future is patched with
+        func_patch, then do:
+        
+        self.func_mock = self._future_wrap_mock(func_patcher.start())
+
+        and the following will do what you expect
+        self.func_mock.side_effect = [67, Exception('oops')]
+
+        Input:
+        outer_mock - Mock of the function that needs a future
         Returns: 
         mock that can be used to set the actual function return value/exception
         '''
