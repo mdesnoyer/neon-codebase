@@ -1138,7 +1138,7 @@ class BrightcoveFeedIterator(object):
         self.items_returned = 0
 
     def __iter__(self):
-        self.args['page_number'] = 0
+        self.args['page'] = 0
         self.items_returned = 0
         return self
 
