@@ -13,6 +13,7 @@ import logging
 import os
 import signal
 import time
+import ast
 
 import tornado.httpserver
 import tornado.ioloop
@@ -27,6 +28,7 @@ import utils.http
 
 from cmsdb import neondata
 from utils import statemon
+from datetime import datetime
 import utils.sync
 from utils.options import define, options
 from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any
@@ -787,6 +789,9 @@ class VideoHelper():
             video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
                           request_id=api_request.job_id,
                           video_url=args.get('video_url', None),
+                          publish_date=args.get('publish_date', None),
+                          duration=int(args.get('duration', 0)) or None, 
+                          custom_data=args.get('custom_data', None), 
                           i_id=api_request.integration_id,
                           serving_enabled=False)
             # save the video 
@@ -821,7 +826,6 @@ class VideoHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         try:
-            # TODO add custom_data (dictionary) as well as publish_date, and duration
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
               Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
@@ -829,9 +833,13 @@ class VideoHandler(APIV2Handler):
               'video_url': Any(str, unicode, Length(min=1, max=512)), 
               'callback_url': Any(str, unicode, Length(min=1, max=512)), 
               'video_title': Any(str, unicode, Length(min=1, max=256)),
+              'duration': All(Coerce(int), Range(min=1, max=86400)), 
+              'publish_date': All(CustomVoluptuousTypes.Date()), 
+              'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
               'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
               'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
             })
+
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
@@ -1020,6 +1028,23 @@ class GetError(Error):
 class AlreadyExists(Error): 
     def __init__(self, existing): 
         self.existing = existing
+
+
+'''*********************************************************************
+Custom Voluptuous Types
+*********************************************************************'''
+class CustomVoluptuousTypes(): 
+    @staticmethod
+    def Date(fmt='%Y-%m-%dT%H:%M:%S.%fZ'):
+        return lambda v: datetime.strptime(v, fmt)
+    @staticmethod
+    def Dictionary():
+        def f(v):
+            if isinstance(ast.literal_eval(v), dict): 
+                return ast.literal_eval(v)
+            else:
+                raise Invalid("not a dictionary") 
+        return f 
 
 '''*********************************************************************
 Endpoints 

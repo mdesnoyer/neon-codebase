@@ -396,6 +396,55 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertNotEquals(rjson['job_id'],'')
 
     @tornado.testing.gen_test
+    def test_post_video_with_duration(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&duration=1354' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
+
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEquals(1354, video.duration)
+
+    @tornado.testing.gen_test
+    def test_post_video_with_publish_date(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18T06:36:40.123Z' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
+
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEquals('2015-08-18T06:36:40.123Z', video.publish_date)
+
+    @tornado.testing.gen_test
+    def test_post_video_with_custom_data(self):
+        custom_data = urllib.quote(json.dumps({ "a" : 123456 }))
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&custom_data=%s' % (self.account_id_api_key, self.test_i_id, custom_data)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
+
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertTrue(video.custom_data is not None)
+
+    @tornado.testing.gen_test
     def test_post_two_videos(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
