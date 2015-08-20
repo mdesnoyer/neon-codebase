@@ -66,13 +66,13 @@ statemon.define('put_thumbnail_fails', int)
 statemon.define('get_thumbnail_oks', int) 
 statemon.define('get_thumbnail_fails', int) 
 
-statemon.define('put_videos_fails', int) 
-statemon.define('post_videos_oks', int) 
-statemon.define('post_videos_fails', int) 
-statemon.define('put_videos_oks', int) 
-statemon.define('put_videos_fails', int) 
-statemon.define('get_videos_oks', int) 
-statemon.define('get_videos_fails', int) 
+statemon.define('put_video_fails', int) 
+statemon.define('post_video_oks', int) 
+statemon.define('post_video_fails', int) 
+statemon.define('put_video_oks', int) 
+statemon.define('put_video_fails', int) 
+statemon.define('get_video_oks', int) 
+statemon.define('get_video_fails', int) 
  
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -771,6 +771,8 @@ class VideoHelper():
         video_id = args['external_video_ref'] 
         video = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
+        # TODO check the request_id on this video, if it's currently processing 
+        # raise and exception, we don't want a video to be spamming us
         if video is None:
             video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
                           request_id=api_request.job_id,
@@ -852,16 +854,20 @@ class VideoHandler(APIV2Handler):
             if response: 
                 job_info = {} 
                 job_info['job_id'] = api_request.job_id
+                statemon.state.increment('post_video_oks')
                 self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
             else: 
                 self.error('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR) 
              
         except MultipleInvalid as e: 
+            statemon.state.increment('post_video_fails')
             self.error('%s %s' % (e.path[0], e.msg))
         except SaveError as e: 
+            statemon.state.increment('post_video_fails')
             _log.exception('key=VideoHandler.post.saveError msg=%s' % e)  
             self.error(e.msg, code=e.code) 
         except Exception as e:
+            statemon.state.increment('post_video_fails')
             _log.exception('key=VideoHandler.post msg=%s' % e)  
             self.error('unable to create video request', {'account_id': account_id})  
     
@@ -912,11 +918,14 @@ class VideoHandler(APIV2Handler):
                vid_dict['videos'] = new_videos
                vid_dict['video_count'] = len(new_videos)
 
+            statemon.state.increment('get_video_oks')
             self.success(json.dumps(vid_dict))
 
         except MultipleInvalid as e:
+            statemon.state.increment('get_video_fails')
             self.error('%s %s' % (e.path[0], e.msg))
         except Exception as e:
+            statemon.state.increment('get_video_fails')
             _log.exception('key=VideoHandler.get msg=%s' % e)  
             self.error('unable to get videos', {'account_id': account_id, 'video_id': video_id})  
  
@@ -945,11 +954,14 @@ class VideoHandler(APIV2Handler):
             video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
                                             internal_video_id)
 
+            statemon.state.increment('put_video_oks')
             self.success(json.dumps(video.__dict__))
 
         except MultipleInvalid as e:
+            statemon.state.increment('put_video_fails')
             self.error('%s %s' % (e.path[0], e.msg)) 
         except Exception as e:
+            statemon.state.increment('put_video_fails')
             _log.exception('key=VideoHandler.put msg=%s' % e)  
             self.error('unable to update video', {'account_id': account_id})  
 
