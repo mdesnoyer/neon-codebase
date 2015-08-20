@@ -1016,8 +1016,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         job_request_keys = [] 
         for vid in vids:
             try:
-                job_request_keys.append((platform_account.videos[vid],
-                                         self.api_key))
+                job_id = platform_account.videos[vid]
+                if job_id is not None:
+                    job_request_keys.append((platform_account.videos[vid],
+                                             self.api_key))
             except KeyError, e:
                 #job id not found
                 job_request_keys.append(("dummy","dummy"))
