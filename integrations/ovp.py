@@ -82,11 +82,11 @@ class OVPIntegration(object):
             connect_timeout=30.0)
 
         response = yield tornado.gen.Task(utils.http.send_request, request,
-                                          base_delay=4.0)
+                                          base_delay=4.0, ntries=2)
 
         if response.code == 409:
             _log.warn('Video %s for account %s already exists' % 
-                      (video_id, self.account_id))
+                      (video_id, self.platform.neon_api_key))
             raise tornado.gen.Return(json.loads(response.body))
         elif response.error is not None:
             statemon.state.increment('job_submission_error')

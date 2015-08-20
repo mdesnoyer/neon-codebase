@@ -1808,27 +1808,6 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
                          ['%s.jpg' % tid2])
         
 
-    def test_read_thumbnail_old_format(self):
-        # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
-
-        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
-        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
-        self.assertEqual(thumb.chosen, False)
-        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
-        self.assertEqual(thumb.enabled, True)
-        self.assertEqual(thumb.rank, 5)
-        self.assertEqual(thumb.height, 232)
-        self.assertEqual(thumb.width, 416)
-        self.assertEqual(thumb.model_version, '20130924')
-        self.assertEqual(thumb.type, 'neon')
-        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
-        self.assertIsNone(thumb.refid)
-        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
-        
-        with self.assertRaises(AttributeError):
-            thumb.thumbnail_id
-
 class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     '''
     Test cases that add image data to thumbnails (and do uploads) 

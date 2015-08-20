@@ -64,6 +64,9 @@ def process_one_account(platform):
             % e)
         statemon.state.increment('unexpected_processing_error')
 
+    _log.debug('Finished processing account %s, integration %s' %
+               (platform.neon_api_key, platform.integration_id))
+
 @tornado.gen.coroutine
 def run_one_cycle():
     platforms = yield tornado.gen.Task(
