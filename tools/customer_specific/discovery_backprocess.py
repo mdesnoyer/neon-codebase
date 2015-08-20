@@ -110,7 +110,7 @@ def main():
         #except Exception as e:
         #    _log.error('Error submitting video: %s' % e)
 
-        results = integration.submit_many_videos(
+        results = yield integration.submit_many_videos(
             videos, grab_new_thumb=False,
             continue_on_error=True)
 
