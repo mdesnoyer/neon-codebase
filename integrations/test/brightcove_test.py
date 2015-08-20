@@ -1130,7 +1130,9 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.submit_mock.call_count, 1)
 
         # Check the call to brightcove
-        cargs, kwargs = self.mock_find_videos.call_args
+        self.assertEquals(self.mock_find_videos.call_count, 2)
+        calls = self.mock_find_videos.call_args_list
+        cargs, kwargs = calls[-1]
         
         self.assertDictContainsSubset({
             'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
@@ -1142,6 +1144,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
                               'renditions', 'length', 'name', 
                               'publishedDate', 'lastModifiedDate', 
                               'referenceId'],
+            'page' : 1,
             'custom_fields' : None},
             kwargs)
 
