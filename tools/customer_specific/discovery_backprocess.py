@@ -87,7 +87,7 @@ def main():
                 video_fields=video_fields,
                 sort_by='CREATION_DATE:DESC',
                 page=cur_page,
-                page_size=20,
+                page_size=50,
                 async=True)
             cur_page += 1
                     
@@ -100,6 +100,7 @@ def main():
                       not in plat.videos]
 
             if len(videos) == 0:
+                time.sleep(0.1)
                 continue
 
             _log.info('Found %i videos to submit on this page' % len(videos))
