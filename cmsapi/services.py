@@ -700,8 +700,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              method="POST",
                                              headers=hdr,
                                              body=body,
-                                             request_timeout=30.0,
-                                             connect_timeout=10.0)
+                                             request_timeout=300.0,
+                                             connect_timeout=30.0)
         
         result = yield tornado.gen.Task(utils.http.send_request, req)
         
