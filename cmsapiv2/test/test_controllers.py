@@ -40,12 +40,25 @@ class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.redis.stop()
 
     @tornado.testing.gen_test 
-    def test_create_new_account(self):
+    def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+ 
+    @tornado.testing.gen_test 
+    def test_create_new_account_json(self):
+        params = json.dumps({'customer_name': 'meisnew'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew') 

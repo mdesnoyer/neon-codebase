@@ -29,7 +29,7 @@ from cmsdb import neondata
 from utils import statemon
 import utils.sync
 from utils.options import define, options
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any
 
 import logging
 _log = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ statemon.define('put_account_oks', int)
 statemon.define('put_account_fails', int) 
 statemon.define('get_account_oks', int) 
 statemon.define('get_account_fails', int)
+statemon.define('account_invalid_inputs', int)  
 
 statemon.define('post_ooyala_oks', int)  
 statemon.define('post_ooyala_fails', int)  
@@ -51,6 +52,7 @@ statemon.define('put_ooyala_oks', int)
 statemon.define('put_ooyala_fails', int)  
 statemon.define('get_ooyala_oks', int)  
 statemon.define('get_ooyala_fails', int)  
+statemon.define('ooyala_invalid_inputs', int)  
 
 statemon.define('post_brightcove_oks', int)  
 statemon.define('post_brightcove_fails', int)  
@@ -58,6 +60,7 @@ statemon.define('put_brightcove_oks', int)
 statemon.define('put_brightcove_fails', int)  
 statemon.define('get_brightcove_oks', int)  
 statemon.define('get_brightcove_fails', int) 
+statemon.define('brightcove_invalid_inputs', int)  
 
 statemon.define('post_thumbnail_oks', int) 
 statemon.define('post_thumbnail_fails', int) 
@@ -65,6 +68,7 @@ statemon.define('put_thumbnail_oks', int)
 statemon.define('put_thumbnail_fails', int) 
 statemon.define('get_thumbnail_oks', int) 
 statemon.define('get_thumbnail_fails', int) 
+statemon.define('thumbnail_invalid_inputs', int)  
 
 statemon.define('put_video_fails', int) 
 statemon.define('post_video_oks', int) 
@@ -74,6 +78,7 @@ statemon.define('put_video_oks', int)
 statemon.define('put_video_fails', int) 
 statemon.define('get_video_oks', int) 
 statemon.define('get_video_fails', int) 
+statemon.define('video_invalid_inputs', int)  
  
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -106,13 +111,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def parse_args(self):
         args = {} 
         # if we have query_arguments only use them 
-        if self.request.query_arguments is not None: 
+        if len(self.request.query_arguments) > 0: 
             for key, value in self.request.query_arguments.iteritems():
                 args[key] = value[0]
-        # otherwise let's use what we find in the body
-        elif self.request.body_arguments is not None: 
-            for key, value in self.request.body_arguments.iteritems():
-                args[key] = value[0]
+        # otherwise let's use what we find in the body, json only
+        elif len(self.request.body) > 0: 
+            bjson = json.loads(self.request.body) 
+            for key, value in bjson.items():
+                args[key] = value
 
         return args
 
@@ -148,10 +154,10 @@ class NewAccountHandler(APIV2Handler):
     @tornado.gen.coroutine 
     def post(self):
         schema = Schema({ 
-          Required('customer_name') : All(str, Length(min=1, max=1024)),
+          Required('customer_name') : Any(str, unicode, Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
         })
         try:
             args = self.parse_args()
@@ -176,7 +182,7 @@ class NewAccountHandler(APIV2Handler):
             self.success(user.to_json())
 
         except MultipleInvalid as e:
-            statemon.state.increment('post_account_fails') 
+            statemon.state.increment('account_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg)) 
 
         except Exception as e: 
@@ -195,7 +201,7 @@ class AccountHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({ 
-          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
         }) 
         try:
             args = {} 
@@ -217,7 +223,7 @@ class AccountHandler(APIV2Handler):
             self.success(output)
  
         except MultipleInvalid as e:  
-            statemon.state.increment('get_account_fails')
+            statemon.state.increment('account_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -231,10 +237,10 @@ class AccountHandler(APIV2Handler):
     @tornado.gen.coroutine
     def put(self, account_id):
         schema = Schema({ 
-          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': All(str, Length(min=1, max=2048)) 
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
         })
         try:
             args = self.parse_args()
@@ -346,8 +352,8 @@ class IntegrationHelper():
     @tornado.gen.coroutine
     def getIntegration(apiv2, account_id, integration_type): 
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
-          Required('integration_id') : All(str, Length(min=1, max=256))
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
         })
         args = apiv2.parse_args()
         args['account_id'] = str(account_id)
@@ -384,10 +390,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id): 
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'ooyala_api_key': All(str, Length(min=1, max=1024)), 
-          'ooyala_api_secret': All(str, Length(min=1, max=1024)), 
+          'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
+          'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
           'autosync': All(Coerce(int), Range(min=0, max=1))
         })
         try: 
@@ -405,7 +411,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.error(e.msg, {'account_id': account_id, 'publisher_id': args['publisher_id']}, e.code)  
 
         except MultipleInvalid as e: 
-            statemon.state.increment('post_ooyala_fails')
+            statemon.state.increment('ooyala_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -434,7 +440,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.error('error getting the integration')  
 
         except MultipleInvalid as e: 
-            statemon.state.increment('get_ooyala_fails')
+            statemon.state.increment('ooyala_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -449,11 +455,11 @@ class OoyalaIntegrationHandler(APIV2Handler):
     def put(self, account_id):
         try: 
             schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('integration_id') : All(str, Length(min=1, max=256)),
-              'ooyala_api_key': All(str, Length(min=1, max=1024)), 
-              'ooyala_api_secret': All(str, Length(min=1, max=1024)), 
-              'publisher_id': All(str, Length(min=1, max=1024))
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+              'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
+              'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
+              'publisher_id': Any(str, unicode, Length(min=1, max=1024))
             })
             args = self.parse_args()
             args['account_id'] = str(account_id)
@@ -479,7 +485,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.success(ooyala_integration.to_json())
              
         except MultipleInvalid as e:
-            statemon.state.increment('put_ooyala_fails')
+            statemon.state.increment('ooyala_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -500,10 +506,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'read_token': All(str, Length(min=1, max=1024)), 
-          'write_token': All(str, Length(min=1, max=1024))
+          'read_token': Any(str, unicode, Length(min=1, max=1024)), 
+          'write_token': Any(str, unicode, Length(min=1, max=1024))
         })
         try: 
             args = self.parse_args()
@@ -525,7 +531,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id}, e.code)  
 
         except MultipleInvalid as e: 
-            statemon.state.increment('post_brightcove_fails')
+            statemon.state.increment('brightcove_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -551,7 +557,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             self.error(e.msg) 
 
         except MultipleInvalid as e:
-            statemon.state.increment('get_brightcove_fails')
+            statemon.state.increment('brightcove_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e: 
@@ -566,11 +572,11 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     def put(self, account_id):
         try:   
             schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('integration_id') : All(str, Length(min=1, max=256)),
-              'read_token': All(str, Length(min=1, max=1024)), 
-              'write_token': All(str, Length(min=1, max=1024)), 
-              'publisher_id': All(str, Length(min=1, max=1024))
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+              'read_token': Any(str, unicode, Length(min=1, max=1024)), 
+              'write_token': Any(str, unicode, Length(min=1, max=1024)), 
+              'publisher_id': Any(str, unicode, Length(min=1, max=1024))
             })
             args = self.parse_args()
             args['account_id'] = account_id = str(account_id)
@@ -597,7 +603,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             self.success(platform.to_json())
 
         except MultipleInvalid as e: 
-            statemon.state.increment('put_brightcove_fails')
+            statemon.state.increment('brightcove_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -614,9 +620,9 @@ class ThumbnailHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
-          Required('video_id') : All(str, Length(min=1, max=256)),
-          Required('thumbnail_location') : All(str, Length(min=1, max=2048))
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('thumbnail_location') : Any(str, unicode, Length(min=1, max=2048))
         })
         try:
             args = self.parse_args()
@@ -665,7 +671,7 @@ class ThumbnailHandler(APIV2Handler):
                 self.error('unable to save thumbnail to video', {'thumbnail_location' : args['thumbnail_location']})  
               
         except MultipleInvalid as e: 
-            statemon.state.increment('post_thumbnail_fails')
+            statemon.state.increment('thumbnail_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:  
@@ -676,8 +682,8 @@ class ThumbnailHandler(APIV2Handler):
     @tornado.gen.coroutine
     def put(self, account_id): 
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
-          Required('thumbnail_id') : All(str, Length(min=1, max=512)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
           'enabled': All(Coerce(int), Range(min=0, max=1))
         })
         try:
@@ -705,7 +711,7 @@ class ThumbnailHandler(APIV2Handler):
             self.success(json.dumps(thumbnail.__dict__))
 
         except MultipleInvalid as e: 
-            statemon.state.increment('put_thumbnail_fails')
+            statemon.state.increment('thumbnail_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:
@@ -716,8 +722,8 @@ class ThumbnailHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id): 
         schema = Schema({
-          Required('account_id') : All(str, Length(min=1, max=256)),
-          Required('thumbnail_id') : All(str, Length(min=1, max=512))
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512))
         })
         try:
             args = self.parse_args()
@@ -730,7 +736,7 @@ class ThumbnailHandler(APIV2Handler):
             self.success(json.dumps(thumbnail.__dict__))
 
         except MultipleInvalid as e: 
-            statemon.state.increment('get_thumbnail_fails')
+            statemon.state.increment('thumbnail_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:
@@ -817,14 +823,14 @@ class VideoHandler(APIV2Handler):
         try:
             # TODO add custom_data (dictionary) as well as publish_date, and duration
             schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('external_video_ref') : All(str, Length(min=1, max=512)),
-              'integration_id' : All(str, Length(min=1, max=256)),
-              'video_url': All(str, Length(min=1, max=512)), 
-              'callback_url': All(str, Length(min=1, max=512)), 
-              'video_title': All(str, Length(min=1, max=256)),
-              'default_thumbnail_url': All(str, Length(min=1, max=128)),
-              'thumbnail_ref': All(str, Length(min=1, max=512))
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
+              'integration_id' : Any(str, unicode, Length(min=1, max=256)),
+              'video_url': Any(str, unicode, Length(min=1, max=512)), 
+              'callback_url': Any(str, unicode, Length(min=1, max=512)), 
+              'video_title': Any(str, unicode, Length(min=1, max=256)),
+              'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
+              'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
             })
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
@@ -869,7 +875,7 @@ class VideoHandler(APIV2Handler):
             self.success(json.dumps(job_info), code=ResponseCode.HTTP_OK) 
 
         except MultipleInvalid as e: 
-            statemon.state.increment('post_video_fails')
+            statemon.state.increment('video_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except SaveError as e: 
@@ -889,9 +895,9 @@ class VideoHandler(APIV2Handler):
     def get(self, account_id):  
         try: 
             schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('video_id') : All(str, Length(min=1, max=4096)),
-              'fields': All(str, Length(min=1, max=4096))
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('video_id') : Any(str, unicode, Length(min=1, max=4096)),
+              'fields': Any(str, unicode, Length(min=1, max=4096))
             })
             args = self.parse_args()
             args['account_id'] = account_id_api_key = str(account_id)
@@ -933,7 +939,7 @@ class VideoHandler(APIV2Handler):
             self.success(json.dumps(vid_dict))
 
         except MultipleInvalid as e:
-            statemon.state.increment('get_video_fails')
+            statemon.state.increment('video_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg))
 
         except Exception as e:
@@ -948,8 +954,8 @@ class VideoHandler(APIV2Handler):
     def put(self, account_id):
         try: 
             schema = Schema({
-              Required('account_id') : All(str, Length(min=1, max=256)),
-              Required('video_id') : All(str, Length(min=1, max=256)),
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
               'testing_enabled': All(Coerce(int), Range(min=0, max=1))
             })
             args = self.parse_args()
@@ -970,7 +976,7 @@ class VideoHandler(APIV2Handler):
             self.success(json.dumps(video.__dict__))
 
         except MultipleInvalid as e:
-            statemon.state.increment('put_video_fails')
+            statemon.state.increment('video_invalid_inputs') 
             self.error('%s %s' % (e.path[0], e.msg)) 
         except Exception as e:
             statemon.state.increment('put_video_fails')
