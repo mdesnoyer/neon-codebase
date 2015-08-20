@@ -1155,6 +1155,7 @@ class BrightcoveFeedIterator(object):
             # Get more entries
             self.page_data = yield self.func(async=True, **self.args)
             self.page_data.reverse()
+            self.args['page'] += 1
 
         if len(self.page_data) == 0:
             # We've gotten all the data

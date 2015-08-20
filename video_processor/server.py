@@ -234,7 +234,8 @@ class FairWeightedRequestQueue(object):
     @tornado.gen.coroutine
     def put(self, api_request, duration=None):
         # Based on customer priority put in the appropriate Q
-        p = yield DBCache.get_customer_priority(api_request.api_key, async=True)
+        p = yield DBCache.get_customer_priority(api_request.api_key,
+                                                async=True)
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
