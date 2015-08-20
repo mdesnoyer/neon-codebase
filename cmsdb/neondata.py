@@ -3025,6 +3025,8 @@ class NeonApiRequest(NamespacedStoredObject):
 
     @classmethod
     def _generate_subkey(cls, job_id, api_key):
+        if job_id is None or api_key is None:
+            return None
         if job_id.startswith('request'):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
