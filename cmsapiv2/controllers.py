@@ -69,6 +69,7 @@ statemon.define('get_thumbnail_fails', int)
 statemon.define('put_video_fails', int) 
 statemon.define('post_video_oks', int) 
 statemon.define('post_video_fails', int) 
+statemon.define('post_video_already_exists', int) 
 statemon.define('put_video_oks', int) 
 statemon.define('put_video_fails', int) 
 statemon.define('get_video_oks', int) 
@@ -767,22 +768,29 @@ class VideoHelper():
 
     @staticmethod 
     @tornado.gen.coroutine 
-    def createVideo(args, account_id_api_key, api_request):
+    def createVideoAndRequest(args, account_id_api_key):
         video_id = args['external_video_ref'] 
         video = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
-        # TODO check the request_id on this video, if it's currently processing 
-        # raise and exception, we don't want a video to be spamming us
         if video is None:
+            # create the api_request
+            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
+                                                 args, 
+                                                 account_id_api_key)
+
             video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
                           request_id=api_request.job_id,
                           video_url=args.get('video_url', None),
                           i_id=api_request.integration_id,
                           serving_enabled=False)
+            # save the video 
             yield tornado.gen.Task(video.save)
- 
-        raise tornado.gen.Return(video) 
-        
+            # save the default thumbnail
+            yield api_request.save_default_thumbnail(async=True)
+            raise tornado.gen.Return((video,api_request))
+        else: 
+            raise AlreadyExists(video)
+         # TODO (elif) add a reprocess flag to this thing
 
     @staticmethod 
     @tornado.gen.coroutine
@@ -822,18 +830,12 @@ class VideoHandler(APIV2Handler):
             args['account_id'] = account_id_api_key = str(account_id)
             schema(args)
           
-            # create the api request 
-            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
-                                                 args, 
-                                                 account_id_api_key)
-            # add the video  
-            new_video = yield tornado.gen.Task(VideoHelper.createVideo, 
-                                               args, 
-                                               account_id_api_key, 
-                                               api_request) 
-            # save the default thumbnail
-            yield api_request.save_default_thumbnail(async=True)
- 
+            # add the video / request
+            video_and_request = yield tornado.gen.Task(VideoHelper.createVideoAndRequest, 
+                                                       args, 
+                                                       account_id_api_key) 
+            new_video = video_and_request[0] 
+            api_request = video_and_request[1]  
             # modify the video if there is a thumbnail set serving_enabled 
             def _set_serving_enabled(v):
                 v.serving_enabled = len(v.thumbnail_ids) > 0
@@ -858,14 +860,23 @@ class VideoHandler(APIV2Handler):
                 self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
             else: 
                 self.error('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR) 
-             
+        
+        except AlreadyExists as e:
+            statemon.state.increment('post_video_already_exists') 
+            job_info = {}
+            job_info['job_id'] = e.existing.job_id
+            job_info['message'] = 'video already had a request for processing' 
+            self.success(json.dumps(job_info), code=ResponseCode.HTTP_OK) 
+
         except MultipleInvalid as e: 
             statemon.state.increment('post_video_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except SaveError as e: 
             statemon.state.increment('post_video_fails')
             _log.exception('key=VideoHandler.post.saveError msg=%s' % e)  
             self.error(e.msg, code=e.code) 
+
         except Exception as e:
             statemon.state.increment('post_video_fails')
             _log.exception('key=VideoHandler.post msg=%s' % e)  
@@ -924,6 +935,7 @@ class VideoHandler(APIV2Handler):
         except MultipleInvalid as e:
             statemon.state.increment('get_video_fails')
             self.error('%s %s' % (e.path[0], e.msg))
+
         except Exception as e:
             statemon.state.increment('get_video_fails')
             _log.exception('key=VideoHandler.get msg=%s' % e)  
@@ -998,6 +1010,10 @@ class SaveError(Error):
 class GetError(Error): 
     def __init__(self, msg): 
         self.msg = msg
+
+class AlreadyExists(Error): 
+    def __init__(self, existing): 
+        self.existing = existing
 
 '''*********************************************************************
 Endpoints 

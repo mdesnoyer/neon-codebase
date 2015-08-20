@@ -381,6 +381,31 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
+
+    @tornado.testing.gen_test
+    def test_post_two_videos(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        first_job_id = rjson['job_id']  
+        self.assertNotEquals(first_job_id,'')
+        
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body) 
+        second_job_id = rjson['job_id']  
+        self.assertEquals(first_job_id,second_job_id)
+
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
         try: 
