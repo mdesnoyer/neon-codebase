@@ -267,7 +267,29 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
+        self.assertEquals(platform.ooyala_api_key, ooyala_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_put_integration_ensure_old_info_not_nulled(self):
+        ooyala_api_key = 'testapikey' 
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        ooyala_api_secret = 'testapisecret' 
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_secret=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_secret)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+
+        platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+                                          self.account_id_api_key, 
+                                          self.test_i_id)
+
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key) 
+        self.assertEquals(platform.api_secret, ooyala_api_secret) 
  
     @tornado.testing.gen_test 
     def test_post_integration_autosync(self):
@@ -344,7 +366,30 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
-        self.assertEquals(platform.read_token, read_token)  
+        self.assertEquals(platform.read_token, read_token) 
+ 
+    @tornado.testing.gen_test 
+    def test_put_integration_ensure_old_info_not_nulled(self):
+        read_token = 'readtoken' 
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s&read_token=%s' % (self.account_id_api_key, self.test_i_id, read_token)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+        write_token = 'writetoken' 
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s&write_token=%s' % (self.account_id_api_key, self.test_i_id, write_token)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='PUT', 
+                                                allow_nonstandard_methods=True)
+
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          self.account_id_api_key, 
+                                          self.test_i_id)
+        print platform
+
+        self.assertEquals(platform.read_token, read_token) 
+        self.assertEquals(platform.write_token, write_token) 
 
 class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
@@ -548,8 +593,13 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(rjson['video_count'], 1)
 
         thumbnail_array = rjson['videos'][0]['thumbnails']
+        thumbnail_one = thumbnail_array[0] 
+        thumbnail_two = thumbnail_array[1] 
         self.assertEquals(len(thumbnail_array), 2)
-        self.assertEquals(thumbnail_array[0]['width'], 500)
+        self.assertEquals(thumbnail_one['width'], 500)
+        self.assertEquals(thumbnail_one['key'], 'testing_vtid_one') 
+        self.assertEquals(thumbnail_two['width'], 500)
+        self.assertEquals(thumbnail_two['key'], 'testing_vtid_two') 
     
     @tornado.testing.gen_test 
     def test_get_video_with_thumbnails_field_no_thumbnails(self): 

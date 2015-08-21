@@ -466,12 +466,15 @@ class OoyalaIntegrationHandler(APIV2Handler):
             args = self.parse_args()
             args['account_id'] = str(account_id)
             schema(args)
-
+            
+            platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+                                              args['account_id'], 
+                                              args['integration_id'])
             def _update_platform(p):
                 try:
-                    p.ooyala_api_key = args['ooyala_api_key'] 
-                    p.api_secret = args['ooyala_api_secret'] 
-                    p.partner_code = args['publisher_id'] 
+                    p.ooyala_api_key = args.get('ooyala_api_key', platform.ooyala_api_key)
+                    p.api_secret = args.get('ooyala_api_secret', platform.api_secret)
+                    p.partner_code = args.get('publisher_id', platform.partner_code)
                 except KeyError as e: 
                     pass
  
@@ -530,6 +533,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
         except SaveError as e:
             statemon.state.increment('post_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.post.saveError msg=%s' % e)  
             self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id}, e.code)  
 
         except MultipleInvalid as e: 
@@ -585,11 +589,15 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             integration_id = args['integration_id'] 
             schema(args)
 
+            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                              args['account_id'], 
+                                              args['integration_id'])
+
             def _update_platform(p):
                 try:
-                    p.read_token = args['read_token'] 
-                    p.write_token = args['write_token'] 
-                    p.publisher_id = args['publisher_id'] 
+                    p.read_token = args.get('read_token', platform.read_token)
+                    p.write_token = args.get('write_token', platform.write_token)
+                    p.publisher_id = args.get('publisher_id', platform.publisher_id)
                 except KeyError as e: 
                     pass
  
@@ -659,7 +667,7 @@ class ThumbnailHandler(APIV2Handler):
                                                    cdn_metadata,
                                                    async=True)
             #save the thumbnail
-            new_thumbnail.save() 
+            yield tornado.gen.Task(new_thumbnail.save)
 
             # save the video 
             new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
