@@ -871,7 +871,7 @@ class VideoHandler(APIV2Handler):
               'callback_url': Any(str, unicode, Length(min=1, max=512)), 
               'video_title': Any(str, unicode, Length(min=1, max=256)),
               'duration': All(Coerce(int), Range(min=1, max=86400)), 
-              'publish_date': All(CustomVoluptuousTypes.Date()), 
+              'publish_date': All(CustomVoluptuousTypes.ISO8601Date()), 
               'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
               'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
               'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
@@ -1074,6 +1074,17 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Date(fmt='%Y-%m-%dT%H:%M:%S.%fZ'):
         return lambda v: datetime.strptime(v, fmt)
+    @staticmethod
+    def ISO8601Date():
+        def f(v): 
+            for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.%fZ'): 
+                try: 
+                    return datetime.strptime(v, fmt)
+                except ValueError: 
+                    pass
+            raise Invalid("not an accepted date format") 
+        return f
+       
     @staticmethod
     def Dictionary():
         def f(v):
