@@ -86,6 +86,7 @@ class ResponseCode(object):
     HTTP_OK = 200
     HTTP_ACCEPTED = 202 
     HTTP_BAD_REQUEST = 400 
+    HTTP_NOT_FOUND = 404 
     HTTP_INTERNAL_SERVER_ERROR = 500
     HTTP_NOT_IMPLEMENTED = 501
 
@@ -307,33 +308,33 @@ class IntegrationHelper():
  
         integration_id = uuid.uuid1().hex
         if integration_type == neondata.IntegrationType.OOYALA: 
-            platform = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
+            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
                                               acct.neon_api_key, integration_id, 
                                               _createOoyalaIntegration, 
                                               create_missing=True) 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
+            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
                                               acct.neon_api_key, integration_id, 
                                               _createBrightcoveIntegration, 
                                               create_missing=True) 
         
         result = yield tornado.gen.Task(acct.modify, 
                                         acct.neon_api_key, 
-                                        lambda p: p.add_platform(platform))
+                                        lambda p: p.add_platform(integration))
         
-        # ensure the platform made it to the database by executing a get
+        # ensure the integration made it to the database by executing a get
         if integration_type == neondata.IntegrationType.OOYALA: 
-            platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
+            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
                                               acct.neon_api_key,
                                               integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
+            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
                                               acct.neon_api_key,
                                               integration_id)
 
 
-        if platform: 
-            raise tornado.gen.Return(platform)
+        if integration: 
+            raise tornado.gen.Return(integration)
         else: 
             raise SaveError('unable to save the integration')
 
@@ -352,25 +353,17 @@ class IntegrationHelper():
     
     @staticmethod 
     @tornado.gen.coroutine
-    def getIntegration(apiv2, account_id, integration_type): 
-        schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
-        })
-        args = apiv2.parse_args()
-        args['account_id'] = str(account_id)
-        schema(args)
-        integration_id = args['integration_id'] 
+    def getIntegration(account_id, integration_id, integration_type): 
         if integration_type == neondata.IntegrationType.OOYALA: 
-            platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                              args['account_id'], 
+            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+                                              account_id, 
                                               integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE: 
-            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                              args['account_id'], 
-                                              args['integration_id'])
-        if platform: 
-            raise tornado.gen.Return(platform) 
+            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                              account_id, 
+                                              integration_id)
+        if integration:
+            raise tornado.gen.Return(integration) 
         else: 
             raise GetError('%s %s' % ('unable to find the integration for id:',integration_id))
 
@@ -403,10 +396,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
             args['account_id'] = str(account_id)
             schema(args)
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
+            integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
             yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, neondata.IntegrationType.OOYALA)
             statemon.state.increment('post_ooyala_oks')
-            self.success(platform.to_json())
+            self.success(integration.to_json())
  
         except SaveError as e: 
             statemon.state.increment('post_ooyala_fails')
@@ -429,12 +422,20 @@ class OoyalaIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         try: 
-            platform = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              self,
-                                              account_id,  
+            schema = Schema({
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+            })
+            args = self.parse_args()
+            args['account_id'] = account_id = str(account_id)
+            schema(args)
+            integration_id = args['integration_id'] 
+            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              account_id, 
+                                              integration_id, 
                                               neondata.IntegrationType.OOYALA) 
             statemon.state.increment('get_ooyala_oks')
-            self.success(platform.to_json())
+            self.success(integration.to_json())
 
         except GetError as e:
             statemon.state.increment('get_ooyala_fails')
@@ -464,30 +465,41 @@ class OoyalaIntegrationHandler(APIV2Handler):
               'publisher_id': Any(str, unicode, Length(min=1, max=1024))
             })
             args = self.parse_args()
-            args['account_id'] = str(account_id)
+            args['account_id'] = account_id = str(account_id)
             schema(args)
+            integration_id = args['integration_id'] 
             
-            platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                              args['account_id'], 
-                                              args['integration_id'])
-            def _update_platform(p):
+            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              account_id, 
+                                              integration_id, 
+                                              neondata.IntegrationType.OOYALA)
+ 
+            def _update_integration(p):
                 try:
-                    p.ooyala_api_key = args.get('ooyala_api_key', platform.ooyala_api_key)
-                    p.api_secret = args.get('ooyala_api_secret', platform.api_secret)
-                    p.partner_code = args.get('publisher_id', platform.partner_code)
+                    p.ooyala_api_key = args.get('ooyala_api_key', integration.ooyala_api_key)
+                    p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
+                    p.partner_code = args.get('publisher_id', integration.partner_code)
                 except KeyError as e: 
                     pass
  
             result = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
-                                         args['account_id'], 
-                                         args['integration_id'], 
-                                         _update_platform)
+                                         account_id, 
+                                         integration_id, 
+                                         _update_integration)
 
-            ooyala_integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                                     args['account_id'], 
-                                                     args['integration_id']) 
+            ooyala_integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                                        account_id, 
+                                                        integration_id, 
+                                                        neondata.IntegrationType.OOYALA)
+ 
             statemon.state.increment('put_ooyala_oks')
             self.success(ooyala_integration.to_json())
+
+        except GetError as e:
+            statemon.state.increment('get_ooyala_fails')
+            _log.exception('key=OoyalaIntegrationHandler.put.GetError msg=%s' % e)  
+            self.error('integration does not exist : information : %s' % e.msg, 
+                        code=ResponseCode.HTTP_NOT_FOUND) 
              
         except MultipleInvalid as e:
             statemon.state.increment('ooyala_invalid_inputs') 
@@ -521,7 +533,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             args['account_id'] = str(account_id)
             schema(args)
             acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            platform = yield tornado.gen.Task(IntegrationHelper.createIntegration, 
+            integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, 
                                               acct, 
                                               args, 
                                               neondata.IntegrationType.BRIGHTCOVE)
@@ -529,7 +541,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                    acct, 
                                    neondata.IntegrationType.BRIGHTCOVE)
             statemon.state.increment('post_brightcove_oks')
-            self.success(platform.to_json())
+            self.success(integration.to_json())
 
         except SaveError as e:
             statemon.state.increment('post_brightcove_fails')
@@ -551,15 +563,24 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):  
         try: 
-            platform = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              self,
-                                              account_id,  
+            schema = Schema({
+              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+              Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+            })
+            args = self.parse_args()
+            args['account_id'] = account_id = str(account_id)
+            schema(args)
+            integration_id = args['integration_id'] 
+            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              account_id,
+                                              integration_id,  
                                               neondata.IntegrationType.BRIGHTCOVE) 
             statemon.state.increment('get_brightcove_oks')
-            self.success(platform.to_json())
+            self.success(integration.to_json())
 
         except GetError as e: 
             statemon.state.increment('get_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.get.getError msg=%s' % e)  
             self.error(e.msg) 
 
         except MultipleInvalid as e:
@@ -589,28 +610,36 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             integration_id = args['integration_id'] 
             schema(args)
 
-            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                              args['account_id'], 
-                                              args['integration_id'])
-
-            def _update_platform(p):
+            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              account_id,
+                                              integration_id,  
+                                              neondata.IntegrationType.BRIGHTCOVE) 
+            def _update_integration(p):
                 try:
-                    p.read_token = args.get('read_token', platform.read_token)
-                    p.write_token = args.get('write_token', platform.write_token)
-                    p.publisher_id = args.get('publisher_id', platform.publisher_id)
+                    p.read_token = args.get('read_token', integration.read_token)
+                    p.write_token = args.get('write_token', integration.write_token)
+                    p.publisher_id = args.get('publisher_id', integration.publisher_id)
                 except KeyError as e: 
                     pass
  
             result = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
                                          account_id, 
                                          integration_id, 
-                                         _update_platform)
+                                         _update_integration)
 
-            platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                              account_id, 
-                                              integration_id) 
+            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
+                                              account_id,
+                                              integration_id,  
+                                              neondata.IntegrationType.BRIGHTCOVE) 
+ 
             statemon.state.increment('put_brightcove_oks')
-            self.success(platform.to_json())
+            self.success(integration.to_json())
+
+        except GetError as e:
+            statemon.state.increment('put_brightcove_fails')
+            _log.exception('key=BrightcoveIntegrationHandler.put msg=%s' % e)  
+            self.error('integration does not exist : information : %s' % e.msg, 
+                        code=ResponseCode.HTTP_NOT_FOUND) 
 
         except MultipleInvalid as e: 
             statemon.state.increment('brightcove_invalid_inputs') 

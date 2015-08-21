@@ -268,6 +268,17 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.test_i_id)
 
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key)
+    @tornado.testing.gen_test 
+    def test_put_integration_dne(self):
+        try: 
+            ooyala_api_key = 'testapikey' 
+            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&ooyala_api_key=%s' % (self.account_id_api_key, ooyala_api_key)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='',
+                                                    method='PUT', 
+                                                    allow_nonstandard_methods=True)
+        except Exception as e:
+            self.assertEquals(e.code, 404)  
  
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -366,7 +377,19 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
-        self.assertEquals(platform.read_token, read_token) 
+        self.assertEquals(platform.read_token, read_token)
+ 
+    @tornado.testing.gen_test 
+    def test_put_integration_dne(self):
+        try: 
+            read_token = 'readtoken' 
+            url = '/api/v2/%s/integrations/brightcove?integration_id=nope&read_token=%s' % (self.account_id_api_key, read_token)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='',
+                                                    method='PUT', 
+                                                    allow_nonstandard_methods=True)
+        except Exception as e:
+            self.assertEquals(e.code, 404)  
  
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -386,7 +409,6 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           self.account_id_api_key, 
                                           self.test_i_id)
-        print platform
 
         self.assertEquals(platform.read_token, read_token) 
         self.assertEquals(platform.write_token, write_token) 
