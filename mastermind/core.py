@@ -42,6 +42,93 @@ statemon.define('critical_error', int)
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
 
+class ModelMapper():
+    '''
+    Stores relevant information about the model used for a given
+    video, particularly with respect to computing the score
+    priors. This was made necessary by the move to using Rank
+    Centrality and, more broadly, no longer binning scores into
+    [1, 7]. 
+
+    Note: This makes several simplifying assumptions. Namely, 
+    if a model is not in `classical models,' then it is using
+    Rank Centrality, and is assumed to have a mean of 1. Generally
+    when Rank Centrality is estimated the sum of the vector is 1--
+    since the vector corresponds to transition probabilities. But
+    since we wanted to the mean to not be dependent on the number
+    of tested items, the sum of the vector corresponds to the number
+    of training items, and hence the mean is definitionally one.
+
+    IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
+    METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
+    '''
+    def __init__(self):
+        # the line in question is:
+        # Peg a score of 5.5 as a 10% lift over random and a score of
+        # 4.0 as neutral
+        #
+        # return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
+        #                  Mastermind.PRIOR_IMPRESSION_SIZE))
+        classical_models = ['20130924_textdiff.model',
+                  '20130924_crossfade.model',
+                  'p_20150722_withCEC_w20.model',
+                  '20130924_crossfade_withalg.model',
+                  'p_20150722_withCEC_w40.model',
+                  '20150206_flickr_slow_memcache.model',
+                  '20130924.model',
+                  'p_20150722_withCEC_w10.model',
+                  'p_20150722_withCEC_wNone.model',
+                  'p_20150722_withCEC_wA.model']
+        self.model2num = {k:n for n, k in enumerate(classical_models)}
+        self.num2model = {n:k for k, n in self.model2num.iteritems()}
+        self.model2type = {x:'classical' for x in self.model2num.keys() + self.num2model.keys()}
+
+    def _add_model(self, modelName):
+        _log.info_n('Model %s is not in model dicts; adding it,'
+            ' presuming rank centrality'%(modelName))
+        modelNum = len(self.model2num)
+        self.model2num[modelName] = modelNum
+        self.num2model[modelNum] = modelName
+        self.model2type[modelName] = 'rc'
+        self.model2type[modelNum] = 'rc'
+
+    def get_model_num(self, modelName):
+        '''
+        Returns the model number given a model name.
+        '''
+        if not self.model2num.has_key(modelName):
+            self._add_model(modelName)
+        return self.model2num[modelName]
+
+    def get_model_name(self, modelNum):
+        '''
+        Returns the model name given the modelNum 
+        '''
+        if not self.num2model.has_key(modelNum):
+            _log.error('Model identified by integer %i '
+                'not recognized, cannot determine name'%(modelNum))
+            return None
+        return self.num2model[modelNum]
+
+    def get_model_type(self, modelid):
+        '''
+        Returns the model type given either a model
+        number or a model name.
+        '''
+        if not self.model2type.has_key(modelid):
+            if type(modelid) == int:
+                _log.error('Model identified by integer %i not recognized,'
+                    ' cannot determine type'%(modelid))
+                return None
+            elif type(modelid) == str:
+                self._add_model(modelid)
+            else:
+                _log.error('Cannot parse modelid input: ' + str(modelid))
+                raise ValueError("modelid must be an integer or a string."
+                    "Could not parse " + str(modelid))
+        return self.model2type(modelid)
+
+
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
     def __init__(self, account_id, testing_enabled, thumbnails=[]):
@@ -728,6 +815,8 @@ class Mastermind(object):
 
         # Peg a score of 5.5 as a 10% lift over random and a score of
         # 4.0 as neutral
+        # 
+        # This is what needs to be changed. The model scores are 
         return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
                          Mastermind.PRIOR_IMPRESSION_SIZE))
 
