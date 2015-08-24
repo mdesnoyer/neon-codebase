@@ -24,9 +24,6 @@ from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 
-#from tornado.testing import AsyncHTTPTestCase
-
-#class TestNewAccountHandler(tornado.testing.AsyncHTTPTestCase): 
 class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application

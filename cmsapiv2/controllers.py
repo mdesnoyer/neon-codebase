@@ -150,12 +150,13 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     __delete = delete
 
 '''****************************************************************
-NewAccountHandler : class responsible for creating a new account
-   HTTP Verbs     : post 
+NewAccountHandler
 ****************************************************************'''
 class NewAccountHandler(APIV2Handler):
+    """Handles post requests to the account endpoint."""
     @tornado.gen.coroutine 
     def post(self):
+        """handles account endpoint post request""" 
         schema = Schema({ 
           Required('customer_name') : Any(str, unicode, Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
@@ -194,15 +195,15 @@ class NewAccountHandler(APIV2Handler):
             self.error('could not create the account', {'customer_name': args['customer_name']})  
         
 '''*****************************************************************
-AccountHandler : class responsible for updating and getting accounts 
-   HTTP Verbs  : get, put 
+AccountHandler 
 *****************************************************************'''
 class AccountHandler(APIV2Handler):
-    '''**********************
-    AccountHandler.get
-    **********************'''    
+    """Handles get,put requests to the account endpoint. 
+       Gets and updates existing accounts.
+    """
     @tornado.gen.coroutine
     def get(self, account_id):
+        """handles account endpoint get request""" 
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
         }) 
@@ -234,11 +235,9 @@ class AccountHandler(APIV2Handler):
             _log.exception('key=AccountHandler.get msg=%s' % e)  
             self.error('could not retrieve the account', {'account_id': account_id})  
  
-    '''**********************
-    AccountHandler.put
-    **********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
+        """handles account endpoint put request""" 
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
@@ -274,17 +273,20 @@ class AccountHandler(APIV2Handler):
             self.error('could not update the account', {'account_id': account_id})  
 
 '''*********************************************************************
-IntegrationHelper : class responsible for helping the integration 
-                    handlers, create the integration, update the 
-                    integration, and add strategies to accounts based on 
-                    the integration type
-
-Method list: createIntegration, updateIntegration, addExperimentStrategy  
+IntegrationHelper 
 *********************************************************************'''
 class IntegrationHelper():
+    """Class responsible for helping the integration handlers."""
     @staticmethod 
     @tornado.gen.coroutine
     def createIntegration(acct, args, integration_type):
+        """Creates an integration for any integration type. 
+        
+        Keyword arguments: 
+        acct - a NeonUserAccount object 
+        args - the args sent in via the API request 
+        integration_type - the type of integration to create 
+        """ 
         def _createOoyalaIntegration(p):
             try:
                 p.account_id = acct.neon_api_key
@@ -341,19 +343,32 @@ class IntegrationHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def addStrategy(acct, integration_type): 
-         if integration_type == neondata.IntegrationType.OOYALA: 
-             strategy = neondata.ExperimentStrategy(acct.neon_api_key) 
-         elif integration_type == neondata.IntegrationType.BRIGHTCOVE: 
-             strategy = neondata.ExperimentStrategy(acct.neon_api_key)
-         result = yield tornado.gen.Task(strategy.save)  
-         if result: 
-             raise tornado.gen.Return(result)
-         else: 
-             raise SaveError('unable to save strategy to account')
+        """Adds an ExperimentStrategy to the database  
+        
+        Keyword arguments: 
+        acct - a NeonUserAccount object 
+        integration_type - the type of integration to create 
+        """ 
+        if integration_type == neondata.IntegrationType.OOYALA: 
+            strategy = neondata.ExperimentStrategy(acct.neon_api_key) 
+        elif integration_type == neondata.IntegrationType.BRIGHTCOVE: 
+            strategy = neondata.ExperimentStrategy(acct.neon_api_key)
+        result = yield tornado.gen.Task(strategy.save)  
+        if result: 
+            raise tornado.gen.Return(result)
+        else: 
+            raise SaveError('unable to save strategy to account')
     
     @staticmethod 
     @tornado.gen.coroutine
     def getIntegration(account_id, integration_id, integration_type): 
+        """Gets an integration based on integration_id, account_id, and type.  
+        
+        Keyword arguments: 
+        account_id - the account_id that owns the integration 
+        integration_id - the integration_id of the integration we want
+        integration_type - the type of integration to create 
+        """ 
         if integration_type == neondata.IntegrationType.OOYALA: 
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                               account_id, 
@@ -373,17 +388,13 @@ class IntegrationHelper():
         return ""
 
 '''*********************************************************************
-OoyalaIntegrationHandler : class responsible for creating/updating/
-                           getting an ooyala integration
-   HTTP Verbs            : get, post, put
+OoyalaIntegrationHandler
 *********************************************************************'''
 class OoyalaIntegrationHandler(APIV2Handler):
- 
-    '''**********************
-    OoyalaIntegration.post
-    **********************'''    
+    """Handles get,put,post requests to the ooyala endpoint within the v2 api."""
     @tornado.gen.coroutine
-    def post(self, account_id): 
+    def post(self, account_id):
+        """handles an ooyala endpoint post request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -416,11 +427,9 @@ class OoyalaIntegrationHandler(APIV2Handler):
                         {'account_id': account_id, 
                          'publisher_id': args['publisher_id']})  
 
-    '''**********************
-    OoyalaIntegration.get
-    **********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):
+        """handles an ooyala endpoint get request""" 
         try: 
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -451,11 +460,9 @@ class OoyalaIntegrationHandler(APIV2Handler):
             _log.exception('key=OoyalaIntegrationHandler.get msg=%s' % e)  
             self.error('error getting the integration', {'account_id': account_id})
  
-    '''**********************
-    OoyalaIntegration.put
-    **********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
+        """handles an ooyala endpoint put request""" 
         try: 
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -511,17 +518,14 @@ class OoyalaIntegrationHandler(APIV2Handler):
             self.error('error updating the integration', {'integration_id': integration_id})
 
 '''*********************************************************************
-BrightcoveIntegrationHandler : class responsible for creating/updating/
-                               getting a brightcove integration
-   HTTP Verbs                : get, post, put
+BrightcoveIntegrationHandler
 *********************************************************************'''
+
 class BrightcoveIntegrationHandler(APIV2Handler):
- 
-    '''*********************
-    BrightcoveIntegration.post 
-    *********************'''   
+    """handles all requests to the brightcove endpoint within the v2 API"""  
     @tornado.gen.coroutine
     def post(self, account_id):
+        """handles a brightcove endpoint post request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -557,11 +561,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             _log.exception('key=BrightcoveIntegrationHandler.post msg=%s' % e)  
             self.error('unable to create brightcove integration', {'account_id' : account_id, 'publisher_id' : publisher_id})  
 
-    '''*********************
-    BrightcoveIntegration.get 
-    *********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):  
+        """handles a brightcove endpoint get request""" 
         try: 
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -592,11 +594,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             _log.exception('key=BrightcoveIntegrationHandler.get msg=%s' % e)  
             self.error('unable to get brightcove integration', {'account_id' : account_id}) 
  
-    '''*********************
-    BrightcoveIntegration.put 
-    *********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
+        """handles a brightcove endpoint put request""" 
         try:   
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -651,13 +651,13 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             self.error('unable to update integration', {'integration_id' : integration_id}) 
 
 '''*********************************************************************
-ThumbnailHandler : class responsible for creating/updating/getting a
-                   thumbnail 
-HTTP Verbs       : get, post, put
+ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
+    """handles all requests to the thumbnails endpoint within the v2 API"""  
     @tornado.gen.coroutine
     def post(self, account_id):
+        """handles a thumbnail endpoint post request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -720,6 +720,7 @@ class ThumbnailHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id): 
+        """handles a thumbnail endpoint put request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
@@ -760,6 +761,7 @@ class ThumbnailHandler(APIV2Handler):
  
     @tornado.gen.coroutine
     def get(self, account_id): 
+        """handles a thumbnail endpoint get request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512))
@@ -785,13 +787,19 @@ class ThumbnailHandler(APIV2Handler):
 
 
 '''*********************************************************************
-VideoHelper      : helper class responsible for creating new video jobs 
-                   for any and all integration types
+VideoHelper  
 *********************************************************************'''
 class VideoHelper():
+    """helper class designed to help the video endpoint handle requests"""  
     @staticmethod 
     @tornado.gen.coroutine 
-    def createApiRequest(args, account_id_api_key): 
+    def createApiRequest(args, account_id_api_key):
+        """creates an API Request object 
+        
+        Keyword arguments: 
+        args -- the args sent to the api endpoint 
+        account_id_api_key -- the account_id/api_key
+        """  
         user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
         job_id = uuid.uuid1().hex
         integration_id = args.get('integration_id', None) 
@@ -814,6 +822,13 @@ class VideoHelper():
     @staticmethod 
     @tornado.gen.coroutine 
     def createVideoAndRequest(args, account_id_api_key):
+        """creates Video object and ApiRequest object and 
+           sends them back to the caller as a tuple
+         
+        Keyword arguments: 
+        args -- the args sent to the api endpoint 
+        account_id_api_key -- the account_id/api_key
+        """  
         video_id = args['external_video_ref'] 
         video = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
@@ -843,6 +858,11 @@ class VideoHelper():
     @staticmethod 
     @tornado.gen.coroutine
     def getThumbnailsFromIds(tids):
+        """gets thumbnailmetadata objects 
+         
+        Keyword arguments: 
+        tids -- a list of tids that needs to be retrieved
+        """  
         thumbnails = []
         if tids: 
             thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many, 
@@ -852,16 +872,12 @@ class VideoHelper():
         raise tornado.gen.Return(thumbnails)
      
 '''*********************************************************************
-VideoHandler     : class responsible for creating/updating/getting a
-                   video
-HTTP Verbs       : get, post, put
+VideoHandler 
 *********************************************************************'''
 class VideoHandler(APIV2Handler):
-    '''**********************
-    Video.post 
-    **********************'''    
     @tornado.gen.coroutine
     def post(self, account_id):
+        """handles a Video endpoint post request""" 
         try:
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -933,11 +949,9 @@ class VideoHandler(APIV2Handler):
             _log.exception('key=VideoHandler.post msg=%s' % e)  
             self.error('unable to create video request', {'account_id': account_id})  
     
-    '''**********************
-    Video.get 
-    **********************'''    
     @tornado.gen.coroutine
     def get(self, account_id):  
+        """handles a Video endpoint get request""" 
         try: 
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -992,11 +1006,9 @@ class VideoHandler(APIV2Handler):
             _log.exception('key=VideoHandler.get msg=%s' % e)  
             self.error('unable to get videos', {'account_id': account_id, 'video_id': video_id})  
  
-    '''**********************
-    Video.put 
-    **********************'''    
     @tornado.gen.coroutine
     def put(self, account_id):
+        """handles a Video endpoint put request""" 
         try: 
             schema = Schema({
               Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -1074,6 +1086,7 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Date(fmt='%Y-%m-%dT%H:%M:%S.%fZ'):
         return lambda v: datetime.strptime(v, fmt)
+
     @staticmethod
     def ISO8601Date():
         def f(v): 
