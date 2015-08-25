@@ -61,9 +61,6 @@ class ModelMapper():
 
     IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
     METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
-
-    TODO: Modify this so that if the model used is not defined
-    (i.e., is None), then it makes no assumptions about the prior.
     '''
     def __init__(self):
         # the line in question is:
@@ -72,19 +69,22 @@ class ModelMapper():
         #
         # return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
         #                  Mastermind.PRIOR_IMPRESSION_SIZE))
-        classical_models = ['20130924_textdiff.model',
-                  '20130924_crossfade.model',
-                  'p_20150722_withCEC_w20.model',
-                  '20130924_crossfade_withalg.model',
-                  'p_20150722_withCEC_w40.model',
-                  '20150206_flickr_slow_memcache.model',
-                  '20130924.model',
-                  'p_20150722_withCEC_w10.model',
-                  'p_20150722_withCEC_wNone.model',
-                  'p_20150722_withCEC_wA.model']
-        self.model2num = {k:n for n, k in enumerate(classical_models)}
+        classical_models = ['20130924_textdiff',
+                  '20130924_crossfade',
+                  'p_20150722_withCEC_w20',
+                  '20130924_crossfade_withalg',
+                  'p_20150722_withCEC_w40',
+                  '20150206_flickr_slow_memcache',
+                  '20130924',
+                  'p_20150722_withCEC_w10',
+                  'p_20150722_withCEC_wNone',
+                  'p_20150722_withCEC_wA']
+        self.model2num = {k:(n+1) for n, k in enumerate(classical_models)}
+        self.model2num[None] = 0 # reserved for unknown models
         self.num2model = {n:k for k, n in self.model2num.iteritems()}
         self.model2type = {x:'classical' for x in self.model2num.keys() + self.num2model.keys()}
+        self.model2type[None] = None # reserved for unknown models
+        self.model2type[0] = None # reserved for unknown models
 
     def _add_model(self, modelName):
         _log.info_n('Model %s is not in model dicts; adding it,'
@@ -94,6 +94,29 @@ class ModelMapper():
         self.num2model[modelNum] = modelName
         self.model2type[modelName] = 'rc'
         self.model2type[modelNum] = 'rc'
+
+    def type2num(self, model_type):
+        '''
+        Converts 'rc' and 'classical' (and any others we may get along
+        the way) to 2 and 1, respectively. A 0 corresponds to an unknown
+        model.
+        '''
+        if model_type == None:
+            return 0
+        if model_type == 'classical':
+            return 1
+        if model_type == 'rc':
+            return 2
+        return 0
+
+    def num2type(self, type_num):
+        '''
+        Converts a model type number into a descriptive string
+        '''
+        if type_num == 0:
+            return None
+        if type_name == 1:
+            return 
 
     def get_model_num(self, modelName):
         '''
@@ -129,7 +152,7 @@ class ModelMapper():
                 _log.error('Cannot parse modelid input: ' + str(modelid))
                 raise ValueError("modelid must be an integer or a string."
                     "Could not parse " + str(modelid))
-        return self.model2type(modelid)
+        return self.model2type[modelid]
 
 
 class VideoInfo(object):
@@ -162,7 +185,8 @@ class ThumbnailInfo(object):
         'base_imp',
         'incr_imp',
         'base_conv',
-        'incr_conv'
+        'incr_conv',
+        'score_type'
         ]
         
     def __init__(self, metadata, base_impressions=0, incremental_impressions=0,
@@ -371,6 +395,13 @@ class Mastermind(object):
                     testing_enabled,
                     thumbnail_infos)
                 self.video_info[video_id] = video_info
+            # update the thumbnail information with the type of 
+            # scoring that was used
+            model_type = self.model_mapper.get_model_type(
+                video_metadata.model_version)
+            video_info = self.video_info[video_id]
+            for thumb in video_info.thumbnails:
+                thumb.score_type = model_type
 
             self._calculate_new_serving_directive(video_id)
 
@@ -819,12 +850,34 @@ class Mastermind(object):
                 return max(1.0, (Mastermind.PRIOR_CTR * 
                                  Mastermind.PRIOR_IMPRESSION_SIZE))
 
-        # Peg a score of 5.5 as a 10% lift over random and a score of
-        # 4.0 as neutral
         # 
         # This is what needs to be changed. The model scores are 
         return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
                          Mastermind.PRIOR_IMPRESSION_SIZE))
+        if thumb_info.score_type == 0:
+            # then it is none, assume a life of 0%
+            return max(1.0, (1. * Mastermind.PRIOR_CTR * 
+                             Mastermind.PRIOR_IMPRESSION_SIZE))
+        elif thumb_info.score_type == 1:
+            # then it was calculated using Borda Count
+            # original doc:
+            # Peg a score of 5.5 as a 10% lift over random and a score of
+            # 4.0 as neutral
+            return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * 
+                            Mastermind.PRIOR_CTR * 
+                            Mastermind.PRIOR_IMPRESSION_SIZE))
+        elif thumb_info.score_type == 2:
+            # then it was calculated using Rank Centrality
+            # in which case the lift is given directly by RC
+            # of course, the calculated score only accounts for
+            # about 22% of the variance (computed by Spearman's Rho)
+            # and so we should regress it back to the mean
+            # lift is given by the ratio of the images scores, 
+            # regressed to the mean by some prior. Furthermore, 
+            # we assume the mean value, which is 1 due to how we 
+            # compute rank centrality.
+            prior = 0.3
+            return max(1.0, prior * score + (1-prior) * 1.0) 
 
     def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a sequential testing strategy.'''
