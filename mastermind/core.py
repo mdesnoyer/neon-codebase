@@ -695,7 +695,7 @@ class Mastermind(object):
         if value_remaining <= Mastermind.VALUE_THRESHOLD
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                impressions[winner_idx] >= 500 and total_conversions > min_conversion):
+                impressions[winner_idx] >= 500 and total_conversions >= min_conversion):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 is_winner_significant = True
@@ -724,25 +724,6 @@ class Mastermind(object):
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
 
-        # Decide if experiment has already comes to a conclusion
-        if not self.is_exp_complete():
-            # TODO: Update the data
-        else self.is_exp_complete():
-            # Load the data
-            if is_winner_significant:
-                # TODO: compare the winner id.
-                # check if the winner is the same as the one loaded.
-                if winner_idx != winner_complete:
-                    # TODO: keep tracking the winning times.
-                # TODO: update the value.
-                # TODO: apply new frac.
-
-            # TODO: TODO: Use the closed form of formulation to see if we get the p value with a different winner.
-                # write the winner back to the data.
-                # update the winning time
-            # Reset the fractions basing on the percentage it calculated.
-
-
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
@@ -757,7 +738,6 @@ class Mastermind(object):
 
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
-
 
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
