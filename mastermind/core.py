@@ -560,7 +560,7 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates, min_conversion, frac_adjust_rate)
+              self._get_bandit_fracs(strategy, baseline, editor, candidates, strategy.min_conversion, strategy.frac_adjust_rate)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
@@ -575,7 +575,7 @@ class Mastermind(object):
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
 
-    def _get_bandit_fracs(self, strategy, baseline, editor, candidates, min_conversion = 50, frac_adjust_rate = 0.5):
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates, min_conversion = 50, frac_adjust_rate = 1.0):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See

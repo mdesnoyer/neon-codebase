@@ -1731,6 +1731,8 @@ class ExperimentStrategy(DefaultedStoredObject):
     
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
+                 min_conversion = 50,
+                 frac_adjust_rate = 1.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.RANDOM,
@@ -1752,6 +1754,15 @@ class ExperimentStrategy(DefaultedStoredObject):
         # explicitly chosen. This and chosen_thumb_overrides had
         # better not both be true.
         self.only_exp_if_chosen = only_exp_if_chosen
+
+        # minimum combined conversion numbers before calling an experiment
+        # complete
+        self.min_conversion = min_conversion
+
+        # Fraction adjusting power rate. When this number is 0, it is
+        # equivalent to standard t-test, when it is 1.0, it is the
+        # regular multi-bandit problem.
+        self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
         # experiment. The other baseline could be an editor generated
