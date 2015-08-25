@@ -175,10 +175,13 @@ class Mastermind(object):
         self.video_info = {} # video_id -> VideoInfo
         
         # account_id -> neondata.ExperimentStrategy
-        self.experiment_strategy = {} 
+        self.experiment_strategy = {}
         
         # video_id -> ((account_id, video_id), [(thumb_id, fraction)])
-        self.serving_directive = {} 
+        self.serving_directive = {}
+
+        # video_id -> neondata.ExperimentState
+        self.experiment_state = {}
         
         # For thread safety
         self.lock = multiprocessing.RLock()
@@ -382,6 +385,13 @@ class Mastermind(object):
             statemon.state.increment('critical_error') 
             return
         
+        # if video has already finished the experiment, just keep the
+        # previous directive.
+        if video_id in self.experiment_state and \
+                       self.experiment_state[video_id] == neondata.ExperimentState.COMPLETE:
+            # TODO: keep running the calculation, it's possible to have the winner overturned.
+            return
+
         result = self._calculate_current_serving_directive(
             video_info, video_id)
         if result is None:
@@ -389,6 +399,7 @@ class Mastermind(object):
             return 
 
         experiment_state, new_directive, value_left, winner_tid = result
+        self.experiment_state[video_id] = experiment_state
                     
         try:
             old_directive = self.serving_directive[video_id][1]
@@ -549,9 +560,14 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             # TODO: load the configuration
-            experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates, min_conversion, frac_adjust_rate)
-            run_frac.update(bandit_frac)
+            # TODO:
+            if current_experiment_state == neondata.something.complete: # TODO: state of complete
+                # TODO: load the fraction
+                run_frac.update(complete_frac)
+            else:
+                experiment_state, bandit_frac, value_left, winner_tid = \
+                  self._get_bandit_fracs(strategy, baseline, editor, candidates, min_conversion, frac_adjust_rate)
+                run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
             experiment_state, seq_frac, value_left, winner_tid = \
@@ -564,14 +580,6 @@ class Mastermind(object):
             statemon.state.increment('invalid_experiment_type')
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
-
-    def is_exp_complete(self, video_id):
-        '''Returns true if the video experiment is complete.'''
-        # if neondata.InternalVideoID.is_no_video(video_id):
-        #     return True
-        # if video_id is None:
-        #     return False
-        # return video_id in self.serving_directive
 
     def _get_bandit_fracs(self, strategy, baseline, editor, candidates, min_conversion = 50, frac_adjust_rate = 0.5):
         '''Gets the serving fractions for a multi-armed bandit strategy.
@@ -863,7 +871,7 @@ class Mastermind(object):
         self._incr_pending_modify(2)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
-            self, video_id, new_directive, video_info)
+            self, video_id, new_directive, video_info)  
         
         self.modify_pool.submit(
             _modify_video_info,
