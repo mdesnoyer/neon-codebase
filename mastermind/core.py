@@ -113,10 +113,12 @@ class ModelMapper():
         '''
         Converts a model type number into a descriptive string
         '''
-        if type_num == 0:
+        if type_num == 1:
+            return 'classical'
+        elif type_num == 2:
+            return 'rc'
+        else:
             return None
-        if type_name == 1:
-            return 
 
     # TODO: ENSURE THAT INPUT SPECIFICATIONS 
     # ARE CORRECT.. it's not clear that this
@@ -156,7 +158,8 @@ class ModelMapper():
                 _log.error('Cannot parse modelid input: ' + str(modelid))
                 raise ValueError("modelid must be an integer or a string."
                     "Could not parse " + str(modelid))
-        return self.model2type[modelid]
+        typn = self.model2type[modelid]
+        return self.type2num(typn)
 
 
 class VideoInfo(object):
@@ -219,7 +222,7 @@ class ThumbnailInfo(object):
         self.base_conv = base_conversions
         self.incr_conv = incremental_conversions
         self.score_type = None
-        
+
     def __str__(self):
         return str({
             'enabled': self.enabled,
