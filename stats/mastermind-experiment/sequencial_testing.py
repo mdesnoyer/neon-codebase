@@ -12,7 +12,7 @@ import itertools
 
 class Param(object):
     BASE_PERCENT = 0.04
-    LIFT = 1.50
+    LIFT = 1.25
     EXP_RATE = 0.02
     EXP_STOP = 0.1
     MIN_CONVERSION = 50
@@ -306,6 +306,8 @@ class StatsOptimizingSimulator(object):
         relative_risk_array = []
 
         optimal_bandit_conversion_count = 0
+        in_lift_range_count = 0
+        off_lift_range_count = 0
         for i in range(self.experiment_number):
             print "experiment: ", i
             impression_counter_1 = 0
@@ -375,6 +377,15 @@ class StatsOptimizingSimulator(object):
             relative_risk = self.calc_aggregate_ab_metrics(combined_data_array)
             # if conversion_counter_1 == 0:
             #     print conversion_counter_2, impression_counter_2, conversion_counter_1, impression_counter_1
+            lift = (conversion_counter_2/impression_counter_2) / (conversion_counter_1/impression_counter_1)
+            print "lift: ", lift
+            if lift >= 1.1875 and lift <= 1.3125:
+                in_lift_range_count = in_lift_range_count + 1
+                print "in_lift_range_count: ", in_lift_range_count
+
+            if lift >= 1.35 and lift <= 1.45:
+                off_lift_range_count = off_lift_range_count + 1
+
             simple_lift = np.log((conversion_counter_2/impression_counter_2) / (conversion_counter_1/impression_counter_1))
 
             # print "calc_aggregate_ab_metrics: ", relative_risk
@@ -420,6 +431,8 @@ class StatsOptimizingSimulator(object):
         print "log std simple: ", np.exp(np.std(simple_lift_array))
         print "mean relative risk: ", np.mean(np.array(relative_risk_array), 0)
         print "std relative risk: ", np.std(np.array(relative_risk_array), 0)
+        print "in_lift_range_count: ", in_lift_range_count
+        print "off_lift_range_count: ", off_lift_range_count
 
 
         return (bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)
@@ -698,8 +711,8 @@ def simulator():
               missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)"""
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
-    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
+    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
     # print stat_simulator.run_bandit_experiment(lambda x, y, z: simulator_function_bandit_random_walk_preset(x, y, z, random_walk_array))
