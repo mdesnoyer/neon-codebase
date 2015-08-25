@@ -85,7 +85,8 @@ statemon.define('video_invalid_inputs', int)
 class ResponseCode(object): 
     HTTP_OK = 200
     HTTP_ACCEPTED = 202 
-    HTTP_BAD_REQUEST = 400 
+    HTTP_BAD_REQUEST = 400
+    HTTP_UNAUTHORIZED = 401 
     HTTP_NOT_FOUND = 404 
     HTTP_INTERNAL_SERVER_ERROR = 500
     HTTP_NOT_IMPLEMENTED = 501
@@ -96,21 +97,31 @@ class APIV2Sender(object):
         self.write(data) 
         self.finish()
 
-    def error(self, message, extra_data=None, code=ResponseCode.HTTP_BAD_REQUEST): 
+    def error(self, message, extra_data=None, code=None):
         error_json = {} 
-        error_json['message'] = message 
-        self.set_status(code)
+        error_json['message'] = message
+        if code: 
+            error_json['code'] = code 
         if extra_data: 
-            error_json['fields'] = extra_data 
+            error_json['data'] = extra_data 
         self.write(error_json)
         self.finish() 
  
-
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self): 
         self.set_header("Content-Type", "application/json")
-        self.api_key = self.request.headers.get('X-Neon-API-Key')
+        self.header_api_key = self.request.headers.get('X-Neon-API-Key')
 
+    @tornado.gen.coroutine
+    def verify_account(self, account_id): 
+        account_id = self.request.uri.split('/')[3]
+        account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+        account_api_key = account.api_v2_key
+        if self.header_api_key is None: 
+            raise NotAuthorizedError('user is not authorized') 
+        if account_api_key is not self.header_api_key:
+            raise NotAuthorizedError('user is not authorized') 
+        
     def parse_args(self):
         args = {} 
         # if we have query_arguments only use them 
@@ -125,29 +136,94 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         return args
 
+    def write_error(self, status_code, **kwargs):
+        def get_exc_message(exception):
+            return exception.log_message if \
+                hasattr(exception, "log_message") else str(exception)
+
+        self.clear()
+        self.set_status(status_code)
+        exception = kwargs["exc_info"][1]
+
+        if any(isinstance(exception, c) for c in [Invalid, 
+                                                  NotAuthorizedError,
+                                                  GetError,  
+                                                  NotFoundError, 
+                                                  NotImplementedError]):
+            if isinstance(exception, Invalid):
+                self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            if isinstance(exception, AlreadyExists):
+                self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            if isinstance(exception, GetError):
+                self.set_status(ResponseCode.HTTP_NOT_FOUND)
+            if isinstance(exception, NotFoundError):
+                self.set_status(ResponseCode.HTTP_NOT_FOUND)
+            if isinstance(exception, NotAuthorizedError):
+                self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
+            if isinstance(exception, NotImplementedError):
+                self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
+            self.error(get_exc_message(exception), code=status_code)
+        elif isinstance(exception, AlreadyExists):
+            self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            self.error('this item already exists', extra_data=get_exc_message(exception)) 
+        else:
+            self.error(
+                message=self._reason,
+                extra_data=get_exc_message(exception) if self.settings.get("debug")
+                else None,
+                code=status_code
+            )
+
+
     @tornado.gen.coroutine 
     def get(self, *args):
-        self.error('get not implemented', code=ResponseCode.HTTP_NOT_IMPLEMENTED)
+        raise NotImplementedError('get not implemented')  
 
     __get = get
  
     @tornado.gen.coroutine 
     def post(self, *args):
-        self.error('post not implemented', code=ResponseCode.HTTP_NOT_IMPLEMENTED)
+        raise NotImplementedError('post not implemented')  
 
     __post = post
 
     @tornado.gen.coroutine 
     def put(self, *args):
-        self.error('put not implemented', code=ResponseCode.HTTP_NOT_IMPLEMENTED)
+        raise NotImplementedError('put not implemented')  
 
     __put = put
 
     @tornado.gen.coroutine 
     def delete(self, *args):
-        self.error('delete not implemented', code=ResponseCode.HTTP_NOT_IMPLEMENTED)
+        raise NotImplementedError('delete not implemented')  
 
     __delete = delete
+
+
+'''****************************************************************
+AccountHelper
+****************************************************************'''
+class AccountHelper():
+    """Class responsible for helping the account handlers."""
+    @staticmethod 
+    @tornado.gen.coroutine
+    def formatUserReturn(user_account):
+        # we don't want to send back everything, build up object of what we want to send back 
+        rv_account = {} 
+        rv_account['tracker_account_id'] = user_account.tracker_account_id
+        # this is weird, but neon_api_key is actually the "id" on this table, it's what we 
+        # use to get information about the account, so send back api_key (as account_id) 
+        rv_account['account_id'] = user_account.neon_api_key 
+        rv_account['staging_tracker_account_id'] = user_account.staging_tracker_account_id 
+        rv_account['default_thumbnail_id'] = user_account.default_thumbnail_id 
+        rv_account['integrations'] = user_account.integrations
+        rv_account['default_size'] = user_account.default_size
+        rv_account['created'] = user_account.created 
+        rv_account['updated'] = user_account.updated
+        rv_account['api_key'] = user_account.api_v2_key
+        rv_account['customer_name'] = user_account.customer_name
+        raise tornado.gen.Return(rv_account)
+    
 
 '''****************************************************************
 NewAccountHandler
@@ -163,37 +239,25 @@ class NewAccountHandler(APIV2Handler):
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
         })
-        try:
-            args = self.parse_args()
-            schema(args) 
-            user = neondata.NeonUserAccount(customer_name=args['customer_name'])
-            try:
-                user.default_size = list(user.default_size) 
-                user.default_size[0] = args.get('default_width', neondata.DefaultSizes.WIDTH)
-                user.default_size[1] = args.get('default_height', neondata.DefaultSizes.HEIGHT)
-                user.default_size = tuple(user.default_size)
-                user.default_thumbnail_id = args.get('default_thumbnail_id', None)
-            except KeyError as e: 
-                pass 
-            output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
-            user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
+        args = self.parse_args()
+        schema(args) 
+        user = neondata.NeonUserAccount(uuid.uuid1().hex, customer_name=args['customer_name'])
+        user.default_size = list(user.default_size) 
+        user.default_size[0] = args.get('default_width', neondata.DefaultSizes.WIDTH)
+        user.default_size[1] = args.get('default_height', neondata.DefaultSizes.HEIGHT)
+        user.default_size = tuple(user.default_size)
+        user.default_thumbnail_id = args.get('default_thumbnail_id', None)
 
-            _log.debug(('key=NewAccountHandler.post '
-                       'msg=New Account has been added : name = %s id = %s') 
-                       % (user.customer_name, user.account_id))
-            statemon.state.increment('post_account_oks')
+        output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
+        user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
+        user = yield AccountHelper.formatUserReturn(user)
+            
+        _log.debug(('New Account has been added : name = %s id = %s') 
+                   % (user['customer_name'], user['account_id']))
+        statemon.state.increment('post_account_oks')
  
-            self.success(user.to_json())
+        self.success(json.dumps(user))
 
-        except MultipleInvalid as e:
-            statemon.state.increment('account_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg)) 
-
-        except Exception as e: 
-            statemon.state.increment('post_new_account_failures') 
-            _log.exception('key=NewAccountHandler.post msg=%s' % e)  
-            self.error('could not create the account', {'customer_name': args['customer_name']})  
-        
 '''*****************************************************************
 AccountHandler 
 *****************************************************************'''
@@ -206,34 +270,20 @@ class AccountHandler(APIV2Handler):
         """handles account endpoint get request""" 
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-        }) 
-        try:
-            args = {} 
-            args['account_id'] = str(account_id)  
-            schema(args) 
-            user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            # we don't want to send back everything, build up object of what we want to send back 
-            rv_account = {} 
-            rv_account['tracker_account_id'] = user_account.tracker_account_id
-            rv_account['account_id'] = user_account.account_id 
-            rv_account['staging_tracker_account_id'] = user_account.staging_tracker_account_id 
-            rv_account['default_thumbnail_id'] = user_account.default_thumbnail_id 
-            rv_account['integrations'] = user_account.integrations
-            rv_account['default_size'] = user_account.default_size
-            rv_account['created'] = user_account.created 
-            rv_account['updated'] = user_account.updated
-            output = json.dumps(rv_account)
-            statemon.state.increment('get_account_oks')
-            self.success(output)
+        })
  
-        except MultipleInvalid as e:  
-            statemon.state.increment('account_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
+        args = {} 
+        args['account_id'] = account_id = str(account_id)  
+        schema(args)
 
-        except Exception as e:  
-            statemon.state.increment('get_account_fails')
-            _log.exception('key=AccountHandler.get msg=%s' % e)  
-            self.error('could not retrieve the account', {'account_id': account_id})  
+        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+
+        if not user_account: 
+            raise NotFoundError()
+         
+        user_account = yield AccountHelper.formatUserReturn(user_account)
+        statemon.state.increment('get_account_oks')
+        self.success(json.dumps(user_account))
  
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -244,33 +294,25 @@ class AccountHandler(APIV2Handler):
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
         })
-        try:
-            args = self.parse_args()
-            args['account_id'] = str(account_id)
-            schema(args)
-            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            def _update_account(a):
-                try: 
-                    a.default_size = list(a.default_size) 
-                    a.default_size[0] = int(args.get('default_width', acct.default_size[0]))
-                    a.default_size[1] = int(args.get('default_height', acct.default_size[1]))
-                    a.default_size = tuple(a.default_size)
-                    a.default_thumbnail_id = args.get('default_thumbnail_id', a.default_thumbnail_id) 
-                except KeyError as e: 
-                    pass 
-            result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct.key, _update_account)
-            output = result.to_json()
-            statemon.state.increment('put_account_oks')
-            self.success(output)
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        acct_internal = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
 
-        except MultipleInvalid as e: 
-            statemon.state.increment('put_account_fails')
-            self.error('%s %s' % (e.path[0], e.msg))
+        if not acct_internal: 
+            raise NotFoundError() 
 
-        except Exception as e:  
-            statemon.state.increment('put_account_fails')
-            _log.exception('key=AccountHandler.put msg=%s' % e)  
-            self.error('could not update the account', {'account_id': account_id})  
+        acct_for_return = yield AccountHelper.formatUserReturn(acct_internal)
+        def _update_account(a):
+            a.default_size = list(a.default_size) 
+            a.default_size[0] = int(args.get('default_width', acct_internal.default_size[0]))
+            a.default_size[1] = int(args.get('default_height', acct_internal.default_size[1]))
+            a.default_size = tuple(a.default_size)
+            a.default_thumbnail_id = args.get('default_thumbnail_id', acct_internal.default_thumbnail_id)
+ 
+        result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct_internal.key, _update_account)
+        statemon.state.increment('put_account_oks')
+        self.success(json.dumps(acct_for_return))
 
 '''*********************************************************************
 IntegrationHelper 
@@ -394,7 +436,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
     """Handles get,put,post requests to the ooyala endpoint within the v2 api."""
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles an ooyala endpoint post request""" 
+        """Handles an ooyala endpoint post request 
+        
+        Keyword arguments:
+        """ 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -402,125 +447,71 @@ class OoyalaIntegrationHandler(APIV2Handler):
           'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
           'autosync': All(Coerce(int), Range(min=0, max=1))
         })
-        try: 
-            args = self.parse_args()
-            args['account_id'] = str(account_id)
-            schema(args)
-            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
-            yield tornado.gen.Task(IntegrationHelper.addStrategy, acct, neondata.IntegrationType.OOYALA)
-            statemon.state.increment('post_ooyala_oks')
-            self.success(integration.to_json())
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+        integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
+        statemon.state.increment('post_ooyala_oks')
+        self.success(integration.to_json())
  
-        except SaveError as e: 
-            statemon.state.increment('post_ooyala_fails')
-            self.error(e.msg, {'account_id': account_id, 'publisher_id': args['publisher_id']}, e.code)  
-
-        except MultipleInvalid as e: 
-            statemon.state.increment('ooyala_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('post_ooyala_fails')
-            _log.exception('key=OoyalaIntegrationHandler.post msg=%s' % e)  
-            self.error('unable to create ooyala integration', 
-                        {'account_id': account_id, 
-                         'publisher_id': args['publisher_id']})  
-
     @tornado.gen.coroutine
     def get(self, account_id):
         """handles an ooyala endpoint get request""" 
-        try: 
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id = str(account_id)
-            schema(args)
-            integration_id = args['integration_id'] 
-            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              account_id, 
-                                              integration_id, 
-                                              neondata.IntegrationType.OOYALA) 
-            statemon.state.increment('get_ooyala_oks')
-            self.success(integration.to_json())
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        integration_id = args['integration_id'] 
+        integration = yield IntegrationHelper.getIntegration(account_id, 
+                                                    integration_id, 
+                                                    neondata.IntegrationType.OOYALA)
 
-        except GetError as e:
-            statemon.state.increment('get_ooyala_fails')
-            _log.exception('key=OoyalaIntegrationHandler.get.GetError msg=%s' % e)  
-            self.error('error getting the integration')  
+        statemon.state.increment('get_ooyala_oks')
+        self.success(integration.to_json())
 
-        except MultipleInvalid as e: 
-            statemon.state.increment('ooyala_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('get_ooyala_fails')
-            _log.exception('key=OoyalaIntegrationHandler.get msg=%s' % e)  
-            self.error('error getting the integration', {'account_id': account_id})
- 
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles an ooyala endpoint put request""" 
-        try: 
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-              'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
-              'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
-              'publisher_id': Any(str, unicode, Length(min=1, max=1024))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id = str(account_id)
-            schema(args)
-            integration_id = args['integration_id'] 
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
+          'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
+          'publisher_id': Any(str, unicode, Length(min=1, max=1024))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        integration_id = args['integration_id'] 
             
-            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              account_id, 
-                                              integration_id, 
-                                              neondata.IntegrationType.OOYALA)
+        integration = yield IntegrationHelper.getIntegration(account_id, 
+                                                     integration_id, 
+                                                     neondata.IntegrationType.OOYALA)
  
-            def _update_integration(p):
-                try:
-                    p.ooyala_api_key = args.get('ooyala_api_key', integration.ooyala_api_key)
-                    p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
-                    p.partner_code = args.get('publisher_id', integration.partner_code)
-                except KeyError as e: 
-                    pass
+        def _update_integration(p):
+            p.ooyala_api_key = args.get('ooyala_api_key', integration.ooyala_api_key)
+            p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
+            p.partner_code = args.get('publisher_id', integration.partner_code)
  
-            result = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
-                                         account_id, 
-                                         integration_id, 
-                                         _update_integration)
+        result = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
+                                        account_id, 
+                                        integration_id, 
+                                        _update_integration)
 
-            ooyala_integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                                        account_id, 
-                                                        integration_id, 
-                                                        neondata.IntegrationType.OOYALA)
+        ooyala_integration = yield IntegrationHelper.getIntegration(account_id, 
+                                                            integration_id, 
+                                                            neondata.IntegrationType.OOYALA)
  
-            statemon.state.increment('put_ooyala_oks')
-            self.success(ooyala_integration.to_json())
-
-        except GetError as e:
-            statemon.state.increment('get_ooyala_fails')
-            _log.exception('key=OoyalaIntegrationHandler.put.GetError msg=%s' % e)  
-            self.error('integration does not exist : information : %s' % e.msg, 
-                        code=ResponseCode.HTTP_NOT_FOUND) 
-             
-        except MultipleInvalid as e:
-            statemon.state.increment('ooyala_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('put_ooyala_fails')
-            _log.exception('key=OoyalaIntegrationHandler.put msg=%s' % e)  
-            self.error('error updating the integration', {'integration_id': integration_id})
+        statemon.state.increment('put_ooyala_oks')
+        self.success(ooyala_integration.to_json())
 
 '''*********************************************************************
 BrightcoveIntegrationHandler
 *********************************************************************'''
-
 class BrightcoveIntegrationHandler(APIV2Handler):
     """handles all requests to the brightcove endpoint within the v2 API"""  
     @tornado.gen.coroutine
@@ -532,123 +523,67 @@ class BrightcoveIntegrationHandler(APIV2Handler):
           'read_token': Any(str, unicode, Length(min=1, max=1024)), 
           'write_token': Any(str, unicode, Length(min=1, max=1024))
         })
-        try: 
-            args = self.parse_args()
-            args['account_id'] = str(account_id)
-            schema(args)
-            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-            integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, 
-                                              acct, 
-                                              args, 
-                                              neondata.IntegrationType.BRIGHTCOVE)
-            yield tornado.gen.Task(IntegrationHelper.addStrategy, 
-                                   acct, 
-                                   neondata.IntegrationType.BRIGHTCOVE)
-            statemon.state.increment('post_brightcove_oks')
-            self.success(integration.to_json())
-
-        except SaveError as e:
-            statemon.state.increment('post_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.post.saveError msg=%s' % e)  
-            self.error(e.msg, {'account_id' : account_id, 'publisher_id' : publisher_id}, e.code)  
-
-        except MultipleInvalid as e: 
-            statemon.state.increment('brightcove_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('post_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.post msg=%s' % e)  
-            self.error('unable to create brightcove integration', {'account_id' : account_id, 'publisher_id' : publisher_id})  
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+        integration = yield IntegrationHelper.createIntegration(acct, 
+                                                             args, 
+                                                             neondata.IntegrationType.BRIGHTCOVE)
+        statemon.state.increment('post_brightcove_oks')
+        self.success(integration.to_json())
 
     @tornado.gen.coroutine
     def get(self, account_id):  
         """handles a brightcove endpoint get request""" 
-        try: 
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id = str(account_id)
-            schema(args)
-            integration_id = args['integration_id'] 
-            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              account_id,
-                                              integration_id,  
-                                              neondata.IntegrationType.BRIGHTCOVE) 
-            statemon.state.increment('get_brightcove_oks')
-            self.success(integration.to_json())
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        integration_id = args['integration_id'] 
+        integration = yield IntegrationHelper.getIntegration(account_id,
+                                                       integration_id,  
+                                                       neondata.IntegrationType.BRIGHTCOVE) 
+        statemon.state.increment('get_brightcove_oks')
+        self.success(integration.to_json())
 
-        except GetError as e: 
-            statemon.state.increment('get_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.get.getError msg=%s' % e)  
-            self.error(e.msg) 
-
-        except MultipleInvalid as e:
-            statemon.state.increment('brightcove_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e: 
-            statemon.state.increment('get_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.get msg=%s' % e)  
-            self.error('unable to get brightcove integration', {'account_id' : account_id}) 
- 
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles a brightcove endpoint put request""" 
-        try:   
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-              'read_token': Any(str, unicode, Length(min=1, max=1024)), 
-              'write_token': Any(str, unicode, Length(min=1, max=1024)), 
-              'publisher_id': Any(str, unicode, Length(min=1, max=1024))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id = str(account_id)
-            integration_id = args['integration_id'] 
-            schema(args)
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          'read_token': Any(str, unicode, Length(min=1, max=1024)), 
+          'write_token': Any(str, unicode, Length(min=1, max=1024)), 
+          'publisher_id': Any(str, unicode, Length(min=1, max=1024))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        integration_id = args['integration_id'] 
+        schema(args)
 
-            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              account_id,
-                                              integration_id,  
-                                              neondata.IntegrationType.BRIGHTCOVE) 
-            def _update_integration(p):
-                try:
-                    p.read_token = args.get('read_token', integration.read_token)
-                    p.write_token = args.get('write_token', integration.write_token)
-                    p.publisher_id = args.get('publisher_id', integration.publisher_id)
-                except KeyError as e: 
-                    pass
+        integration = yield IntegrationHelper.getIntegration(account_id,
+                                                  integration_id,  
+                                                  neondata.IntegrationType.BRIGHTCOVE) 
+        def _update_integration(p):
+            p.read_token = args.get('read_token', integration.read_token)
+            p.write_token = args.get('write_token', integration.write_token)
+            p.publisher_id = args.get('publisher_id', integration.publisher_id)
  
-            result = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
-                                         account_id, 
-                                         integration_id, 
-                                         _update_integration)
+        result = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
+                                     account_id, 
+                                     integration_id, 
+                                     _update_integration)
 
-            integration = yield tornado.gen.Task(IntegrationHelper.getIntegration, 
-                                              account_id,
-                                              integration_id,  
-                                              neondata.IntegrationType.BRIGHTCOVE) 
+        integration = yield IntegrationHelper.getIntegration(account_id,
+                                                  integration_id,  
+                                                  neondata.IntegrationType.BRIGHTCOVE) 
  
-            statemon.state.increment('put_brightcove_oks')
-            self.success(integration.to_json())
-
-        except GetError as e:
-            statemon.state.increment('put_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.put msg=%s' % e)  
-            self.error('integration does not exist : information : %s' % e.msg, 
-                        code=ResponseCode.HTTP_NOT_FOUND) 
-
-        except MultipleInvalid as e: 
-            statemon.state.increment('brightcove_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('put_brightcove_fails')
-            _log.exception('key=BrightcoveIntegrationHandler.put msg=%s' % e)  
-            self.error('unable to update integration', {'integration_id' : integration_id}) 
+        statemon.state.increment('put_brightcove_oks')
+        self.success(integration.to_json())
 
 '''*********************************************************************
 ThumbnailHandler
@@ -663,60 +598,50 @@ class ThumbnailHandler(APIV2Handler):
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_location') : Any(str, unicode, Length(min=1, max=2048))
         })
-        try:
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
-            video_id = args['video_id'] 
-            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,video_id)
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+        video_id = args['video_id'] 
+        internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,video_id)
 
-            video = yield tornado.gen.Task(neondata.VideoMetadata.get, internal_video_id)
+        video = yield tornado.gen.Task(neondata.VideoMetadata.get, internal_video_id)
 
-            current_thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
-                                                        video.thumbnail_ids)
-            cdn_key = neondata.CDNHostingMetadataList.create_key(account_id_api_key,
-                                                                 video.integration_id)
-            cdn_metadata = yield tornado.gen.Task(neondata.CDNHostingMetadataList.get,
-                                                  cdn_key)
-            # ranks can be negative 
-            min_rank = 1
-            for thumb in current_thumbnails:
-                if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
-                    thumb.rank < min_rank):
-                    min_rank = thumb.rank
-            cur_rank = min_rank - 1
+        current_thumbnails = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+                                                    video.thumbnail_ids)
+        cdn_key = neondata.CDNHostingMetadataList.create_key(account_id_api_key,
+                                                             video.integration_id)
+        cdn_metadata = yield tornado.gen.Task(neondata.CDNHostingMetadataList.get,
+                                              cdn_key)
+        # ranks can be negative 
+        min_rank = 1
+        for thumb in current_thumbnails:
+            if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
+                thumb.rank < min_rank):
+                min_rank = thumb.rank
+        cur_rank = min_rank - 1
  
-            new_thumbnail = neondata.ThumbnailMetadata(None,
-                                                       internal_vid=internal_video_id, 
-                                                       ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
-                                                       rank=cur_rank)
-            # upload image to cdn 
-            yield video.download_and_add_thumbnail(new_thumbnail,
-                                                   args['thumbnail_location'],
-                                                   cdn_metadata,
-                                                   async=True)
-            #save the thumbnail
-            yield tornado.gen.Task(new_thumbnail.save)
+        new_thumbnail = neondata.ThumbnailMetadata(None,
+                                                   internal_vid=internal_video_id, 
+                                                   ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
+                                                   rank=cur_rank)
+        # upload image to cdn 
+        yield video.download_and_add_thumbnail(new_thumbnail,
+                                               args['thumbnail_location'],
+                                               cdn_metadata,
+                                               async=True)
+        #save the thumbnail
+        yield tornado.gen.Task(new_thumbnail.save)
 
-            # save the video 
-            new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                               internal_video_id, 
-                                               lambda x: x.thumbnail_ids.append(new_thumbnail.key))
+        # save the video 
+        new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
+                                           internal_video_id, 
+                                           lambda x: x.thumbnail_ids.append(new_thumbnail.key))
 
-            if new_video: 
-                statemon.state.increment('post_thumbnail_oks')
-                self.success('{ "message": "thumbnail accepted for processing" }', code=ResponseCode.HTTP_ACCEPTED)  
-            else: 
-                self.error('unable to save thumbnail to video', {'thumbnail_location' : args['thumbnail_location']})  
-              
-        except MultipleInvalid as e: 
-            statemon.state.increment('thumbnail_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:  
-            statemon.state.increment('post_thumbnail_fails')
-            _log.exception('key=ThumbnailHandler.post msg=%s' % e)  
-            self.error('unable to add thumbnail', {'thumbnail_location' : args['thumbnail_location']}) 
+        if new_video: 
+            statemon.state.increment('post_thumbnail_oks')
+            self.success('{ "message": "thumbnail accepted for processing" }', code=ResponseCode.HTTP_ACCEPTED)  
+        else:
+            raise SaveError('unable to save thumbnail to video') 
 
     @tornado.gen.coroutine
     def put(self, account_id): 
@@ -726,39 +651,26 @@ class ThumbnailHandler(APIV2Handler):
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
           'enabled': All(Coerce(int), Range(min=0, max=1))
         })
-        try:
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
-            thumbnail_id = args['thumbnail_id'] 
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+        thumbnail_id = args['thumbnail_id'] 
             
-            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
-                                               thumbnail_id)
-            def _update_thumbnail(t):
-                try:
-                    t.enabled = bool(int(args.get('enabled', thumbnail.enabled)))
-                except KeyError as e: 
-                    pass
+        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                           thumbnail_id)
+        def _update_thumbnail(t):
+            t.enabled = bool(int(args.get('enabled', thumbnail.enabled)))
 
-            yield tornado.gen.Task(neondata.ThumbnailMetadata.modify, 
-                                   thumbnail_id, 
-                                   _update_thumbnail)
+        yield tornado.gen.Task(neondata.ThumbnailMetadata.modify, 
+                               thumbnail_id, 
+                               _update_thumbnail)
 
-            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
-                                               thumbnail_id)
+        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                           thumbnail_id)
  
-            statemon.state.increment('put_thumbnail_oks')
-            self.success(json.dumps(thumbnail.__dict__))
+        statemon.state.increment('put_thumbnail_oks')
+        self.success(json.dumps(thumbnail.__dict__))
 
-        except MultipleInvalid as e: 
-            statemon.state.increment('thumbnail_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:
-            statemon.state.increment('put_thumbnail_fails')
-            _log.exception('key=ThumbnailHandler.put msg=%s' % e)  
-            self.error('unable to update thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
- 
     @tornado.gen.coroutine
     def get(self, account_id): 
         """handles a thumbnail endpoint get request""" 
@@ -766,25 +678,16 @@ class ThumbnailHandler(APIV2Handler):
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512))
         })
-        try:
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
-            thumbnail_id = args['thumbnail_id'] 
-            thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
-                                               thumbnail_id) 
-            statemon.state.increment('get_thumbnail_oks')
-            self.success(json.dumps(thumbnail.__dict__))
-
-        except MultipleInvalid as e: 
-            statemon.state.increment('thumbnail_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:
-            statemon.state.increment('get_thumbnail_fails')
-            _log.exception('key=ThumbnailHandler.get msg=%s' % e)  
-            self.error('unable to get thumbnail', {'account_id': account_id, 'thumbnail_id': thumbnail_id})  
-
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+        thumbnail_id = args['thumbnail_id'] 
+        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
+                                           thumbnail_id)
+        if not thumbnail: 
+            raise GetError('thumbnail does not exist with id = %s' % (thumbnail_id)) 
+        statemon.state.increment('get_thumbnail_oks')
+        self.success(json.dumps(thumbnail.__dict__))
 
 '''*********************************************************************
 VideoHelper  
@@ -851,8 +754,8 @@ class VideoHelper():
             # save the default thumbnail
             yield api_request.save_default_thumbnail(async=True)
             raise tornado.gen.Return((video,api_request))
-        else: 
-            raise AlreadyExists(video)
+        else:
+            raise AlreadyExists('job_id=%s' % (video.job_id))
          # TODO (elif) add a reprocess flag to this thing
 
     @staticmethod 
@@ -878,167 +781,128 @@ class VideoHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request""" 
-        try:
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
-              'integration_id' : Any(str, unicode, Length(min=1, max=256)),
-              'video_url': Any(str, unicode, Length(min=1, max=512)), 
-              'callback_url': Any(str, unicode, Length(min=1, max=512)), 
-              'video_title': Any(str, unicode, Length(min=1, max=256)),
-              'duration': All(Coerce(int), Range(min=1, max=86400)), 
-              'publish_date': All(CustomVoluptuousTypes.ISO8601Date()), 
-              'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
-              'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
-              'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
-            })
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
+          'integration_id' : Any(str, unicode, Length(min=1, max=256)),
+          'video_url': Any(str, unicode, Length(min=1, max=512)), 
+          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
+          'video_title': Any(str, unicode, Length(min=1, max=256)),
+          'duration': All(Coerce(int), Range(min=1, max=86400)), 
+          'publish_date': All(CustomVoluptuousTypes.ISO8601Date()), 
+          'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
+          'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
+          'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
+        })
 
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
           
-            # add the video / request
-            video_and_request = yield tornado.gen.Task(VideoHelper.createVideoAndRequest, 
-                                                       args, 
-                                                       account_id_api_key) 
-            new_video = video_and_request[0] 
-            api_request = video_and_request[1]  
-            # modify the video if there is a thumbnail set serving_enabled 
-            def _set_serving_enabled(v):
-                v.serving_enabled = len(v.thumbnail_ids) > 0
-            yield tornado.gen.Task(neondata.VideoMetadata.modify,
-                                   new_video.key,
-                                   _set_serving_enabled)
+        # add the video / request
+        video_and_request = yield tornado.gen.Task(VideoHelper.createVideoAndRequest, 
+                                                   args, 
+                                                   account_id_api_key)
+        new_video = video_and_request[0] 
+        api_request = video_and_request[1]  
+        # modify the video if there is a thumbnail set serving_enabled 
+        def _set_serving_enabled(v):
+            v.serving_enabled = len(v.thumbnail_ids) > 0
+        yield tornado.gen.Task(neondata.VideoMetadata.modify,
+                               new_video.key,
+                               _set_serving_enabled)
             
-            # add the job
-            vs_job_url = 'http://%s:8081/job' % options.video_server
-            request = tornado.httpclient.HTTPRequest(url=vs_job_url,
-                                                     method="POST",
-                                                     body=api_request.to_json(),
-                                                     request_timeout=30.0,
-                                                     connect_timeout=10.0)
+        # add the job
+        vs_job_url = 'http://%s:8081/job' % options.video_server
+        request = tornado.httpclient.HTTPRequest(url=vs_job_url,
+                                                 method="POST",
+                                                 body=api_request.to_json(),
+                                                 request_timeout=30.0,
+                                                 connect_timeout=10.0)
 
-            response = utils.http.send_request(request)
+        response = utils.http.send_request(request)
 
-            if response: 
-                job_info = {} 
-                job_info['job_id'] = api_request.job_id
-                statemon.state.increment('post_video_oks')
-                self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
-            else: 
-                self.error('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR) 
+        if response: 
+            job_info = {} 
+            job_info['job_id'] = api_request.job_id
+            statemon.state.increment('post_video_oks')
+            self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
+        else:
+            raise Exception('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR)
         
-        except AlreadyExists as e:
-            statemon.state.increment('post_video_already_exists') 
-            job_info = {}
-            job_info['job_id'] = e.existing.job_id
-            job_info['message'] = 'video already had a request for processing' 
-            self.success(json.dumps(job_info), code=ResponseCode.HTTP_OK) 
-
-        except MultipleInvalid as e: 
-            statemon.state.increment('video_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except SaveError as e: 
-            statemon.state.increment('post_video_fails')
-            _log.exception('key=VideoHandler.post.saveError msg=%s' % e)  
-            self.error(e.msg, code=e.code) 
-
-        except Exception as e:
-            statemon.state.increment('post_video_fails')
-            _log.exception('key=VideoHandler.post msg=%s' % e)  
-            self.error('unable to create video request', {'account_id': account_id})  
-    
     @tornado.gen.coroutine
     def get(self, account_id):  
         """handles a Video endpoint get request""" 
-        try: 
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('video_id') : Any(str, unicode, Length(min=1, max=4096)),
-              'fields': Any(str, unicode, Length(min=1, max=4096))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
-            video_id = args['video_id']
-            fields = args.get('fields', None) 
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id') : Any(str, unicode, Length(min=1, max=4096)),
+          'fields': Any(str, unicode, Length(min=1, max=4096))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+        video_id = args['video_id']
+        fields = args.get('fields', None) 
             
-            vid_dict = {} 
-            output_list = []
-            internal_video_ids = [] 
-            video_ids = video_id.split(',')
-            for v_id in video_ids: 
-                internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
-                internal_video_ids.append(internal_video_id)
+        vid_dict = {} 
+        output_list = []
+        internal_video_ids = [] 
+        video_ids = video_id.split(',')
+        for v_id in video_ids: 
+            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
+            internal_video_ids.append(internal_video_id)
  
-            videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
-                                            internal_video_ids) 
-            if videos:  
-               new_videos = [] 
-               if fields:
-                   field_set = set(fields.split(','))
-                   for obj in videos:
-                       obj = obj.__dict__
-                       new_video = {} 
-                       for field in field_set: 
-                           if field == 'thumbnails':
-                               new_video['thumbnails'] = yield VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids'])
-                           elif field in obj: 
-                               new_video[field] = obj[field] 
-                       if new_video: 
-                          new_videos.append(new_video)
-               else: 
-                   new_videos = [obj.__dict__ for obj in videos] 
+        videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
+                                        internal_video_ids) 
+        if videos:  
+           new_videos = [] 
+           if fields:
+               field_set = set(fields.split(','))
+               for obj in videos:
+                   obj = obj.__dict__
+                   new_video = {} 
+                   for field in field_set: 
+                       if field == 'thumbnails':
+                           new_video['thumbnails'] = yield VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids'])
+                       elif field in obj: 
+                           new_video[field] = obj[field] 
+                   if new_video: 
+                       new_videos.append(new_video)
+           else: 
+               new_videos = [obj.__dict__ for obj in videos] 
 
-               vid_dict['videos'] = new_videos
-               vid_dict['video_count'] = len(new_videos)
+           vid_dict['videos'] = new_videos
+           vid_dict['video_count'] = len(new_videos)
 
-            statemon.state.increment('get_video_oks')
-            self.success(json.dumps(vid_dict))
+        statemon.state.increment('get_video_oks')
+        self.success(json.dumps(vid_dict))
 
-        except MultipleInvalid as e:
-            statemon.state.increment('video_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg))
-
-        except Exception as e:
-            statemon.state.increment('get_video_fails')
-            _log.exception('key=VideoHandler.get msg=%s' % e)  
-            self.error('unable to get videos', {'account_id': account_id, 'video_id': video_id})  
- 
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles a Video endpoint put request""" 
-        try: 
-            schema = Schema({
-              Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-              Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-              'testing_enabled': All(Coerce(int), Range(min=0, max=1))
-            })
-            args = self.parse_args()
-            args['account_id'] = account_id_api_key = str(account_id)
-            schema(args)
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
+          'testing_enabled': All(Coerce(int), Range(min=0, max=1))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
 
-            abtest = bool(int(args['testing_enabled']))
-            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
-            def _update_video(v): 
-                v.testing_enabled = abtest
-            result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                            internal_video_id, 
-                                            _update_video)
-            video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                            internal_video_id)
-
-            statemon.state.increment('put_video_oks')
-            self.success(json.dumps(video.__dict__))
-
-        except MultipleInvalid as e:
-            statemon.state.increment('video_invalid_inputs') 
-            self.error('%s %s' % (e.path[0], e.msg)) 
-        except Exception as e:
-            statemon.state.increment('put_video_fails')
-            _log.exception('key=VideoHandler.put msg=%s' % e)  
-            self.error('unable to update video', {'account_id': account_id})  
+        abtest = bool(int(args['testing_enabled']))
+        internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
+        def _update_video(v): 
+            v.testing_enabled = abtest
+        result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
+                                        internal_video_id, 
+                                        _update_video)
+        video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                       internal_video_id)
+        if not video: 
+            raise GetError('video does not exist with id: %s' % (args['video_id']))
+        
+        statemon.state.increment('put_video_oks')
+        self.success(json.dumps(video.__dict__))
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
@@ -1068,16 +932,29 @@ class Error(Exception):
 class SaveError(Error): 
     def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR): 
         self.msg = msg
-        self.code = code 
-
-class GetError(Error): 
-    def __init__(self, msg): 
+        self.code = code
+ 
+class NotFoundError(tornado.web.HTTPError): 
+    def __init__(self, msg='resource was not found', code=ResponseCode.HTTP_NOT_FOUND): 
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+ 
+class NotAuthorizedError(tornado.web.HTTPError): 
+    def __init__(self, msg, code=ResponseCode.HTTP_UNAUTHORIZED): 
         self.msg = msg
+        self.status_code = code
+        self.reason = 'not authorized' 
+        self.log_message = 'not authorized' 
 
-class AlreadyExists(Error): 
-    def __init__(self, existing): 
-        self.existing = existing
+class GetError(tornado.web.HTTPError): 
+    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST): 
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
 
+class AlreadyExists(tornado.web.HTTPError): 
+    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
 
 '''*********************************************************************
 Custom Voluptuous Types
@@ -1112,7 +989,6 @@ Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/api/v2/accounts/?$', NewAccountHandler),
-    (r'/api/v2/accounts/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),

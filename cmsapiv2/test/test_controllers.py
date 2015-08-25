@@ -17,6 +17,7 @@ import utils.neon
 import utils.http
 import urllib
 import test_utils.neontest
+import uuid
 from mock import patch
 from cmsdb import neondata
 from StringIO import StringIO
@@ -75,7 +76,7 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.user = neondata.NeonUserAccount(customer_name='testingaccount')
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
         self.user.save() 
         super(TestAccountHandler, self).setUp()
 
@@ -89,7 +90,7 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
             response = yield self.http_client.fetch(self.get_url(url), 
                                                     method="GET")
 	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 400) 
+	    self.assertEquals(e.code, 404) 
 	    pass
  
     @tornado.testing.gen_test
@@ -115,22 +116,19 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     
     @tornado.testing.gen_test 
     def test_get_acct_does_exist(self):
-        try: 
-            url = '/api/v2/accounts?customer_name=123abc'
-            response = yield self.http_client.fetch(self.get_url(url), 
-                                                    body='', 
-                                                    method='POST', 
-                                                    allow_nonstandard_methods=True)
-	    self.assertEquals(response.code, 200)
-            rjson = json.loads(response.body)
-            self.assertEquals(rjson['customer_name'], '123abc') 
-            url = '/api/v2/%s' % (rjson['neon_api_key']) 
-            response = yield self.http_client.fetch(self.get_url(url), 
-                                                    method="GET")
-            rjson2 = json.loads(response.body) 
-            self.assertEquals(rjson['account_id'],rjson2['account_id']) 
-        except tornado.httpclient.HTTPError as e:
-            pass
+	url = '/api/v2/accounts?customer_name=123abc'
+	response = yield self.http_client.fetch(self.get_url(url), 
+			    body='', 
+			    method='POST', 
+			    allow_nonstandard_methods=True)
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+	self.assertEquals(rjson['customer_name'], '123abc') 
+	url = '/api/v2/%s' % (rjson['account_id']) 
+	response = yield self.http_client.fetch(self.get_url(url), 
+			method="GET")
+        rjson2 = json.loads(response.body) 
+        self.assertEquals(rjson['account_id'],rjson2['account_id']) 
 
     @tornado.testing.gen_test 
     def test_basic_post_account(self):
@@ -145,7 +143,7 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
-        url = '/api/v2/accounts/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
+        url = '/api/v2/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
@@ -168,7 +166,7 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
 
-        url = '/api/v2/accounts/%s?default_height=1200' % (self.user.neon_api_key) 
+        url = '/api/v2/%s?default_height=1200' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
@@ -191,7 +189,7 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
 
-        url = '/api/v2/accounts/%s?default_width=1200' % (self.user.neon_api_key) 
+        url = '/api/v2/%s?default_width=1200' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
@@ -212,7 +210,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
@@ -248,7 +246,17 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.account_id_api_key, 
                                           self.test_i_id)
 
-        self.assertEquals(rjson['integration_id'], platform.integration_id) 
+        self.assertEquals(rjson['integration_id'], platform.integration_id)
+ 
+    def test_get_integration_dne(self):
+        url = '/api/v2/%s/integrations/ooyala?integration_id=idontexist' % (self.account_id_api_key)
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 404)
+        rjson = json.loads(response.body)
+        self.assertTrue('idontexist' in rjson['message']) 
  
     @tornado.testing.gen_test 
     def test_put_integration(self):
@@ -322,7 +330,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
@@ -417,7 +425,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
@@ -550,14 +558,17 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertTrue(video.custom_data is not None)
 
-    @tornado.testing.gen_test
     def test_post_two_videos(self):
+        # use self.stop/wait to make sure we get the response back and 
+        # not an exception, we don't want no exception
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        self.http_client.fetch(self.get_url(url),
+                               callback = self.stop, 
+                               body='',
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
@@ -565,14 +576,16 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               body='',
+                               method='POST',
+                              allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 400) 
         rjson = json.loads(response.body) 
-        second_job_id = rjson['job_id']  
-        self.assertEquals(first_job_id,second_job_id)
+        data = rjson['data']  
+        self.assertTrue(first_job_id in data)
 
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
@@ -684,7 +697,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                     method='PUT', 
                                                     allow_nonstandard_methods=True)
 	except Exception as e:
-            self.assertEquals(e.code, 400)
+            self.assertEquals(e.code, 404)
 
 class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
@@ -693,7 +706,7 @@ class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
         neondata.ThumbnailMetadata('testingtid', width=500).save()
@@ -766,7 +779,7 @@ class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase):
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
 	except Exception as e:
-            self.assertEquals(e.code, 400)
+            self.assertEquals(e.code, 404)
 
     @tornado.testing.gen_test
     def test_thumbnail_update_enabled(self):
