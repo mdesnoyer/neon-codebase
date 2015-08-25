@@ -25,6 +25,163 @@ from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 
+class TestAPIKeyRequired(test_utils.neontest.AsyncHTTPTestCase):
+    def get_app(self): 
+        return controllers.application
+
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
+        self.user.save() 
+        super(TestAPIKeyRequired, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+
+    def test_return_unauthorized_accounts(self):
+        url = '/api/v2/234234accountidtest324'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+        url = '/api/v2/234234accountidtest324'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method='PUT', 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+    def test_return_authorized_accounts(self):
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
+        url = '/api/v2/%s' % (self.user.neon_api_key)
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header, 
+                               method='GET')
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+        url = '/api/v2/%s' % (self.user.neon_api_key)
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header,
+                               body='',  
+                               method='PUT',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+    def test_return_unauthorized_brightcove(self):
+        url = '/api/v2/234234accountidtest324/integrations/brightcove'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method='PUT', 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method='POST', 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+    def test_return_authorized_brightcove(self):
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
+        url = '/api/v2/%s/integrations/brightcove' % (self.user.neon_api_key)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header, 
+                               method='GET')
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header,
+                               body='',  
+                               method='PUT',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header,
+                               body='',  
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+    def test_return_unauthorized_ooyala(self):
+        url = '/api/v2/234234accountidtest324/integrations/ooyala'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method='PUT', 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method='POST', 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+    def test_return_authorized_ooyala(self):
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
+        url = '/api/v2/%s/integrations/ooyala' % (self.user.neon_api_key)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header, 
+                               method='GET')
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header,
+                               body='',  
+                               method='PUT',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               headers=header,
+                               body='',  
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertNotEquals(response.code, 401)
+
 class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def get_app(self): 
         return controllers.application
@@ -78,10 +235,16 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.redis.start()
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
         self.user.save() 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -215,10 +378,16 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
         defop = neondata.OoyalaIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -335,10 +504,16 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
         defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -447,6 +622,11 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.http_mocker = patch('utils.http.send_request')
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -454,6 +634,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
+        self.verify_account_mocker.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -725,12 +906,18 @@ class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image] 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
+        self.verify_account_mocker.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):

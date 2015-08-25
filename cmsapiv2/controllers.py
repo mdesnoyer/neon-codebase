@@ -29,6 +29,7 @@ import utils.http
 from cmsdb import neondata
 from utils import statemon
 from datetime import datetime
+from functools import wraps 
 import utils.sync
 from utils.options import define, options
 from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any
@@ -106,21 +107,33 @@ class APIV2Sender(object):
             error_json['data'] = extra_data 
         self.write(error_json)
         self.finish() 
+
+class apiv2(object):
+    @staticmethod
+    def api_key_required(func): 
+        def _decorator(request, *args, **kwargs):
+            verified = request.verify_account()
+            if not verified: 
+                raise NotAuthorizedError()
+            return func(request, *args, **kwargs)
+        return wraps(func)(_decorator)
  
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self): 
+    def initialize(self):
         self.set_header("Content-Type", "application/json")
         self.header_api_key = self.request.headers.get('X-Neon-API-Key')
+        self.account_id = self.request.uri.split('/')[3]
 
-    @tornado.gen.coroutine
-    def verify_account(self, account_id): 
-        account_id = self.request.uri.split('/')[3]
-        account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id)
+    def verify_account(request):
+        account = neondata.NeonUserAccount.get(request.account_id)
+        if not account: 
+            return False
         account_api_key = account.api_v2_key
-        if self.header_api_key is None: 
-            raise NotAuthorizedError('user is not authorized') 
-        if account_api_key is not self.header_api_key:
-            raise NotAuthorizedError('user is not authorized') 
+        if request.header_api_key is None:
+            return False
+        if account_api_key not in request.header_api_key:
+            return False
+        return True
         
     def parse_args(self):
         args = {} 
@@ -144,18 +157,12 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.clear()
         self.set_status(status_code)
         exception = kwargs["exc_info"][1]
-
         if any(isinstance(exception, c) for c in [Invalid, 
                                                   NotAuthorizedError,
-                                                  GetError,  
-                                                  NotFoundError, 
+                                                  NotFoundError,  
                                                   NotImplementedError]):
             if isinstance(exception, Invalid):
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
-            if isinstance(exception, AlreadyExists):
-                self.set_status(ResponseCode.HTTP_BAD_REQUEST)
-            if isinstance(exception, GetError):
-                self.set_status(ResponseCode.HTTP_NOT_FOUND)
             if isinstance(exception, NotFoundError):
                 self.set_status(ResponseCode.HTTP_NOT_FOUND)
             if isinstance(exception, NotAuthorizedError):
@@ -167,13 +174,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
             self.error('this item already exists', extra_data=get_exc_message(exception)) 
         else:
-            self.error(
-                message=self._reason,
-                extra_data=get_exc_message(exception) if self.settings.get("debug")
-                else None,
-                code=status_code
-            )
-
+            self.error(message=self._reason,
+                extra_data=get_exc_message(exception),
+                code=status_code)
 
     @tornado.gen.coroutine 
     def get(self, *args):
@@ -265,6 +268,7 @@ class AccountHandler(APIV2Handler):
     """Handles get,put requests to the account endpoint. 
        Gets and updates existing accounts.
     """
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):
         """handles account endpoint get request""" 
@@ -285,6 +289,7 @@ class AccountHandler(APIV2Handler):
         statemon.state.increment('get_account_oks')
         self.success(json.dumps(user_account))
  
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles account endpoint put request""" 
@@ -422,7 +427,7 @@ class IntegrationHelper():
         if integration:
             raise tornado.gen.Return(integration) 
         else: 
-            raise GetError('%s %s' % ('unable to find the integration for id:',integration_id))
+            raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
 
     @staticmethod 
     @tornado.gen.coroutine
@@ -434,6 +439,7 @@ OoyalaIntegrationHandler
 *********************************************************************'''
 class OoyalaIntegrationHandler(APIV2Handler):
     """Handles get,put,post requests to the ooyala endpoint within the v2 api."""
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """Handles an ooyala endpoint post request 
@@ -455,6 +461,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         statemon.state.increment('post_ooyala_oks')
         self.success(integration.to_json())
  
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):
         """handles an ooyala endpoint get request""" 
@@ -473,6 +480,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         statemon.state.increment('get_ooyala_oks')
         self.success(integration.to_json())
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles an ooyala endpoint put request""" 
@@ -514,6 +522,7 @@ BrightcoveIntegrationHandler
 *********************************************************************'''
 class BrightcoveIntegrationHandler(APIV2Handler):
     """handles all requests to the brightcove endpoint within the v2 API"""  
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a brightcove endpoint post request""" 
@@ -533,6 +542,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('post_brightcove_oks')
         self.success(integration.to_json())
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):  
         """handles a brightcove endpoint get request""" 
@@ -550,6 +560,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('get_brightcove_oks')
         self.success(integration.to_json())
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles a brightcove endpoint put request""" 
@@ -590,6 +601,7 @@ ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
     """handles all requests to the thumbnails endpoint within the v2 API"""  
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a thumbnail endpoint post request""" 
@@ -643,6 +655,7 @@ class ThumbnailHandler(APIV2Handler):
         else:
             raise SaveError('unable to save thumbnail to video') 
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id): 
         """handles a thumbnail endpoint put request""" 
@@ -671,6 +684,7 @@ class ThumbnailHandler(APIV2Handler):
         statemon.state.increment('put_thumbnail_oks')
         self.success(json.dumps(thumbnail.__dict__))
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id): 
         """handles a thumbnail endpoint get request""" 
@@ -685,7 +699,7 @@ class ThumbnailHandler(APIV2Handler):
         thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
                                            thumbnail_id)
         if not thumbnail: 
-            raise GetError('thumbnail does not exist with id = %s' % (thumbnail_id)) 
+            raise NotFoundError('thumbnail does not exist with id = %s' % (thumbnail_id)) 
         statemon.state.increment('get_thumbnail_oks')
         self.success(json.dumps(thumbnail.__dict__))
 
@@ -778,6 +792,7 @@ class VideoHelper():
 VideoHandler 
 *********************************************************************'''
 class VideoHandler(APIV2Handler):
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request""" 
@@ -830,6 +845,7 @@ class VideoHandler(APIV2Handler):
         else:
             raise Exception('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR)
         
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):  
         """handles a Video endpoint get request""" 
@@ -877,6 +893,7 @@ class VideoHandler(APIV2Handler):
         statemon.state.increment('get_video_oks')
         self.success(json.dumps(vid_dict))
 
+    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
         """handles a Video endpoint put request""" 
@@ -899,7 +916,7 @@ class VideoHandler(APIV2Handler):
         video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
                                        internal_video_id)
         if not video: 
-            raise GetError('video does not exist with id: %s' % (args['video_id']))
+            raise NotFoundError('video does not exist with id: %s' % (args['video_id']))
         
         statemon.state.increment('put_video_oks')
         self.success(json.dumps(video.__dict__))
@@ -940,14 +957,7 @@ class NotFoundError(tornado.web.HTTPError):
         self.code = self.status_code = code
  
 class NotAuthorizedError(tornado.web.HTTPError): 
-    def __init__(self, msg, code=ResponseCode.HTTP_UNAUTHORIZED): 
-        self.msg = msg
-        self.status_code = code
-        self.reason = 'not authorized' 
-        self.log_message = 'not authorized' 
-
-class GetError(tornado.web.HTTPError): 
-    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST): 
+    def __init__(self, msg='not authorized', code=ResponseCode.HTTP_UNAUTHORIZED): 
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 
