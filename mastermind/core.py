@@ -218,8 +218,8 @@ class ThumbnailInfo(object):
         self.incr_imp = incremental_impressions
         self.base_conv = base_conversions
         self.incr_conv = incremental_conversions
-        self.score_type = Non
-e
+        self.score_type = None
+        
     def __str__(self):
         return str({
             'enabled': self.enabled,
