@@ -118,6 +118,10 @@ class ModelMapper():
         if type_name == 1:
             return 
 
+    # TODO: ENSURE THAT INPUT SPECIFICATIONS 
+    # ARE CORRECT.. it's not clear that this
+    # is strictly necessary, as they are never
+    # actually called in mastermind
     def get_model_num(self, modelName):
         '''
         Returns the model number given a model name.
@@ -214,7 +218,8 @@ class ThumbnailInfo(object):
         self.incr_imp = incremental_impressions
         self.base_conv = base_conversions
         self.incr_conv = incremental_conversions
-
+        self.score_type = Non
+e
     def __str__(self):
         return str({
             'enabled': self.enabled,
