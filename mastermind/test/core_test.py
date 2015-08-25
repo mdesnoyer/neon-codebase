@@ -99,6 +99,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.redis_patcher.stop()
 
     def test_priors(self):
+        # the computation of the prior has been modified significantly,
+        # such that it's not computed based on whether or not the 
+        # scoring type thumbnail is the classical (Borda Count) or the
+        # new method (Rank Centrality). 
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
         
@@ -126,6 +130,69 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
+        # in order to test the priors, we have to label the thumbnails
+        # with their respective models. This occurs when we call 
+        # update_video_info, which isn't heretofor invoked. 
+        modelsTested = [['20130924_crossfade', 1], 
+                        [None, 0],
+                        ['asdf', 2]]
+        thumbnails = [build_thumb(ThumbnailMetadata(
+                                    'n1', 'vid1', rank=0,
+                                    ttype='neon', model_score=5.8)),
+                    build_thumb(ThumbnailMetadata(
+                                    'n2', 'vid1', rank=1,
+                                    ttype='neon',
+                                    model_score='3.5')),
+                    build_thumb(ThumbnailMetadata(
+                                    'ctr', 'vid1',
+                                    ttype='random',
+                                    model_score=0.2)),
+                    build_thumb(ThumbnailMetadata(
+                                    'bc', 'vid1', chosen=True,
+                                    ttype='brightcove',
+                                    model_score=0.))]
+        mm = self.mastermind.model_mapper
+        expected_scores = [[1.12, 1.0, 1.0, 1.0],
+                           [1.0, 1.0, 1.0, 1.0],
+                           [2.44, 1.75, 1.0, 1.0]]
+        for n, (model_version, model_type_num) in enumerate(
+                                                  modelsTested):
+            model_in_mm = (model_version in 
+                        mm.model2num.keys())
+            mm_is_updated = model_version != None
+            mm_cur_stored_len = len(
+                mm.model2num.keys())
+            self.mastermind.update_video_info(
+                VideoMetadata('acct1_vid1', 
+                              model_version=model_version),
+                              thumbnails)
+            if (not model_in_mm) and mm_is_updated:
+                # if this should've resulted in a new model being
+                # added to model_mapper, ensure that the keys have
+                # incremented properly. 
+                self.assertEqual(mm_cur_stored_len, 
+                    len(mm.model2num.keys())+1)
+            # verify that the new model is in the keys
+            self.assertTrue(model_version in 
+                            mm.model2num.keys())
+            # verify that the model is mapped to a type
+            self.assertTrue(model_version in
+                            mm.model2type.keys())
+            # get the model num
+            modelNum = mm.get_model_num(model_version)
+            # ensure that the model type, obtained by name, 
+            # is correct. 
+            modelType_byname = mm.get_model_type(model_version)
+            self.assertTrue(modelType_byname == model_type_num)
+            # ensure that the model type, obtained by num,
+            # is correct
+            modelType_bynum = mm.get_model_type(modelNum)
+            self.assertTrue(modelType_bynum == model_type_num)
+            # iterate over each thumbnail, ensuring that it is 
+            # correct
+            for m,t in enumerate(thumbnails):
+                gpc = self.mastermind._get_prior_conversions(t)
+                self.assertAlmostEqual(gpc, expected_scores[n][m])
 
     def test_more_conversions_than_impressions(self):
         self.mastermind.update_experiment_strategy(
