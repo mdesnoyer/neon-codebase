@@ -61,6 +61,9 @@ class ModelMapper():
 
     IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
     METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
+
+    TODO: Modify this so that if the model used is not defined
+    (i.e., is None), then it makes no assumptions about the prior.
     '''
     def __init__(self):
         # the line in question is:
@@ -277,6 +280,9 @@ class Mastermind(object):
         # A thread pool to modify entries in the database
         self.modify_pool = concurrent.futures.ThreadPoolExecutor(
             options.modify_pool_size)
+
+        # map from model IDs to score type ('classical' or 'rc')
+        self.model_mapper = ModelMapper()
 
     def _incr_pending_modify(self, count):
         '''Safely increment the number of pending modifies by count.'''
