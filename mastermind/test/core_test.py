@@ -134,23 +134,18 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # with their respective models. This occurs when we call 
         # update_video_info, which isn't heretofor invoked. 
         modelsTested = [['20130924_crossfade', 1], 
-                        [None, 0],
-                        ['asdf', 2]]
-        thumbnails = [build_thumb(ThumbnailMetadata(
-                                    'n1', 'vid1', rank=0,
-                                    ttype='neon', model_score=5.8)),
-                    build_thumb(ThumbnailMetadata(
-                                    'n2', 'vid1', rank=1,
-                                    ttype='neon',
-                                    model_score='3.5')),
-                    build_thumb(ThumbnailMetadata(
-                                    'ctr', 'vid1',
-                                    ttype='random',
-                                    model_score=0.2)),
-                    build_thumb(ThumbnailMetadata(
-                                    'bc', 'vid1', chosen=True,
-                                    ttype='brightcove',
-                                    model_score=0.))]
+                        [None, 0],['asdf', 2]]
+        thumbnails = [ThumbnailMetadata('n1', 'vid1', rank=0,
+                                        ttype='neon', model_score=5.8),
+                      ThumbnailMetadata('n2', 'vid1', rank=1,
+                                        ttype='neon',
+                                        model_score='3.5'),
+                      ThumbnailMetadata('ctr', 'vid1',
+                                        ttype='random',
+                                        model_score=0.2),
+                      ThumbnailMetadata('bc', 'vid1', chosen=False,
+                                        ttype='brightcove',
+                                        model_score=0.)]
         mm = self.mastermind.model_mapper
         expected_scores = [[1.12, 1.0, 1.0, 1.0],
                            [1.0, 1.0, 1.0, 1.0],
@@ -170,8 +165,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 # if this should've resulted in a new model being
                 # added to model_mapper, ensure that the keys have
                 # incremented properly. 
-                self.assertEqual(mm_cur_stored_len, 
-                    len(mm.model2num.keys())+1)
+                self.assertEqual(mm_cur_stored_len+1, 
+                    len(mm.model2num.keys()))
             # verify that the new model is in the keys
             self.assertTrue(model_version in 
                             mm.model2num.keys())
@@ -188,9 +183,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             # is correct
             modelType_bynum = mm.get_model_type(modelNum)
             self.assertTrue(modelType_bynum == model_type_num)
+            # acquire the video_info
+            m_vid_info = self.mastermind.video_info['acct1_vid1']
             # iterate over each thumbnail, ensuring that it is 
             # correct
-            for m,t in enumerate(thumbnails):
+            for m,t in enumerate(m_vid_info.thumbnails):
                 gpc = self.mastermind._get_prior_conversions(t)
                 self.assertAlmostEqual(gpc, expected_scores[n][m])
 
