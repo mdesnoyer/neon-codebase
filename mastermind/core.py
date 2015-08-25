@@ -704,10 +704,9 @@ class Mastermind(object):
                 except IndexError:
                     winner = non_exp_thumb
                 winner_tid = winner.id
-                # TODO: not to return so early.
                 return (experiment_state,
                         self._get_experiment_done_fracs(
-                            strategy, baseline, editor, winner),
+                            strategy, baseline, editor, candidates, winner),
                         value_remaining,
                         winner_tid)
 
@@ -731,7 +730,6 @@ class Mastermind(object):
             win_frac = np.around(win_frac[:-1], 2)
             # Adjust the run_frac according to frac_adjust_rate, if frac_adjust_rate == 0.0
             # then all the fractions are equal. If frac_adjust_rate == 1.0, then run_frac stays the same.
-            # TODO: check with the percentage with the editors and baseline.
             win_frac = win_frac / np.sum(win_frac)
             win_frac = win_frac ** frac_adjust_rate
             win_frac = win_frac / np.sum(win_frac)
@@ -770,7 +768,7 @@ class Mastermind(object):
                    'Falling back to the multi armed bandit')
         return self._get_bandit_fracs(strategy, baseline, editor, candidates)
 
-    def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
+    def _get_experiment_done_fracs(self, strategy, baseline, editor, candidates, winner):
         '''Returns the serving fractions for when the experiment is complete.
 
         Just returns a dictionary of the directive { id -> frac }
@@ -786,8 +784,14 @@ class Mastermind(object):
             # most of the time.
             majority = baseline or editor
             if majority and majority.id != winner.id:
-                return { winner.id : 1.0 - strategy.holdback_frac,
-                         majority.id : strategy.holdback_frac }
+                valid_bandits = copy.copy(candidates)
+                valid_bandits.add(majority)
+                valid_bandits = list(valid_bandits)
+                holdback_ids = [x.id for x in valid_bandits
+                               if x.id != winner.id]
+                result = { winner.id : 1.0 - strategy.holdback_frac}
+                result.update(dict([[x, strategy.holdback_frac/len(holdback_ids)] for x in holdback_ids]))
+                return result
         else:
             # The experiment is done, but we do not show the winner
             # for most of the traffic (usually because it's still a
