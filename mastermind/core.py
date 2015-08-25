@@ -559,15 +559,9 @@ class Mastermind(object):
 
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
-            # TODO: load the configuration
-            # TODO:
-            if current_experiment_state == neondata.something.complete: # TODO: state of complete
-                # TODO: load the fraction
-                run_frac.update(complete_frac)
-            else:
-                experiment_state, bandit_frac, value_left, winner_tid = \
-                  self._get_bandit_fracs(strategy, baseline, editor, candidates, min_conversion, frac_adjust_rate)
-                run_frac.update(bandit_frac)
+            experiment_state, bandit_frac, value_left, winner_tid = \
+              self._get_bandit_fracs(strategy, baseline, editor, candidates, min_conversion, frac_adjust_rate)
+            run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
             experiment_state, seq_frac, value_left, winner_tid = \
@@ -693,7 +687,6 @@ class Mastermind(object):
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
-        # TODO: using a different strategy of experiment complete.
         is_winner_significant = False
         # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
         # Means that 95% of chance the value remaining is 1% of the picked winner.
