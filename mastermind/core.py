@@ -849,16 +849,7 @@ class Mastermind(object):
             else:
                 return max(1.0, (Mastermind.PRIOR_CTR * 
                                  Mastermind.PRIOR_IMPRESSION_SIZE))
-
-        # 
-        # This is what needs to be changed. The model scores are 
-        return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
-                         Mastermind.PRIOR_IMPRESSION_SIZE))
-        if thumb_info.score_type == 0:
-            # then it is none, assume a life of 0%
-            return max(1.0, (1. * Mastermind.PRIOR_CTR * 
-                             Mastermind.PRIOR_IMPRESSION_SIZE))
-        elif thumb_info.score_type == 1:
+        if thumb_info.score_type == 1:
             # then it was calculated using Borda Count
             # original doc:
             # Peg a score of 5.5 as a 10% lift over random and a score of
@@ -878,6 +869,10 @@ class Mastermind(object):
             # compute rank centrality.
             prior = 0.3
             return max(1.0, prior * score + (1-prior) * 1.0) 
+        else:
+            # then it is none, assume a life of 0%
+            return max(1.0, (1. * Mastermind.PRIOR_CTR * 
+                             Mastermind.PRIOR_IMPRESSION_SIZE))
 
     def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
         '''Gets the serving fractions for a sequential testing strategy.'''
