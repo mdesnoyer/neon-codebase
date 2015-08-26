@@ -713,7 +713,7 @@ class Mastermind(object):
                 winner_tid = winner.id
                 return (experiment_state,
                         self._get_experiment_done_fracs(
-                            strategy, baseline, editor, candidates, winner),
+                            strategy, baseline, editor, winner),
                         value_remaining,
                         winner_tid)
 
@@ -777,7 +777,7 @@ class Mastermind(object):
                    'Falling back to the multi armed bandit')
         return self._get_bandit_fracs(strategy, baseline, editor, candidates)
 
-    def _get_experiment_done_fracs(self, strategy, baseline, editor, candidates, winner):
+    def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.
 
         Just returns a dictionary of the directive { id -> frac }
@@ -851,7 +851,7 @@ class Mastermind(object):
         self._incr_pending_modify(2)
         self.modify_pool.submit(
             _modify_many_serving_fracs,
-            self, video_id, new_directive, video_info)  
+            self, video_id, new_directive, video_info)
         
         self.modify_pool.submit(
             _modify_video_info,
