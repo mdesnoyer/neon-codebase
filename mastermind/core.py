@@ -388,7 +388,7 @@ class Mastermind(object):
         # if video has already finished the experiment, just keep the
         # previous directive.
         if self.experiment_state.get(video_id, None) == \
-           neondata.ExperimentState.COMPLETE
+           neondata.ExperimentState.COMPLETE:
             # TODO: Cover the test case when the server restarts \
             # have the winner overturned.
             return
@@ -644,10 +644,6 @@ class Mastermind(object):
                              x.get_impressions())
                              for x in valid_bandits])
 
-        print bandit_ids
-        print "conv", conv
-        print "imp", imp
-
         # Calculation the summation of all conversions.
         total_conversions = sum(x.get_conversions() for x in valid_bandits)
         if non_exp_thumb is not None:
@@ -665,10 +661,11 @@ class Mastermind(object):
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
-                spstats.beta.rvs(conv + 1,
-                                 Mastermind.PRIOR_IMPRESSION_SIZE * 
-                                    (1 - Mastermind.PRIOR_CTR) + 
-                                    non_exp_thumb.get_impressions()-conv,
+                spstats.beta.rvs(max(conv, 0) + 1,
+                                 max(Mastermind.PRIOR_IMPRESSION_SIZE * 
+                                        (1 - Mastermind.PRIOR_CTR) + 
+                                        non_exp_thumb.get_impressions() - 
+                                        conv , 0) + 1,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -696,7 +693,6 @@ class Mastermind(object):
             if impressions[i] < 500:
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
-        print "win_frac", win_frac
 
         is_winner_significant = False
         # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
@@ -731,10 +727,8 @@ class Mastermind(object):
                 if np.sum(win_frac[other_idx]) < 1e-5:
                     win_frac[other_idx] = 0.1 / len(other_idx)
                 else:
-                    print "other_id", win_frac[other_idx]
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
-                    print "win_frac", win_frac
 
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
@@ -750,7 +744,6 @@ class Mastermind(object):
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
-        print "run_frac: ", run_frac
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
 

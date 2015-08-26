@@ -142,8 +142,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='brightcove'))]))[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
-        self.assertAlmostEqual(directive['n1'], 1.0/1.1)
-        self.assertAlmostEqual(directive['bc'], 0.1/1.1)
+        self.assertAlmostEqual(directive['n1'], 0.9)
+        self.assertAlmostEqual(directive['bc'], 0.1)
 
     def test_inf_model_score(self):
         self.mastermind.update_experiment_strategy(
@@ -1411,6 +1411,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
                               [('acct1_vid1_v1t1', 0.01),
                                ('acct1_vid1_v1t2', 0.99)])
+        print directives
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
