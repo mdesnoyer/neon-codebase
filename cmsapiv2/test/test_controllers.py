@@ -377,7 +377,7 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
-        defop = neondata.OoyalaIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         self.verify_account_mocker = patch(
             'cmsapiv2.controllers.APIV2Handler.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
@@ -399,7 +399,6 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                          rjson['neon_api_key'], 
                                           rjson['integration_id'])
 
         self.assertEquals(rjson['integration_id'], platform.integration_id) 
@@ -412,7 +411,6 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(rjson['integration_id'], platform.integration_id)
@@ -435,10 +433,8 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 body='',
                                                 method='PUT', 
                                                 allow_nonstandard_methods=True)
-
         self.assertEquals(response.code, 200)
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key)
@@ -470,7 +466,6 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
 
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key) 
@@ -488,7 +483,6 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
-                                          rjson['neon_api_key'], 
                                           rjson['integration_id'])
         self.assertEquals(integration.auto_update, True)  
 
@@ -503,7 +497,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
-        defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
             'cmsapiv2.controllers.APIV2Handler.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
@@ -523,9 +517,9 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 method='POST',
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body) 
+        rjson = json.loads(response.body)
+        import pdb; pdb.set_trace()
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                          rjson['neon_api_key'], 
                                           rjson['integration_id'])
 
         self.assertEquals(rjson['integration_id'], platform.integration_id) 
@@ -538,7 +532,6 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(rjson['integration_id'], platform.integration_id) 
@@ -554,7 +547,6 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
 
         self.assertEquals(response.code, 200)
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(platform.read_token, read_token)
@@ -587,7 +579,6 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
 
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
-                                          self.account_id_api_key, 
                                           self.test_i_id)
 
         self.assertEquals(platform.read_token, read_token) 
@@ -606,7 +597,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
         self.test_i_id = 'testvideohiid'
         neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
-        defop = neondata.BrightcoveIntegration.modify(self.account_id_api_key, self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
         self.cdn_mock = self._future_wrap_mock(
