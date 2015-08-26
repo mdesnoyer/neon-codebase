@@ -387,9 +387,10 @@ class Mastermind(object):
         
         # if video has already finished the experiment, just keep the
         # previous directive.
-        if video_id in self.experiment_state and \
-                       self.experiment_state[video_id] == neondata.ExperimentState.COMPLETE:
-            # TODO: keep running the calculation, it's possible to have the winner overturned.
+        if self.experiment_state.get(video_id, None) == \
+           neondata.ExperimentState.COMPLETE
+            # TODO: Cover the test case when the server restarts \
+            # have the winner overturned.
             return
 
         result = self._calculate_current_serving_directive(
@@ -560,7 +561,12 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates, strategy.min_conversion, strategy.frac_adjust_rate)
+              self._get_bandit_fracs(strategy,
+                                     baseline,
+                                     editor,
+                                     candidates,
+                                     strategy.min_conversion,
+                                     strategy.frac_adjust_rate)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
@@ -575,7 +581,8 @@ class Mastermind(object):
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
 
-    def _get_bandit_fracs(self, strategy, baseline, editor, candidates, min_conversion = 50, frac_adjust_rate = 1.0):
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates,
+                          min_conversion = 50, frac_adjust_rate = 1.0):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See
@@ -791,14 +798,8 @@ class Mastermind(object):
             # most of the time.
             majority = baseline or editor
             if majority and majority.id != winner.id:
-                valid_bandits = copy.copy(candidates)
-                valid_bandits.add(majority)
-                valid_bandits = list(valid_bandits)
-                holdback_ids = [x.id for x in valid_bandits
-                               if x.id != winner.id]
-                result = { winner.id : 1.0 - strategy.holdback_frac}
-                result.update(dict([[x, strategy.holdback_frac/len(holdback_ids)] for x in holdback_ids]))
-                return result
+                return { winner.id : 1.0 - strategy.holdback_frac,
+                         majority.id : strategy.holdback_frac }
         else:
             # The experiment is done, but we do not show the winner
             # for most of the traffic (usually because it's still a
