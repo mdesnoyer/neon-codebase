@@ -27,7 +27,6 @@ import utils.logs
 import utils.http
 
 from cmsdb import neondata
-from utils import statemon
 from datetime import datetime
 from functools import wraps 
 import utils.sync
@@ -41,48 +40,42 @@ import uuid
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 
+from utils import statemon
 statemon.define('post_account_oks', int) 
-statemon.define('post_account_fails', int) 
 statemon.define('put_account_oks', int) 
-statemon.define('put_account_fails', int) 
 statemon.define('get_account_oks', int) 
-statemon.define('get_account_fails', int)
-statemon.define('account_invalid_inputs', int)  
 
 statemon.define('post_ooyala_oks', int)  
-statemon.define('post_ooyala_fails', int)  
 statemon.define('put_ooyala_oks', int)  
-statemon.define('put_ooyala_fails', int)  
 statemon.define('get_ooyala_oks', int)  
-statemon.define('get_ooyala_fails', int)  
-statemon.define('ooyala_invalid_inputs', int)  
 
 statemon.define('post_brightcove_oks', int)  
-statemon.define('post_brightcove_fails', int)  
 statemon.define('put_brightcove_oks', int)  
-statemon.define('put_brightcove_fails', int)  
 statemon.define('get_brightcove_oks', int)  
-statemon.define('get_brightcove_fails', int) 
-statemon.define('brightcove_invalid_inputs', int)  
 
 statemon.define('post_thumbnail_oks', int) 
-statemon.define('post_thumbnail_fails', int) 
 statemon.define('put_thumbnail_oks', int) 
-statemon.define('put_thumbnail_fails', int) 
 statemon.define('get_thumbnail_oks', int) 
-statemon.define('get_thumbnail_fails', int) 
-statemon.define('thumbnail_invalid_inputs', int)  
 
-statemon.define('put_video_fails', int) 
 statemon.define('post_video_oks', int) 
-statemon.define('post_video_fails', int) 
-statemon.define('post_video_already_exists', int) 
 statemon.define('put_video_oks', int) 
-statemon.define('put_video_fails', int) 
-statemon.define('get_video_oks', int) 
-statemon.define('get_video_fails', int) 
-statemon.define('video_invalid_inputs', int)  
- 
+statemon.define('get_video_oks', int)
+_get_video_oks_ref = statemon.state.get_ref('get_video_oks')
+
+statemon.define('invalid_input_errors', int)
+_invalid_input_errors_ref = statemon.state.get_ref('invalid_input_errors')
+statemon.define('unauthorized_errors', int) 
+_unauthorized_errors_ref = statemon.state.get_ref('unauthorized_errors')
+statemon.define('not_found_errors', int) 
+_not_found_errors_ref = statemon.state.get_ref('not_found_errors')
+statemon.define('not_implemented_errors', int)
+_not_implemented_errors_ref = statemon.state.get_ref('not_implemented_errors')
+statemon.define('already_exists_errors', int)
+_already_exists_errors_ref = statemon.state.get_ref('already_exists_errors')
+
+statemon.define('invalid_server_errors', int)  
+_invalid_server_errors_ref = statemon.state.get_ref('invalid_server_errors')
+
 class ResponseCode(object): 
     HTTP_OK = 200
     HTTP_ACCEPTED = 202 
@@ -162,18 +155,31 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                                   NotFoundError,  
                                                   NotImplementedError]):
             if isinstance(exception, Invalid):
+                statemon.state.increment(ref=_invalid_input_errors_ref,
+                                         safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
             if isinstance(exception, NotFoundError):
+                statemon.state.increment(ref=_not_found_errors_ref,
+                                         safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_FOUND)
             if isinstance(exception, NotAuthorizedError):
+                statemon.state.increment(ref=_not_authorized_errors_ref,
+                                         safe=False)
                 self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
             if isinstance(exception, NotImplementedError):
+                statemon.state.increment(ref=_not_implemented_errors_ref,
+                                         safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
             self.error(get_exc_message(exception), code=status_code)
         elif isinstance(exception, AlreadyExists):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            statemon.state.increment(ref=_already_exists_errors_ref,
+                                     safe=False)
             self.error('this item already exists', extra_data=get_exc_message(exception)) 
         else:
+            _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
+            statemon.state.increment(ref=_internal_server_errors_ref,
+                                     safe=False)
             self.error(message=self._reason,
                 extra_data=get_exc_message(exception),
                 code=status_code)
@@ -202,7 +208,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
     __delete = delete
 
-
 '''****************************************************************
 AccountHelper
 ****************************************************************'''
@@ -227,7 +232,6 @@ class AccountHelper():
         rv_account['customer_name'] = user_account.customer_name
         raise tornado.gen.Return(rv_account)
     
-
 '''****************************************************************
 NewAccountHandler
 ****************************************************************'''
