@@ -518,7 +518,6 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        import pdb; pdb.set_trace()
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['integration_id'])
 
