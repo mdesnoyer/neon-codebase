@@ -730,15 +730,17 @@ class Mastermind(object):
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
 
+        # Adjust the run_frac according to frac_adjust_rate,
+        # if frac_adjust_rate == 0.0, then all the fractions are equal.
+        # If frac_adjust_rate == 1.0, then run_frac stays the same.
+        win_frac = win_frac ** frac_adjust_rate
+        win_frac = win_frac / np.sum(win_frac)
+
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
         if non_exp_thumb is not None:
             win_frac = np.around(win_frac[:-1], 2)
-            # Adjust the run_frac according to frac_adjust_rate, if frac_adjust_rate == 0.0
-            # then all the fractions are equal. If frac_adjust_rate == 1.0, then run_frac stays the same.
-            win_frac = win_frac / np.sum(win_frac)
-            win_frac = win_frac ** frac_adjust_rate
             win_frac = win_frac / np.sum(win_frac)
 
         for thumb_id, frac in zip(bandit_ids, win_frac):
