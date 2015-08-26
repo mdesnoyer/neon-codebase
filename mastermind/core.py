@@ -694,7 +694,6 @@ class Mastermind(object):
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
-        is_winner_significant = False
         # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
         # Means that 95% of chance the value remaining is 1% of the picked winner.
         # This will make it comes to conclusion quicker comparing to 
@@ -705,7 +704,6 @@ class Mastermind(object):
                 impressions[winner_idx] >= 500 and total_conversions >= min_conversion):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
-                is_winner_significant = True
                 try:
                     winner = valid_bandits[winner_idx]
                 except IndexError:
