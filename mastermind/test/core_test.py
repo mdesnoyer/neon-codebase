@@ -1342,7 +1342,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestStatUpdating, self).setUp()
-        numpy.random.seed(1984934)
+        numpy.random.seed(1984935)
 
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
@@ -1411,7 +1411,6 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
                               [('acct1_vid1_v1t1', 0.01),
                                ('acct1_vid1_v1t2', 0.99)])
-        print directives
         for val in [x[1] for x in directives[('acct1', 'acct1_vid2')]]:
             self.assertGreater(val, 0.0)
 
