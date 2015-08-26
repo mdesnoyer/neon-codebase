@@ -689,6 +689,7 @@ class Mastermind(object):
             if impressions[i] < 500:
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
+        print "win_frac", win_frac
 
         is_winner_significant = False
         # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
@@ -723,8 +724,10 @@ class Mastermind(object):
                 if np.sum(win_frac[other_idx]) < 1e-5:
                     win_frac[other_idx] = 0.1 / len(other_idx)
                 else:
+                    print "other_id", win_frac[other_idx]
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
+                    print "win_frac", win_frac
 
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
@@ -740,6 +743,7 @@ class Mastermind(object):
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
+        print "run_frac: ", run_frac
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
 
