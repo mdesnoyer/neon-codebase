@@ -634,13 +634,17 @@ class Mastermind(object):
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.get_impressions() - conv[x.id])
+                             x.get_impressions())
                              for x in valid_bandits])
 
+        print bandit_ids
+        print "conv", conv
+        print "imp", imp
+
         # Calculation the summation of all conversions.
-        total_conversions = sum(x.get_conversion for x in valid_bandits)
+        total_conversions = sum(x.get_conversions() for x in valid_bandits)
         if non_exp_thumb is not None:
-            total_conversion = total_conversion + non_exp_thumb.get_conversions()
+            total_conversions = total_conversions + non_exp_thumb.get_conversions()
 
         # Run the monte carlo series
         MC_SAMPLES = 1000.
@@ -648,9 +652,8 @@ class Mastermind(object):
         # Change: the formula in the paper is conversions+1,
         #         impressions-conversions+1
         mc_series = [spstats.beta.rvs(conv[x] + 1,
-                                      imp[x] - conv[x] + 1),
-                                      size=MC_SAMPLES)
-                                      for x in bandit_ids]
+                                      max(imp[x] - conv[x], 0) + 1,
+                                      size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
@@ -692,7 +695,7 @@ class Mastermind(object):
         # Means that 95% of chance the value remaining is 1% of the picked winner.
         # This will make it comes to conclusion quicker comparing to 
         # using: if win_frac[winner_idx] >= 0.95:
-        if value_remaining <= Mastermind.VALUE_THRESHOLD
+        if value_remaining <= Mastermind.VALUE_THRESHOLD:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
                 impressions[winner_idx] >= 500 and total_conversions >= min_conversion):
