@@ -156,6 +156,17 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         expected_scores = [[1.12, 1.0, 1.0, 1.0],
                            [1.0, 1.0, 1.0, 1.0],
                            [2.44, 1.75, 1.0, 1.0]]
+
+        self.assertEquals(
+            ModelMapper.get_model_type('20130924_crossfade'),
+            ScoreType.CLASSICAL)
+
+        with self.assertLogExists(logging.WARNING,
+            'Unknown experiment type'):
+            self.assertEquals(
+                ModelMapper.get_model_type('some_unknown_model'),
+                ScoreType.UNKNOWN)
+
         for n, (model_version, model_type_num) in enumerate(
                                                   modelsTested):
             self.mastermind.update_video_info(
