@@ -1295,6 +1295,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_conversions=110,
                                                base_impressions=2000)]))
         self.assertAlmostEqual(run_frac['n1'], 0.5)
+        self.assertAlmostEqual(run_frac['n2'], 0.5)
 
         self.mastermind.update_experiment_strategy(
             'acct1',
@@ -1313,6 +1314,56 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=2000)]))
         self.assertGreater(run_frac['n1'], 0.3)
         self.assertLess(run_frac['n1'], 0.5)
+
+        # Testing frac_adjust_rate=0.0, but there are a baseline thumbnail.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random'),
+                                               base_conversions=110,
+                                               base_impressions=2000)]))
+        self.assertAlmostEqual(run_frac['b1'], 0.99)
+        self.assertAlmostEqual(run_frac['n1'], 0.005)
+        self.assertAlmostEqual(run_frac['n2'], 0.005)
+
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+                               exp_frac = 1.0))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random'),
+                                               base_conversions=110,
+                                               base_impressions=2000)]))
+        self.assertAlmostEqual(run_frac['b1'], 1.0/3.0)
+        self.assertAlmostEqual(run_frac['n1'], 1.0/3.0)
+        self.assertAlmostEqual(run_frac['n2'], 1.0/3.0)
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
