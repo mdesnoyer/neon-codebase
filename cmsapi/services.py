@@ -11,6 +11,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import api.brightcove_api
 import datetime
 import json
 import hashlib
@@ -1419,49 +1420,23 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 
                 #Saved platform
                 if na:
-                    response = yield tornado.gen.Task(
-                        bc.verify_token_and_create_requests_for_video,
-                        10)
-                    
-                    ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    #TODO : Add expected time of completion !
-                    video_response = []
-                    if not response:
-                        #Distinguish between api call failure and bad tokens
-                        _log.error("key=create brightcove account " 
-                            " msg=brightcove api call failed or token error")
-                        data = '{"error": "Read token given is incorrect'  
-                        data += ' or brightcove api failed"}'
+                    # Verify that the token works by making a call to
+                    # Brightcove
+                    bc_api = bc.get_api()
+                    try:
+                        bc_response = yield bc_api.search_videos(page_size=10,
+                                                                 async=True)
+                    except api.brightcove_api.BrightcoveApiError as e:
+                        _log.error("Error accessing the Brightcove api. "
+                                   "There is probably something wrong with "
+                                   "the token for account %s, integration %s"
+                                   % (self.api_key, bc.integration_id))
+                        data = ('{"error": "Read token given is incorrect'  
+                                ' or brightcove api failed"}')
                         self.send_json_response(data, 502)
                         return
-
-                    for item in response:
-                        t_urls =[]; thumbs = []
-                        t_urls.append(item['videoStillURL'])
-                        tm = neondata.ThumbnailMetadata(
-                                0,
-                                neondata.InternalVideoID.generate(self.api_key,
-                                                                  item["id"]),
-                                t_urls, ctime, 0, 0,
-                                "brightcove", 0, 0)
-                        thumbs.append(tm.to_dict_for_video_response())
-                        vr = neondata.VideoResponse(item["id"],
-                              None,
-                              "processing",
-                              "brightcove",
-                              i_id,
-                              item['name'],
-                              None,
-                              None,
-                              0, #current tid,add fake tid
-                              thumbs)
-                        video_response.append(vr.to_dict())
-                        
-                    vstatus_response = GetVideoStatusResponse(
-                                        video_response, len(video_response))
-                    data = vstatus_response.to_json() 
-                    #data = tornado.escape.json_encode(video_response)
-                    self.send_json_response(data, 201)
+                    
+                    self.send_json_response('', 201)
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
@@ -1756,6 +1731,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
                 rank=cur_rank)
             new_thumbs.append(new_thumb)
+            
             thumb_futures.append(vmdata.download_and_add_thumbnail(
                 new_thumb,
                 url,
