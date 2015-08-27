@@ -1404,10 +1404,11 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             ('acct1_vid1', 'acct1_vid1_v1t1', None, 900, None, 4),
             ('acct1_vid1', 'acct1_vid1_v1t2', None, 900, None, 98),
             ('acct1_vid2', 'acct1_vid2_v2t1', None, 0, None, 0),
-            ('acct1_vid2', 'acct1_vid2_v2t2', None, 900, None, 98),
-            ('acct1_vid2', 'acct1_vid2_v2t3', None, 900, None, 98)])
+            ('acct1_vid2', 'acct1_vid2_v2t2', None, 400, None, 150),
+            ('acct1_vid2', 'acct1_vid2_v2t3', None, 400, None, 150)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
+        print directives
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
                               [('acct1_vid1_v1t1', 0.01),
                                ('acct1_vid1_v1t2', 0.99)])

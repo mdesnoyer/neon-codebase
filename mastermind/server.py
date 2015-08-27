@@ -243,6 +243,11 @@ class VideoDBWatcher(threading.Thread):
                     sub.close()
 
     def run(self):
+        # When the server first starts up, load experiment states
+        # and load the serving directives. Send them to mastermind
+        # core function, so it will make the process stateful when
+        # experiment complete.
+        _copy_db_experiment_info_to_mastermind()
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
@@ -268,6 +273,57 @@ class VideoDBWatcher(threading.Thread):
         self._stopped.set()
         self._video_updater.stop()
 
+##########################################################################
+    def _turn_thumbnail_status_to_directive(self, thumbnail_status):
+        ids = str(thumbnail_status.key).split('_')
+        if len(ids) != 4:
+            _log.error('The thumbnail_status id %s does not seem to be valid.' %
+                thumbnail_status.key)
+            return (None, None)
+        else:
+            video_id = ('_').join([ids[1], ids[2])
+            thumbnail_id = ids[3]
+            return (video_id,
+                    (thumbnail_id, float(thumbnail_status.serving_frac)))
+
+    def _copy_db_experiment_info_to_mastermind(self):
+        _log.info('Loading current experiment info and updating in mastermind')
+
+        #
+        for platform in neondata.AbstractPlatform.get_all():
+            if not platform.serving_enabled:
+                continue
+            for video_id in platform.get_internal_video_ids():
+                ids = video_id.split('_')
+                account_id = ids[0]
+                video_metadata = neondata.VideoMetadata.get(video_id)
+                if not video_metadata.serving_enabled:
+                    continue
+                video_status = neondata.VideoStatus.get(video_id)
+                experiment_state = video_status.experiment_state
+
+                # Get all thumbnails
+                t_status_list = neondata.ThumbnailStatus.get_many(
+                    video_metadata.thumbnail_ids)
+                directive_list = []
+                for thumbnail_status in t_status_list:
+                    t_video_id, directive = \
+                        _turn_thumbnail_status_to_directive(thumbnail_status)
+                    if t_video_id is None or directive is None:
+                        continue
+                    if t_video_id != video_id:
+                        _log.error('ThumbnailStatus video id %s does not match'
+                                   ' the query video id %s' % t_video_id,
+                                   video_id)
+                        continue
+                    directive_list.append(directive)
+
+                mastermind.update_experiment_state_directive(
+                    video_id,
+                    experiment_state,
+                    ((account_id, video_id), directive_list))
+
+#############################################################
     def _process_db_data(self):
         _log.info('Polling the video database for a full batch update')
 

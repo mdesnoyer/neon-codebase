@@ -234,6 +234,9 @@ class Mastermind(object):
         for video_id in video_ids:
             try:
                 directive = self.serving_directive[video_id]
+                print "*******************"
+                print self.serving_directive
+                print "*******************"
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
@@ -243,6 +246,25 @@ class Mastermind(object):
                 # don't have information about this video id
                 # anymore. Oh well.
                 pass
+
+    def update_experiment_state_directive(self, video_id, state, directive):
+        ''' Add a video experiment state to the experiment_state
+
+        Inputs:
+        video_id - video_id to be updated
+        state: experiment state of that video
+        directive: serving directives of the thumbnails
+
+        When Mastermind server starts, the experiment_states and current
+        serving directives are loaded from the database. If experiment
+        is already complete, we will keep its complete state and not
+        changing its serving directives.
+        '''
+        if video_id is not None:
+            with self.lock:
+                self.experiment_state.update( {video_id: state} )
+                self.serving_directive.update( {video_id: directive} )
+
 
     def update_video_info(self, video_metadata, thumbnails,
                           testing_enabled=True):
@@ -290,6 +312,8 @@ class Mastermind(object):
         with self.lock:
             if video_id in self.video_info:
                 del self.video_info[video_id]
+            if video_id in self.experiment_state:
+                del self.experiment_state[video_id]
             if video_id in self.serving_directive:
                 del self.serving_directive[video_id]
                 self._incr_pending_modify(1)
@@ -867,7 +891,9 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
             serving_frac=frac,
             ctr=ctrs[thumb_id])
             for thumb_id, frac in new_directive.iteritems()]
-
+        print "+++++++++++++++++++++"
+        print objs
+        print "+++++++++++++++++++++"
         neondata.ThumbnailStatus.save_all(objs)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
