@@ -247,23 +247,58 @@ class Mastermind(object):
                 # anymore. Oh well.
                 pass
 
-    def update_experiment_state_directive(self, video_id, state, directive):
-        ''' Add a video experiment state to the experiment_state
+    def _turn_thumbnail_status_to_directive(self, thumbnail_status):
+        '''Convert thubmnail_status to serving directive
+
+        Inputs:
+        thumbnails_status - ThumbnailStatus
+
+        Returns:
+        tuple (video_id, (thumbnail_id, directive)) video_id is 
+        extracted from thumbnail_status. directive is the serving fraction
+        '''
+
+        # TODO: explain ThumbnailStatus format example.
+        ids = str(thumbnail_status.get_id()).split('_')
+        if len(ids) != 4:
+            _log.error('The thumbnail_status id %s does not seem to be valid.' %
+                thumbnail_status.key)
+            return (None, None)
+        else:
+            video_id = ('_').join([ids[1], ids[2])
+            thumbnail_partial_id = ids[3]
+            return (video_id,
+                    (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
+
+    def update_experiment_state_directive(self, video_id, video_status,
+                                          thumbnail_status_list):
+        '''Add a video experiment state to the experiment_state
 
         Inputs:
         video_id - video_id to be updated
         state: experiment state of that video
         directive: serving directives of the thumbnails
 
-        When Mastermind server starts, the experiment_states and current
-        serving directives are loaded from the database. If experiment
-        is already complete, we will keep its complete state and not
-        changing its serving directives.
         '''
         if video_id is not None:
             with self.lock:
-                self.experiment_state.update( {video_id: state} )
-                self.serving_directive.update( {video_id: directive} )
+                self.experiment_state[video_id] = video_status.experiment_state
+
+                directive_list = []
+                for thumbnail_status in t_status_list:
+                    t_video_id, directive = \
+                        _turn_thumbnail_status_to_directive(thumbnail_status)
+                    if t_video_id is None or directive is None:
+                        continue
+                    if t_video_id != video_id:
+                        _log.error('ThumbnailStatus video id %s does not match'
+                                   ' the query video id %s' % t_video_id,
+                                   video_id)
+                        continue
+                    directive_list.append(directive)
+
+                self.serving_directive[video_id] = \
+                    ((account_id, video_id), directive_list)
 
 
     def update_video_info(self, video_metadata, thumbnails,
