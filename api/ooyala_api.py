@@ -60,7 +60,7 @@ class OoyalaAPI(object):
         self._cache_base_url = cache_base_url
         self._expiration_window = expiration
         self._response_headers = [()]
-        self.http_request_pool = RequestPool(5, 1)
+        self.http_request_pool = RequestPool(5)
         self.neon_uri = "http://localhost:8081/api/v1/submitvideo/"  
         if neon_video_server is not None:
             self.neon_uri = "http://%s:8081/api/v1/submitvideo/" % neon_video_server

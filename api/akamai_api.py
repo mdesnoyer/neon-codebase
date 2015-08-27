@@ -26,8 +26,6 @@ import utils.logs
 import utils.neon
 import utils.sync
 
-from utils.http import RequestPool
-
 _log = logging.getLogger(__name__)
 
 HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']    

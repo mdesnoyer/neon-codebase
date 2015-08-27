@@ -52,7 +52,8 @@ class BrightcoveApi(object):
     All video ids used in the class refer to the Brightcove platform VIDEO ID
     '''
 
-    write_connection = RequestPool(options.max_write_connections)
+    write_connection = RequestPool(options.max_write_connections,
+                                   limit_for_subprocs=True)
     read_connection = RequestPool(options.max_read_connections)
     READ_URL = "http://api.brightcove.com/services/library"
     WRITE_URL = "http://api.brightcove.com/services/post"
