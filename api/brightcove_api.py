@@ -193,7 +193,6 @@ class BrightcoveApi(object):
                                              body=body,
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
-
         response = yield BrightcoveApi.write_connection.send_request(
             req, async=True, ntries=options.max_retries)
         if response.error:

@@ -1436,7 +1436,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         self.send_json_response(data, 502)
                         return
                     
-                    self.send_json_response('', 201)
+                    self.send_json_response('{}', 201)
                 else:
                     data = '{"error": "platform was not added,\
                                 account creation issue"}'
