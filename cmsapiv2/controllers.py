@@ -345,7 +345,6 @@ class IntegrationHelper():
                 p.partner_code = args['publisher_id'] 
                 p.ooyala_api_key = args.get('ooyala_api_key', None)
                 p.api_secret = args.get('ooyala_api_secret', None)
-                p.auto_update = bool(int(args.get('autosync', False)))
             except KeyError as e: 
                 pass 
              
@@ -452,7 +451,6 @@ class OoyalaIntegrationHandler(APIV2Handler):
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
           'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
           'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
-          'autosync': All(Coerce(int), Range(min=0, max=1))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
