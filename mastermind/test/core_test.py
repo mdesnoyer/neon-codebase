@@ -1175,7 +1175,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(0.01, directive['bc'])
         self.assertGreater(directive['ctr'], 0.05) # Not enough imp
 
-################################################################################
     def test_min_conversion_effect(self):
         # The min_conversion number will affect how quickly the experiment comes
         # to conclusion.
@@ -1314,8 +1313,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=2000)]))
         self.assertGreater(run_frac['n1'], 0.3)
         self.assertLess(run_frac['n1'], 0.5)
-
-################################################################################
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1593,7 +1590,6 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                 ('acct1_vid1', 'v1t_where', 1000, None, 5, None)
                 ])
 
-
 class TestExperimentState(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestExperimentState, self).setUp()
@@ -1666,6 +1662,58 @@ class TestExperimentState(test_utils.neontest.TestCase):
         fractions = dict([x for x in fractions])
         self.assertEquals(fractions['acct1_vid1_v1t1'], 0.0)
         self.assertEquals(fractions['acct1_vid1_v1t2'], 1.0)
+
+    def test_update_experiment_state_directive(self):
+        # Set the experiment state to be complete
+        thumbnail_status_1 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t1',
+            serving_frac = 0.30,
+            ctr = 0.02)
+        thumbnail_status_2 = neondata.ThumbnailStatus(
+            'thumbnailstatus_acct1_vid1_v1t2',
+            serving_frac = 0.70,
+            ctr = 0.03)
+        video_status = neondata.VideoStatus('acct1_vid1', 'complete',
+            'acct1_vid1_v1t2', 0.01)
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [thumbnail_status_1, thumbnail_status_2])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        fractions = directives[('acct1', 'acct1_vid1')]
+        fractions = dict([x for x in fractions])
+        print "directives", directives
+        # check the fractions
+        self.assertEquals(fractions['acct1_vid1_v1t1'], 0.3)
+        self.assertEquals(fractions['acct1_vid1_v1t2'], 0.7)
+
+        # run the update
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 0, 135, 0)])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        fractions = directives[('acct1', 'acct1_vid1')]
+        fractions = dict([x for x in fractions])
+        # The fractions should not have changed, because 'complete'
+        self.assertEquals(fractions['acct1_vid1_v1t1'], 0.3)
+        self.assertEquals(fractions['acct1_vid1_v1t2'], 0.7)
+
+        # Set the experiment state to be not complete
+        video_status = neondata.VideoStatus('acct1_vid1', 'unknown',
+            'acct1_vid1_v1t2', 0.01)
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [thumbnail_status_1, thumbnail_status_2])
+
+        # run the update
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 0, 135, 0)])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        fractions = directives[('acct1', 'acct1_vid1')]
+        fractions = dict([x for x in fractions])
+        # The fractions should not have changed, because 'complete'
+        self.assertNotEquals(fractions['acct1_vid1_v1t1'], 0.3)
+        self.assertNotEquals(fractions['acct1_vid1_v1t2'], 0.7)
 
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):

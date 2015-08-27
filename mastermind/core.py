@@ -234,9 +234,6 @@ class Mastermind(object):
         for video_id in video_ids:
             try:
                 directive = self.serving_directive[video_id]
-                print "*******************"
-                print self.serving_directive
-                print "*******************"
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
@@ -247,7 +244,7 @@ class Mastermind(object):
                 # anymore. Oh well.
                 pass
 
-    def _turn_thumbnail_status_to_directive(self, thumbnail_status):
+    def _thumbnail_status_to_directive(self, thumbnail_status):
         '''Convert thubmnail_status to serving directive
 
         Inputs:
@@ -262,13 +259,13 @@ class Mastermind(object):
         # It contains four parts: thumbnails status, account id, video id
         # and thumbnail id.
         ids = str(thumbnail_status.get_id()).split('_')
-        if len(ids) != 4:
+        if len(ids) != 3:
             _log.error('The thumbnail_status id %s does not seem to be valid.' %
-                thumbnail_status.key)
+                thumbnail_status.get_id())
             return (None, None)
         else:
-            video_id = ('_').join([ids[1], ids[2]])
-            thumbnail_partial_id = ids[3]
+            video_id = ('_').join([ids[0], ids[1]])
+            thumbnail_partial_id = ids[2]
             return (video_id,
                     (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
 
@@ -287,9 +284,9 @@ class Mastermind(object):
                 self.experiment_state[video_id] = video_status.experiment_state
 
                 directive_list = []
-                for thumbnail_status in t_status_list:
+                for thumbnail_status in thumbnail_status_list:
                     t_video_id, directive = \
-                        _turn_thumbnail_status_to_directive(thumbnail_status)
+                        self._thumbnail_status_to_directive(thumbnail_status)
                     if t_video_id is None or directive is None:
                         continue
                     if t_video_id != video_id:
@@ -298,7 +295,7 @@ class Mastermind(object):
                                    video_id)
                         continue
                     directive_list.append(directive)
-
+                account_id = video_id.split('_')[0]
                 self.serving_directive[video_id] = \
                     ((account_id, video_id), directive_list)
 
@@ -717,7 +714,6 @@ class Mastermind(object):
                                       max(imp[x] - conv[x], 0) + 1,
                                       size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
-            print "non_exp_thumb", non_exp_thumb
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
@@ -927,9 +923,6 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
             serving_frac=frac,
             ctr=ctrs[thumb_id])
             for thumb_id, frac in new_directive.iteritems()]
-        print "+++++++++++++++++++++"
-        print objs
-        print "+++++++++++++++++++++"
         neondata.ThumbnailStatus.save_all(objs)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
