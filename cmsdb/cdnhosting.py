@@ -477,7 +477,7 @@ class CloudinaryHosting(CDNHosting):
                                                  body=encoded_params)
         
         try:
-            response = yield tornado.gen.Task(utils.http.send_request, request) 
+            response = yield utils.http.send_request(request, async=True) 
             raise tornado.gen.Return(response)
         except socket.error, e:
             _log.error("Socket error uploading image to cloudinary %s" %\
