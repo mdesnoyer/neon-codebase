@@ -1598,7 +1598,6 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             ('acct1_vid2', 'acct1_vid2_v2t3', None, 400, None, 150)])
 
         directives = dict([x for x in self.mastermind.get_directives()])
-        print directives
         self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
                               [('acct1_vid1_v1t1', 0.01),
                                ('acct1_vid1_v1t2', 0.99)])
@@ -1724,15 +1723,14 @@ class TestExperimentState(test_utils.neontest.TestCase):
             'thumbnailstatus_acct1_vid1_v1t2',
             serving_frac = 0.70,
             ctr = 0.03)
-        video_status = neondata.VideoStatus('acct1_vid1', 'complete',
-            'acct1_vid1_v1t2', 0.01)
+        video_status = neondata.VideoStatus('acct1_vid1',
+            neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
         self.mastermind.update_experiment_state_directive(
             'acct1_vid1', video_status,
             [thumbnail_status_1, thumbnail_status_2])
         directives = dict([x for x in self.mastermind.get_directives()])
         fractions = directives[('acct1', 'acct1_vid1')]
         fractions = dict([x for x in fractions])
-        print "directives", directives
         # check the fractions
         self.assertEquals(fractions['acct1_vid1_v1t1'], 0.3)
         self.assertEquals(fractions['acct1_vid1_v1t2'], 0.7)
