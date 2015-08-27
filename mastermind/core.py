@@ -25,6 +25,8 @@ from utils.options import define, options
 from utils import statemon
 from utils import strutils
 
+from collections import defaultdict as ddict
+
 _log = logging.getLogger(__name__)
 
 define('modify_pool_size', type=int, default=5,
@@ -42,7 +44,16 @@ statemon.define('critical_error', int)
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
 
-class ModelMapper():
+class ScoreType(object):
+    '''
+    Exports some variable names that map to integers
+    to refer to the different scoring types.
+    '''
+    RANK_CENTRALITY = 2
+    CLASSICAL = 1
+    UNKNOWN = 0
+
+class ModelMapper(object):
     '''
     Stores relevant information about the model used for a given
     video, particularly with respect to computing the score
@@ -62,112 +73,30 @@ class ModelMapper():
     IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
     METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
     '''
-    def __init__(self):
-        # the line in question is:
-        # Peg a score of 5.5 as a 10% lift over random and a score of
-        # 4.0 as neutral
-        #
-        # return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
-        #                  Mastermind.PRIOR_IMPRESSION_SIZE))
-        classical_models = ['20130924_textdiff',
-                  '20130924_crossfade',
-                  'p_20150722_withCEC_w20',
-                  '20130924_crossfade_withalg',
-                  'p_20150722_withCEC_w40',
-                  '20150206_flickr_slow_memcache',
-                  '20130924',
-                  'p_20150722_withCEC_w10',
-                  'p_20150722_withCEC_wNone',
-                  'p_20150722_withCEC_wA']
-        self.model2num = {k:(n+1) for n, k in enumerate(classical_models)}
-        self.model2num[None] = 0 # reserved for unknown models
-        self.num2model = {n:k for k, n in self.model2num.iteritems()}
-        self.model2type = {x:'classical' for x in self.model2num.keys() + self.num2model.keys()}
-        self.model2type[None] = None # reserved for unknown models
-        self.model2type[0] = None # reserved for unknown models
+    MODEL2TYPE = ddict(lambda: ScoreType.RANK_CENTRALITY,
+        {x:ScoreType.CLASSICAL for x in ['20130924_textdiff',
+        '20130924_crossfade','p_20150722_withCEC_w20',
+        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
+        '20150206_flickr_slow_memcache','20130924',
+        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
+        'p_20150722_withCEC_wNone']})
+    MODEL2TYPE[None] = ScoreType.UNKNOWN # reserved for unknown models
 
-    def _add_model(self, modelName):
-        _log.info_n('Model %s is not in model dicts; adding it,'
-            ' presuming rank centrality'%(modelName))
-        modelNum = len(self.model2num)
-        self.model2num[modelName] = modelNum
-        self.num2model[modelNum] = modelName
-        self.model2type[modelName] = 'rc'
-        self.model2type[modelNum] = 'rc'
-
-    def type2num(self, model_type):
-        '''
-        Converts 'rc' and 'classical' (and any others we may get along
-        the way) to 2 and 1, respectively. A 0 corresponds to an unknown
-        model.
-        '''
-        if model_type == None:
-            return 0
-        if model_type == 'classical':
-            return 1
-        if model_type == 'rc':
-            return 2
-        return 0
-
-    def num2type(self, type_num):
-        '''
-        Converts a model type number into a descriptive string
-        '''
-        if type_num == 1:
-            return 'classical'
-        elif type_num == 2:
-            return 'rc'
-        else:
-            return None
-
-    # TODO: ENSURE THAT INPUT SPECIFICATIONS 
-    # ARE CORRECT.. it's not clear that this
-    # is strictly necessary, as they are never
-    # actually called in mastermind
-    def get_model_num(self, modelName):
-        '''
-        Returns the model number given a model name.
-        '''
-        if not self.model2num.has_key(modelName):
-            self._add_model(modelName)
-        return self.model2num[modelName]
-
-    def get_model_name(self, modelNum):
-        '''
-        Returns the model name given the modelNum 
-        '''
-        if not self.num2model.has_key(modelNum):
-            _log.error('Model identified by integer %i '
-                'not recognized, cannot determine name'%(modelNum))
-            return None
-        return self.num2model[modelNum]
-
-    def get_model_type(self, modelid):
+    @classmethod
+    def get_model_type(cls, modelid):
         '''
         Returns the model type given either a model
         number or a model name.
         '''
-        if not self.model2type.has_key(modelid):
-            if type(modelid) == int:
-                _log.error('Model identified by integer %i not recognized,'
-                    ' cannot determine type'%(modelid))
-                return None
-            elif type(modelid) == str:
-                self._add_model(modelid)
-            else:
-                _log.error('Cannot parse modelid input: ' + str(modelid))
-                raise ValueError("modelid must be an integer or a string."
-                    "Could not parse " + str(modelid))
-        typn = self.model2type[modelid]
-        return self.type2num(typn)
-
+        return ModelMapper.MODEL2TYPE[modelid]
 
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
-    def __init__(self, account_id, testing_enabled, thumbnails=[]):
+    def __init__(self, account_id, testing_enabled, thumbnails=[], score_type=ScoreType.UNKNOWN):
         self.account_id = str(account_id)
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
+        self.score_type = score_type
 
     def __str__(self):
         return strutils.full_object_str(self)
@@ -192,8 +121,7 @@ class ThumbnailInfo(object):
         'base_imp',
         'incr_imp',
         'base_conv',
-        'incr_conv',
-        'score_type'
+        'incr_conv'
         ]
         
     def __init__(self, metadata, base_impressions=0, incremental_impressions=0,
@@ -221,7 +149,6 @@ class ThumbnailInfo(object):
         self.incr_imp = incremental_impressions
         self.base_conv = base_conversions
         self.incr_conv = incremental_conversions
-        self.score_type = None
 
     def __str__(self):
         return str({
@@ -313,9 +240,6 @@ class Mastermind(object):
         self.modify_pool = concurrent.futures.ThreadPoolExecutor(
             options.modify_pool_size)
 
-        # map from model IDs to score type ('classical' or 'rc')
-        self.model_mapper = ModelMapper()
-
     def _incr_pending_modify(self, count):
         '''Safely increment the number of pending modifies by count.'''
                 
@@ -395,21 +319,19 @@ class Mastermind(object):
                                 'account id %s and it should not have') % 
                                 (video_id, video_metadata.get_account_id()))
                     video_info.account_id = video_metadata.get_account_id()
+                video_info.score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 
             except KeyError:
                 # No information about this video yet, so add it to the index
+                score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 video_info = VideoInfo(
                     video_metadata.get_account_id(),
                     testing_enabled,
-                    thumbnail_infos)
+                    thumbnail_infos,
+                    score_type=score_type)
                 self.video_info[video_id] = video_info
-            # update the thumbnail information with the type of 
-            # scoring that was used
-            model_type = self.model_mapper.get_model_type(
-                video_metadata.model_version)
-            video_info = self.video_info[video_id]
-            for thumb in video_info.thumbnails:
-                thumb.score_type = model_type
 
             self._calculate_new_serving_directive(video_id)
 
@@ -680,13 +602,14 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates)
+              self._get_bandit_fracs(strategy, baseline, editor, candidates,
+                                     video_info)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
             experiment_state, seq_frac, value_left, winner_tid = \
               self._get_sequential_fracs(strategy, baseline, editor,
-                                         candidates)
+                                         candidates, video_info)
             run_frac.update(seq_frac)
         else:
             _log.error('Invalid experiment type for video %s : %s' % 
@@ -695,7 +618,7 @@ class Mastermind(object):
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
 
-    def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates, video_info):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See
@@ -749,7 +672,7 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conv = dict([(x.id, self._get_prior_conversions(x) +
+        conv = dict([(x.id, self._get_prior_conversions(x, video_info) +
                       x.get_conversions())
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
@@ -764,7 +687,7 @@ class Mastermind(object):
                                       size=MC_SAMPLES)
                                       for x in bandit_ids]
         if non_exp_thumb is not None:
-            conv = self._get_prior_conversions(non_exp_thumb) + \
+            conv = self._get_prior_conversions(non_exp_thumb, video_info) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
                 spstats.beta.rvs(max(1, conv),
@@ -841,7 +764,7 @@ class Mastermind(object):
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
 
-    def _get_prior_conversions(self, thumb_info):
+    def _get_prior_conversions(self, thumb_info, video_info):
         '''Get the number of conversions we would expect based on the model 
         score.'''
         
@@ -857,7 +780,7 @@ class Mastermind(object):
             else:
                 return max(1.0, (Mastermind.PRIOR_CTR * 
                                  Mastermind.PRIOR_IMPRESSION_SIZE))
-        if thumb_info.score_type == 1:
+        if video_info.score_type == ScoreType.CLASSICAL:
             # then it was calculated using Borda Count
             # original doc:
             # Peg a score of 5.5 as a 10% lift over random and a score of
@@ -865,7 +788,7 @@ class Mastermind(object):
             return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * 
                             Mastermind.PRIOR_CTR * 
                             Mastermind.PRIOR_IMPRESSION_SIZE))
-        elif thumb_info.score_type == 2:
+        elif video_info.score_type == ScoreType.RANK_CENTRALITY:
             # then it was calculated using Rank Centrality
             # in which case the lift is given directly by RC
             # of course, the calculated score only accounts for
@@ -878,15 +801,15 @@ class Mastermind(object):
             prior = 0.3
             return max(1.0, prior * score + (1-prior) * 1.0) 
         else:
-            # then it is none, assume a life of 0%
+            # then it is none, assume a lift of 0%
             return max(1.0, (1. * Mastermind.PRIOR_CTR * 
                              Mastermind.PRIOR_IMPRESSION_SIZE))
 
-    def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
+    def _get_sequential_fracs(self, strategy, baseline, editor, candidates, video_info):
         '''Gets the serving fractions for a sequential testing strategy.'''
         _log.error('Sequential seving strategy is not implemented. '
                    'Falling back to the multi armed bandit')
-        return self._get_bandit_fracs(strategy, baseline, editor, candidates)
+        return self._get_bandit_fracs(strategy, baseline, editor, candidates, video_info)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.
