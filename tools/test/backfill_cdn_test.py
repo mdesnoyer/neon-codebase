@@ -48,7 +48,7 @@ class TestBackfillCDN(test_utils.neontest.AsyncTestCase):
         
         self.http_call_patcher = \
           patch('utils.http.send_request')
-        self.http_mock = self._callback_wrap_mock(
+        self.http_mock = self._future_wrap_mock(
             self.http_call_patcher.start())
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         

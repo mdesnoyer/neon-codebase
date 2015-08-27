@@ -106,7 +106,7 @@ class TestCase(unittest.TestCase):
         self.fail('Timed out waiting for %s to equal %s. '
                   'Its value was %s' % (func, expected, found))
 
-    def _future_wrap_mock(self, outer_mock):
+    def _future_wrap_mock(self, outer_mock, require_async_kw=False):
         '''Sets up a mock that mocks out a call that returns a future.
 
         For example, if a function that returns a future is patched with
@@ -119,11 +119,16 @@ class TestCase(unittest.TestCase):
 
         Input:
         outer_mock - Mock of the function that needs a future
+        require_async_kw - If true, the async=True must be set on call to 
+                           return a future. Otherwise just returns the value.
         Returns: 
         mock that can be used to set the actual function return value/exception
         '''
         inner_mock = MagicMock()
         def _build_future(*args, **kwargs):
+            if require_async_kw and not kwargs.get('async', False):
+                return inner_mock(*args, **kwargs)
+                
             future = concurrent.futures.Future()
             try:
                 future.set_result(inner_mock(*args, **kwargs))
