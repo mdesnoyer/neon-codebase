@@ -52,6 +52,7 @@ class ScoreType(object):
     RANK_CENTRALITY = 2
     CLASSICAL = 1
     UNKNOWN = 0
+    DEFAULT = RANK_CENTRALITY
 
 class ModelMapper(object):
     '''
@@ -73,7 +74,7 @@ class ModelMapper(object):
     IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
     METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
     '''
-    MODEL2TYPE = ddict(lambda: ScoreType.RANK_CENTRALITY,
+    MODEL2TYPE = ddict(lambda: ScoreType.DEFAULT,
         {x:ScoreType.CLASSICAL for x in ['20130924_textdiff',
         '20130924_crossfade','p_20150722_withCEC_w20',
         '20130924_crossfade_withalg','p_20150722_withCEC_w40',
@@ -83,11 +84,31 @@ class ModelMapper(object):
     MODEL2TYPE[None] = ScoreType.UNKNOWN # reserved for unknown models
 
     @classmethod
+    def _add_model(cls, modelid, score_type=ScoreType.DEFAULT):
+        if ((score_type != ScoreType.RANK_CENTRALITY) and
+            (score_type != ScoreType.CLASSICAL) and
+            (score_type != ScoreType.UNKNOWN)):
+            _log.error('Invalid score type specification for model '
+                       '%s defaulting to UNKNOWN'%(modelid))
+            score_type = ScoreType.UNKNOWN
+            # if it's already in there, do not attempt to change
+            if ModelMapper.MODEL2TYPE.has_key(modelid):
+                _log.info('Model %s with invalid score type %s'
+                    ' is already in MODEL2TYPE, original score '
+                    'type remains'%(str(modelid), str(score_type)))
+                return
+        _log.info('Model %s is not in model dicts; adding it,'
+                  ' as score type %s'%(str(modelid), str(score_type)))
+        cls.MODEL2TYPE[modelid] = score_type
+
+    @classmethod
     def get_model_type(cls, modelid):
         '''
         Returns the model type given either a model
         number or a model name.
         '''
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            ModelMapper._add_model(modelid)
         return ModelMapper.MODEL2TYPE[modelid]
 
 class VideoInfo(object):

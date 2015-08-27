@@ -129,7 +129,45 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
-        
+    
+    def test_model_mapping(self):
+        # tests that the mapping from models --> score type is 
+        # correct for known models. 
+        modelsToTest = ['20130924_textdiff',
+        '20130924_crossfade','p_20150722_withCEC_w20',
+        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
+        '20150206_flickr_slow_memcache','20130924',
+        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
+        'p_20150722_withCEC_wNone']
+        for model in modelsToTest:
+            self.assertEqual(ScoreType.CLASSICAL, 
+                ModelMapper.get_model_type(model))
+        # test that it correctly adds new models
+        self.assertEqual(ScoreType.DEFAULT,
+            ModelMapper.get_model_type('unknown_model_5hx'))
+        self.assertTrue(
+            ModelMapper.MODEL2TYPE.has_key('unknown_model_5hx'))
+        # test that invalid score types are mapped to UNKNOWN
+        ModelMapper._add_model('unknown_model_z9i', 21)
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type(
+                'unknown_model_z9i'))
+        ModelMapper._add_model('unknown_model_z9i', 'score!')
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type(
+                'unknown_model_z9i'))
+        # test that model score_types cannot be changed to
+        # invalid values
+        ModelMapper._add_model('unknown_model_5hx', 12)
+        self.assertEqual(ScoreType.DEFAULT,
+            ModelMapper.get_model_type('unknown_model_5hx'))
+        # test that model score_types can be changed to 
+        # valid values.
+        ModelMapper._add_model('unknown_model_5hx', 
+            ScoreType.UNKNOWN)
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type('unknown_model_5hx'))
+
     def test_priors(self):
         # the computation of the prior has been modified significantly,
         # such that it's not computed based on whether or not the 
@@ -156,16 +194,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         expected_scores = [[1.12, 1.0, 1.0, 1.0],
                            [1.0, 1.0, 1.0, 1.0],
                            [2.44, 1.75, 1.0, 1.0]]
-
-        self.assertEquals(
-            ModelMapper.get_model_type('20130924_crossfade'),
-            ScoreType.CLASSICAL)
-
-        with self.assertLogExists(logging.WARNING,
-            'Unknown experiment type'):
-            self.assertEquals(
-                ModelMapper.get_model_type('some_unknown_model'),
-                ScoreType.UNKNOWN)
 
         for n, (model_version, model_type_num) in enumerate(
                                                   modelsTested):
