@@ -142,25 +142,43 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         for model in modelsToTest:
             self.assertEqual(ScoreType.CLASSICAL, 
                 ModelMapper.get_model_type(model))
+
         # test that it correctly adds new models
-        self.assertEqual(ScoreType.DEFAULT,
-            ModelMapper.get_model_type('unknown_model_5hx'))
+        with self.assertLogExists(logging.INFO, 
+            ('Model %s is not in model dicts; adding it,'
+                  ' as score type %s'%(str('unknown_model_5hx'), 
+                    str(ScoreType.DEFAULT)))):
+            self.assertEqual(ScoreType.DEFAULT,
+                ModelMapper.get_model_type('unknown_model_5hx'))
         self.assertTrue(
             ModelMapper.MODEL2TYPE.has_key('unknown_model_5hx'))
+        
         # test that invalid score types are mapped to UNKNOWN
-        ModelMapper._add_model('unknown_model_z9i', 21)
+        with self.assertLogExists(logging.ERROR, 
+            ('Invalid score type specification for model '
+             '%s defaulting to UNKNOWN'%('unknown_model_z9i'))):
+            ModelMapper._add_model('unknown_model_z9i', 21)
         self.assertEqual(ScoreType.UNKNOWN,
             ModelMapper.get_model_type(
                 'unknown_model_z9i'))
-        ModelMapper._add_model('unknown_model_z9i', 'score!')
+        self.assertTrue(
+            ModelMapper.MODEL2TYPE.has_key('unknown_model_z9i'))
+        with self.assertLogExists(logging.ERROR, 
+            ('Model %s with invalid score type %s'
+             ' is already in MODEL2TYPE, original score '
+            'type remains'%('unknown_model_z9i', 
+            str(ScoreType.UNKNOWN)))):
+            ModelMapper._add_model('unknown_model_z9i', 'score!')
         self.assertEqual(ScoreType.UNKNOWN,
             ModelMapper.get_model_type(
                 'unknown_model_z9i'))
+        
         # test that model score_types cannot be changed to
         # invalid values
         ModelMapper._add_model('unknown_model_5hx', 12)
         self.assertEqual(ScoreType.DEFAULT,
             ModelMapper.get_model_type('unknown_model_5hx'))
+        
         # test that model score_types can be changed to 
         # valid values.
         ModelMapper._add_model('unknown_model_5hx', 

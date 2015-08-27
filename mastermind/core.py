@@ -93,11 +93,12 @@ class ModelMapper(object):
             score_type = ScoreType.UNKNOWN
             # if it's already in there, do not attempt to change
             if ModelMapper.MODEL2TYPE.has_key(modelid):
-                _log.info('Model %s with invalid score type %s'
+                _log.error('Model %s with invalid score type %s'
                     ' is already in MODEL2TYPE, original score '
                     'type remains'%(str(modelid), str(score_type)))
                 return
-        _log.info('Model %s is not in model dicts; adding it,'
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            _log.info('Model %s is not in model dicts; adding it,'
                   ' as score type %s'%(str(modelid), str(score_type)))
         cls.MODEL2TYPE[modelid] = score_type
 
