@@ -1699,9 +1699,9 @@ class TestExperimentState(test_utils.neontest.TestCase):
         self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
                           neondata.ExperimentState.RUNNING)
         self.assertAlmostEquals(fractions_test1['acct1_vid1_v1t1'],
-                          fractions_test2['acct1_vid1_v1t2'], delta=0.02)
+                          fractions_test2['acct1_vid1_v1t2'], delta=0.05)
         self.assertAlmostEquals(fractions_test1['acct1_vid1_v1t2'],
-                          fractions_test2['acct1_vid1_v1t1'], delta=0.02)
+                          fractions_test2['acct1_vid1_v1t1'], delta=0.05)
 
 
     def test_update_stats_when_experiment_complete(self):
@@ -1715,6 +1715,7 @@ class TestExperimentState(test_utils.neontest.TestCase):
         directives = dict([x for x in self.mastermind.get_directives()])
         fractions = directives[('acct1', 'acct1_vid1')]
         fractions = dict([x for x in fractions])
+        video_status = neondata.VideoStatus.get('acct1_vid1')
         self.assertGreater(fractions['acct1_vid1_v1t2'],
             fractions['acct1_vid1_v1t1'])
         self.assertEqual(video_status.experiment_state,
@@ -1731,6 +1732,7 @@ class TestExperimentState(test_utils.neontest.TestCase):
         fractions = dict([x for x in fractions])
         self.assertEquals(fractions['acct1_vid1_v1t1'], 0.0)
         self.assertEquals(fractions['acct1_vid1_v1t2'], 1.0)
+        video_status = neondata.VideoStatus.get('acct1_vid1')
         self.assertEqual(video_status.experiment_state,
                          neondata.ExperimentState.COMPLETE)
         self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
