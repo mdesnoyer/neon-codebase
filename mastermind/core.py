@@ -258,14 +258,16 @@ class Mastermind(object):
         extracted from thumbnail_status. directive is the serving fraction
         '''
 
-        # TODO: explain ThumbnailStatus format example.
+        # An example of ThumbnailStatus id: thumbnailstatus_acct1_vid1_v1t2
+        # It contains four parts: thumbnails status, account id, video id
+        # and thumbnail id.
         ids = str(thumbnail_status.get_id()).split('_')
         if len(ids) != 4:
             _log.error('The thumbnail_status id %s does not seem to be valid.' %
                 thumbnail_status.key)
             return (None, None)
         else:
-            video_id = ('_').join([ids[1], ids[2])
+            video_id = ('_').join([ids[1], ids[2]])
             thumbnail_partial_id = ids[3]
             return (video_id,
                     (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
@@ -448,8 +450,6 @@ class Mastermind(object):
         # previous directive.
         if self.experiment_state.get(video_id, None) == \
            neondata.ExperimentState.COMPLETE:
-            # TODO: Cover the test case when the server restarts \
-            # have the winner overturned.
             return
 
         result = self._calculate_current_serving_directive(
@@ -717,6 +717,7 @@ class Mastermind(object):
                                       max(imp[x] - conv[x], 0) + 1,
                                       size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
+            print "non_exp_thumb", non_exp_thumb
             conv = self._get_prior_conversions(non_exp_thumb) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
