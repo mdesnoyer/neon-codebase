@@ -52,10 +52,8 @@ class BrightcoveApi(object):
     All video ids used in the class refer to the Brightcove platform VIDEO ID
     '''
 
-    write_connection = RequestPool(options.max_write_connections,
-                                   options.max_retries)
-    read_connection = RequestPool(options.max_read_connections,
-                                  options.max_retries)
+    write_connection = RequestPool(options.max_write_connections)
+    read_connection = RequestPool(options.max_read_connections)
     READ_URL = "http://api.brightcove.com/services/library"
     WRITE_URL = "http://api.brightcove.com/services/post"
     
@@ -102,7 +100,10 @@ class BrightcoveApi(object):
         if not find_vid_callback:
             return BrightcoveApi.read_connection.send_request(req)
         else:
-            BrightcoveApi.read_connection.send_request(req, find_vid_callback)
+            BrightcoveApi.read_connection.send_request(
+                req,
+                ntries=options.max_retries,
+                callback=find_vid_callback)
 
     @tornado.gen.coroutine
     def add_image(self, video_id, tid, image=None, remote_url=None,
@@ -193,9 +194,8 @@ class BrightcoveApi(object):
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
 
-        response = yield tornado.gen.Task(
-            BrightcoveApi.write_connection.send_request,
-            req)
+        response = yield BrightcoveApi.write_connection.send_request(
+            req, async=True, ntries=options.max_retries)
         if response.error:
             if response.error.code >= 500:
                 raise BrightcoveApiServerError(
@@ -357,7 +357,7 @@ class BrightcoveApi(object):
             return video_urls[max(video_urls.keys())]
 
     def get_publisher_feed(self, command='find_all_videos', output='json',
-                           page_no=0, page_size=100, callback=None):
+                           page_no=0, page_size=100):
     
         '''Get videos after the signup date, Iterate until you hit 
            video the publish date.
@@ -383,7 +383,8 @@ class BrightcoveApi(object):
                                              method="GET",
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
-        return BrightcoveApi.read_connection.send_request(req, callback)
+        return BrightcoveApi.read_connection.send_request(
+            req, ntries=options.max_retries)
 
     def process_publisher_feed(self, items, i_id):
         ''' process publisher feed for neon tags and generate brightcove
@@ -754,8 +755,8 @@ class BrightcoveApi(object):
                                              method="GET", 
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
-        response = yield tornado.gen.Task(
-            BrightcoveApi.read_connection.send_request, req)
+        response = yield BrightcoveApi.read_connection.send_request(
+            req, ntries=options.max_retries, async=True)
 
         if response.error:
             _log.error('key=get_current_thumbnail_url '
@@ -852,8 +853,8 @@ class BrightcoveApi(object):
                            urllib.urlencode(url_params)),
                 request_timeout = 60.0)
             
-            response = yield tornado.gen.Task(
-                BrightcoveApi.read_connection.send_request, request)
+            response = yield BrightcoveApi.read_connection.send_request(
+                request, ntries=options.max_retries, async=True)
 
             results.extend(_handle_response(response))
 
@@ -931,8 +932,8 @@ class BrightcoveApi(object):
             decompress_response=True,
             request_timeout = 120.0)
 
-        response = yield tornado.gen.Task(
-            BrightcoveApi.read_connection.send_request, request)
+        response = yield BrightcoveApi.read_connection.send_request(
+            request, ntries=options.max_retries, async=True)
 
         results = _handle_response(response)
 
@@ -1009,8 +1010,8 @@ class BrightcoveApi(object):
             decompress_response=True,
             request_timeout = 120.0)
 
-        response = yield tornado.gen.Task(
-            BrightcoveApi.read_connection.send_request, request)
+        response = yield BrightcoveApi.read_connection.send_request(
+            request, async=True, ntries=options.max_retries)
 
         results = _handle_response(response)
 
@@ -1066,8 +1067,8 @@ class BrightcoveApi(object):
             decompress_response=True,
             request_timeout = 120.0)
 
-        response = yield tornado.gen.Task(
-            BrightcoveApi.read_connection.send_request, request)
+        response = yield BrightcoveApi.read_connection.send_request(
+            request, async=True, ntries=options.max_retries)
 
         results = _handle_response(response)
 

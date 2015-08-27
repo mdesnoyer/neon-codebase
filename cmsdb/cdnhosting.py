@@ -166,6 +166,7 @@ class CDNHosting(object):
             statemon.state.increment('upload_error')
             raise
 
+
         if self.update_serving_urls and len(new_serving_thumbs) > 0:
             def add_serving_urls(obj):
                 for params in new_serving_thumbs:
@@ -206,10 +207,10 @@ class CDNHosting(object):
         request = tornado.httpclient.HTTPRequest(
             url, 'GET',
             headers={'Accept': 'image/*'})
-        response = yield tornado.gen.Task(
-            utils.http.send_request,
+        response = yield utils.http.send_request(
             request,
-            base_delay=4.0)
+            base_delay=4.0,
+            async=True)
         if response.error:
             raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)

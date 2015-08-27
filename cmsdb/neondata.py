@@ -1302,7 +1302,7 @@ class NamespacedStoredObject(StoredObject):
         objects in the database.
 
         The set of keys to grab happens once so if the db changes while
-        the iteration is going, so neither new or deleted objects will
+        the iteration is gong, so neither new or deleted objects will
         be returned.
 
         #TODO(mdesnoyer): Figure out a way to make this
@@ -2532,8 +2532,8 @@ class BrightcovePlatform(AbstractPlatform):
 
         # Update the new_tid as the thumbnail for the video
         try:
-            image = utils.imageutils.PILImageUtils.download_image(
-                t_url)
+            image = yield utils.imageutils.PILImageUtils.download_image(
+                t_url, async=True)
             update_response = yield bc.update_thumbnail_and_videostill(
                 platform_vid,
                 new_tid,
@@ -3635,6 +3635,7 @@ class ThumbnailMetadata(StoredObject):
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
+        
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -3892,6 +3893,7 @@ class VideoMetadata(StoredObject):
         try:
             image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
+            
         except IOError, e:
             msg = "IOError while downloading image %s: %s" % (
                 image_url, e)

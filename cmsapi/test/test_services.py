@@ -63,16 +63,19 @@ def create_random_image_response():
 # Test Services
 ###############################################
 
-def process_neon_api_requests(api_requests, api_key, i_id, t_type):
+def process_neon_api_requests(api_requests, api_key, i_id, t_type,
+                              plattype=neondata.BrightcovePlatform):
     #Create thumbnail metadata
     images = {}
     thumbnail_url_to_image = {}
     N_THUMBS = 5
+    video_map = {}
     for api_request in api_requests:
         video_id = api_request.video_id
         internal_video_id = neondata.InternalVideoID.generate(api_key,
                                                               video_id)
         job_id = api_request.job_id
+        video_map[video_id] = job_id
         thumbnails = []
         for t in range(N_THUMBS):
             image =  utils.imageutils.PILImageUtils.create_random_image(360,
@@ -130,6 +133,11 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type):
                                         url, 10, 5, "test", i_id)
         vmdata.save()
 
+    def _update_videos(x):
+        x.videos.update(video_map)
+
+    plattype.modify(api_key, i_id, _update_videos)
+
     return images, thumbnail_url_to_image
 
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
@@ -144,12 +152,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         #NOTE: Make sure that you don't repatch objects
 
         #Http Connection pool Mock
-        self.cp_sync_patcher = \
-          patch('utils.http.tornado.httpclient.HTTPClient')
         self.cp_async_patcher = \
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
-        self.cp_mock_client = self.cp_sync_patcher.start()
-        self.cp_mock_async_client = self.cp_async_patcher.start()
+        self.cp_mock_async_client = self._future_wrap_mock(
+            self.cp_async_patcher.start()().fetch)
 
         self.api_key = "" # filled later
         self.a_id = "unittester-0"
@@ -168,7 +174,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         random.seed(19449)
         
     def tearDown(self):
-        self.cp_sync_patcher.stop()
         self.cp_async_patcher.stop()
         self.redis.stop()
         super(TestServices, self).tearDown()
@@ -265,7 +270,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             vid = str(item['id'])                              
             title = item['name']
             video_download_url = item['FLVURL']
-            job_id = str(self.job_ids[i]) #str(random.random())
+            job_id = str(random.random())
             p_thumb = item['videoStillURL']
             api_request = neondata.BrightcoveApiRequest(
                 job_id, self.api_key, vid,
@@ -340,6 +345,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 'read_token' : self.rtoken, 'write_token': self.wtoken, 
                 'auto_update': False}
         resp = self.post_request(url, vals, self.api_key)
+        self.assertEquals(resp.code, 201)
         return resp.body
 
     def update_brightcove_account(self, rtoken=None, wtoken=None, autoupdate=None):
@@ -438,10 +444,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         else:
             callback = args[1] if len(args) >=2 else None
 
-        if "/services/library?command=find_video_by_id" in http_request.url:
+        if "/services/library?command=search_videos" in http_request.url:
             request = tornado.httpclient.HTTPRequest(http_request.url)
             response = tornado.httpclient.HTTPResponse(request, 200,
-                    buffer=StringIO(bcove_responses.find_video_by_id_response))
+                    buffer=StringIO(bcove_responses.search_videos_response))
             if kwargs.has_key("callback"):
                 callback = kwargs["callback"]
                 return tornado.ioloop.IOLoop.current().add_callback(callback,
@@ -506,14 +512,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         '''
         Setup the state of a brightcove account with 5 processed videos 
         '''
-        #Setup Side effect for the http clients
-        #self.bapi_mock_client().fetch.side_effect = \
-        #  self._success_http_side_effect
-        self.cp_mock_client().fetch.side_effect = \
-          self._success_http_side_effect 
-        #self.bapi_mock_async_client().fetch.side_effect = \
-        #self._success_http_side_effect
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
     
         #set up account and video state for testing
@@ -585,6 +584,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(resp.code, 400)
 
     def test_get_account_info(self):
+        self.cp_mock_async_client.side_effect = \
+          self._success_http_side_effect
         
         self.create_brightcove_account()
         url = self.get_url('/api/v1/accounts/%s/neon_integrations'\
@@ -595,10 +596,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(data['neon_api_key'], self.api_key)
         self.assertEqual(data['integration_id'], '0')
 
-        self.cp_mock_client().fetch.side_effect = \
-          self._success_http_side_effect 
-        self.cp_mock_async_client().fetch.side_effect = \
-          self._success_http_side_effect
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations'\
                             '/%s' % (self.a_id, self.b_id))
         resp = self.get_request(url, self.api_key)
@@ -621,9 +618,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertFalse(strategy.only_exp_if_chosen)
 
         #Setup Side effect for the http clients
-        self.cp_mock_client().fetch.side_effect = \
-          self._success_http_side_effect 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
 
         #create brightcove account
@@ -665,13 +660,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             self.assertEqual(api_key, neondata.NeonApiKey.get_api_key(self.a_id))
 
             #Setup Side effect for the http clients
-            #self.bapi_mock_client().fetch.side_effect = \
-            #                    self._success_http_side_effect
-            self.cp_mock_client().fetch.side_effect = \
-                                self._success_http_side_effect 
-            #self.bapi_mock_async_client().fetch.side_effect = \
-                                #self._success_http_side_effect
-            self.cp_mock_async_client().fetch.side_effect = \
+            self.cp_mock_async_client.side_effect = \
                                 self._success_http_side_effect
 
             #create brightcove account
@@ -723,10 +712,15 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             self._test_update_thumbnail_fails()
     
     def _test_update_thumbnail_fails(self):
-        def _failure_http_side_effect(request, callback=None):
-            if mock_image_url_prefix in request.url:
-                response = tornado.httpclient.HTTPResponse(request, 500,
+
+        download_mock = MagicMock()
+        fail_image_func = lambda x: tornado.httpclient.HTTPResponse(x, 500,
                     buffer=StringIO("Server error"))
+        download_mock.side_effect = fail_image_func
+        
+        def _failure_http_side_effect(request):
+            if mock_image_url_prefix in request.url:
+                response = download_mock(request)
 
             elif "http://api.brightcove.com/services/post" in request.url:
                 itype = "THUMBNAIL"
@@ -738,10 +732,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                         ('{"result": {"displayName":"test","id":123,'
                         '"referenceId":"test_ref_id","remoteUrl":null,"type":"%s"},'
                         '"error": "mock error", "id": null}'%itype))
-
-            if callback:
-                return tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                                    response)
             return response
 
         vids = self._get_videos()
@@ -749,29 +739,26 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         tids = self._get_thumbnails(vid)
         
         #Failed to download Image; Expect internal error 500
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
                 _failure_http_side_effect
         with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
             resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 502) 
 
         #Brightcove api error, gateway error 502
-        self.cp_mock_async_client().fetch.side_effect = \
-                self._success_http_side_effect
-        self.cp_mock_client().fetch.side_effect =\
-                _failure_http_side_effect
+        download_mock.side_effect = lambda x: create_random_image_response()
         with self.assertLogExists(logging.ERROR, 'Internal Brightcove error'):
             resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 502) 
 
         #Successful update of thumbnail
-        self.cp_mock_client().fetch.side_effect =\
+        self.cp_mock_async_client.side_effect =\
                 self._success_http_side_effect
         resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 200) 
 
         #Induce Failure again, bcove api error
-        self.cp_mock_client().fetch.side_effect =\
+        self.cp_mock_async_client.side_effect =\
                 _failure_http_side_effect 
         resp = self.update_brightcove_thumbnail(vid, tids[1]) 
         self.assertEqual(resp.code, 502) 
@@ -790,8 +777,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         tids = self._get_thumbnails(vid)
         i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
         tid  = tids[0]
-        self.cp_mock_client().fetch.side_effect =\
-            self._success_http_side_effect
         url = self.get_url('/api/v1/brightcovecontroller/%s/updatethumbnail/%s' 
                         %(self.api_key, i_vid))
         vals = {'thumbnail_id' : tid }
@@ -1055,7 +1040,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_video_request'%(self.a_id, "0"))
 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
 
         response = self.post_request(uri, vals, api_key)
@@ -1076,7 +1061,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request'%(self.a_id, "0"))
 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         
         vid = "vid1"
@@ -1094,7 +1079,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         request = tornado.httpclient.HTTPRequest('http://thumbnails.neon-lab.com')
         response = tornado.httpclient.HTTPResponse(request, 409,
                 buffer=StringIO('{"error":"already processed","video_id":"vid", "job_id":"%s"}' % job_id))
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
         response = self.post_request(uri, vals, api_key)
         self.assertEqual(response.code, 409)
         self.assertEqual(json.loads(response.body)["job_id"], job_id)
@@ -1115,7 +1100,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             '{"error":"video id greater than 128 chars"}')
 
     def test_create_video_request_with_custom_data(self):
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
         vals = {
@@ -1151,7 +1136,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(job.publish_date, '2015-06-03T13:04:33+00:00')
 
     def test_create_video_with_default_thumb(self):
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
         vals = {
@@ -1178,7 +1163,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(job.callback_url, 'http://callback')
 
     def test_create_video_request_custom_data_via_url_string(self):
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
         vals = {
@@ -1225,7 +1210,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             '{"error":"custom data must be a dictionary"}')
 
     def test_create_video_request_utf8(self):
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
         vals = {
@@ -1261,7 +1246,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request'%(self.a_id, "0"))
 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         
         vid = "vid1"
@@ -1292,7 +1277,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_video_request'%(self.a_id, "0"))
 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         response = self.post_request(uri, vals, api_key)
         self.assertEqual(response.code, 400)
@@ -1653,7 +1638,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         }
         ]}
         '''
-        
+        mock_img_download = self._future_wrap_mock(
+            mock_img_download.send_request)
+        mock_cloudinary = self._future_wrap_mock(mock_cloudinary.send_request)
         #s3mocks to mock host_thumbnails_to_s3
         conn = boto_mock.MockConnection()
         conn.create_bucket('host-thumbnails')
@@ -1661,11 +1648,11 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         mock_conntype.return_value = conn
 
         # Mock out the cloudinary call
-        mock_cloudinary.send_request.side_effect = \
-          lambda x, callback: callback(tornado.httpclient.HTTPResponse(x, 200))
+        mock_cloudinary.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(x, 200)
 
         # Mock the image download
-        def _handle_img_download(request, callback=None, *args, **kwargs):
+        def _handle_img_download(request, *args, **kwargs):
             if "jpg" in request.url or "jpeg" in request.url:
                 if "error_image" in request.url:
                     response = tornado.httpclient.HTTPResponse(request, 500)
@@ -1686,13 +1673,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                                                            buffer=imgstream)
             else:
                 response = self._success_http_side_effect(request,
-                                                          callback=callback,
                                                           *args, **kwargs)
-            if callback:
-                return self.io_loop.add_callback(callback, response)
-            else:
-                return response
-        mock_img_download.send_request.side_effect = _handle_img_download 
+            return response
+        
+        mock_img_download.side_effect = _handle_img_download 
         
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
@@ -1930,7 +1914,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.code, 200)
 
 ##### OOYALA PLATFORM TEST ######
-
+@unittest.skip('We do not support ooyala these days')
 class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
     ''' Ooyala services Test '''
         
@@ -1957,7 +1941,7 @@ class TestOoyalaServices(tornado.testing.AsyncHTTPTestCase):
         
         self.cp_mock_client().fetch.side_effect = \
           self._success_http_side_effect 
-        self.cp_mock_async_client().fetch.side_effect = \
+        self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
 
         self.oo_api_key = 'oo_api_key_now'
