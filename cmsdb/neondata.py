@@ -3845,6 +3845,15 @@ class VideoStatus(DefaultedStoredObject):
                  experiment_value_remaining=None):
         super(VideoStatus, self).__init__(video_id)
 
+        # Detect experiment_state changes, and record the history
+        # if self.experiment and experiment_state != self.experiment_state:
+        #     self.experiment_state = experiment_state
+        #     # TODO: what if the history is none?
+        #     history_dict = dict(self.history)
+        #     history_dict[datatime.datetime.utcnow()] = experiment_state
+        #     # TODO: what if the history is too big?
+        #     self.history = history_dict
+
         # State of the experiment
         self.experiment_state = experiment_state
 
@@ -3854,6 +3863,7 @@ class VideoStatus(DefaultedStoredObject):
         # For the multi-armed bandit strategy, the value remaining
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
+
 
     @classmethod
     def _baseclass_name(cls):

@@ -787,6 +787,9 @@ class Mastermind(object):
         # Adjust the run_frac according to frac_adjust_rate,
         # if frac_adjust_rate == 0.0, then all the fractions are equal.
         # If frac_adjust_rate == 1.0, then run_frac stays the same.
+
+        # TODO: now the adjustment is equal for all fractions.
+        # TODO: We will change it to be related to the prior instead.
         win_frac = win_frac ** frac_adjust_rate
         win_frac = win_frac / np.sum(win_frac)
 
