@@ -1646,9 +1646,8 @@ class TestExperimentState(test_utils.neontest.TestCase):
         numpy.random.seed(1984935)
 
         # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind = Mastermind()
@@ -1663,7 +1662,8 @@ class TestExperimentState(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        self.redis.stop()
+        super(TestExperimentState, self).tearDown()
 
     def test_update_stats_when_experiment_not_complete(self):
         # Initial stats
@@ -1675,9 +1675,14 @@ class TestExperimentState(test_utils.neontest.TestCase):
             ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 0, 135, 0)])
         directives = dict([x for x in self.mastermind.get_directives()])
         fractions = directives[('acct1', 'acct1_vid1')]
-        fractions = dict([x for x in fractions])
-        self.assertGreater(fractions['acct1_vid1_v1t2'],
-            fractions['acct1_vid1_v1t1'])
+        fractions_test1 = dict([x for x in fractions])
+        self.assertGreater(fractions_test1['acct1_vid1_v1t2'],
+            fractions_test1['acct1_vid1_v1t1'])
+        video_status = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEqual(video_status.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.RUNNING)
 
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 135, 0),
@@ -1685,9 +1690,19 @@ class TestExperimentState(test_utils.neontest.TestCase):
         directives = dict([x for x in self.mastermind.get_directives()])
         directives = dict([x for x in self.mastermind.get_directives()])
         fractions = directives[('acct1', 'acct1_vid1')]
-        fractions = dict([x for x in fractions])
-        self.assertGreater(fractions['acct1_vid1_v1t1'],
-            fractions['acct1_vid1_v1t2'])
+        fractions_test2 = dict([x for x in fractions])
+        self.assertGreater(fractions_test2['acct1_vid1_v1t1'],
+            fractions_test2['acct1_vid1_v1t2'])
+        video_status = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEqual(video_status.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.RUNNING)
+        self.assertAlmostEquals(fractions_test1['acct1_vid1_v1t1'],
+                          fractions_test2['acct1_vid1_v1t2'], delta=0.02)
+        self.assertAlmostEquals(fractions_test1['acct1_vid1_v1t2'],
+                          fractions_test2['acct1_vid1_v1t1'], delta=0.02)
+
 
     def test_update_stats_when_experiment_complete(self):
         # Initial stats
@@ -1702,6 +1717,10 @@ class TestExperimentState(test_utils.neontest.TestCase):
         fractions = dict([x for x in fractions])
         self.assertGreater(fractions['acct1_vid1_v1t2'],
             fractions['acct1_vid1_v1t1'])
+        self.assertEqual(video_status.experiment_state,
+                         neondata.ExperimentState.COMPLETE)
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.COMPLETE)
 
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 135, 0),
@@ -1712,6 +1731,10 @@ class TestExperimentState(test_utils.neontest.TestCase):
         fractions = dict([x for x in fractions])
         self.assertEquals(fractions['acct1_vid1_v1t1'], 0.0)
         self.assertEquals(fractions['acct1_vid1_v1t2'], 1.0)
+        self.assertEqual(video_status.experiment_state,
+                         neondata.ExperimentState.COMPLETE)
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.COMPLETE)
 
     def test_update_experiment_state_directive(self):
         # Set the experiment state to be complete
