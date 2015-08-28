@@ -165,7 +165,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_FOUND)
             if isinstance(exception, NotAuthorizedError):
-                statemon.state.increment(ref=_not_authorized_errors_ref,
+                statemon.state.increment(ref=_unauthorized_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
             if isinstance(exception, NotImplementedError):
@@ -506,7 +506,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
             
         integration = yield IntegrationHelper.getIntegration(integration_id, 
                                                      neondata.IntegrationType.OOYALA)
- 
+
         def _update_integration(p):
             p.ooyala_api_key = args.get('ooyala_api_key', integration.ooyala_api_key)
             p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
@@ -587,6 +587,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
         integration = yield IntegrationHelper.getIntegration(integration_id,  
                                                   neondata.IntegrationType.BRIGHTCOVE) 
+
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
             p.write_token = args.get('write_token', integration.write_token)

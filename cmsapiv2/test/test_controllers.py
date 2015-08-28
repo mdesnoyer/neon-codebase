@@ -25,167 +25,117 @@ from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 
-class TestAPIKeyRequired(test_utils.neontest.AsyncHTTPTestCase):
+class TestControllersBase(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
         return controllers.application
 
-    def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
-        self.user.save() 
-        super(TestAPIKeyRequired, self).setUp()
-
-    def tearDown(self): 
-        self.redis.stop()
-
-    def test_return_unauthorized_accounts(self):
-        url = '/api/v2/234234accountidtest324'
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
+    def post_exceptions(self, url, params, exception_mocker): 
+        exception_mock = self._future_wrap_mock(exception_mocker.start())
+        exception_mock.side_effect = Exception('blah blah')  
+        header = { 'Content-Type':'application/json' }
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='POST', 
+                                 headers=header) 
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 500)
 
-        url = '/api/v2/234234accountidtest324'
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               body='', 
-                               method='PUT', 
-                               allow_nonstandard_methods=True)
+        exception_mock.side_effect = ValueError('blah blah')  
+        header = { 'Content-Type':'application/json' }
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='POST', 
+                                 headers=header) 
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 500)
 
-    def test_return_authorized_accounts(self):
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
-        url = '/api/v2/%s' % (self.user.neon_api_key)
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header, 
-                               method='GET')
+        exception_mock.side_effect = KeyError('blah blah')  
+        header = { 'Content-Type':'application/json' }
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='POST', 
+                                 headers=header) 
         response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-        url = '/api/v2/%s' % (self.user.neon_api_key)
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header,
-                               body='',  
-                               method='PUT',
-                               allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 500)
+ 
+        exception_mock.side_effect = controllers.Invalid('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='POST', 
+                                 headers=header) 
         response = self.wait()
-        self.assertNotEquals(response.code, 401)
+        self.assertEquals(response.code, 400) 
+        exception_mocker.stop()
 
-    def test_return_unauthorized_brightcove(self):
-        url = '/api/v2/234234accountidtest324/integrations/brightcove'
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
+    def get_exceptions(self, url, exception_mocker):
+        exception_mock = self._future_wrap_mock(exception_mocker.start())
+        exception_mock.side_effect = Exception('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+              			 method="GET")
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 500)
 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               body='', 
-                               method='PUT', 
-                               allow_nonstandard_methods=True)
+        exception_mock.side_effect = ValueError('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+              			 method="GET")
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 500)
 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               body='', 
-                               method='POST', 
-                               allow_nonstandard_methods=True)
+        exception_mock.side_effect = controllers.NotFoundError('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+              			 method="GET")
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 404) 
+        exception_mocker.stop()
 
-    def test_return_authorized_brightcove(self):
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
-        url = '/api/v2/%s/integrations/brightcove' % (self.user.neon_api_key)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header, 
-                               method='GET')
+    def put_exceptions(self, url, params, exception_mocker):
+        exception_mock = self._future_wrap_mock(exception_mocker.start())
+        exception_mock.side_effect = Exception('blah blah')  
+        header = { 'Content-Type':'application/json' }
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='PUT', 
+                                 headers=header) 
         response = self.wait()
-        self.assertNotEquals(response.code, 401)
+        self.assertEquals(response.code, 500)
 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header,
-                               body='',  
-                               method='PUT',
-                               allow_nonstandard_methods=True)
+        exception_mock.side_effect = controllers.NotFoundError('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='PUT', 
+                                 headers=header) 
         response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header,
-                               body='',  
-                               method='POST',
-                               allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 404)
+ 
+        exception_mock.side_effect = controllers.AlreadyExists('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='PUT', 
+                                 headers=header) 
         response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-    def test_return_unauthorized_ooyala(self):
-        url = '/api/v2/234234accountidtest324/integrations/ooyala'
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
+        self.assertEquals(response.code, 409)
+ 
+        exception_mock.side_effect = controllers.Invalid('blah blah')  
+	self.http_client.fetch(self.get_url(url),
+                                 callback=self.stop, 
+                                 body=params, 
+                                 method='PUT', 
+                                 headers=header) 
         response = self.wait()
-        self.assertEquals(response.code, 401)
+        self.assertEquals(response.code, 400) 
+        exception_mocker.stop()
 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               body='', 
-                               method='PUT', 
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               body='', 
-                               method='POST', 
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-
-    def test_return_authorized_ooyala(self):
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
-        url = '/api/v2/%s/integrations/ooyala' % (self.user.neon_api_key)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header, 
-                               method='GET')
-        response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header,
-                               body='',  
-                               method='PUT',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               headers=header,
-                               body='',  
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertNotEquals(response.code, 401)
-
-class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
-    def get_app(self): 
-        return controllers.application
-
+class TestNewAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -225,11 +175,13 @@ class TestNewAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method="GET")
 
+    def test_post_acct_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.AccountHandler.post')
+        params = json.dumps({'rando': '123123abc'})
+	url = '/api/v2/124234234?param=123'
+        self.post_exceptions(url, params, exception_mocker) 
 
-class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
-    def get_app(self): 
-        return controllers.application
-
+class TestAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -281,15 +233,17 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
     def test_get_acct_does_exist(self):
 	url = '/api/v2/accounts?customer_name=123abc'
 	response = yield self.http_client.fetch(self.get_url(url), 
-			    body='', 
-			    method='POST', 
-			    allow_nonstandard_methods=True)
+			       body='',
+                               callback=self.stop,  
+   			       method='POST', 
+   			       allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
 	self.assertEquals(rjson['customer_name'], '123abc') 
 	url = '/api/v2/%s' % (rjson['account_id']) 
-	response = yield self.http_client.fetch(self.get_url(url), 
-			method="GET")
+	response = yield self.http_client.fetch(self.get_url(url),
+                                         callback=self.stop, 
+                       			 method="GET")
         rjson2 = json.loads(response.body) 
         self.assertEquals(rjson['account_id'],rjson2['account_id']) 
 
@@ -365,11 +319,19 @@ class TestAccountHandler(test_utils.neontest.AsyncHTTPTestCase):
         default_size_new = new_user['default_size']
         self.assertEquals(default_size_new[0],1200)
         self.assertEquals(default_size_new[1],default_size_old[1])
- 
-class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase): 
-    def get_app(self): 
-        return controllers.application
 
+    def test_get_acct_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.AccountHandler.get')
+	url = '/api/v2/%s' % '1234234'
+        self.get_exceptions(url, exception_mocker)  
+
+    def test_put_acct_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.AccountHandler.put')
+	url = '/api/v2/124234234?param=123'
+        params = json.dumps({'rando': '123123abc'})
+        self.put_exceptions(url, params, exception_mocker)
+ 
+class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -469,12 +431,26 @@ class TestOoyalaIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.test_i_id)
 
         self.assertEquals(platform.ooyala_api_key, ooyala_api_key) 
-        self.assertEquals(platform.api_secret, ooyala_api_secret) 
+        self.assertEquals(platform.api_secret, ooyala_api_secret)
  
-class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase): 
-    def get_app(self): 
-        return controllers.application
+    def test_get_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.get')
+	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        self.get_exceptions(url, exception_mocker)  
 
+    def test_put_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.put')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        self.put_exceptions(url, params, exception_mocker) 
+ 
+    def test_post_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.post')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        self.post_exceptions(url, params, exception_mocker)  
+ 
+class TestBrightcoveIntegrationHandler(TestControllersBase): 
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -735,11 +711,26 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         rjson = json.loads(response.body)
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['integration_id'])
-        self.assertEquals(platform.uses_batch_provisioning, False) 
+        self.assertEquals(platform.uses_batch_provisioning, False)
+ 
+    def test_get_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
+	url = '/api/v2/%s/integrations/brightcove' % '1234234'
+        self.get_exceptions(url, exception_mocker)  
 
-class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase): 
-    def get_app(self): 
-        return controllers.application
+    def test_put_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.put')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/integrations/brightcove' % '1234234'
+        self.put_exceptions(url, params, exception_mocker) 
+ 
+    def test_post_integration_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.post')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/integrations/brightcove' % '1234234'
+        self.post_exceptions(url, params, exception_mocker)  
+
+class TestVideoHandler(TestControllersBase): 
 
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
@@ -1024,10 +1015,24 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
 	except Exception as e:
             self.assertEquals(e.code, 404)
 
-class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase): 
-    def get_app(self): 
-        return controllers.application
+    def test_get_video_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
+	url = '/api/v2/%s/videos' % '1234234'
+        self.get_exceptions(url, exception_mocker)  
 
+    def test_put_video_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.VideoHandler.put')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/videos' % '1234234'
+        self.put_exceptions(url, params, exception_mocker) 
+ 
+    def test_post_video_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.VideoHandler.post')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/videos' % '1234234'
+        self.post_exceptions(url, params, exception_mocker)  
+
+class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -1159,7 +1164,63 @@ class TestThumbnailHandler(test_utils.neontest.AsyncHTTPTestCase):
                                                     method='DELETE')
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 501) 
-	    pass 
+	    pass
+ 
+    def test_get_thumbnail_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.get')
+	url = '/api/v2/%s/thumbnails' % '1234234'
+        self.get_exceptions(url, exception_mocker)  
+
+    def test_put_thumbnail_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.put')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/thumbnails' % '1234234'
+        self.put_exceptions(url, params, exception_mocker) 
+ 
+    def test_post_thumbnail_exceptions(self):
+        exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.post')
+        params = json.dumps({'integration_id': '123123abc'})
+	url = '/api/v2/%s/thumbnails' % '1234234'
+        self.post_exceptions(url, params, exception_mocker)  
+
+class TestAPIKeyRequired(TestControllersBase):
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
+        self.user.save() 
+        super(TestAPIKeyRequired, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+    
+    def make_calls_and_asserts(self, url, method): 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body='', 
+                               method=method, 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 401)
+
+    def test_all_urls(self): 
+        urls = [ ('/api/v2/a1', 'GET'), 
+                 ('/api/v2/a1', 'PUT'), 
+                 ('/api/v2/a1/integrations/brightcove', 'GET'), 
+                 ('/api/v2/a1/integrations/brightcove', 'PUT'), 
+                 ('/api/v2/a1/integrations/brightcove', 'POST'), 
+                 ('/api/v2/a1/integrations/ooyala', 'GET'), 
+                 ('/api/v2/a1/integrations/ooyala', 'PUT'), 
+                 ('/api/v2/a1/integrations/ooyala', 'POST'), 
+                 ('/api/v2/a1/videos', 'GET'), 
+                 ('/api/v2/a1/videos', 'PUT'), 
+                 ('/api/v2/a1/videos', 'POST'), 
+                 ('/api/v2/a1/thumbnails', 'GET'), 
+                 ('/api/v2/a1/thumbnails', 'PUT'), 
+                 ('/api/v2/a1/thumbnails', 'POST') ]
+
+        for url, method in urls:
+            self.make_calls_and_asserts(url, method)  
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
