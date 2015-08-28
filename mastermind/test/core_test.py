@@ -1745,7 +1745,7 @@ class TestExperimentState(test_utils.neontest.TestCase):
             serving_frac = 0.30,
             ctr = 0.02)
         thumbnail_status_2 = neondata.ThumbnailStatus(
-            'thumbnailstatus_acct1_vid1_v1t2',
+            'acct1_vid1_v1t2',
             serving_frac = 0.70,
             ctr = 0.03)
         video_status = neondata.VideoStatus('acct1_vid1',
@@ -1788,6 +1788,78 @@ class TestExperimentState(test_utils.neontest.TestCase):
         # The fractions should not have changed, because 'complete'
         self.assertNotEquals(fractions['acct1_vid1_v1t1'], 0.3)
         self.assertNotEquals(fractions['acct1_vid1_v1t2'], 0.7)
+
+    def test_update_experiment_state_directive_none_frac(self):
+        with self.assertLogExists(logging.ERROR,
+                                  'The thumbnail_status acct1_vid1_v1t1'):
+            # Set the experiment state to be complete
+            thumbnail_status_1 = neondata.ThumbnailStatus(
+                'acct1_vid1_v1t1',
+                serving_frac = None,
+                ctr = 0.02)
+            thumbnail_status_2 = neondata.ThumbnailStatus(
+                'acct1_vid1_v1t2',
+                serving_frac = 0.70,
+                ctr = 0.03)
+            video_status = neondata.VideoStatus('acct1_vid1',
+                neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+            self.mastermind.update_experiment_state_directive(
+                'acct1_vid1', video_status,
+                [thumbnail_status_1, thumbnail_status_2])
+            self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                              neondata.ExperimentState.UNKNOWN)
+            self.mastermind.wait_for_pending_modifies()
+            new_video_status = neondata.VideoStatus.get('acct1_vid1')
+            self.assertEquals(new_video_status.experiment_state,
+                              neondata.ExperimentState.UNKNOWN)
+
+    def test_update_experiment_state_directive_wrong_thumbnail_status(self):
+        with self.assertLogExists(logging.ERROR,
+                                  'ThumbnailStatus video id acct1_vid3'):
+            # Set the experiment state to be complete
+            thumbnail_status_1 = neondata.ThumbnailStatus(
+                'acct1_vid3_v1t1',
+                serving_frac = 0.30,
+                ctr = 0.02)
+            thumbnail_status_2 = neondata.ThumbnailStatus(
+                'acct1_vid1_v1t2',
+                serving_frac = 0.70,
+                ctr = 0.03)
+            video_status = neondata.VideoStatus('acct1_vid1',
+                neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+            self.mastermind.update_experiment_state_directive(
+                'acct1_vid1', video_status,
+                [thumbnail_status_1, thumbnail_status_2])
+            self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                              neondata.ExperimentState.UNKNOWN)
+            self.mastermind.wait_for_pending_modifies()
+            new_video_status = neondata.VideoStatus.get('acct1_vid1')
+            self.assertEquals(new_video_status.experiment_state,
+                              neondata.ExperimentState.UNKNOWN)
+
+    def test_update_experiment_state_directive_not_sum_1(self):
+        with self.assertLogExists(logging.ERROR,
+                                  'ThumbnailStatus of video id acct1_vid1'):
+            # Set the experiment state to be complete
+            thumbnail_status_1 = neondata.ThumbnailStatus(
+                'acct1_vid1_v1t1',
+                serving_frac = 0.31,
+                ctr = 0.02)
+            thumbnail_status_2 = neondata.ThumbnailStatus(
+                'acct1_vid1_v1t2',
+                serving_frac = 0.70,
+                ctr = 0.03)
+            video_status = neondata.VideoStatus('acct1_vid1',
+                neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+            self.mastermind.update_experiment_state_directive(
+                'acct1_vid1', video_status,
+                [thumbnail_status_1, thumbnail_status_2])
+            self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                              neondata.ExperimentState.UNKNOWN)
+            self.mastermind.wait_for_pending_modifies()
+            new_video_status = neondata.VideoStatus.get('acct1_vid1')
+            self.assertEquals(new_video_status.experiment_state,
+                              neondata.ExperimentState.UNKNOWN)
 
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -1940,7 +2012,7 @@ class TestModifyDatabase(test_utils.neontest.TestCase):
         super(TestModifyDatabase, self).tearDown()
 
     def test_unexpected_exception_video_modify(self):
-        self.datamock.VideoStatus().save.side_effect = [
+        self.datamock.VideoStatus.modify.side_effect = [
             IOError('Some weird error')]
         with self.assertLogExists(logging.ERROR,
                                   'Unhandled exception when updating video'):

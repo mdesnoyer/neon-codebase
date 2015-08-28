@@ -273,7 +273,6 @@ class VideoDBWatcher(threading.Thread):
         self._stopped.set()
         self._video_updater.stop()
 
-##########################################################################
     def _copy_db_experiment_info_to_mastermind(self):
         '''Save current experiment state and serving fracs to mastermind
          
@@ -305,7 +304,6 @@ class VideoDBWatcher(threading.Thread):
                     experiment_state,
                     thumbnail_status_list)
 
-#############################################################
     def _process_db_data(self):
         _log.info('Polling the video database for a full batch update')
 

@@ -266,6 +266,10 @@ class Mastermind(object):
         else:
             video_id = ('_').join([ids[0], ids[1]])
             thumbnail_partial_id = ids[2]
+            if thumbnail_status.serving_frac is None:
+                _log.error('The thumbnail_status %s has None serving_frac.' %
+                    thumbnail_status.get_id())
+                return (video_id, None)
             return (video_id,
                     (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
 
@@ -281,23 +285,46 @@ class Mastermind(object):
         '''
         if video_id is not None:
             with self.lock:
+                has_error = False
                 self.experiment_state[video_id] = video_status.experiment_state
 
                 directive_list = []
+                frac_sum = 0.0
                 for thumbnail_status in thumbnail_status_list:
                     t_video_id, directive = \
                         self._thumbnail_status_to_directive(thumbnail_status)
                     if t_video_id is None or directive is None:
-                        continue
+                        has_error = True;
+                        break
                     if t_video_id != video_id:
                         _log.error('ThumbnailStatus video id %s does not match'
-                                   ' the query video id %s' % t_video_id,
-                                   video_id)
-                        continue
+                                   ' the query video id %s' % (t_video_id,
+                                   video_id))
+                        has_error = True
+                        break
+                    frac_sum = frac_sum + directive[1]
                     directive_list.append(directive)
-                account_id = video_id.split('_')[0]
-                self.serving_directive[video_id] = \
-                    ((account_id, video_id), directive_list)
+                if not has_error:
+                    if abs(frac_sum - 1.0) >= 0.001:
+                        has_error = True
+                        _log.error('ThumbnailStatus of video id %s does not'
+                                   ' sum to 1.0' % video_id)
+                    # Validate the summation.
+
+                if has_error:
+                    self.experiment_state[video_id] = \
+                        neondata.ExperimentState.UNKNOWN
+                    self._incr_pending_modify(1)
+                    self.modify_pool.submit(
+                        _modify_video_info,
+                        self, video_id, neondata.ExperimentState.UNKNOWN,
+                        video_status.experiment_value_remaining,
+                        video_status.winner_tid)
+                else:
+                    # No Error.
+                    account_id = video_id.split('_')[0]
+                    self.serving_directive[video_id] = \
+                        ((account_id, video_id), directive_list)
 
 
     def update_video_info(self, video_metadata, thumbnails,
@@ -941,9 +968,14 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         full_winner = winner_tid
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
-        neondata.VideoStatus(video_id, experiment_state,
-                             full_winner,
-                             value_left).save()
+        def _update(status):
+           status.experiment_state = experiment_state
+           status.winner_tid = full_winner
+           status.experiment_value_remaining = value_left
+        neondata.VideoStatus.modify(video_id, _update, create_missing=True)
+        # neondata.VideoStatus(video_id, experiment_state,
+                             # full_winner,
+                             # value_left).save()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

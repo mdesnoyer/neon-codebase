@@ -3842,7 +3842,8 @@ class VideoStatus(DefaultedStoredObject):
     '''
     def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
                  winner_tid=None,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 state_history=None):
         super(VideoStatus, self).__init__(video_id)
 
         # Detect experiment_state changes, and record the history
@@ -3864,6 +3865,16 @@ class VideoStatus(DefaultedStoredObject):
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
 
+        # [(time, new_state)]
+        # self.state_history = state_history or []
+
+        # @experiment_state.setter
+        # def experiment_state(self, value):
+        #    if value != self.experiment_state:
+        #        self.experiment_state = value
+        #        self.state_history.append(
+        #            (datetime.datetime.utcnow().isoformat(),
+        #             value))
 
     @classmethod
     def _baseclass_name(cls):

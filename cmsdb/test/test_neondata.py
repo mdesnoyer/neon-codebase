@@ -617,6 +617,17 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
         self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
 
+    # def test_video_status_history(self):
+    #     vid = InternalVideoID.generate('acct1', 'vid1')
+    #     neondata.VideoStatus(vid).save()
+    #     video_status = neondata.VideoStatus.get(vid)
+    #     print "video_status", video_status
+    #     def _update(status):
+    #        status.experiment_state = neondata.ExperimentState.COMPLETE
+    #     neondata.VideoStatus.modify(vid, _update)
+    #     video_status = neondata.VideoStatus.get(vid)
+    #     print "video_status", video_status
+
     def test_video_metadata_methods(self):
         '''
         Currently only Tests the video_requests methods 
