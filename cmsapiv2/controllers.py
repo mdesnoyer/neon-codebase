@@ -83,6 +83,7 @@ class ResponseCode(object):
     HTTP_BAD_REQUEST = 400
     HTTP_UNAUTHORIZED = 401 
     HTTP_NOT_FOUND = 404 
+    HTTP_CONFLICT = 409 
     HTTP_INTERNAL_SERVER_ERROR = 500
     HTTP_NOT_IMPLEMENTED = 501
 
@@ -171,12 +172,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_not_implemented_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
+
             self.error(get_exc_message(exception), code=status_code)
+
         elif isinstance(exception, AlreadyExists):
-            self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            self.set_status(ResponseCode.HTTP_CONFLICT)
             statemon.state.increment(ref=_already_exists_errors_ref,
                                      safe=False)
             self.error('this item already exists', extra_data=get_exc_message(exception)) 
+
         else:
             _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
             statemon.state.increment(ref=_internal_server_errors_ref,
@@ -353,9 +357,15 @@ class IntegrationHelper():
                 current_time = time.time()
                 p.account_id = acct.neon_api_key
                 p.publisher_id = args['publisher_id'] 
-                p.read_token = args.get('read_token', None)
-                p.write_token = args.get('write_token', None)
-                p.callback_url = args.get('callback_url', None)
+                p.read_token = args.get('read_token', p.read_token)
+                p.write_token = args.get('write_token', p.write_token)
+                p.callback_url = args.get('callback_url', p.callback_url)
+                playlist_feed_ids = args.get('playlist_feed_ids', None)
+                if playlist_feed_ids: 
+                    p.playlist_feed_ids = playlist_feed_ids.split(',')
+                p.id_field = args.get('id_field', p.id_field) 
+                p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
+                                                              p.uses_batch_provisioning)))
             except KeyError as e: 
                 pass
  
@@ -524,8 +534,11 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=1024)), 
-          'write_token': Any(str, unicode, Length(min=1, max=1024))
+          'read_token': Any(str, unicode, Length(min=1, max=512)), 
+          'write_token': Any(str, unicode, Length(min=1, max=512)),
+          'id_field': Any(str, unicode, Length(min=1, max=32)),
+          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+          'uses_batch_provisioning': All(Coerce(int), Range(min=0, max=1))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -563,7 +576,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=1024)), 
           'write_token': Any(str, unicode, Length(min=1, max=1024)), 
-          'publisher_id': Any(str, unicode, Length(min=1, max=1024))
+          'publisher_id': Any(str, unicode, Length(min=1, max=512)),
+          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+          'uses_batch_provisioning': All(Coerce(int), Range(min=0, max=1))
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -576,6 +591,11 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             p.read_token = args.get('read_token', integration.read_token)
             p.write_token = args.get('write_token', integration.write_token)
             p.publisher_id = args.get('publisher_id', integration.publisher_id)
+            playlist_feed_ids = args.get('playlist_feed_ids', None)
+            if playlist_feed_ids: 
+                p.playlist_feed_ids = playlist_feed_ids.split(',')
+            p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
+                                                          integration.uses_batch_provisioning)))
  
         result = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
                                      integration_id, 
@@ -716,7 +736,6 @@ class VideoHelper():
         request.video_id = args['external_video_ref'] 
         if integration_id: 
             request.integration_id = integration_id
-            #request.integration_type = user_account.integrations[integration_id]
         request.video_url = args.get('video_url', None) 
         request.callback_url = args.get('callback_url', None)
         request.video_title = args.get('video_title', None) 
@@ -975,6 +994,10 @@ class CustomVoluptuousTypes():
                     pass
             raise Invalid("not an accepted date format") 
         return f
+
+    @staticmethod
+    def CommaSeparatedList():
+        return lambda v: v.split(',')
        
     @staticmethod
     def Dictionary():

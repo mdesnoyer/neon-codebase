@@ -482,7 +482,7 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
-        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
             'cmsapiv2.controllers.APIV2Handler.verify_account')
         self.verify_account_mock = self._future_wrap_mock(
@@ -506,7 +506,39 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['integration_id'])
 
-        self.assertEquals(rjson['integration_id'], platform.integration_id) 
+        self.assertEquals(rjson['integration_id'], platform.integration_id)
+        # make sure the defaults are the default 
+        self.assertEquals(rjson['playlist_feed_ids'], self.defop.playlist_feed_ids) 
+        self.assertEquals(rjson['read_token'], self.defop.read_token) 
+        self.assertEquals(rjson['write_token'], self.defop.write_token) 
+        self.assertEquals(rjson['callback_url'], self.defop.callback_url) 
+        self.assertEquals(rjson['uses_batch_provisioning'], self.defop.uses_batch_provisioning)
+        self.assertEquals(rjson['id_field'], self.defop.id_field)
+ 
+    @tornado.testing.gen_test 
+    def test_post_integration_body_params(self):
+        params = json.dumps({'publisher_id': '123123abc'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['publisher_id'], '123123abc')
+
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+
+        self.assertEquals(rjson['integration_id'], platform.integration_id)
+        # make sure the defaults are the default 
+        self.assertEquals(rjson['playlist_feed_ids'], self.defop.playlist_feed_ids) 
+        self.assertEquals(rjson['read_token'], self.defop.read_token) 
+        self.assertEquals(rjson['write_token'], self.defop.write_token) 
+        self.assertEquals(rjson['callback_url'], self.defop.callback_url) 
+        self.assertEquals(rjson['uses_batch_provisioning'], self.defop.uses_batch_provisioning)
+        self.assertEquals(rjson['id_field'], self.defop.id_field)
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
@@ -566,7 +598,144 @@ class TestBrightcoveIntegrationHandler(test_utils.neontest.AsyncHTTPTestCase):
                                           self.test_i_id)
 
         self.assertEquals(platform.read_token, read_token) 
-        self.assertEquals(platform.write_token, write_token) 
+        self.assertEquals(platform.write_token, write_token)
+ 
+    @tornado.testing.gen_test 
+    def test_post_integration_one_playlist_feed_id(self):
+        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc' \
+                   % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+
+        playlist_feed_ids = rjson['playlist_feed_ids'] 
+
+        self.assertEquals(playlist_feed_ids[0], 'abc')
+        self.assertEquals(platform.playlist_feed_ids[0], 'abc')
+ 
+    @tornado.testing.gen_test 
+    def test_post_integration_multiple_playlist_feed_ids(self):
+        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc,def,ghi' \
+                   % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+
+        playlist_feed_ids = rjson['playlist_feed_ids'] 
+
+        self.assertEquals(playlist_feed_ids[0], 'abc')
+        self.assertEquals(playlist_feed_ids[1], 'def')
+        self.assertEquals(playlist_feed_ids[2], 'ghi')
+        self.assertEquals(platform.playlist_feed_ids[0], 'abc')
+        self.assertEquals(platform.playlist_feed_ids[1], 'def')
+        self.assertEquals(platform.playlist_feed_ids[2], 'ghi')
+
+    @tornado.testing.gen_test 
+    def test_post_integration_body_playlist_feed_ids(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'playlist_feed_ids': 'abc,def,ghi,123'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+
+        playlist_feed_ids = rjson['playlist_feed_ids'] 
+        self.assertEquals(playlist_feed_ids[0], 'abc')
+        self.assertEquals(playlist_feed_ids[1], 'def')
+        self.assertEquals(playlist_feed_ids[2], 'ghi')
+        self.assertEquals(playlist_feed_ids[3], '123')
+        self.assertEquals(platform.playlist_feed_ids[0], 'abc')
+        self.assertEquals(platform.playlist_feed_ids[1], 'def')
+        self.assertEquals(platform.playlist_feed_ids[2], 'ghi')
+        self.assertEquals(platform.playlist_feed_ids[3], '123')
+
+    @tornado.testing.gen_test 
+    def test_post_integration_with_uses_batch_provisioning(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_batch_provisioning': 1})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+        self.assertTrue(platform.uses_batch_provisioning, True)
+
+    @tornado.testing.gen_test 
+    def test_put_integration_playlist_feed_ids(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'playlist_feed_ids': 'abc,def,ghi,123'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+ 
+        rjson = json.loads(response.body)
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'playlist_feed_ids': 'putupdate'})
+
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='PUT', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+        playlist_feed_ids = rjson['playlist_feed_ids']
+        self.assertEquals(platform.playlist_feed_ids[0], 'putupdate')
+ 
+    @tornado.testing.gen_test 
+    def test_put_integration_uses_batch_provisioning(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_batch_provisioning': 1})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+ 
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+        self.assertEquals(platform.uses_batch_provisioning, True) 
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'uses_batch_provisioning': 0})
+
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='PUT', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          rjson['integration_id'])
+        self.assertEquals(platform.uses_batch_provisioning, False) 
 
 class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
@@ -738,7 +907,7 @@ class TestVideoHandler(test_utils.neontest.AsyncHTTPTestCase):
                                method='POST',
                               allow_nonstandard_methods=True)
         response = self.wait()
-        self.assertEquals(response.code, 400) 
+        self.assertEquals(response.code, 409) 
         rjson = json.loads(response.body) 
         data = rjson['data']  
         self.assertTrue(first_job_id in data)
