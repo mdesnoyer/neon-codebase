@@ -12,7 +12,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 import mastermind.core
-from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo
+from mastermind.core import Mastermind, ThumbnailInfo, VideoInfo, ModelMapper, ScoreType
 
 from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
@@ -52,7 +52,8 @@ class TestObjects(test_utils.neontest.TestCase):
                                            incremental_impressions=56,
                                            base_impressions=9849,
                                            incremental_conversions=98,
-                                           base_conversions=4986)])
+                                           base_conversions=4986)],
+            score_type=ScoreType.CLASSICAL)
 
         video_info_2 = VideoInfo(
             'acct1', True,
@@ -62,7 +63,8 @@ class TestObjects(test_utils.neontest.TestCase):
                                            incremental_impressions=56,
                                            base_impressions=9849,
                                            incremental_conversions=98,
-                                           base_conversions=4986)])
+                                           base_conversions=4986)],
+            score_type=ScoreType.CLASSICAL)
 
         self.assertEqual(video_info_1, video_info_2)
         self.assertEqual(repr(video_info_1), repr(video_info_2))
@@ -98,7 +100,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
 
-    def test_priors(self):
+    def test_serving_directives_with_priors(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
         
@@ -113,7 +115,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
 
         # TODO (mdesnoyer): Change this test to have the initial model
         # score significantly change the prior serving
@@ -126,6 +129,107 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
+    
+    def test_model_mapping(self):
+        # tests that the mapping from models --> score type is 
+        # correct for known models. 
+        modelsToTest = ['20130924_textdiff',
+        '20130924_crossfade','p_20150722_withCEC_w20',
+        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
+        '20150206_flickr_slow_memcache','20130924',
+        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
+        'p_20150722_withCEC_wNone']
+        for model in modelsToTest:
+            self.assertEqual(ScoreType.CLASSICAL, 
+                ModelMapper.get_model_type(model))
+
+        # test that it correctly adds new models
+        with self.assertLogExists(logging.INFO, 
+            ('Model %s is not in model dicts; adding it,'
+                  ' as score type %s'%(str('unknown_model_5hx'), 
+                    str(ScoreType.DEFAULT)))):
+            self.assertEqual(ScoreType.DEFAULT,
+                ModelMapper.get_model_type('unknown_model_5hx'))
+        self.assertTrue(
+            ModelMapper.MODEL2TYPE.has_key('unknown_model_5hx'))
+        
+        # test that invalid score types are mapped to UNKNOWN
+        with self.assertLogExists(logging.ERROR, 
+            ('Invalid score type specification for model '
+             '%s defaulting to UNKNOWN'%('unknown_model_z9i'))):
+            ModelMapper._add_model('unknown_model_z9i', 21)
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type(
+                'unknown_model_z9i'))
+        self.assertTrue(
+            ModelMapper.MODEL2TYPE.has_key('unknown_model_z9i'))
+        with self.assertLogExists(logging.ERROR, 
+            ('Model %s with invalid score type %s'
+             ' is already in MODEL2TYPE, original score '
+            'type remains'%('unknown_model_z9i', 
+            str(ScoreType.UNKNOWN)))):
+            ModelMapper._add_model('unknown_model_z9i', 'score!')
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type(
+                'unknown_model_z9i'))
+        
+        # test that model score_types cannot be changed to
+        # invalid values
+        ModelMapper._add_model('unknown_model_5hx', 12)
+        self.assertEqual(ScoreType.DEFAULT,
+            ModelMapper.get_model_type('unknown_model_5hx'))
+        
+        # test that model score_types can be changed to 
+        # valid values.
+        ModelMapper._add_model('unknown_model_5hx', 
+            ScoreType.UNKNOWN)
+        self.assertEqual(ScoreType.UNKNOWN,
+            ModelMapper.get_model_type('unknown_model_5hx'))
+
+    def test_priors(self):
+        # the computation of the prior has been modified significantly,
+        # such that it's not computed based on whether or not the 
+        # scoring type thumbnail is the classical (Borda Count) or the
+        # new method (Rank Centrality). 
+        # in order to test the priors, we have to label the thumbnails
+        # with their respective models. This occurs when we call 
+        # update_video_info, which isn't heretofor invoked. 
+        modelsTested = [['20130924_crossfade', ScoreType.CLASSICAL], 
+                        [None, ScoreType.UNKNOWN],
+                        ['asdf', ScoreType.RANK_CENTRALITY]]
+        thumbnails = [ThumbnailMetadata('n1', 'vid1', rank=0,
+                                        ttype='neon', model_score=5.8),
+                      ThumbnailMetadata('n2', 'vid1', rank=1,
+                                        ttype='neon',
+                                        model_score='3.5'),
+                      ThumbnailMetadata('ctr', 'vid1',
+                                        ttype='random',
+                                        model_score=0.2),
+                      ThumbnailMetadata('bc', 'vid1', chosen=False,
+                                        ttype='brightcove',
+                                        model_score=0.)]
+
+        expected_scores = [[1.12, 1.0, 1.0, 1.0],
+                           [1.0, 1.0, 1.0, 1.0],
+                           [2.44, 1.75, 1.0, 1.0]]
+
+        for n, (model_version, model_type_num) in enumerate(
+                                                  modelsTested):
+            self.mastermind.update_video_info(
+                VideoMetadata('acct1_vid1', 
+                              model_version=model_version),
+                              thumbnails)
+            # ensure that the model type, obtained by name, 
+            # is correct. 
+            modelType_byname = ModelMapper.get_model_type(model_version)
+            self.assertTrue(modelType_byname == model_type_num)
+            # acquire the video_info
+            m_vid_info = self.mastermind.video_info['acct1_vid1']
+            # iterate over each thumbnail, ensuring that it is 
+            # correct
+            for m,t in enumerate(m_vid_info.thumbnails):
+                gpc = self.mastermind._get_prior_conversions(t, m_vid_info)
+                self.assertAlmostEqual(gpc, expected_scores[n][m])
 
     def test_more_conversions_than_impressions(self):
         self.mastermind.update_experiment_strategy(
@@ -139,7 +243,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_conversions=2000,
                                                base_impressions=200),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         self.assertAlmostEqual(directive['n1'], 1.0/1.1)
@@ -161,7 +266,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='neon',
                                                model_score='-inf')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
 
         self.assertEquals(len(directive), 4)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -228,7 +334,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                phash=4437921476290916540,
                                                filtered=None, 
                                                ttype='centerframe', 
-                                               model_score=None))])
+                                               model_score=None))],
+                 score_type=ScoreType.CLASSICAL)
 
         self.mastermind._calculate_new_serving_directive('testacct123_4324552316001')
         self.assertEquals(len(self.mastermind.serving_directive['testacct123_4324552316001'][1]), 7)
@@ -295,7 +402,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                model_version='20130924_crossfade_withalg', 
                                                phash='4576300592785859720', 
                                                urls=['http://blah.invalid2.jpg'], 
-                                               ttype='neon', model_score=None))])
+                                               ttype='neon', model_score=None))],
+                 score_type=ScoreType.CLASSICAL)
 
         self.mastermind._calculate_new_serving_directive('acct1_vid1')
         self.assertEquals(len(self.mastermind.serving_directive['acct1_vid1'][1]), 9)
@@ -363,7 +471,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                model_version='20130924_crossfade_withalg', 
                                                phash='4576300592785859720', 
                                                urls=['http://blah.invalid2.jpg'], 
-                                               ttype='neon', model_score=None))]))[1]
+                                               ttype='neon', model_score=None))],
+                 score_type=ScoreType.CLASSICAL))[1]
  
         self.assertEquals(len(directive), 9)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -382,7 +491,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon',
-                                           model_score=u'3.5'))])
+                                           model_score=u'3.5'))],
+             score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(sum(directive.values()), 1.0)
@@ -436,11 +546,12 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1',
                                                ttype='neon', model_score=3.5)),
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                               ttype='random'))]))[1]
+                                               ttype='random'))],
+                 score_type=ScoreType.CLASSICAL))[1]
         self.assertEqual(directive, {'n1': 0.0, 'n2':0.01, 'ctr':0.99 })
 
     def test_finding_baseline_thumb(self):
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         
         # When there is just a Neon thumb, we should show the Neon one
         video_info.thumbnails.append(
@@ -472,7 +583,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', baseline_type='centerframe'))
 
         # The random frame is not shown if it's not the baseline type
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         with self.assertLogExists(logging.ERROR,
@@ -492,7 +603,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', baseline_type='brightcove'))
 
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
@@ -516,7 +627,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', ExperimentStrategy('acct1', baseline_type='neon',
                                         holdback_frac=0.02))
 
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [],score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('ctr', 'vid1', ttype='random')))
         video_info.thumbnails.append(
@@ -558,7 +669,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='random')),
              build_thumb(ThumbnailMetadata('bc1', 'vid1', chosen=True,
-                                           ttype='brightcove'))])
+                                           ttype='brightcove'))],
+             score_type=ScoreType.CLASSICAL)
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -579,7 +691,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(directive['n2'], 0.0)
 
     def test_multiple_chosen_thumbs(self):
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
 
         video_info.thumbnails.append(
             build_thumb(ThumbnailMetadata('n1', 'vid1', ttype='neon',
@@ -612,7 +724,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info = VideoInfo(
                 'acct1', False, [build_thumb(
                     ThumbnailMetadata('n1', 'vid1',ttype='neon',
-                                      model_score=5.8))])
+                                      model_score=5.8))],
+                score_type=ScoreType.CLASSICAL)
         with self.assertLogExists(logging.ERROR, ('Testing was disabled and '
                                                   'there was no baseline')):
             with self.assertLogExists(logging.WARNING, ('Could not find a '
@@ -655,7 +768,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('bc1', 'vid1', rank=1,
                                                ttype='brightcove')),
                  build_thumb(ThumbnailMetadata('bc2', 'vid1', rank=2,
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
         self.assertAlmostEqual(directive['bc2'], 0.0)
         self.assertGreater(directive['n1'], 0.0)
@@ -675,7 +789,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                ttype='brightcove')),
                  build_thumb(ThumbnailMetadata('cust', 'vid1', chosen=True,
                                                ttype='customupload'),
-                                               phash=67)]))[1]
+                                               phash=67)],
+                 score_type=ScoreType.CLASSICAL))[1]
         self.assertAlmostEqual(directive['ctr'], 0.99)
         self.assertAlmostEqual(directive['cust'], 0.0)
         self.assertAlmostEqual(directive['bc1'], 0.0)
@@ -693,7 +808,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1',
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
         
         self.assertAlmostEqual(directive['n2'], 0.99)
         self.assertAlmostEqual(directive['bc'], 0.0)
@@ -714,7 +830,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
               build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                             ttype='random')),
               build_thumb(ThumbnailMetadata('bc', 'vid1',
-                                            ttype='brightcove'))])
+                                            ttype='brightcove'))],
+              score_type=ScoreType.CLASSICAL)
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -741,7 +858,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', only_exp_if_chosen=True))
 
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         self.assertIsNone(
             self.mastermind._calculate_current_serving_directive(
                 video_info))
@@ -788,7 +905,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(sum(directive.values()), 1.0)
 
     def test_too_many_thumbs_disabled(self):
-        video_info = VideoInfo('acct1', True, [])
+        video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         self.assertIsNone(
             self.mastermind._calculate_current_serving_directive(
                 video_info))
@@ -835,7 +952,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='random')),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                           ttype='brightcove'))])
+                                           ttype='brightcove'))],
+             score_type=ScoreType.CLASSICAL)
 
         with self.assertLogExists(logging.ERROR, 'not implemented'):
             directive = self.mastermind._calculate_current_serving_directive(
@@ -857,7 +975,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         video_info = VideoInfo(
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
-                                           ttype='neon', model_score=5.8))])
+                                           ttype='neon', model_score=5.8))],
+            score_type=ScoreType.CLASSICAL)
 
         with self.assertLogExists(logging.ERROR, 'Invalid experiment type'):
             self.assertIsNone(
@@ -872,7 +991,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 self.mastermind._calculate_current_serving_directive(
                     VideoInfo('acct2', True, [
                         build_thumb(ThumbnailMetadata('n1', 'vid1',
-                                                      ttype='neon'))])))
+                                                      ttype='neon'))],
+                        score_type=ScoreType.CLASSICAL)))
 
     def test_winner_found_override_editor(self):
         self.mastermind.update_experiment_strategy(
@@ -883,7 +1003,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5))])
+                                           ttype='neon', model_score=3.5))],
+             score_type=ScoreType.CLASSICAL)
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
@@ -947,7 +1068,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5))])
+                                           ttype='neon', model_score=3.5))],
+             score_type=ScoreType.CLASSICAL)
 
         def _set_winner(thumb_name):
             for thumb in video_info.thumbnails:
@@ -1010,7 +1132,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))])
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertItemsEqual(directive.keys(), ['n2', 'ctr', 'bc', 'n1'])
@@ -1049,7 +1172,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='random')),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                           ttype='brightcove'))])
+                                           ttype='brightcove'))],
+             score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -1076,7 +1200,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                            ttype='neon', model_score=5.8)),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
                                            ttype='neon', model_score=3.5))
-            ])
+            ], score_type=ScoreType.CLASSICAL)
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
@@ -1106,7 +1230,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                                ttype='random')),
                  build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                               ttype='brightcove'))]))[1]
+                                               ttype='brightcove'))],
+                 score_type=ScoreType.CLASSICAL))[1]
         self.assertItemsEqual(
             sorted(directive.keys(), key=lambda x: directive[x])[2:],
             ['n3', 'ctr', 'bc', 'n1'])
@@ -1136,7 +1261,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          base_impressions=10, base_conversions=4),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=1200, base_conversions=150)])
+                         base_impressions=1200, base_conversions=150)],
+             score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -1165,7 +1291,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                          base_impressions=350, base_conversions=1),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=1200, base_conversions=2)])
+                         base_impressions=1200, base_conversions=2)],
+             score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         
@@ -1625,7 +1752,8 @@ class TestModifyDatabase(test_utils.neontest.TestCase):
                     mastermind.core.VideoInfo(
                         'acct1', True, 
                         [build_thumb(ThumbnailMetadata('t1', 'vid1')),
-                         build_thumb(ThumbnailMetadata('t2', 'vid1'))]))
+                         build_thumb(ThumbnailMetadata('t2', 'vid1'))],
+                         score_type=ScoreType.CLASSICAL))
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
