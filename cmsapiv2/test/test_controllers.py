@@ -753,7 +753,6 @@ class TestVideoHandler(TestControllersBase):
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image]
-        #self.http_mocker = patch('utils.http.tornado.httpclient.HTTPClient.fetch')
         self.http_mocker = patch('utils.http.send_request')
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
@@ -775,6 +774,23 @@ class TestVideoHandler(TestControllersBase):
     def test_post_video(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
+
+    @tornado.testing.gen_test
+    def test_post_invalid_thumbnail(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' \
+                      % (self.account_id_api_key, self.test_i_id)
+        #self.im_download_mock.side_effect = Exception('boom')
+        #add_tn_mocker = patch('cmsdb.neondata.VideoMetadata.download_and_add_thumbnail')
+        #add_tn_mock = self._future_wrap_mock(
+        #    add_tn_mocker.start())
+        #add_tn_mock = Exception('boom')
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',

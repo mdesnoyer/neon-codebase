@@ -27,6 +27,8 @@ import utils.neon
 import utils.logs
 import utils.http
 
+import dateutil.parser
+
 from cmsdb import neondata
 from datetime import datetime
 from functools import wraps 
@@ -983,7 +985,7 @@ Custom Voluptuous Types
 class CustomVoluptuousTypes(): 
     @staticmethod
     def Date(fmt='%Y-%m-%dT%H:%M:%S.%fZ'):
-        return lambda v: datetime.strptime(v, fmt)
+        return lambda v: dateutil.parser.parse(v)
 
     @staticmethod
     def ISO8601Date():
