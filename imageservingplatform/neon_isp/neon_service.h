@@ -1,15 +1,16 @@
 #ifndef _NEON_SERVICE_
 #define _NEON_SERVICE_
 
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include <ngx_http.h>
-#include "neon_error_codes.h"
-
+#include <boost/scoped_ptr.hpp>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include "neon_error_codes.h"
 
 typedef enum  {
     

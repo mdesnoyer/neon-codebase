@@ -124,7 +124,7 @@ neon_service_set_bucket_id(const ngx_str_t * identifier,
     
     unsigned long bucket_hash = neon_sdbm_hash(hashstring, offset);
     bucket_hash %= N_ABTEST_BUCKETS;
-    bucket_id->data = ngx_pcalloc(pool, N_ABTEST_BUCKET_DIGITS + 1);
+    bucket_id->data = (u_char *)ngx_pcalloc(pool, N_ABTEST_BUCKET_DIGITS + 1);
     sprintf((char*)bucket_id->data, "%x", (unsigned int)bucket_hash);
     bucket_id->len = strlen((char*)bucket_id->data);
 }
@@ -189,7 +189,7 @@ neon_service_set_custom_cookie(ngx_http_request_t *request,
 
     // Allocate cookie
     c_len = neon_cookie_name->len + value_len + expires->len + domain->len + equal_sign.len; 
-    cookie = ngx_pnalloc(request->pool, c_len);
+    cookie = (u_char *)ngx_pnalloc(request->pool, c_len);
     if (cookie == NULL) {
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 
                        0, "Failed to allocate memory in the pool for cookie");
@@ -204,7 +204,7 @@ neon_service_set_custom_cookie(ngx_http_request_t *request,
     p = ngx_copy(p, domain->data, domain->len);
 
     // Add cookie to the headers list
-    set_cookie = ngx_list_push(&request->headers_out.headers);
+    set_cookie = (ngx_table_elt_t*)ngx_list_push(&request->headers_out.headers);
     if (set_cookie == NULL) {
         neon_stats[NEON_SERVICE_COOKIE_SET_FAIL] ++;
         return NEON_FALSE;
@@ -582,7 +582,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
 
     ngx_buf_t * buf;
     ngx_buf_t * b;
-    b = ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
+    b = (ngx_buf_t*)ngx_pcalloc(request->pool, sizeof(ngx_buf_t));
     if(b == NULL){
         request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
@@ -616,46 +616,41 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     //dummy bucket id, server api doesn't use bucket id currently 
     ngx_str_t bucket_id = ngx_string("");
 
-    buf = ngx_calloc_buf(request->pool);
+    buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
     ngx_str_t start = ngx_string("{\"data\":\"");
     buf->pos = start.data; 
     buf->last = buf->pos + start.len; 
     content_length += start.len;  
     neon_service_add_to_chain(request, chain, buf); 
     
-    // look up thumbnail image url
-    char *url = NULL; 
-    buf = ngx_calloc_buf(request->pool);
-    NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
-        neon_mastermind_image_url_lookup(account_id,
-                (char*)video_id,
-                &bucket_id,
-                height,
-                width,
-                &url);
+    buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
+ 
+    std::string image_url("");  
+    neon_mastermind_image_url_lookup(account_id,
+                     (char*)video_id,
+                     &bucket_id,
+                     height,
+                     width, 
+                     image_url);
     
-    if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
+    if (image_url.size() == 0) {  
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
         neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
         neon_service_server_api_not_found(request, chain);
         return NEON_SERVER_API_FAIL;
     }
-
-    buf->pos = (u_char*)url; 
-    buf->last = buf->pos + strlen(url); 
-    content_length += strlen(url);  
+    
+    // a copy here to avoid invalid reads when trying to free image_url
+    u_char* new_url = (u_char *)ngx_pnalloc(request->pool, image_url.length());
+    ngx_copy(new_url, (u_char*)image_url.c_str(), image_url.length());
+    buf->pos = new_url; 
+    buf->last = buf->pos + image_url.length();  
+    content_length += image_url.length();  
 
     neon_service_add_to_chain(request, chain, buf);
 
-    // Temp solution, figure out a way to use the nginx logger
-    if (strstr(url,"cloudinary") != NULL) {
-        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, 
-                        "Cloudinary URL generated for video %s h %d w %d", 
-                        video_id, height, width);
-    }  
-
     ngx_str_t end = ngx_string("\",\"error\":\"\"}");
-    buf = ngx_calloc_buf(request->pool);
+    buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
     buf->pos = end.data; 
     buf->last = buf->pos + end.len;  
     content_length += end.len;  
@@ -732,36 +727,34 @@ neon_service_client_api(ngx_http_request_t *request,
     }
 
     // look up thumbnail image url
-    buf = ngx_calloc_buf(request->pool);
+    buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
+    ngx_memzero(buf, sizeof(ngx_buf_t)); 
     ngx_str_t redirect_str = ngx_string("redirect to image");
     buf->pos = redirect_str.data; 
     buf->last = buf->pos + redirect_str.len;  
     neon_service_add_to_chain(request, chain, buf); 
  
-    char *url = NULL; 
-    buf = ngx_calloc_buf(request->pool);
-    NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR error_url =
-        neon_mastermind_image_url_lookup(account_id,
-                (char*)video_id,
-                &bucket_id,
-                height,
-                width,
-                &url);
+    std::string image_url(""); 
+    neon_mastermind_image_url_lookup(account_id,
+                     (char*)video_id,
+                      &bucket_id,
+                      height,
+                      width, 
+                      image_url);
 
-    if(error_url != NEON_MASTERMIND_IMAGE_URL_LOOKUP_OK) {
+    if (image_url.size() == 0) { 
         neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
         return NEON_CLIENT_API_FAIL;
     }
 
-    buf->pos = (u_char*)url; 
-    buf->last = buf->pos + strlen(url); 
-    // Temp solution, figure out a way to use the nginx logger
-    if (strstr(url,"cloudinary") != NULL) {
-        ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, 
-                        "Cloudinary URL generated for video %s h %d w %d", 
-                        video_id, height, width);
-    }  
+    buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
+    // a copy here to avoid invalid reads when trying to free image_url
+    u_char* new_url = (u_char *)ngx_pnalloc(request->pool, image_url.length());
+    ngx_copy(new_url, (u_char*)image_url.c_str(), image_url.length());
+    buf->pos = new_url; 
+    buf->last = buf->pos + image_url.length();  
+ 
     // we don't want to add the url to the chain here, since we are 
     // simply redirecting, set the headers with the url information 
     // and off we go. 
@@ -844,7 +837,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 
     // make a copy of params o we can parse and extract them with str_tok
     // this could be better with ngx functions
-    unsigned char * vids = ngx_pcalloc(request->pool, video_ids.len + 1);
+    unsigned char * vids = (unsigned char*)ngx_pcalloc(request->pool, video_ids.len + 1);
     vids[video_ids.len] = 0;
     strncpy((char*) vids, (char *)video_ids.data, video_ids.len);
     char *vtoken = strtok_r((char*)vids, s, &context);
@@ -853,22 +846,17 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     
     if (wants_html) { 
         static ngx_str_t response_body_start = ngx_string("<!DOCTYPE html><html><head><script type='text/javascript'>window.parent.postMessage('");
-        buf = ngx_calloc_buf(request->pool);
-     //   buf->memory = 1;   
-    //    *chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
         buf->start = buf->pos  = response_body_start.data;
         buf->end = buf->last = buf->pos + response_body_start.len;
         clen += response_body_start.len;
         neon_service_add_to_chain(request, (*chain), buf); 
-      //  (*chain)->buf = buf;
-     //   (*chain)->next = NULL;
-     //   chain = &(*chain)->next;
     }  
     // for each video id  passd to us as params
     while(vtoken != NULL) {
 
         size_t sz = strlen(vtoken) +1;
-        unsigned char * video_id = ngx_pcalloc(request->pool, sz);
+        unsigned char * video_id = (unsigned char *)ngx_pcalloc(request->pool, sz);
         memset(video_id, 0, sz);
         strncpy((char*) video_id, vtoken, sz);
         
@@ -882,21 +870,19 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
             neon_service_set_bucket_id(&ipAddress, &vid_str, &bucket_id, request->pool);
         }
 
-        char *tid = NULL; 
-        NEON_MASTERMIND_TID_LOOKUP_ERROR err =
-            neon_mastermind_tid_lookup(account_id,
-                    (const char*)video_id,
-                    &bucket_id,
-                    &tid);
+        std::string tid(""); 
+        neon_mastermind_tid_lookup(account_id, (const char*)video_id, &bucket_id, tid);
 
-        // allocate a buffer and its chain
-        buf = ngx_calloc_buf(request->pool);
+        buf = (ngx_buf_t *)ngx_calloc_buf(request->pool);
 
-        if(err == NEON_MASTERMIND_TID_LOOKUP_OK) {
-            buf->start = buf->pos  = (u_char*)tid;
-            buf->end = buf->last = buf->pos + strlen(tid);
-            clen += strlen(tid);
-        }else{
+        if(tid.length() > 0) {
+            u_char* new_tid = (u_char *)ngx_pnalloc(request->pool, tid.length());
+            ngx_copy(new_tid, (u_char*)tid.c_str(), tid.length());
+            buf->pos = new_tid; 
+            buf->last = buf->pos + tid.length();  
+            clen += tid.length();
+        }
+        else {
             buf->start = buf->pos = noimage.data;
             buf->end = buf->last = noimage.data + noimage.len;
             clen += noimage.len;
@@ -911,7 +897,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
         // if there's another token, then we need a separator
         if (vtoken){
              // Add separator buffer
-             ngx_buf_t * s_buf = ngx_calloc_buf(request->pool);
+             ngx_buf_t * s_buf = (ngx_buf_t *)ngx_calloc_buf(request->pool);
              s_buf->start = s_buf->pos = (u_char*)",";
              s_buf->end = s_buf->last = s_buf->pos + 1; 
              neon_service_add_to_chain(request, (*chain), s_buf); 
@@ -920,16 +906,11 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     }
     if (wants_html) { 
         static ngx_str_t response_body_end = ngx_string("', '*')</script></head><body></body></html>");
-        buf = ngx_calloc_buf(request->pool);
-        //buf->memory = 1;   
-        //*chain = ngx_pcalloc(request->pool, sizeof(ngx_chain_t));
+        buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
         buf->start = buf->pos  = response_body_end.data;
         buf->end = buf->last = buf->pos + response_body_end.len;
         clen += response_body_end.len;
         neon_service_add_to_chain(request, (*chain), buf); 
-        //(*chain)->buf = buf;
-        //(*chain)->next = NULL;
-        //chain = &(*chain)->next;
     }  
 
     request->headers_out.status = NGX_HTTP_OK;

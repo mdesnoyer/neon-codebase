@@ -1,6 +1,10 @@
 #ifndef _NEON_UTILS_
 #define _NEON_UTILS_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 #include <time.h>
 #include "neon_error_codes.h"
@@ -66,6 +70,9 @@ NEON_BOOLEAN neon_is_valid_ip_string(unsigned char *ip);
 
 
 
+#ifdef __cplusplus
+} // extern "C"
+#endif
 #endif
 
 

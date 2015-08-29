@@ -32,6 +32,8 @@ import tornado.ioloop
 import tornado.web
 import tornado.escape
 import threading
+import urlparse
+import urllib
 import utils.botoutils
 import utils.http
 import utils.neon
@@ -118,13 +120,18 @@ class RequestData(object):
     Instance of this classs is stored in the Q
     '''
 
-    def __init__(self, key, api_request):
+    def __init__(self, key, api_request, duration=None):
         '''
         @api_request: NeonApiRequest Object
         '''
         self.key = key
         self.api_request = api_request
-        self.video_size = None # in bytes
+        if duration is not None:
+            # approximate the video size
+            self.video_size = duration * 8.0 * 1024 * 800
+        else:
+            self.video_size = None # in bytes
+        self.duration = duration # in seconds
 
     def get_key(self):
         return self.key
@@ -225,15 +232,16 @@ class FairWeightedRequestQueue(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def put(self, api_request):
+    def put(self, api_request, duration=None):
         # Based on customer priority put in the appropriate Q
-        p = yield DBCache.get_customer_priority(api_request.api_key, async=True)
+        p = yield DBCache.get_customer_priority(api_request.api_key,
+                                                async=True)
         
         # if priority > # of queues, then consider all priorities > len(Qs) as
         # the lowest priority
         pindex = min(p, len(self.pqs) -1)
         key = api_request.key
-        item = RequestData(key, api_request)
+        item = RequestData(key, api_request, duration=duration)
         ret = self.pqs[pindex].put(key, item)
 
         # TODO(Sunil): Remove the complexity of looking up the
@@ -271,7 +279,7 @@ class FairWeightedRequestQueue(object):
         pq = self.pqs[pqid]
         item = pq.peek(key)
         # if the item still exists in the Q
-        if item:
+        if item and item.duration is None:
             video_url = item.get_video_url()
 
             # Get content length of the video
@@ -281,7 +289,7 @@ class FairWeightedRequestQueue(object):
                 if nbytes is not None:
                     statemon.state.increment('queue_size_bytes', nbytes)
                     _log.info("Request %s had video file of size %s",
-                              item, nbytes)
+                              item.key, nbytes)
                     # add video size 
                     item.set_video_size(nbytes)
             except Exception as e:
@@ -308,10 +316,14 @@ class FairWeightedRequestQueue(object):
                 _log.warn('Error getting video url %s via boto. '
                           'Falling back on http: %s' % (video_url, e))
                 
-        
-        req = tornado.httpclient.HTTPRequest(method='HEAD',
-                                             url=video_url,
-                                             request_timeout=5.0) 
+
+        url_parse = urlparse.urlparse(video_url)
+        url_parse = list(url_parse)
+        url_parse[2] = urllib.quote(url_parse[2])
+        req = tornado.httpclient.HTTPRequest(
+            method='HEAD',
+            url=urlparse.urlunparse(url_parse),
+            request_timeout=5.0) 
             
         result = yield tornado.gen.Task(utils.http.send_request, req)
 
@@ -376,7 +388,9 @@ class JobManager(object):
             # video of 800 kbps or 15 min if we don't know
             # the length of the video.
             approx_video_length = self.base_time*15.0
-            if job.video_size:
+            if job.duration:
+                approx_video_length = job.duration
+            elif job.video_size:
                 approx_video_length = job.video_size * 8.0 / 1024 / 800
             deadline = datetime.datetime.now() + datetime.timedelta(
                 seconds=approx_video_length*2.0)
@@ -519,7 +533,16 @@ class JobManager(object):
         
         Returns False if the job is already in the queue.
         '''
-        retval = yield self.q.put(api_request, async=True)
+        # Try to get the duration of the video
+        duration = None
+        video = yield tornado.gen.Task(
+            neondata.VideoMetadata.get,
+            neondata.InternalVideoID.generate(api_request.api_key,
+                                              api_request.video_id))
+        if video is not None:
+            duration = video.duration
+                    
+        retval = yield self.q.put(api_request, duration, async=True)
         statemon.state.server_queue = self.q.qsize()
         _log.info('Add job %s for account %s to the queue' % 
                   (api_request.job_id, api_request.api_key))
@@ -668,6 +691,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             api_request = None 
             http_callback = params.get(CALLBACK_URL, None)
             default_thumbnail = params.get('default_thumbnail', None)
+            external_thumbnail_id = params.get('external_thumbnail_id', None)
+            publish_date = params.get('publish_date', None)
+            i_id = params.get(INTEGRATION_ID, '0')
             # Verify essential parameters
             try:
                 api_key = params[API_KEY]
@@ -682,7 +708,7 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 title = params[VIDEO_TITLE]
                 url = params[VIDEO_DOWNLOAD_URL]
                 if not default_thumbnail:
-                    _log.info("no default image for the video %s" % vid)
+                    _log.debug("no default image for the video %s" % vid)
                 
 
             except KeyError, e:
@@ -706,13 +732,13 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
             job_id = hashlib.md5(intermediate).hexdigest()
           
             # Identify Request Type
+            # TODO: Remove the special treatment for brightcove and ooyala
             if "brightcove" in self.request.uri:
                 pub_id  = params[PUBLISHER_ID] #publisher id
                 rtoken = params[BCOVE_READ_TOKEN]
                 wtoken = params[BCOVE_WRITE_TOKEN]
                 autosync = params["autosync"]
                 request_type = "brightcove"
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.BrightcoveApiRequest(
                     job_id, api_key, vid, title, url,
                     rtoken, wtoken, pub_id, http_callback, i_id,
@@ -725,7 +751,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 oo_api_key = params["oo_api_key"]
                 oo_secret_key = params["oo_secret_key"]
                 autosync = params["autosync"]
-                i_id = params[INTEGRATION_ID]
                 api_request = neondata.OoyalaApiRequest(
                     job_id,
                     api_key, 
@@ -742,11 +767,18 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
 
             else:
                 request_type = "neon"
-                api_request = neondata.NeonApiRequest(job_id, api_key, vid,
-                                                      title, url,
-                                                      request_type,
-                                                      http_callback,
-                                                      default_thumbnail)
+                api_request = neondata.NeonApiRequest(
+                    job_id,
+                    api_key,
+                    vid,
+                    title,
+                    url,
+                    request_type,
+                    http_callback,
+                    default_thumbnail,
+                    integration_id=i_id,
+                    external_thumbnail_id=external_thumbnail_id,
+                    publish_date=publish_date)
                 statemon.state.increment('neon_requests')
             
             # API Method
@@ -783,7 +815,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                 # NOTE: Only if this is a Neon request, save it to the
                 # DB. Other platform requests get added on request
                 # creation cron
-                if request_type == 'neon':
+                # TODO: Change this so that any source will have the video
+                # added here.
+                if request_type == 'neon' and i_id == '0':
                     nplatform = yield tornado.gen.Task(
                         neondata.NeonPlatform.get, api_key, '0')
                     if nplatform:
@@ -803,23 +837,27 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                         return
 
                 # Save the video metadata and the default thumbnail
-                video = yield tornado.gen.Task(
-                    neondata.VideoMetadata.get,
-                    neondata.InternalVideoID.generate(api_key, vid))
-                if video is None:
-                    video = neondata.VideoMetadata(
-                        neondata.InternalVideoID.generate(api_key, vid),
-                        request_id=api_request.job_id,
-                        video_url=url,
-                        i_id=api_request.integration_id,
-                        serving_enabled=False)
-                    yield tornado.gen.Task(video.save)
+                def _merge_video_data(video_obj):
+                    video_obj.job_id = api_request.job_id
+                    video_obj.url = url
+                    video_obj.integration_id = api_request.integration_id
+                    video_obj.serving_enabled = \
+                      len(video_obj.thumbnail_ids) > 0
+                    video_obj.publish_date = publish_date or \
+                      video_obj.publish_date
+                internal_video_id = \
+                  neondata.InternalVideoID.generate(api_key, vid)
+                yield tornado.gen.Task(
+                    neondata.VideoMetadata.modify,
+                    internal_video_id,
+                    _merge_video_data,
+                    create_missing=True)
                 yield api_request.save_default_thumbnail(async=True)
                 def _set_serving_enabled(video_obj):
                     video_obj.serving_enabled = \
                       len(video_obj.thumbnail_ids) > 0
                 yield tornado.gen.Task(neondata.VideoMetadata.modify,
-                                       video.key,
+                                       internal_video_id,
                                        _set_serving_enabled)
                 
                 self.set_status(201)

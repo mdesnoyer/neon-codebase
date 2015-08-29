@@ -1,6 +1,9 @@
 #ifndef _NEON_FETCH_
 #define _NEON_FETCH_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <time.h>
 #include "neon_error_codes.h"
@@ -28,5 +31,8 @@ NEON_FETCH_ERROR neon_fetch(const char * const mastermind_url,
 
 
 
+#ifdef __cplusplus
+}
+#endif
 #endif
 

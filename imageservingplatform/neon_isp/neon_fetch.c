@@ -41,6 +41,7 @@ neon_fetch(const char * const mastermind_url,
     int ret = 0;
 
     *script_output = (char *)malloc(output_size);
+    memset(*script_output, 0, output_size); 
     strcat(*script_output, "neon_fetch::isp_s3downloader: ");
  
     static const char * format = "/usr/local/bin/isp_s3downloader -u %s -d %s";
@@ -79,7 +80,7 @@ neon_fetch(const char * const mastermind_url,
     }
  
     free(line); 
-    ret = WEXITSTATUS(fclose(script_runner)); 
+    ret = WEXITSTATUS(pclose(script_runner)); 
     
     return ret == 0 ? NEON_FETCH_OK : NEON_FETCH_FAIL;
 }

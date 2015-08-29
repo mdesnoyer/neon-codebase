@@ -8,8 +8,15 @@
 */
 
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <ngx_core.h>
 #include <ngx_http.h>
+#ifdef __cplusplus
+}
+#endif
+
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
@@ -168,10 +175,10 @@ ngx_http_neon_create_loc_conf(ngx_conf_t * cf)
 {
     ngx_http_neon_loc_conf_t * conf;
     
-    conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_neon_loc_conf_t));
+    conf = (ngx_http_neon_loc_conf_t *)ngx_pcalloc(cf->pool, sizeof(ngx_http_neon_loc_conf_t));
     
     if(conf == NULL) {
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }
     
     //conf->mastermind_url = NGX_CONF_UNSET;
@@ -203,14 +210,14 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
     //clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     //clcf->handler = ngx_http_neon_handler_healthcheck; // which handler should this be ? 
 
-    ngx_str_t  *name = data; // i.e., first field of var
+    ngx_str_t  *name = (ngx_str_t *)data; // i.e., first field of var
    
        if(name == NULL){
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }    
     
     if (ngx_strcmp(name->data, "") == 0) {
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }
 
     ngx_http_neon_loc_conf.mastermind_file_url.data = name->data;
@@ -225,14 +232,14 @@ ngx_http_neon_mastermind_file_url(ngx_conf_t *cf, void *post, void *data)
 static char *
 ngx_http_neon_mastermind_download_filepath(ngx_conf_t *cf, void *post, void *data)
 {
-    ngx_str_t  *name = data; // i.e., first field of var
+    ngx_str_t  *name = (ngx_str_t*)data; // i.e., first field of var
    
        if(name == NULL){
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }    
     
     if (ngx_strcmp(name->data, "") == 0) {
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }
     
     ngx_http_neon_loc_conf.mastermind_download_filepath.data = name->data;
@@ -247,14 +254,14 @@ ngx_http_neon_mastermind_download_filepath(ngx_conf_t *cf, void *post, void *dat
 static char *
 ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *data)
 {
-    ngx_str_t  *name = data; // i.e., first field of var
+    ngx_str_t  *name = (ngx_str_t*)data; // i.e., first field of var
    
        if(name == NULL){
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }    
     
     if (ngx_strcmp(name->data, "") == 0) {
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }
     
     ngx_http_neon_loc_conf.mastermind_validated_filepath.data = name->data;
@@ -265,10 +272,10 @@ ngx_http_neon_mastermind_validated_filepath(ngx_conf_t *cf, void *post, void *da
     
 static char *
 ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
-    time_t *name = data; // i.e., first field of var
+    time_t *name = (time_t*)data; // i.e., first field of var
    
     if(name == NULL){
-        return NGX_CONF_ERROR;
+        return (char *)NGX_CONF_ERROR;
     }    
     
     ngx_http_neon_loc_conf.updater_sleep_time = *name; 
@@ -283,7 +290,7 @@ ngx_http_neon_updater_sleep_time(ngx_conf_t *cf, void *post, void *data){
 static char *
 ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data)
 {
-    ngx_str_t  *name = data; // i.e., first field of var
+    ngx_str_t  *name = (ngx_str_t*)data; // i.e., first field of var
    
     if (name == NULL || ngx_strcmp(name->data, "") == 0){
         ngx_http_neon_loc_conf.neon_fetch_s3port.data = NULL;
@@ -303,7 +310,7 @@ ngx_http_neon_fetch_s3port(ngx_conf_t *cf, void *post, void *data)
 static char *
 ngx_http_neon_fetch_s3downloader(ngx_conf_t *cf, void *post, void *data)
 {
-    ngx_str_t  *name = data; // i.e., first field of var
+    ngx_str_t  *name = (ngx_str_t*)data; // i.e., first field of var
    
     if (name == NULL || ngx_strcmp(name->data, "") == 0){
         ngx_http_neon_loc_conf.neon_fetch_s3downloader.data = NULL;
@@ -489,7 +496,7 @@ static ngx_int_t ngx_http_neon_handler_healthcheck(ngx_http_request_t *r)
     r->headers_out.content_type.len = sizeof("text/plain") - 1;
     r->headers_out.content_type.data = (u_char *) "text/plain";
     
-    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    b = (ngx_buf_t*)ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     
     out.buf = b;
     out.next = NULL;
@@ -551,7 +558,7 @@ static ngx_int_t ngx_http_neon_handler_stats(ngx_http_request_t *r)
     r->headers_out.content_type.len = sizeof("text/plain") - 1;
     r->headers_out.content_type.data = (u_char *) "text/plain";
     
-    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    b = (ngx_buf_t*)ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     
     out.buf = b;
     out.next = NULL;
@@ -664,7 +671,7 @@ static void create_stats_formatter(int num_of_counters, char * format_string, in
 static char *ngx_http_neon_client_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
   ngx_http_core_loc_conf_t  *clcf;
-  clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+  clcf = (ngx_http_core_loc_conf_t*)ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
   clcf->handler = ngx_http_neon_handler_client;
 
     
@@ -675,7 +682,7 @@ static char *ngx_http_neon_client_hook(ngx_conf_t *cf, ngx_command_t *cmd, void 
 static char *ngx_http_neon_server_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_core_loc_conf_t  *clcf;
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    clcf = (ngx_http_core_loc_conf_t*)ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_neon_handler_server;
     
     ngx_http_neon_mastermind_file_url(cf, cmd, conf);    
@@ -686,7 +693,7 @@ static char *ngx_http_neon_server_hook(ngx_conf_t *cf, ngx_command_t *cmd, void 
 static char *ngx_http_neon_getthumbnailid_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_core_loc_conf_t  *clcf;
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    clcf = (ngx_http_core_loc_conf_t*)ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_neon_handler_getthumbnailid;
     
     return NGX_CONF_OK;
@@ -696,7 +703,7 @@ static char *ngx_http_neon_getthumbnailid_hook(ngx_conf_t *cf, ngx_command_t *cm
 static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_core_loc_conf_t  *clcf;
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    clcf = (ngx_http_core_loc_conf_t*)ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_neon_handler_healthcheck;
     
     return NGX_CONF_OK;
@@ -706,7 +713,7 @@ static char *ngx_http_neon_healthcheck_hook(ngx_conf_t *cf, ngx_command_t *cmd, 
 static char *ngx_http_neon_stats_hook(ngx_conf_t *cf, ngx_command_t *cmd, void *conf){
 
     ngx_http_core_loc_conf_t  *clcf;
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    clcf = (ngx_http_core_loc_conf_t*)ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     clcf->handler = ngx_http_neon_handler_stats;
     
     return NGX_CONF_OK;

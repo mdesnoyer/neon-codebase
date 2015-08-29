@@ -28,7 +28,8 @@ import time
 from utils.options import define, options
 
 define('region', type=str, default="us-east-1", help='region to connect to')
-define('customer_callback_sqs', type=str, default="neon-customer-callback", help='SQS Q')
+define('customer_callback_sqs', type=str, default="neon-customer-callback",
+       help='SQS queue name')
 
 statemon.define('callbacks_in_flight', int)
 statemon.define('callback_errors', int)

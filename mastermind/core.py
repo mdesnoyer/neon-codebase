@@ -25,6 +25,8 @@ from utils.options import define, options
 from utils import statemon
 from utils import strutils
 
+from collections import defaultdict as ddict
+
 _log = logging.getLogger(__name__)
 
 define('modify_pool_size', type=int, default=5,
@@ -42,12 +44,81 @@ statemon.define('critical_error', int)
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
 
+class ScoreType(object):
+    '''
+    Exports some variable names that map to integers
+    to refer to the different scoring types.
+    '''
+    RANK_CENTRALITY = 2
+    CLASSICAL = 1
+    UNKNOWN = 0
+    DEFAULT = RANK_CENTRALITY
+
+class ModelMapper(object):
+    '''
+    Stores relevant information about the model used for a given
+    video, particularly with respect to computing the score
+    priors. This was made necessary by the move to using Rank
+    Centrality and, more broadly, no longer binning scores into
+    [1, 7]. 
+
+    Note: This makes several simplifying assumptions. Namely, 
+    if a model is not in `classical models,' then it is using
+    Rank Centrality, and is assumed to have a mean of 1. Generally
+    when Rank Centrality is estimated the sum of the vector is 1--
+    since the vector corresponds to transition probabilities. But
+    since we wanted to the mean to not be dependent on the number
+    of tested items, the sum of the vector corresponds to the number
+    of training items, and hence the mean is definitionally one.
+
+    IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
+    METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
+    '''
+    MODEL2TYPE = ddict(lambda: ScoreType.DEFAULT,
+        {x:ScoreType.CLASSICAL for x in ['20130924_textdiff',
+        '20130924_crossfade','p_20150722_withCEC_w20',
+        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
+        '20150206_flickr_slow_memcache','20130924',
+        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
+        'p_20150722_withCEC_wNone']})
+    MODEL2TYPE[None] = ScoreType.UNKNOWN # reserved for unknown models
+
+    @classmethod
+    def _add_model(cls, modelid, score_type=ScoreType.DEFAULT):
+        if ((score_type != ScoreType.RANK_CENTRALITY) and
+            (score_type != ScoreType.CLASSICAL) and
+            (score_type != ScoreType.UNKNOWN)):
+            _log.error('Invalid score type specification for model '
+                       '%s defaulting to UNKNOWN'%(modelid))
+            score_type = ScoreType.UNKNOWN
+            # if it's already in there, do not attempt to change
+            if ModelMapper.MODEL2TYPE.has_key(modelid):
+                _log.error('Model %s with invalid score type %s'
+                    ' is already in MODEL2TYPE, original score '
+                    'type remains'%(str(modelid), str(score_type)))
+                return
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            _log.info('Model %s is not in model dicts; adding it,'
+                  ' as score type %s'%(str(modelid), str(score_type)))
+        cls.MODEL2TYPE[modelid] = score_type
+
+    @classmethod
+    def get_model_type(cls, modelid):
+        '''
+        Returns the model type given either a model
+        number or a model name.
+        '''
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            ModelMapper._add_model(modelid)
+        return ModelMapper.MODEL2TYPE[modelid]
+
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
-    def __init__(self, account_id, testing_enabled, thumbnails=[]):
+    def __init__(self, account_id, testing_enabled, thumbnails=[], score_type=ScoreType.UNKNOWN):
         self.account_id = str(account_id)
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
+        self.score_type = score_type
 
     def __str__(self):
         return strutils.full_object_str(self)
@@ -287,7 +358,6 @@ class Mastermind(object):
             with self.lock:
                 has_error = False
                 self.experiment_state[video_id] = video_status.experiment_state
-
                 directive_list = []
                 frac_sum = 0.0
                 for thumbnail_status in thumbnail_status_list:
@@ -314,17 +384,14 @@ class Mastermind(object):
                 if has_error:
                     self.experiment_state[video_id] = \
                         neondata.ExperimentState.UNKNOWN
-                    self._incr_pending_modify(1)
-                    self.modify_pool.submit(
-                        _modify_video_info,
-                        self, video_id, neondata.ExperimentState.UNKNOWN,
-                        video_status.experiment_value_remaining,
-                        video_status.winner_tid)
+                    
+                    self._calculate_new_serving_directive(video_id)
                 else:
-                    # No Error.
+                    # No Error so set the serving directive
                     account_id = video_id.split('_')[0]
                     self.serving_directive[video_id] = \
                         ((account_id, video_id), directive_list)
+
 
 
     def update_video_info(self, video_metadata, thumbnails,
@@ -357,13 +424,18 @@ class Mastermind(object):
                                 'account id %s and it should not have') % 
                                 (video_id, video_metadata.get_account_id()))
                     video_info.account_id = video_metadata.get_account_id()
+                video_info.score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 
             except KeyError:
                 # No information about this video yet, so add it to the index
+                score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 video_info = VideoInfo(
                     video_metadata.get_account_id(),
                     testing_enabled,
-                    thumbnail_infos)
+                    thumbnail_infos,
+                    score_type=score_type)
                 self.video_info[video_id] = video_info
 
             self._calculate_new_serving_directive(video_id)
@@ -648,14 +720,15 @@ class Mastermind(object):
                                      baseline,
                                      editor,
                                      candidates,
-                                     strategy.min_conversion,
+                                     video_info,
+                                     strategy.min_conversion,  
                                      strategy.frac_adjust_rate)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
             experiment_state, seq_frac, value_left, winner_tid = \
               self._get_sequential_fracs(strategy, baseline, editor,
-                                         candidates)
+                                         candidates, video_info)
             run_frac.update(seq_frac)
         else:
             _log.error('Invalid experiment type for video %s : %s' % 
@@ -665,7 +738,8 @@ class Mastermind(object):
         return (experiment_state, run_frac, value_left, winner_tid)
 
     def _get_bandit_fracs(self, strategy, baseline, editor, candidates,
-                          min_conversion = 50, frac_adjust_rate = 1.0):
+                          video_info, min_conversion = 50, 
+                          frac_adjust_rate = 1.0):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See
@@ -719,7 +793,7 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conv = dict([(x.id, self._get_prior_conversions(x) +
+        conv = dict([(x.id, self._get_prior_conversions(x, video_info) +
                       x.get_conversions())
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
@@ -741,7 +815,7 @@ class Mastermind(object):
                                       max(imp[x] - conv[x], 0) + 1,
                                       size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
-            conv = self._get_prior_conversions(non_exp_thumb) + \
+            conv = self._get_prior_conversions(non_exp_thumb, video_info) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
                 spstats.beta.rvs(max(conv, 0) + 1,
@@ -833,7 +907,7 @@ class Mastermind(object):
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
 
-    def _get_prior_conversions(self, thumb_info):
+    def _get_prior_conversions(self, thumb_info, video_info):
         '''Get the number of conversions we would expect based on the model 
         score.'''
         
@@ -849,17 +923,36 @@ class Mastermind(object):
             else:
                 return max(1.0, (Mastermind.PRIOR_CTR * 
                                  Mastermind.PRIOR_IMPRESSION_SIZE))
+        if video_info.score_type == ScoreType.CLASSICAL:
+            # then it was calculated using Borda Count
+            # original doc:
+            # Peg a score of 5.5 as a 10% lift over random and a score of
+            # 4.0 as neutral
+            return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * 
+                            Mastermind.PRIOR_CTR * 
+                            Mastermind.PRIOR_IMPRESSION_SIZE))
+        elif video_info.score_type == ScoreType.RANK_CENTRALITY:
+            # then it was calculated using Rank Centrality
+            # in which case the lift is given directly by RC
+            # of course, the calculated score only accounts for
+            # about 22% of the variance (computed by Spearman's Rho)
+            # and so we should regress it back to the mean
+            # lift is given by the ratio of the images scores, 
+            # regressed to the mean by some prior. Furthermore, 
+            # we assume the mean value, which is 1 due to how we 
+            # compute rank centrality.
+            prior = 0.3
+            return max(1.0, prior * score + (1-prior) * 1.0) 
+        else:
+            # then it is none, assume a lift of 0%
+            return max(1.0, (1. * Mastermind.PRIOR_CTR * 
+                             Mastermind.PRIOR_IMPRESSION_SIZE))
 
-        # Peg a score of 5.5 as a 10% lift over random and a score of
-        # 4.0 as neutral
-        return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
-                         Mastermind.PRIOR_IMPRESSION_SIZE))
-
-    def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
+    def _get_sequential_fracs(self, strategy, baseline, editor, candidates, video_info):
         '''Gets the serving fractions for a sequential testing strategy.'''
         _log.error('Sequential seving strategy is not implemented. '
                    'Falling back to the multi armed bandit')
-        return self._get_bandit_fracs(strategy, baseline, editor, candidates)
+        return self._get_bandit_fracs(strategy, baseline, editor, candidates, video_info)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.
@@ -969,13 +1062,10 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
         def _update(status):
-           status.experiment_state = experiment_state
+           status.set_experiment_state(experiment_state)
            status.winner_tid = full_winner
            status.experiment_value_remaining = value_left
         neondata.VideoStatus.modify(video_id, _update, create_missing=True)
-        # neondata.VideoStatus(video_id, experiment_state,
-                             # full_winner,
-                             # value_left).save()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

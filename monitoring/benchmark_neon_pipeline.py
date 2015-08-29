@@ -203,8 +203,7 @@ def monitor_neon_pipeline():
     finally:
         # cleanup
         np = neondata.NeonPlatform.get(options.api_key, '0')
-        neondata.NeonPlatform.delete_all_video_related_data(np, video_id,
-                really_delete_keys=True)
+        np.delete_all_video_related_data(video_id, really_delete_keys=True)
 
 def main():
     utils.neon.InitNeon()

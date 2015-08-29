@@ -1,16 +1,17 @@
 #ifndef _NEON_MASTERMIND_C
 #define _NEON_MASTERMIND_C
 
-#include <time.h>
-#include <ngx_config.h>
-#include <ngx_core.h>
-#include <ngx_http.h>
-#include "neon_error_codes.h"
+#include <iostream>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <time.h>
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+#include "neon_error_codes.h"
 
 /*
  *  Contains an error message in case of function call failure
@@ -74,14 +75,13 @@ typedef enum  {
     
 } NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR;
     
-    
-NEON_MASTERMIND_IMAGE_URL_LOOKUP_ERROR
+void
 neon_mastermind_image_url_lookup(const char * accountId,
                                  const char * videoId,
                                  ngx_str_t * ipAddress,
                                  int height,
-                                 int width,
-                                 char ** url);
+                                 int width, 
+                                 std::string & image_url);
     
 typedef enum  {
     NEON_MASTERMIND_TID_LOOKUP_OK = 0,
@@ -90,18 +90,16 @@ typedef enum  {
     
 } NEON_MASTERMIND_TID_LOOKUP_ERROR;
 
-NEON_MASTERMIND_TID_LOOKUP_ERROR
+void
 neon_mastermind_tid_lookup(const char * accountId,
                             const char * videoId,
-                            ngx_str_t * bucketId,
-                            char ** tid);
+                            ngx_str_t * bucketId, 
+                            std::string & thumbnailId);
      
 /*
  * Check if current mastermind has expired
  */
 NEON_BOOLEAN neon_mastermind_expired();
-
-
 
 /*
  *  Get health check status
@@ -113,13 +111,10 @@ NEON_BOOLEAN neon_mastermind_expired();
  *
  */
 int neon_mastermind_healthcheck();
-
-    
     
 #ifdef __cplusplus
 } // extern "C"
 #endif
-    
 
 #endif
 

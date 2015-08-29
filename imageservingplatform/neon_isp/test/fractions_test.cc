@@ -143,7 +143,7 @@ TEST_F(FractionsTest, test_generate_default_url_base)
     Fraction f; 
     f.Init(0,frac);
     boost::scoped_ptr<std::string> default_url; 
-    default_url.reset(url_utils::GenerateUrl(f.base_url(), *f.tid(),700,800)); 
+    default_url.reset(new std::string(url_utils::GenerateUrl(f.base_url(), *f.tid(),700,800))); 
     ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *default_url.get()); 
 }
 
