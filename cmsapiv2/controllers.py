@@ -403,25 +403,6 @@ class IntegrationHelper():
 
     @staticmethod 
     @tornado.gen.coroutine
-    def addStrategy(acct, integration_type): 
-        """Adds an ExperimentStrategy to the database  
-        
-        Keyword arguments: 
-        acct - a NeonUserAccount object 
-        integration_type - the type of integration to create 
-        """ 
-        if integration_type == neondata.IntegrationType.OOYALA: 
-            strategy = neondata.ExperimentStrategy(acct.neon_api_key) 
-        elif integration_type == neondata.IntegrationType.BRIGHTCOVE: 
-            strategy = neondata.ExperimentStrategy(acct.neon_api_key)
-        result = yield tornado.gen.Task(strategy.save)  
-        if result: 
-            raise tornado.gen.Return(result)
-        else: 
-            raise SaveError('unable to save strategy to account')
-    
-    @staticmethod 
-    @tornado.gen.coroutine
     def getIntegration(integration_id, integration_type): 
         """Gets an integration based on integration_id, account_id, and type.  
         
