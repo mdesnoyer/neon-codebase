@@ -141,6 +141,34 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(len(objs), 4)
 
+    @tornado.testing.gen_test
+    def test_async_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = yield tornado.gen.Task(conn.fetch_keys_from_db,
+                                      'neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
+
+    def test_sync_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = conn.fetch_keys_from_db('neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
+
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
 
