@@ -240,15 +240,19 @@ class Mastermind(object):
     '''
     PRIOR_IMPRESSION_SIZE = 10
     PRIOR_CTR = 0.1
+    VALUE_THRESHOLD = 0.01
     
     def __init__(self):
         self.video_info = {} # video_id -> VideoInfo
         
         # account_id -> neondata.ExperimentStrategy
-        self.experiment_strategy = {} 
+        self.experiment_strategy = {}
         
         # video_id -> ((account_id, video_id), [(thumb_id, fraction)])
-        self.serving_directive = {} 
+        self.serving_directive = {}
+
+        # video_id -> neondata.ExperimentState
+        self.experiment_state = {}
         
         # For thread safety
         self.lock = multiprocessing.RLock()
@@ -296,11 +300,13 @@ class Mastermind(object):
         '''
         if video_ids is None:
             with self.lock:
-                video_ids = self.video_info.keys()
+                keys = self.serving_directive.keys()
+        else:
+            keys = video_ids
 
-        for video_id in video_ids:
+        for key in keys:
             try:
-                directive = self.serving_directive[video_id]
+                directive = self.serving_directive[key]
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
@@ -310,6 +316,85 @@ class Mastermind(object):
                 # don't have information about this video id
                 # anymore. Oh well.
                 pass
+
+    def _thumbnail_status_to_directive(self, thumbnail_status):
+        '''Convert thubmnail_status to serving directive
+
+        Inputs:
+        thumbnails_status - ThumbnailStatus
+
+        Returns:
+        tuple (video_id, (thumbnail_id, directive)) video_id is 
+        extracted from thumbnail_status. directive is the serving fraction
+        '''
+
+        # An example of ThumbnailStatus id: thumbnailstatus_acct1_vid1_v1t2
+        # It contains four parts: thumbnails status, account id, video id
+        # and thumbnail id.
+        ids = str(thumbnail_status.get_id()).split('_')
+        if len(ids) != 3:
+            _log.error('The thumbnail_status id %s does not seem to be valid.' %
+                thumbnail_status.get_id())
+            return (None, None)
+        else:
+            video_id = ('_').join([ids[0], ids[1]])
+            thumbnail_partial_id = ids[2]
+            if thumbnail_status.serving_frac is None:
+                _log.error('The thumbnail_status %s has None serving_frac.' %
+                    thumbnail_status.get_id())
+                return (video_id, None)
+            return (video_id,
+                    (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
+
+    def update_experiment_state_directive(self, video_id, video_status,
+                                          thumbnail_status_list):
+        '''Add a video experiment state to the experiment_state
+
+        Inputs:
+        video_id - video_id to be updated
+        video_status: neondata.VideoStatus object
+        thumbnail_status_list: list of thumbnail status objects
+
+        '''
+        if video_id is not None:
+            with self.lock:
+                has_error = False
+                self.experiment_state[video_id] = video_status.experiment_state
+                directive_list = []
+                frac_sum = 0.0
+                for thumbnail_status in thumbnail_status_list:
+                    t_video_id, directive = \
+                        self._thumbnail_status_to_directive(thumbnail_status)
+                    if t_video_id is None or directive is None:
+                        has_error = True;
+                        break
+                    if t_video_id != video_id:
+                        _log.error('ThumbnailStatus video id %s does not match'
+                                   ' the query video id %s' % (t_video_id,
+                                   video_id))
+                        has_error = True
+                        break
+                    frac_sum = frac_sum + directive[1]
+                    directive_list.append(directive)
+                if not has_error:
+                    if abs(frac_sum - 1.0) >= 0.001:
+                        has_error = True
+                        _log.error('ThumbnailStatus of video id %s does not'
+                                   ' sum to 1.0' % video_id)
+                    # Validate the summation.
+
+                if has_error:
+                    self.experiment_state[video_id] = \
+                        neondata.ExperimentState.UNKNOWN
+                    
+                    self._calculate_new_serving_directive(video_id)
+                else:
+                    # No Error so set the serving directive
+                    account_id = video_id.split('_')[0]
+                    self.serving_directive[video_id] = \
+                        ((account_id, video_id), directive_list)
+
+
 
     def update_video_info(self, video_metadata, thumbnails,
                           testing_enabled=True):
@@ -362,6 +447,8 @@ class Mastermind(object):
         with self.lock:
             if video_id in self.video_info:
                 del self.video_info[video_id]
+            if video_id in self.experiment_state:
+                del self.experiment_state[video_id]
             if video_id in self.serving_directive:
                 del self.serving_directive[video_id]
                 self._incr_pending_modify(1)
@@ -457,6 +544,12 @@ class Mastermind(object):
             statemon.state.increment('critical_error') 
             return
         
+        # if video has already finished the experiment, just keep the
+        # previous directive.
+        if self.experiment_state.get(video_id, None) == \
+           neondata.ExperimentState.COMPLETE:
+            return
+
         result = self._calculate_current_serving_directive(
             video_info, video_id)
         if result is None:
@@ -464,6 +557,7 @@ class Mastermind(object):
             return 
 
         experiment_state, new_directive, value_left, winner_tid = result
+        self.experiment_state[video_id] = experiment_state
                     
         try:
             old_directive = self.serving_directive[video_id][1]
@@ -624,8 +718,13 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates,
-                                     video_info)
+              self._get_bandit_fracs(strategy,
+                                     baseline,
+                                     editor,
+                                     candidates,
+                                     video_info,
+                                     strategy.min_conversion,  
+                                     strategy.frac_adjust_rate)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
@@ -640,7 +739,9 @@ class Mastermind(object):
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
 
-    def _get_bandit_fracs(self, strategy, baseline, editor, candidates, video_info):
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates,
+                          video_info, min_conversion = 50, 
+                          frac_adjust_rate = 1.0):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See
@@ -699,23 +800,31 @@ class Mastermind(object):
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.get_impressions() - conv[x.id])
+                             x.get_impressions())
                              for x in valid_bandits])
+
+        # Calculation the summation of all conversions.
+        total_conversions = sum(x.get_conversions() for x in valid_bandits)
+        if non_exp_thumb is not None:
+            total_conversions = total_conversions + non_exp_thumb.get_conversions()
 
         # Run the monte carlo series
         MC_SAMPLES = 1000.
-        mc_series = [spstats.beta.rvs(max(1, conv[x]),
-                                      max(1, imp[x]),
-                                      size=MC_SAMPLES)
-                                      for x in bandit_ids]
+
+        # Change: the formula in the paper is conversions+1,
+        #         impressions-conversions+1
+        mc_series = [spstats.beta.rvs(conv[x] + 1,
+                                      max(imp[x] - conv[x], 0) + 1,
+                                      size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
             conv = self._get_prior_conversions(non_exp_thumb, video_info) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
-                spstats.beta.rvs(max(1, conv),
-                                 max(1, Mastermind.PRIOR_IMPRESSION_SIZE * 
+                spstats.beta.rvs(max(conv, 0) + 1,
+                                 max(Mastermind.PRIOR_IMPRESSION_SIZE * 
                                         (1 - Mastermind.PRIOR_CTR) + 
-                                        non_exp_thumb.get_impressions()-conv),
+                                        non_exp_thumb.get_impressions() - 
+                                        conv , 0) + 1,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -744,10 +853,14 @@ class Mastermind(object):
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
-        if win_frac[winner_idx] >= 0.95:
+        # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
+        # Means that 95% of chance the value remaining is 1% of the picked winner.
+        # This will make it comes to conclusion quicker comparing to 
+        # using: if win_frac[winner_idx] >= 0.95:
+        if value_remaining <= Mastermind.VALUE_THRESHOLD:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                impressions[winner_idx] >= 500):
+                impressions[winner_idx] >= 500 and total_conversions >= min_conversion):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
@@ -774,12 +887,22 @@ class Mastermind(object):
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
 
+        # Adjust the run_frac according to frac_adjust_rate,
+        # if frac_adjust_rate == 0.0, then all the fractions are equal.
+        # If frac_adjust_rate == 1.0, then run_frac stays the same.
+
+        # TODO: now the adjustment is equal for all fractions.
+        # TODO: We will change it to be related to the prior instead.
+        win_frac = win_frac ** frac_adjust_rate
+        win_frac = win_frac / np.sum(win_frac)
+
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
         if non_exp_thumb is not None:
             win_frac = np.around(win_frac[:-1], 2)
             win_frac = win_frac / np.sum(win_frac)
+
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
@@ -925,7 +1048,6 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
             serving_frac=frac,
             ctr=ctrs[thumb_id])
             for thumb_id, frac in new_directive.iteritems()]
-
         neondata.ThumbnailStatus.save_all(objs)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
@@ -941,9 +1063,11 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         full_winner = winner_tid
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
-        neondata.VideoStatus(video_id, experiment_state,
-                             full_winner,
-                             value_left).save()
+        def _update(status):
+           status.set_experiment_state(experiment_state)
+           status.winner_tid = full_winner
+           status.experiment_value_remaining = value_left
+        neondata.VideoStatus.modify(video_id, _update, create_missing=True)
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

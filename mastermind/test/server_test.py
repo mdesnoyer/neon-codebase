@@ -445,6 +445,72 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
 
+    def test_initialize_serving_directives(self, datamock):
+        datamock.InternalVideoID = neondata.InternalVideoID
+
+        # A platform with serving disabled
+        platform1 = neondata.BrightcovePlatform('a1', 'i1', 
+                                                serving_enabled=False)
+        platform1.add_video('vid1', 'job11')
+
+        # A platform with serving enabled
+        platform2 = neondata.BrightcovePlatform('a2', 'i2',
+                                                serving_enabled=True)
+        platform2.add_video('vid1', 'job21')
+        platform2.add_video('vid2', 'job22')
+        
+        datamock.AbstractPlatform.get_all.return_value = \
+          [platform1, platform2]
+
+        # Define the video meta data
+        vid_meta = {
+            'a1_vid1': neondata.VideoMetadata(
+                'a1_vid1',
+                ['a1_vid1_t01'],
+                i_id='i1'),
+            'a2_vid1': neondata.VideoMetadata(
+                'a2_vid1',
+                ['a2_vid1_t01',
+                 'a2_vid1_t02'],
+                i_id='i2'),
+            'a2_vid2': neondata.VideoMetadata(
+                'a2_vid2',
+                ['a2_vid2_t01'],
+                i_id='i2', serving_enabled=False)
+        }
+        datamock.VideoMetadata.get.side_effect = \
+          lambda vid: vid_meta[vid]
+
+        # Define the video status
+        vid_status = {
+            'a2_vid1': neondata.VideoStatus('a2_vid1',
+                                            neondata.ExperimentState.COMPLETE),
+        }
+        datamock.VideoStatus.get.side_effect = \
+          lambda vid: vid_status[vid]
+
+        # Define the thumbnail status
+        tid_status = {
+            'a2_vid1_t01' : neondata.ThumbnailStatus('a2_vid1_t01', '0.3'),
+            'a2_vid1_t02' : neondata.ThumbnailStatus('a2_vid1_t02', '0.7')
+            }
+        datamock.ThumbnailStatus.get_many.side_effect = \
+          lambda tids: [tid_status[x] for x in tids]
+
+        # Do the initialization
+        self.watcher._initialize_serving_directives()
+
+        # Make sure one video was updated
+        directives = dict((x[0], dict(x[1]))
+                          for x in self.mastermind.get_directives())
+        self.assertEquals(len(directives), 1)
+        self.assertEquals(directives[('a2', 'a2_vid1')],
+                          {'a2_vid1_t01' : 0.3,
+                           'a2_vid1_t02' : 0.7})
+        self.assertEquals(self.mastermind.experiment_state['a2_vid1'],
+                          neondata.ExperimentState.COMPLETE)
+
+
 class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
     def setUp(self):
         # Start a database

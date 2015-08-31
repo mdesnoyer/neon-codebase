@@ -1827,6 +1827,8 @@ class ExperimentStrategy(DefaultedStoredObject):
     
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
+                 min_conversion = 50,
+                 frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.RANDOM,
@@ -1848,6 +1850,15 @@ class ExperimentStrategy(DefaultedStoredObject):
         # explicitly chosen. This and chosen_thumb_overrides had
         # better not both be true.
         self.only_exp_if_chosen = only_exp_if_chosen
+
+        # minimum combined conversion numbers before calling an experiment
+        # complete
+        self.min_conversion = min_conversion
+
+        # Fraction adjusting power rate. When this number is 0, it is
+        # equivalent to standard t-test, when it is 1.0, it is the
+        # regular multi-bandit problem.
+        self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
         # experiment. The other baseline could be an editor generated
@@ -2462,10 +2473,13 @@ class BrightcovePlatform(AbstractPlatform):
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
-                id_field=BRIGHTCOVE_ID):
+                id_field=BRIGHTCOVE_ID,
+                enabled=True,
+                serving_enabled=True):
 
         ''' On every request, the job id is saved '''
-        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest,
+                                                 enabled, serving_enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -4041,7 +4055,8 @@ class VideoStatus(DefaultedStoredObject):
     '''
     def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
                  winner_tid=None,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 state_history=None):
         super(VideoStatus, self).__init__(video_id)
 
         # State of the experiment
@@ -4054,11 +4069,23 @@ class VideoStatus(DefaultedStoredObject):
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
 
+        # [(time, new_state)]
+        self.state_history = state_history or []
+
+    def set_experiment_state(self, value):
+        if value != self.experiment_state:
+            self.experiment_state = value
+            self.state_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 value))
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return VideoStatus.__name__
+
+    
 
 class AbstractJsonResponse(object):
     

@@ -10,6 +10,8 @@ if sys.path[0] != __base_path__:
 import copy
 from concurrent.futures import Future
 import contextlib
+import datetime
+import dateutil.parser
 import logging
 import json
 import multiprocessing
@@ -706,6 +708,27 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         video_meta.save()
         neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
         self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
+
+    def test_video_status_history(self):
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        neondata.VideoStatus(vid).save()
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(video_status.state_history, [])
+        def _update(status):
+            status.set_experiment_state(neondata.ExperimentState.COMPLETE)
+        neondata.VideoStatus.modify(vid, _update)
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.COMPLETE)
+        self.assertEquals(video_status.state_history[0][1],
+                          neondata.ExperimentState.COMPLETE)
+        new_time = dateutil.parser.parse(
+            video_status.state_history[0][0])
+        self.assertLess(
+            (datetime.datetime.utcnow() - new_time).total_seconds(),
+            600)
 
     def test_video_metadata_methods(self):
         '''
