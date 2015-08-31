@@ -602,8 +602,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             'key1_NOVIDEO_t0')
         self.assertEquals(self.directive_publisher.default_sizes['key1'],
                           [640,480])
-        self.assertEquals(
-            self.directive_publisher.get_serving_urls(
+        
+        self.assertWaitForEquals(
+            lambda: self.directive_publisher.get_serving_urls(
                 'key1_NOVIDEO_t0').get_serving_url(160, 90),
             't_default.jpg')
 

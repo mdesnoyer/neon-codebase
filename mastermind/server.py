@@ -586,7 +586,7 @@ class StatsDBWatcher(threading.Thread):
     def __del__(self):
         if self._update_stats_timer and self._update_stats_timer.is_alive():
             self._update_stats_timer.cancel()
-        super(DirectivePublisher, self).__del__()
+        super(StatsDBWatcher, self).__del__()
 
     def _update_time_since_stats_update(self):
         if self.last_update is not None:
