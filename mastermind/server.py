@@ -91,7 +91,7 @@ statemon.define('unexpected_statsdb_error', int) # 1 if there was an error last 
 statemon.define('has_newest_statsdata', int) # 1 if we have the newest data
 statemon.define('good_connection_to_impala', int)
 statemon.define('good_connection_to_hbase', int)
-statemon.define('initalized_directives', int)
+statemon.define('initialized_directives', int)
 statemon.define('videodb_batch_update', int) # Count of the nubmer of batch updates from the video db
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
@@ -294,15 +294,14 @@ class VideoDBWatcher(threading.Thread):
                 if not video_metadata.serving_enabled:
                     continue
                 video_status = neondata.VideoStatus.get(video_id)
-                experiment_state = video_status.experiment_state
 
                 # Get all thumbnails
                 thumbnail_status_list = neondata.ThumbnailStatus.get_many(
                     video_metadata.thumbnail_ids)
 
                 self.mastermind.update_experiment_state_directive(
+                    video_id,
                     video_status,
-                    experiment_state,
                     thumbnail_status_list)
 
     def _process_db_data(self):

@@ -300,11 +300,13 @@ class Mastermind(object):
         '''
         if video_ids is None:
             with self.lock:
-                video_ids = self.video_info.keys()
+                keys = self.serving_directive.keys()
+        else:
+            keys = video_ids
 
-        for video_id in video_ids:
+        for key in keys:
             try:
-                directive = self.serving_directive[video_id]
+                directive = self.serving_directive[key]
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
@@ -350,8 +352,8 @@ class Mastermind(object):
 
         Inputs:
         video_id - video_id to be updated
-        state: experiment state of that video
-        directive: serving directives of the thumbnails
+        video_status: neondata.VideoStatus object
+        thumbnail_status_list: list of thumbnail status objects
 
         '''
         if video_id is not None:

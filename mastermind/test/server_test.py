@@ -492,15 +492,23 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Define the thumbnail status
         tid_status = {
             'a2_vid1_t01' : neondata.ThumbnailStatus('a2_vid1_t01', '0.3'),
-            'a2_vid1_t02' : neondata.ThumbnailStatus('a2_vid1_t02', '0.7'),
+            'a2_vid1_t02' : neondata.ThumbnailStatus('a2_vid1_t02', '0.7')
+            }
         datamock.ThumbnailStatus.get_many.side_effect = \
           lambda tids: [tid_status[x] for x in tids]
 
         # Do the initialization
         self.watcher._initialize_serving_directives()
 
-        # TODO(mdesnoyer): FInish this test
-        self.assertTrue(False)
+        # Make sure one video was updated
+        directives = dict((x[0], dict(x[1]))
+                          for x in self.mastermind.get_directives())
+        self.assertEquals(len(directives), 1)
+        self.assertEquals(directives[('a2', 'a2_vid1')],
+                          {'a2_vid1_t01' : 0.3,
+                           'a2_vid1_t02' : 0.7})
+        self.assertEquals(self.mastermind.experiment_state['a2_vid1'],
+                          neondata.ExperimentState.COMPLETE)
 
 
 class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
