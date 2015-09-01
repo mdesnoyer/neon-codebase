@@ -937,7 +937,6 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
-       
         self.assertEquals(response.code, 200)
 
     @tornado.testing.gen_test
@@ -959,6 +958,16 @@ class TestVideoHandler(TestControllersBase):
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
         vm.save()
         url = '/api/v2/%s/videos?video_id=vid1&fields=created' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+       
+        self.assertEquals(response.code, 200)
+    
+    @tornado.testing.gen_test
+    def test_get_single_video_with_invalid_fields(self):
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm.save()
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created,me_is_invalid' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
@@ -997,7 +1006,7 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 1)
-
+        
         thumbnail_array = rjson['videos'][0]['thumbnails']
         thumbnail_one = thumbnail_array[0] 
         thumbnail_two = thumbnail_array[1] 
