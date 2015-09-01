@@ -1476,7 +1476,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', frac_adjust_rate=0.0,
-                               exp_frac = 1.0))
+                               exp_frac = '1.0'))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1535,6 +1535,37 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
             self.mastermind.update_experiment_strategy('acct1', None)
 
         self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
+
+    def test_update_with_bad_experiment_strategy_fields(self):
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid entry in experiment strategy'):
+            self.mastermind.update_experiment_strategy(
+                'acct1', ExperimentStrategy('acct1', exp_frac=''))
+            self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid entry in experiment strategy'):
+            self.mastermind.update_experiment_strategy(
+                'acct1', ExperimentStrategy('acct1', holdback_frac=''))
+            self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid entry in experiment strategy'):
+            self.mastermind.update_experiment_strategy(
+                'acct1', ExperimentStrategy('acct1', frac_adjust_rate=''))
+            self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid entry in experiment strategy'):
+            self.mastermind.update_experiment_strategy(
+                'acct1', ExperimentStrategy('acct1', min_conversion=''))
+            self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Invalid entry in experiment strategy'):
+            self.mastermind.update_experiment_strategy(
+                'acct1', ExperimentStrategy('acct1', max_neon_thumbs=''))
+            self.assertIsNotNone(self.mastermind.experiment_strategy['acct1'])
 
     def test_update_experiment_strategy(self):
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
@@ -1785,6 +1816,11 @@ class TestExperimentState(test_utils.neontest.TestCase):
 
         self.mastermind = Mastermind()
 
+    def tearDown(self):
+        self.redis.stop()
+        super(TestExperimentState, self).tearDown()
+
+    def test_update_stats_when_experiment_not_complete(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1'))
         self.mastermind.update_video_info(
@@ -1796,12 +1832,7 @@ class TestExperimentState(test_utils.neontest.TestCase):
         new_video_status = neondata.VideoStatus.get('acct1_vid1')
         self.assertEquals(new_video_status.experiment_state,
                           neondata.ExperimentState.RUNNING)
-
-    def tearDown(self):
-        self.redis.stop()
-        super(TestExperimentState, self).tearDown()
-
-    def test_update_stats_when_experiment_not_complete(self):
+        
         # Initial stats
         # The acct1_vid1_v1t2 should be favored, but not complete the experiment
         # So, if we do an update, it is possible for acct1_vid1_v1t1 to win
@@ -1844,6 +1875,18 @@ class TestExperimentState(test_utils.neontest.TestCase):
 
 
     def test_update_stats_when_experiment_complete(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1'))
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
+                               ttype='neon'),
+             ThumbnailMetadata('acct1_vid1_v1t2', 'acct1_vid1', ttype='neon')])
+        self.mastermind.wait_for_pending_modifies()
+        new_video_status = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(new_video_status.experiment_state,
+                          neondata.ExperimentState.RUNNING)
+        
         # Initial stats
         # The acct1_vid1_v1t2 win and complete the experiment.
         # So, if we do an update, it is not possible for acct1_vid1_v1t1 to win
@@ -1888,6 +1931,18 @@ class TestExperimentState(test_utils.neontest.TestCase):
         self.assertEqual(video_status.winner_tid, 'acct1_vid1_v1t2')
 
     def test_update_experiment_state_directive(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1'))
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
+                               ttype='neon'),
+             ThumbnailMetadata('acct1_vid1_v1t2', 'acct1_vid1', ttype='neon')])
+        self.mastermind.wait_for_pending_modifies()
+        new_video_status = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(new_video_status.experiment_state,
+                          neondata.ExperimentState.RUNNING)
+        
         # Set the experiment state to be complete
         thumbnail_status_1 = neondata.ThumbnailStatus(
             'acct1_vid1_v1t1',
@@ -1939,45 +1994,31 @@ class TestExperimentState(test_utils.neontest.TestCase):
         directives = dict([x for x in self.mastermind.get_directives()])
         fractions = directives[('acct1', 'acct1_vid1')]
         fractions = dict([x for x in fractions])
-        # The fractions should not have changed, because 'complete'
+        # The fractions should have been recalculated
         self.assertNotEquals(fractions['acct1_vid1_v1t1'], 0.3)
         self.assertNotEquals(fractions['acct1_vid1_v1t2'], 0.7)
 
     def test_update_experiment_state_directive_none_frac(self):
-        with self.assertLogExists(
-                logging.ERROR,
-                'The thumbnail_status acct1_vid1_v1t1 has None'):
-            # Set the experiment state to be complete
-            thumbnail_status_1 = neondata.ThumbnailStatus(
-                'acct1_vid1_v1t1',
-                serving_frac = None,
-                ctr = 0.02)
-            thumbnail_status_2 = neondata.ThumbnailStatus(
-                'acct1_vid1_v1t2',
-                serving_frac = 0.70,
-                ctr = 0.03)
-            video_status = neondata.VideoStatus('acct1_vid1',
-                neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+        # Set the experiment state to be complete
+        thumbnail_status_1 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t1',
+            serving_frac = None,
+            ctr = 0.02)
+        thumbnail_status_2 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t2',
+            serving_frac = 0.70,
+            ctr = 0.03)
+        video_status = neondata.VideoStatus('acct1_vid1',
+            neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
 
-            self.mastermind.update_experiment_state_directive(
-                'acct1_vid1', video_status,
-                [thumbnail_status_1, thumbnail_status_2])
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [thumbnail_status_1, thumbnail_status_2])
 
-            # The experiment state is unknown, so re-calculate the serving
-            # directives
-            self.mastermind.wait_for_pending_modifies()
-            self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
-                              neondata.ExperimentState.RUNNING)
-            new_video_status = neondata.VideoStatus.get('acct1_vid1')
-            self.assertEquals(new_video_status.experiment_state,
-                              neondata.ExperimentState.RUNNING)
-            self.assertIsNone(new_video_status.winner_tid)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t1').serving_frac,
-                0.5)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t2').serving_frac,
-                0.5)
+        # The experiment state is unknown, 
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
             
 
     def test_update_experiment_state_directive_wrong_thumbnail_status(self):
@@ -2001,19 +2042,10 @@ class TestExperimentState(test_utils.neontest.TestCase):
                 [thumbnail_status_1, thumbnail_status_2])
             
 
-            self.mastermind.wait_for_pending_modifies()
             self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
-                              neondata.ExperimentState.RUNNING)
-            new_video_status = neondata.VideoStatus.get('acct1_vid1')
-            self.assertEquals(new_video_status.experiment_state,
-                              neondata.ExperimentState.RUNNING)
-            self.assertIsNone(new_video_status.winner_tid)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t1').serving_frac,
-                0.5)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t2').serving_frac,
-                0.5)
+                              neondata.ExperimentState.UNKNOWN)
+            self.assertEquals(
+                len([x for x in self.mastermind.get_directives()]), 0)
 
     def test_update_experiment_state_directive_not_sum_1(self):
         with self.assertLogExists(
@@ -2034,20 +2066,62 @@ class TestExperimentState(test_utils.neontest.TestCase):
             self.mastermind.update_experiment_state_directive(
                 'acct1_vid1', video_status,
                 [thumbnail_status_1, thumbnail_status_2])
-
-            self.mastermind.wait_for_pending_modifies()
+            
             self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
-                              neondata.ExperimentState.RUNNING)
-            new_video_status = neondata.VideoStatus.get('acct1_vid1')
-            self.assertEquals(new_video_status.experiment_state,
-                              neondata.ExperimentState.RUNNING)
-            self.assertIsNone(new_video_status.winner_tid)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t1').serving_frac,
-                0.5)
-            self.assertAlmostEquals(
-                neondata.ThumbnailStatus.get('acct1_vid1_v1t2').serving_frac,
-                0.5)
+                              neondata.ExperimentState.UNKNOWN)
+            self.assertEquals(
+                len([x for x in self.mastermind.get_directives()]), 0)
+
+    def test_update_experiment_state_no_thumb_info(self):
+        video_status = neondata.VideoStatus(
+            'acct1_vid1',
+            neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [])
+
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
+
+    def test_update_experiment_state_empty_string_serving_frac(self):
+        # Set the experiment state to be complete
+        thumbnail_status_1 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t1',
+            serving_frac = '',
+            ctr = 0.02)
+        thumbnail_status_2 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t2',
+            serving_frac = 0.70,
+            ctr = 0.03)
+        video_status = neondata.VideoStatus('acct1_vid1',
+            neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [thumbnail_status_1, thumbnail_status_2])
+
+        # The experiment state is unknown, 
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
+
+    def test_update_experiment_state_missing_thumb_data(self):
+        # Set the experiment state to be complete
+        thumbnail_status_2 = neondata.ThumbnailStatus(
+            'acct1_vid1_v1t2',
+            serving_frac = 0.70,
+            ctr = 0.03)
+        video_status = neondata.VideoStatus('acct1_vid1',
+            neondata.ExperimentState.COMPLETE, 'acct1_vid1_v1t2', 0.01)
+
+        self.mastermind.update_experiment_state_directive(
+            'acct1_vid1', video_status,
+            [None, thumbnail_status_2])
+
+        # The experiment state is unknown, 
+        self.assertEquals(self.mastermind.experiment_state['acct1_vid1'],
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
 
 class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
