@@ -79,6 +79,9 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Callback options
+define('send_callbacks', default=1, help='If 1, callbacks are sent')
+
 # Script running options
 define('tmp_dir', default='/tmp', help='Temp directory to work in')
 
@@ -490,6 +493,9 @@ class VideoDBWatcher(threading.Thread):
             _log.error('Could not find information about video %s' % video_id)
             return
 
+        
+        thumb_ids = sorted(set(video_metadata.thumbnail_ids))
+
         try:
             abtest, serving_enabled = self._platform_options[
                 (video_metadata.get_account_id(),
@@ -502,7 +508,6 @@ class VideoDBWatcher(threading.Thread):
 
         if serving_enabled and video_metadata.serving_enabled:
             thumbnails = []
-            thumb_ids = sorted(set(video_metadata.thumbnail_ids))
             thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
             for thumb_id, meta in zip(thumb_ids, thumbs):
                 if meta is None:
@@ -1421,8 +1426,8 @@ class DirectivePublisher(threading.Thread):
         try:
             customer_error_jobs= set([])
             request_keys = [(video.job_id, video.get_account_id()) for
-                                video in neondata.VideoMetadata.get_many(video_ids)
-                                if video is not None]
+                            video in neondata.VideoMetadata.get_many(video_ids)
+                            if video is not None]
             def _set_state(request_dict):
                 for obj in request_dict.itervalues():
                     # Handle customer_error videos. Don't change their states
@@ -1447,13 +1452,20 @@ class DirectivePublisher(threading.Thread):
             statemon.state.increment('unexpected_db_update_error')
             _log.exception('Unexpected error when updating serving state in '
                            'database %s' % e)
+            # We didn't update the database so don't say that the
+            # videos were published. This will trigger a retry next
+            # time the directives are pushed.
+            with self.lock:
+                self.last_published_videos = \
+                  self.last_published_videos - video_ids
         finally:
             self._incr_pending_modify(-len(video_ids))
 
     def _send_callbacks(self):
         try:
-            self.callback_manager.schedule_all_callbacks(
-                self.last_published_videos)
+            if options.send_callbacks:
+                self.callback_manager.schedule_all_callbacks(
+                    self.last_published_videos)
         except Exception as e:
             _log.warn('Unexpected error when sending a customer '
                       'callback: %s' % e)
