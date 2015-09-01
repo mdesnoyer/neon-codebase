@@ -300,7 +300,7 @@ class VideoDBWatcher(threading.Thread):
 
                 # Get all thumbnails
                 thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    video_metadata.thumbnail_ids, log_missing=False)
+                    set(video_metadata.thumbnail_ids), log_missing=False)
                 thumbnail_status_list = [x for x in thumbnail_status_list if
                                          x is not None]
 
@@ -502,9 +502,9 @@ class VideoDBWatcher(threading.Thread):
 
         if serving_enabled and video_metadata.serving_enabled:
             thumbnails = []
-            thumbs = neondata.ThumbnailMetadata.get_many(
-                video_metadata.thumbnail_ids)
-            for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
+            thumb_ids = sorted(set(video_metadata.thumbnail_ids))
+            thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
+            for thumb_id, meta in zip(thumb_ids, thumbs):
                 if meta is None:
                     statemon.state.increment('no_thumbnailmetadata')
                     _log.error('Could not find metadata for thumb %s' %
@@ -513,8 +513,7 @@ class VideoDBWatcher(threading.Thread):
                 else:
                     thumbnails.append(meta)
 
-            serving_urls = neondata.ThumbnailServingURLs.get_many(
-                video_metadata.thumbnail_ids)
+            serving_urls = neondata.ThumbnailServingURLs.get_many(thumb_ids)
             for url_obj in serving_urls:
                 if url_obj is not None:
                     self.directive_pusher.add_serving_urls(
@@ -526,7 +525,7 @@ class VideoDBWatcher(threading.Thread):
                                               abtest)
         else:
             self.mastermind.remove_video_info(video_id)
-            for thumb_id in video_metadata.thumbnail_ids:
+            for thumb_id in thumb_ids:
                 self.directive_pusher.del_serving_urls(thumb_id)
 
     def process_queued_video_updates(self):
