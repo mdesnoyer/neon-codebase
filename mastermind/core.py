@@ -339,12 +339,13 @@ class Mastermind(object):
         else:
             video_id = ('_').join([ids[0], ids[1]])
             thumbnail_partial_id = ids[2]
-            if thumbnail_status.serving_frac is None:
-                _log.error('The thumbnail_status %s has None serving_frac.' %
-                    thumbnail_status.get_id())
+            if (thumbnail_status is None or 
+                thumbnail_status.serving_frac is None or 
+                thumbnail_status.serving_frace == ''):
                 return (video_id, None)
             return (video_id,
-                    (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
+                    (thumbnail_partial_id,
+                     float(thumbnail_status.serving_frac)))
 
     def update_experiment_state_directive(self, video_id, video_status,
                                           thumbnail_status_list):
@@ -356,13 +357,15 @@ class Mastermind(object):
         thumbnail_status_list: list of thumbnail status objects
 
         '''
-        if video_id is not None:
+        if video_id is not None and len(thumbnail_status_list) > 0:
             with self.lock:
                 has_error = False
                 self.experiment_state[video_id] = video_status.experiment_state
                 directive_list = []
                 frac_sum = 0.0
                 for thumbnail_status in thumbnail_status_list:
+                    if thumbnail_status is None:
+                        continue
                     t_video_id, directive = \
                         self._thumbnail_status_to_directive(thumbnail_status)
                     if t_video_id is None or directive is None:
@@ -386,8 +389,6 @@ class Mastermind(object):
                 if has_error:
                     self.experiment_state[video_id] = \
                         neondata.ExperimentState.UNKNOWN
-                    
-                    self._calculate_new_serving_directive(video_id)
                 else:
                     # No Error so set the serving directive
                     account_id = video_id.split('_')[0]
