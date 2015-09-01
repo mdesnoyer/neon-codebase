@@ -293,11 +293,16 @@ class VideoDBWatcher(threading.Thread):
                 account_id = video_metadata.get_account_id()
                 if not video_metadata.serving_enabled:
                     continue
-                video_status = neondata.VideoStatus.get(video_id)
+                video_status = neondata.VideoStatus.get(video_id,
+                                                        log_missing=False)
+                if video_status is None:
+                    continue
 
                 # Get all thumbnails
                 thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    video_metadata.thumbnail_ids)
+                    video_metadata.thumbnail_ids, log_missing=False)
+                thumbnail_status_list = [x for x in thumbnail_status_list if
+                                         x is not None]
 
                 self.mastermind.update_experiment_state_directive(
                     video_id,
