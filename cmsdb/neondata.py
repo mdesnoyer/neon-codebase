@@ -1302,7 +1302,7 @@ class NamespacedStoredObject(StoredObject):
         objects in the database.
 
         The set of keys to grab happens once so if the db changes while
-        the iteration is gong, so neither new or deleted objects will
+        the iteration is going, so neither new or deleted objects will
         be returned.
 
         #TODO(mdesnoyer): Figure out a way to make this
