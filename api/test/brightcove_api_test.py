@@ -47,7 +47,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
 
         self.http_call_patcher = \
           patch('api.brightcove_api.BrightcoveApi.read_connection.send_request')
-        self.http_mock = self.http_call_patcher.start()
+        self.outer_http_mock = self.http_call_patcher.start()
+        self.http_mock = self._future_wrap_mock(self.outer_http_mock)
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
 
@@ -57,22 +58,17 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         super(TestBrightcoveApi, self).tearDown()
 
     def _set_http_response(self, code=200, body='', error=None):
-        def do_response(request, callback=None, *args, **kwargs):
-            response = HTTPResponse(request, code,
-                                    buffer=StringIO(body),
-                                    error=error)
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
+        def do_response(request, *args, **kwargs):
+            return HTTPResponse(request, code,
+                                buffer=StringIO(body),
+                                error=error)
 
         self.http_mock.side_effect = do_response
 
     def _set_videos_to_return(self, videos):
         '''Define the videos to return. Should be video structures.'''
         self.videos_to_return = videos
-        def respond_with_videos(request, callback=None):
+        def respond_with_videos(request, **kwargs):
             videos = self.videos_to_return
             parsed = urlparse.urlparse(request.url)
             params = urlparse.parse_qs(parsed.query)
@@ -89,14 +85,8 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                 'total_count' : -1
             }
             
-            
-            response = HTTPResponse(request, 200,
-                                    buffer=StringIO(json.dumps(retstruct)))
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                             response)
-            else:
-                return response
+            return HTTPResponse(request, 200,
+                                buffer=StringIO(json.dumps(retstruct)))
 
         self.http_mock.side_effect = respond_with_videos
 
@@ -201,7 +191,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     @patch('api.brightcove_api.utils.http.send_request')
     def test_check_feed(self, utils_http_patch):
     
-        def _side_effect(request, callback=None, *args, **kwargs):
+        def _side_effect(request, *args, **kwargs):
             if "submitvideo" in request.url:
                 response = HTTPResponse(request, 200,
                     buffer=StringIO('{"job_id":"j123"}'))
@@ -209,12 +199,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                 response = bcove_find_modified_videos_response 
             if "find_all_videos" in request.url:
                 response = bcove_response
-            
-            if callback:
-                tornado.ioloop.IOLoop.current().add_callback(callback,
-                                                    response)
-            else:
-                return response
+            return response
         
         bcove_request = HTTPRequest(
             'http://api.brightcove.com/services/library?'
@@ -229,7 +214,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
                 HTTPResponse(bcove_request, 200,
                 buffer=StringIO(bcove_responses.find_modified_videos_response))
 
-        self.http_mock.side_effect = _side_effect
+        self.outer_http_mock.side_effect = _side_effect
         utils_http_patch.side_effect = _side_effect
         
         a_id = 'test' 
@@ -253,6 +238,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
     @tornado.testing.gen_test 
     def test_add_image(self, write_conn_mock):
+        write_conn_mock = self._future_wrap_mock(write_conn_mock)
         def verify():
             '''
             Verify the image name when uploaded to Bcove
@@ -273,7 +259,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
                 buffer=StringIO('{"result":{"id":"newtid"}}'))
-        write_conn_mock.side_effect = lambda x, callback: callback(response)
+        write_conn_mock.side_effect = [response]
         image = PILImageUtils.create_random_image(360, 480) 
         tid = "TID"
         
@@ -295,11 +281,12 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         '''
         Verify the multipart request construction to brightcove
         '''
+        write_conn_mock = self._future_wrap_mock(write_conn_mock)
         r_url = "http://i1.neon-images.com/video_id1?height=10&width=20"
         response = HTTPResponse(HTTPRequest("http://bcove"), 200,
                 buffer=StringIO('{"result":{"id":"newtid", "remoteUrl":"%s"}}'
                                 % r_url))
-        write_conn_mock.side_effect = lambda x, callback: callback(response)
+        write_conn_mock.side_effect = [response]
         resp = yield self.api.add_image("video_id1", 'tid1', 
                                         remote_url=r_url)
         self.assertEqual(resp, {"id": "newtid",

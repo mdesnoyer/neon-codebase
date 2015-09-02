@@ -84,11 +84,11 @@ class PILImageUtils(object):
 
         Returns the image in PIL format.
         '''
-        response = yield tornado.gen.Task(
-            utils.http.send_request,
+        response = yield utils.http.send_request(
             tornado.httpclient.HTTPRequest(url,
                                            request_timeout=60.0,
-                                           connect_timeout=10.0))
+                                           connect_timeout=10.0),
+            async=True)
         if response.error:
             _log.error('Error retrieving image from: %s. %s' % 
                        (url, response.error))

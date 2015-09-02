@@ -1885,7 +1885,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
         # Mock out the cdn url check
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
-        self.mock_cdn_url = self._callback_wrap_mock(
+        self.mock_cdn_url = self._future_wrap_mock(
             self.cdn_check_patcher.start().send_request)
         self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
