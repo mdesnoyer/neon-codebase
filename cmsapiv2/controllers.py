@@ -181,7 +181,11 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_CONFLICT)
             statemon.state.increment(ref=_already_exists_errors_ref,
                                      safe=False)
-            self.error('this item already exists', extra_data=get_exc_message(exception)) 
+            self.error('this item already exists', extra_data=get_exc_message(exception))
+ 
+        elif isinstance(exception, neondata.ThumbDownloadError): 
+            self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+            self.error('failed to download thumbnail', extra_data=get_exc_message(exception)) 
 
         else:
             _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
@@ -753,14 +757,14 @@ class VideoHelper():
                           request_id=api_request.job_id,
                           video_url=args.get('video_url', None),
                           publish_date=args.get('publish_date', None),
-                          duration=int(args.get('duration', 0)) or None, 
+                          duration=float(args.get('duration', 0.0)) or None, 
                           custom_data=args.get('custom_data', None), 
                           i_id=api_request.integration_id,
                           serving_enabled=False)
             # save the video 
             yield tornado.gen.Task(video.save)
             # save the default thumbnail
-            yield api_request.save_default_thumbnail(async=True)
+            new_thumb = yield api_request.save_default_thumbnail(async=True)
             raise tornado.gen.Return((video,api_request))
         else:
             raise AlreadyExists('job_id=%s' % (video.job_id))
@@ -797,7 +801,7 @@ class VideoHandler(APIV2Handler):
           'video_url': Any(str, unicode, Length(min=1, max=512)), 
           'callback_url': Any(str, unicode, Length(min=1, max=512)), 
           'video_title': Any(str, unicode, Length(min=1, max=256)),
-          'duration': All(Coerce(int), Range(min=1, max=86400)), 
+          'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.ISO8601Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
           'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),

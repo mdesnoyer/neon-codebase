@@ -3659,12 +3659,12 @@ class NeonApiRequest(NamespacedStoredObject):
             ttype=thumb_type,
             rank=cur_rank,
             external_id=self.external_thumbnail_id)
-        yield video.download_and_add_thumbnail(meta,
+        thumb = yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,
                                                save_objects=True,
                                                async=True)
-
+        raise tornado.gen.Return(thumb) 
         # Push a thumbnail serving directive to Kinesis so that it can
         # be served quickly.
 
