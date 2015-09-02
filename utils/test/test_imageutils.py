@@ -68,7 +68,8 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
         self.image = imageutils.PILImageUtils.create_random_image(360, 480)
 
         self.get_img_patcher = patch('utils.http.send_request')
-        self.get_img_mock = self.get_img_patcher.start()
+        self.get_img_mock = self._future_wrap_mock(
+            self.get_img_patcher.start())
         self.get_img_mock.side_effect = self._returnValidImage
 
     def tearDown(self):
@@ -76,12 +77,12 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
         
         super(TestDownloadImage, self).tearDown()
 
-    def _returnValidImage(self, request, callback):
+    def _returnValidImage(self, request, **kw):
         response = tornado.httpclient.HTTPResponse(request, 200,
                                                    buffer=StringIO())
         self.image.save(response.buffer, 'JPEG')
         response.buffer.seek(0)
-        tornado.ioloop.IOLoop.current().add_callback(callback, response)
+        return response
 
     def test_get_valid_image(self):
 
@@ -91,12 +92,11 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
 
     def test_connection_error(self):
         self.get_img_mock.side_effect = (
-            lambda x, callback: tornado.ioloop.IOLoop.current().add_callback(
-                callback,
+            lambda x, **kw: 
                 tornado.httpclient.HTTPResponse(
                     x,
                     200,
-                    error = tornado.httpclient.HTTPError(404))))
+                    error = tornado.httpclient.HTTPError(404)))
 
         with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
             with self.assertRaises(tornado.httpclient.HTTPError):

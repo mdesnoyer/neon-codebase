@@ -137,14 +137,14 @@ class TestFairWeightedQ(test_utils.neontest.AsyncTestCase):
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, buffer=StringIO(''),
+        headers={'Content-Length': self.video_size()})
 
     def tearDown(self):
         self.send_request_patcher.stop()
@@ -256,13 +256,14 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
         # Patch the video length lookup
         self.http_patcher = patch('video_processor.server.utils.http')
-        self.mock_http = self.http_patcher.start()
+        self.mock_http = self._future_wrap_mock(
+            self.http_patcher.start().send_request)
         vsize = 1024
         request = tornado.httpclient.HTTPRequest("http://xyz")
         response = tornado.httpclient.HTTPResponse(request, 200,
                 buffer=StringIO(''), headers={'Content-Length': vsize})
-        self.mock_http.send_request.side_effect = \
-                lambda x, callback, **kw: callback(response)
+        self.mock_http.side_effect = \
+                lambda x, **kw: response
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -735,14 +736,14 @@ class QueueSmokeTest(test_utils.neontest.TestCase):
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+            lambda x, **kw: tornado.httpclient.HTTPResponse(
+                x, 200, buffer=StringIO(''),
+                headers={'Content-Length': self.video_size()})
 
     def tearDown(self):
         self.send_request_patcher.stop()
@@ -817,14 +818,14 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
 
         # Patch the video length lookup
         self.send_request_patcher = patch('video_processor.server.utils.http.send_request')
-        self.mock_send_request = self.send_request_patcher.start()
+        self.mock_send_request = self._future_wrap_mock(
+            self.send_request_patcher.start())
         self.video_size = MagicMock()
         self.video_size.return_value = 10.0
         self.mock_send_request.side_effect = \
-                lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(
-                        x, 200, buffer=StringIO(''),
-                        headers={'Content-Length': self.video_size()}))
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, buffer=StringIO(''),
+              headers={'Content-Length': self.video_size()})
 
         #create test account
         a_id = "testaccountneonapi"

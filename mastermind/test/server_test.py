@@ -294,7 +294,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
     def test_connection_error(self, datamock):
         datamock.AbstractPlatform.get_all.side_effect = \
-          redis.ConnectionError
+          [redis.ConnectionError]
 
         with self.assertRaises(redis.ConnectionError):
             self.watcher._process_db_data()
@@ -487,7 +487,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                             neondata.ExperimentState.COMPLETE),
         }
         datamock.VideoStatus.get.side_effect = \
-          lambda vid: vid_status[vid]
+          lambda vid, **kw: vid_status[vid]
 
         # Define the thumbnail status
         tid_status = {
@@ -495,7 +495,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             'a2_vid1_t02' : neondata.ThumbnailStatus('a2_vid1_t02', '0.7')
             }
         datamock.ThumbnailStatus.get_many.side_effect = \
-          lambda tids: [tid_status[x] for x in tids]
+          lambda tids, **kw: [tid_status[x] for x in tids]
 
         # Do the initialization
         self.watcher._initialize_serving_directives()

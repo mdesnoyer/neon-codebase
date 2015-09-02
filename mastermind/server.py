@@ -79,6 +79,9 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Callback options
+define('send_callbacks', default=1, help='If 1, callbacks are sent')
+
 # Script running options
 define('tmp_dir', default='/tmp', help='Temp directory to work in')
 
@@ -293,11 +296,16 @@ class VideoDBWatcher(threading.Thread):
                 account_id = video_metadata.get_account_id()
                 if not video_metadata.serving_enabled:
                     continue
-                video_status = neondata.VideoStatus.get(video_id)
+                video_status = neondata.VideoStatus.get(video_id,
+                                                        log_missing=False)
+                if video_status is None:
+                    continue
 
                 # Get all thumbnails
                 thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    video_metadata.thumbnail_ids)
+                    set(video_metadata.thumbnail_ids), log_missing=False)
+                thumbnail_status_list = [x for x in thumbnail_status_list if
+                                         x is not None]
 
                 self.mastermind.update_experiment_state_directive(
                     video_id,
@@ -485,6 +493,9 @@ class VideoDBWatcher(threading.Thread):
             _log.error('Could not find information about video %s' % video_id)
             return
 
+        
+        thumb_ids = sorted(set(video_metadata.thumbnail_ids))
+
         try:
             abtest, serving_enabled = self._platform_options[
                 (video_metadata.get_account_id(),
@@ -497,9 +508,8 @@ class VideoDBWatcher(threading.Thread):
 
         if serving_enabled and video_metadata.serving_enabled:
             thumbnails = []
-            thumbs = neondata.ThumbnailMetadata.get_many(
-                video_metadata.thumbnail_ids)
-            for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
+            thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
+            for thumb_id, meta in zip(thumb_ids, thumbs):
                 if meta is None:
                     statemon.state.increment('no_thumbnailmetadata')
                     _log.error('Could not find metadata for thumb %s' %
@@ -508,8 +518,7 @@ class VideoDBWatcher(threading.Thread):
                 else:
                     thumbnails.append(meta)
 
-            serving_urls = neondata.ThumbnailServingURLs.get_many(
-                video_metadata.thumbnail_ids)
+            serving_urls = neondata.ThumbnailServingURLs.get_many(thumb_ids)
             for url_obj in serving_urls:
                 if url_obj is not None:
                     self.directive_pusher.add_serving_urls(
@@ -521,7 +530,7 @@ class VideoDBWatcher(threading.Thread):
                                               abtest)
         else:
             self.mastermind.remove_video_info(video_id)
-            for thumb_id in video_metadata.thumbnail_ids:
+            for thumb_id in thumb_ids:
                 self.directive_pusher.del_serving_urls(thumb_id)
 
     def process_queued_video_updates(self):
@@ -1414,42 +1423,53 @@ class DirectivePublisher(threading.Thread):
 
     def _update_video_serving_state(self, video_ids, new_state):
         '''Updates a list of video ids with a new serving state.'''
-        try:
-            customer_error_jobs= set([])
-            request_keys = [(video.job_id, video.get_account_id()) for
-                                video in neondata.VideoMetadata.get_many(video_ids)
+        MAX_VIDS_PER_CALL = 100
+        video_ids = list(video_ids)
+        for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
+            cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
+            try:
+                def _set_serving_url(videos_dict):
+                    for vidobj in videos_dict.itervalues():
+                        if vidobj is not None:
+                            if new_state == neondata.RequestState.SERVING:
+                                vidobj.serving_url = vidobj.get_serving_url(
+                                    save=False)
+                            else:
+                                vidobj.serving_url = None
+                videos = neondata.VideoMetadata.modify_many(cur_vid_ids,
+                                                            _set_serving_url)
+                
+                request_keys = [(video.job_id, video.get_account_id()) for
+                                video in videos.itervalues()
                                 if video is not None]
-            def _set_state(request_dict):
-                for obj in request_dict.itervalues():
-                    # Handle customer_error videos. Don't change their states
-                    if obj is not None:
-                        if obj.state not in \
-                          [neondata.RequestState.CUSTOMER_ERROR]:
-                            obj.state = new_state
-                        else:
-                            customer_error_jobs.add(obj.job_id)
-            neondata.NeonApiRequest.modify_many(request_keys, _set_state)
-            def _set_serving_url(videos_dict):
-                for vidobj in videos_dict.itervalues():
-                    if (vidobj is not None and 
-                        vidobj.job_id not in customer_error_jobs):
-                        if new_state == neondata.RequestState.SERVING:
-                            vidobj.serving_url = vidobj.get_serving_url(
-                                save=False)
-                        else:
-                            vidobj.serving_url = None
-            neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
-        except Exception as e:
-            statemon.state.increment('unexpected_db_update_error')
-            _log.exception('Unexpected error when updating serving state in '
-                           'database %s' % e)
-        finally:
-            self._incr_pending_modify(-len(video_ids))
+                def _set_state(request_dict):
+                    for obj in request_dict.itervalues():
+                        if obj is not None:
+                            if obj.state not in [
+                                    neondata.RequestState.CUSTOMER_ERROR,
+                                    neondata.RequestState.FAILED,
+                                    neondata.RequestState.INT_ERROR]:
+                                obj.state = new_state
+                neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+                
+            except Exception as e:
+                statemon.state.increment('unexpected_db_update_error')
+                _log.exception('Unexpected error when updating serving state in '
+                               'database %s' % e)
+                # We didn't update the database so don't say that the
+                # videos were published. This will trigger a retry next
+                # time the directives are pushed.
+                with self.lock:
+                    self.last_published_videos = \
+                      self.last_published_videos - set(cur_vid_ids)
+            finally:
+                self._incr_pending_modify(-len(cur_vid_ids))
 
     def _send_callbacks(self):
         try:
-            self.callback_manager.schedule_all_callbacks(
-                self.last_published_videos)
+            if options.send_callbacks:
+                self.callback_manager.schedule_all_callbacks(
+                    self.last_published_videos)
         except Exception as e:
             _log.warn('Unexpected error when sending a customer '
                       'callback: %s' % e)

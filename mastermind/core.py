@@ -339,12 +339,13 @@ class Mastermind(object):
         else:
             video_id = ('_').join([ids[0], ids[1]])
             thumbnail_partial_id = ids[2]
-            if thumbnail_status.serving_frac is None:
-                _log.error('The thumbnail_status %s has None serving_frac.' %
-                    thumbnail_status.get_id())
+            if (thumbnail_status is None or 
+                thumbnail_status.serving_frac is None or 
+                thumbnail_status.serving_frac == ''):
                 return (video_id, None)
             return (video_id,
-                    (thumbnail_partial_id, float(thumbnail_status.serving_frac)))
+                    (thumbnail_partial_id,
+                     float(thumbnail_status.serving_frac)))
 
     def update_experiment_state_directive(self, video_id, video_status,
                                           thumbnail_status_list):
@@ -356,13 +357,15 @@ class Mastermind(object):
         thumbnail_status_list: list of thumbnail status objects
 
         '''
-        if video_id is not None:
+        if video_id is not None and len(thumbnail_status_list) > 0:
             with self.lock:
                 has_error = False
                 self.experiment_state[video_id] = video_status.experiment_state
                 directive_list = []
                 frac_sum = 0.0
                 for thumbnail_status in thumbnail_status_list:
+                    if thumbnail_status is None:
+                        continue
                     t_video_id, directive = \
                         self._thumbnail_status_to_directive(thumbnail_status)
                     if t_video_id is None or directive is None:
@@ -386,8 +389,6 @@ class Mastermind(object):
                 if has_error:
                     self.experiment_state[video_id] = \
                         neondata.ExperimentState.UNKNOWN
-                    
-                    self._calculate_new_serving_directive(video_id)
                 else:
                     # No Error so set the serving directive
                     account_id = video_id.split('_')[0]
@@ -505,6 +506,20 @@ class Mastermind(object):
         if strategy is None or account_id is None:
             _log.error('Invalid account id %s and strategy: %s' %
                        (account_id, strategy))
+            return
+
+        # Clean up data types in the experiment strategy
+        try:
+            strategy.exp_frac = float(strategy.exp_frac)
+            strategy.holdback_frac = float(strategy.holdback_frac)
+            strategy.frac_adjust_rate = float(strategy.frac_adjust_rate)
+            strategy.min_conversion = int(strategy.min_conversion)
+            strategy.max_neon_thumbs = (None if strategy.max_neon_thumbs 
+                                        is None else 
+                                        int(strategy.max_neon_thumbs))
+        except ValueError as e:
+            _log.error('Invalid entry in experiment strategy %s' %
+                       strategy.get_id())
             return
         
         with self.lock:
@@ -685,8 +700,10 @@ class Mastermind(object):
         if strategy.max_neon_thumbs is not None:
             neon_thumbs = [thumb for thumb in candidates if 
                            thumb.type == neondata.ThumbnailType.NEON]
-            neon_thumbs = sorted(neon_thumbs,
-                                 key=lambda x: (x.rank, -x.model_score))
+            neon_thumbs = sorted(
+                neon_thumbs,
+                key=lambda x: (x.rank, -x.model_score if x.model_score else 
+                               float('inf')))
             if len(neon_thumbs) > strategy.max_neon_thumbs:
                 candidates = candidates.difference(
                     neon_thumbs[strategy.max_neon_thumbs:])
@@ -754,7 +771,7 @@ class Mastermind(object):
         experiment_state = neondata.ExperimentState.RUNNING
         value_remaining = None
         winner_tid = None
-        experiment_frac = strategy.exp_frac
+        experiment_frac = float(strategy.exp_frac)
                 
         if (editor is not None and 
             baseline is not None and 
@@ -766,7 +783,7 @@ class Mastermind(object):
         
         # First allocate the non-experiment portion
         non_exp_thumb = None
-        if strategy.exp_frac >= 1.0:
+        if experiment_frac >= 1.0:
             # When the experimental fraction is 100%, put everything
             # into the valid bandits that makes sense.
             if editor is not None:
@@ -778,14 +795,14 @@ class Mastermind(object):
         else:
             if editor is None:
                 if baseline:
-                    run_frac[baseline.id] = 1.0 - strategy.exp_frac
+                    run_frac[baseline.id] = 1.0 - experiment_frac
                     non_exp_thumb = baseline
                 else:
                     # There is nothing to run in the main fraction, so
                     # run the experiment over everything.
                     experiment_frac = 1.0
             else:
-                run_frac[editor.id] = 1.0 - strategy.exp_frac
+                run_frac[editor.id] = 1.0 - experiment_frac
                 non_exp_thumb = editor
                 if baseline and strategy.always_show_baseline:
                     valid_bandits.add(baseline)
