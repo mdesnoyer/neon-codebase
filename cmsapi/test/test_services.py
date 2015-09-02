@@ -332,7 +332,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         tai = json.loads(response.body)["tracker_account_id"]
         return api_key
 
-    def create_brightcove_account(self, expected_code=201):
+    def create_brightcove_account(self, expected_code=200):
         ''' create brightcove platform account '''
 
         #create a neon account first
