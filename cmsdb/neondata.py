@@ -824,6 +824,13 @@ class StoredObject(object):
         '''Converts a key to an id'''
         return key
 
+    def _set_keyname(self):
+        '''Returns the key in the database for the set that holds this object.
+
+        The result of the key lookup will be a set of objects for this class
+        '''
+        raise NotImplementedError()
+
     @classmethod
     def format_key(cls, key):
         return key
@@ -844,14 +851,23 @@ class StoredObject(object):
 
     def save(self, callback=None):
         '''Save the object to the database.'''
-        db_connection = DBConnection.get(self)
+        
         value = self.to_json()
+        def _save_and_add2set(pipe):
+            pipe.sadd(self._set_keyname(), self.key)
+            pipe.set(self.key, value)
+            
+        db_connection = DBConnection.get(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            db_connection.conn.set(self.key, value, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           (self._set_keyname(), self.key),
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                (self._set_keyname(), self.key))
 
 
     @classmethod
@@ -1299,6 +1315,9 @@ class NamespacedStoredObject(StoredObject):
         return <Class>.__name__
         '''
         raise NotImplementedError()
+
+    def _set_keyname(self):
+        return '%s:set' % self._baseclass_name()
 
     @classmethod
     def format_key(cls, key):
@@ -3619,6 +3638,10 @@ class ThumbnailMetadata(StoredObject):
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
+    def _set_keyname(self):
+        '''Key the set by the video id'''
+        return '%s:set' % self.key.rpartition('_')[0]
+
     @classmethod
     def is_valid_key(cls, key):
         return ThumbnailID.is_valid_key(key)
@@ -3833,6 +3856,10 @@ class VideoMetadata(StoredObject):
 
         # The time the video was published in ISO 8601 format
         self.publish_date = publish_date
+
+    def _set_keyname(self):
+        '''Key by the account id'''
+        return '%s:set' % self.get_account_id()
 
     @classmethod
     def is_valid_key(cls, key):
