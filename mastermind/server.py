@@ -1423,43 +1423,47 @@ class DirectivePublisher(threading.Thread):
 
     def _update_video_serving_state(self, video_ids, new_state):
         '''Updates a list of video ids with a new serving state.'''
-        try:
-            customer_error_jobs= set([])
-            request_keys = [(video.job_id, video.get_account_id()) for
-                            video in neondata.VideoMetadata.get_many(video_ids)
-                            if video is not None]
-            def _set_state(request_dict):
-                for obj in request_dict.itervalues():
-                    # Handle customer_error videos. Don't change their states
-                    if obj is not None:
-                        if obj.state not in \
-                          [neondata.RequestState.CUSTOMER_ERROR]:
-                            obj.state = new_state
-                        else:
-                            customer_error_jobs.add(obj.job_id)
-            neondata.NeonApiRequest.modify_many(request_keys, _set_state)
-            def _set_serving_url(videos_dict):
-                for vidobj in videos_dict.itervalues():
-                    if (vidobj is not None and 
-                        vidobj.job_id not in customer_error_jobs):
-                        if new_state == neondata.RequestState.SERVING:
-                            vidobj.serving_url = vidobj.get_serving_url(
-                                save=False)
-                        else:
-                            vidobj.serving_url = None
-            neondata.VideoMetadata.modify_many(video_ids, _set_serving_url)
-        except Exception as e:
-            statemon.state.increment('unexpected_db_update_error')
-            _log.exception('Unexpected error when updating serving state in '
-                           'database %s' % e)
-            # We didn't update the database so don't say that the
-            # videos were published. This will trigger a retry next
-            # time the directives are pushed.
-            with self.lock:
-                self.last_published_videos = \
-                  self.last_published_videos - video_ids
-        finally:
-            self._incr_pending_modify(-len(video_ids))
+        MAX_VIDS_PER_CALL = 100
+        video_ids = list(video_ids)
+        for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
+            cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
+            try:
+                def _set_serving_url(videos_dict):
+                    for vidobj in videos_dict.itervalues():
+                        if vidobj is not None:
+                            if new_state == neondata.RequestState.SERVING:
+                                vidobj.serving_url = vidobj.get_serving_url(
+                                    save=False)
+                            else:
+                                vidobj.serving_url = None
+                videos = neondata.VideoMetadata.modify_many(cur_vid_ids,
+                                                            _set_serving_url)
+                
+                request_keys = [(video.job_id, video.get_account_id()) for
+                                video in videos.itervalues()
+                                if video is not None]
+                def _set_state(request_dict):
+                    for obj in request_dict.itervalues():
+                        if obj is not None:
+                            if obj.state not in [
+                                    neondata.RequestState.CUSTOMER_ERROR,
+                                    neondata.RequestState.FAILED,
+                                    neondata.RequestState.INT_ERROR]:
+                                obj.state = new_state
+                neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+                
+            except Exception as e:
+                statemon.state.increment('unexpected_db_update_error')
+                _log.exception('Unexpected error when updating serving state in '
+                               'database %s' % e)
+                # We didn't update the database so don't say that the
+                # videos were published. This will trigger a retry next
+                # time the directives are pushed.
+                with self.lock:
+                    self.last_published_videos = \
+                      self.last_published_videos - set(cur_vid_ids)
+            finally:
+                self._incr_pending_modify(-len(cur_vid_ids))
 
     def _send_callbacks(self):
         try:

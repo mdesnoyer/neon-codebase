@@ -56,7 +56,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
         # Mock out the cdn url check
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
-        self.mock_cdn_url = self._callback_wrap_mock(
+        self.mock_cdn_url = self._future_wrap_mock(
             self.cdn_check_patcher.start().send_request)
         self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
@@ -266,6 +266,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
     @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_hosting(self, mock_http):
+        mock_http = self._future_wrap_mock(mock_http)
         
         mock_response = '{"public_id":"bfea94933dc752a2def8a6d28f9ac4c2","version":1406671711,"signature":"26bd2ffa2b301b9a14507d152325d7692c0d4957","width":480,"height":268,"format":"jpg","resource_type":"image","created_at":"2014-07-29T22:08:19Z","bytes":74827,"type":"upload","etag":"99fd609b49a802fdef7e2952a5e75dc3","url":"http://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg","secure_url":"https://res.cloudinary.com/neon-labs/image/upload/v1406671711/bfea94933dc752a2def8a6d28f9ac4c2.jpg"}'
 
@@ -276,9 +277,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mresponse = tornado.httpclient.HTTPResponse(
             tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
             200, buffer=StringIO(mock_response))
-        mock_http.side_effect = lambda x, callback=None, **kw: callback(
-            tornado.httpclient.HTTPResponse(x, 200,
-                                            buffer=StringIO(mock_response)))
+        mock_http.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200,buffer=StringIO(mock_response))
         url = cd.upload(None, tid, url)
         self.assertEquals(mock_http.call_count, 2)
         self.assertIsNotNone(mock_http._mock_call_args_list[0][0][0]._body)
@@ -287,6 +288,7 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
 
     @patch('cmsdb.cdnhosting.utils.http.send_request')
     def test_cloudinary_error(self, mock_http):
+        mock_http = self._future_wrap_mock(mock_http)
 
         metadata = neondata.CloudinaryCDNHostingMetadata()
         cd = cmsdb.cdnhosting.CDNHosting.create(metadata)
@@ -295,9 +297,9 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         mresponse = tornado.httpclient.HTTPResponse(
             tornado.httpclient.HTTPRequest('http://cloudinary.com'), 
             502, buffer=StringIO("gateway error"))
-        mock_http.side_effect = lambda x, callback: callback(
-                                    tornado.httpclient.HTTPResponse(x, 502,
-                                    buffer=StringIO("gateway error")))
+        mock_http.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 502, buffer=StringIO("gateway error"))
         with self.assertLogExists(logging.ERROR,
                 'Failed to upload image to cloudinary for tid %s' % tid):
             with self.assertRaises(IOError):
@@ -321,7 +323,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         # Mock out the cdn url check
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
-        self.mock_cdn_url = self._callback_wrap_mock(
+        self.mock_cdn_url = self._future_wrap_mock(
             self.cdn_check_patcher.start().send_request)
         self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
@@ -531,7 +533,7 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
         self.cdn_mock = MagicMock()
         self.cdn_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
         self.http_patcher = patch('cmsdb.cdnhosting.utils.http')
-        self.http_mock = self._callback_wrap_mock(
+        self.http_mock = self._future_wrap_mock(
             self.http_patcher.start().send_request)
         def _handle_http_request(request, *args, **kwargs):
             if 'cdn' in request.url:
