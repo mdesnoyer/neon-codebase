@@ -150,9 +150,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''Returns the (url, {image_struct}) of the best image in the 
         Brightcove video object
         '''
-        url = data['videoStillURL']
+        url = data.get('videoStillURL', None)
         if url is None:
-            url = data['thumbnailURL']
+            url = data.get('thumbnailURL', None)
             if url is None:
                 return (None, None)
             obj = data['thumbnail']
@@ -287,6 +287,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 self.platform.neon_api_key,
                 self.platform.integration_id,
                 _set_mod_date)
+            
+            _log.debug(
+                'updated last process date for account %s integration %s'
+                % (self.platform.neon_api_key, self.platform.integration_id))
 
     @tornado.gen.coroutine
     def process_publisher_stream(self):
@@ -407,28 +411,44 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         if not video_id in self.platform.videos:
             # The video hasn't been submitted before
-            response = yield self.submit_video(
-                video_id,
-                video_url,
-                video_title=unicode(vid_obj['name']),
-                default_thumbnail=thumb_url,
-                external_thumbnail_id=thumb_id,
-                callback_url=self.platform.callback_url,
-                custom_data = custom_data,
-                duration=float(vid_obj['length']) / 1000.0,
-                publish_date=publish_date)
+            job_id = None
+            try:
+                response = yield self.submit_video(
+                    video_id,
+                    video_url,
+                    video_title=unicode(vid_obj['name']),
+                    default_thumbnail=thumb_url,
+                    external_thumbnail_id=thumb_id,
+                    callback_url=self.platform.callback_url,
+                    custom_data = custom_data,
+                    duration=float(vid_obj['length']) / 1000.0,
+                    publish_date=publish_date)
+                job_id = response['job_id']
 
-            # TODO: Remove this hack once videos aren't attached to
-            # platform objects.
-            # HACK: Add the video to the platform object because our call 
-            # will put it on the NeonPlatform object.
-            self.platform = yield tornado.gen.Task(
-                neondata.BrightcovePlatform.modify,
-                self.platform.neon_api_key,
-                self.platform.integration_id,
-            lambda x: x.add_video(video_id, response['job_id']))
+            except Exception as e:
+                # If the video metadata object is there, then try to
+                # find the job id in that oject.
+                new_video = yield tornado.gen.Task(
+                    neondata.VideoMetadata.get,
+                    neondata.InternalVideoID.generate(
+                        self.platform.neon_api_key, video_id))
+                if new_video is not None:
+                    job_id = new_video.job_id
+                raise e
 
-            job_id = response['job_id']
+            finally:
+                # TODO: Remove this hack once videos aren't attached to
+                # platform objects.
+                # HACK: Add the video to the platform object because our call 
+                # will put it on the NeonPlatform object.
+                if job_id is not None:
+                    self.platform = yield tornado.gen.Task(
+                        neondata.BrightcovePlatform.modify,
+                        self.platform.neon_api_key,
+                        self.platform.integration_id,
+                    lambda x: x.add_video(video_id, job_id))
+
+
         else:
             job_id = self.platform.videos[video_id]
             if job_id is not None:
@@ -483,11 +503,16 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''
         thumb_url, thumb_data = \
           BrightcoveIntegration._get_best_image_info(data)
+        if thumb_data is None:
+            _log.warn_n('Could not find thumbnail in %s' % data)
+            return 
         bc_urls = [_normalize_thumbnail_url(x) for 
                    x in _get_urls_from_bc_response(data)]
 
         # Function that will set the external id in the ThumbnailMetadata
         external_id = thumb_data.get('id', None)
+        if external_id is not None:
+            external_id = unicode(external_id)
         def _set_external_id(obj):
             obj.external_id = external_id
 
@@ -527,8 +552,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             if thumb.external_id is not None:
                 # We know about this thumb was in Brightcove so see if it
                 # is still there.
-                if thumb.external_id in _extract_image_info_from_bc_response(
-                        data, 'id'):
+                if (unicode(thumb.external_id) in 
+                    _extract_image_info_from_bc_response(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
                 # For legacy thumbs, we specified a reference id. Look for it

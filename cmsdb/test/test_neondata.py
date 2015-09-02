@@ -10,6 +10,8 @@ if sys.path[0] != __base_path__:
 import copy
 from concurrent.futures import Future
 import contextlib
+import datetime
+import dateutil.parser
 import logging
 import json
 import multiprocessing
@@ -140,6 +142,34 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         objs = yield tornado.gen.Task(AbstractPlatform.get_all)
 
         self.assertEquals(len(objs), 4)
+
+    @tornado.testing.gen_test
+    def test_async_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = yield tornado.gen.Task(conn.fetch_keys_from_db,
+                                      'neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
+
+    def test_sync_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = conn.fetch_keys_from_db('neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
 
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
@@ -678,6 +708,27 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         video_meta.save()
         neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
         self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
+
+    def test_video_status_history(self):
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        neondata.VideoStatus(vid).save()
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(video_status.state_history, [])
+        def _update(status):
+            status.set_experiment_state(neondata.ExperimentState.COMPLETE)
+        neondata.VideoStatus.modify(vid, _update)
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.COMPLETE)
+        self.assertEquals(video_status.state_history[0][1],
+                          neondata.ExperimentState.COMPLETE)
+        new_time = dateutil.parser.parse(
+            video_status.state_history[0][0])
+        self.assertLess(
+            (datetime.datetime.utcnow() - new_time).total_seconds(),
+            600)
 
     def test_video_metadata_methods(self):
         '''
@@ -1807,27 +1858,6 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertEqual(ThumbnailMetadata.get(tid2).urls,
                          ['%s.jpg' % tid2])
         
-
-    def test_read_thumbnail_old_format(self):
-        # Make sure that we're backwards compatible
-        thumb = ThumbnailMetadata._create('2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15', json.loads("{\"video_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001\", \"thumbnail_metadata\": {\"chosen\": false, \"thumbnail_id\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\", \"model_score\": 4.1698684091322846, \"enabled\": true, \"rank\": 5, \"height\": 232, \"width\": 416, \"model_version\": \"20130924\", \"urls\": [\"https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg\"], \"created_time\": \"2013-12-02 09:55:19\", \"type\": \"neon\", \"refid\": null}, \"key\": \"2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15\"}"))
-
-        self.assertEqual(thumb.key, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001_9e1d6017cab9aa970fca5321de268e15')
-        self.assertEqual(thumb.video_id, '2630b61d2db8c85e9491efa7a1dd48d0_2876590502001')
-        self.assertEqual(thumb.chosen, False)
-        self.assertAlmostEqual(thumb.model_score, 4.1698684091322846)
-        self.assertEqual(thumb.enabled, True)
-        self.assertEqual(thumb.rank, 5)
-        self.assertEqual(thumb.height, 232)
-        self.assertEqual(thumb.width, 416)
-        self.assertEqual(thumb.model_version, '20130924')
-        self.assertEqual(thumb.type, 'neon')
-        self.assertEqual(thumb.created_time, '2013-12-02 09:55:19')
-        self.assertIsNone(thumb.refid)
-        self.assertEqual(thumb.urls, ["https://host-thumbnails.s3.amazonaws.com/2630b61d2db8c85e9491efa7a1dd48d0/208720d8a4aef7ee5f565507833e2ccb/neon4.jpeg"])
-        
-        with self.assertRaises(AttributeError):
-            thumb.thumbnail_id
 
 class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     '''

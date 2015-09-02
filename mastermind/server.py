@@ -79,6 +79,9 @@ define('expiry_buffer', type=int, default=30,
 define('serving_update_delay', type=int, default=240,
        help='delay in seconds to update new videos to serving state')
 
+# Callback options
+define('send_callbacks', default=1, help='If 1, callbacks are sent')
+
 # Script running options
 define('tmp_dir', default='/tmp', help='Temp directory to work in')
 
@@ -91,6 +94,7 @@ statemon.define('unexpected_statsdb_error', int) # 1 if there was an error last 
 statemon.define('has_newest_statsdata', int) # 1 if we have the newest data
 statemon.define('good_connection_to_impala', int)
 statemon.define('good_connection_to_hbase', int)
+statemon.define('initialized_directives', int)
 statemon.define('videodb_batch_update', int) # Count of the nubmer of batch updates from the video db
 statemon.define('videodb_error', int) # error connecting to the video DB
 statemon.define('publish_error', int) # error publishing directive to s3
@@ -244,9 +248,14 @@ class VideoDBWatcher(threading.Thread):
                     sub.close()
 
     def run(self):
+        is_initialized = False
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
+                    if not is_initialized:
+                        self._initialize_serving_directives()
+                        is_initialized = True
+                        statemon.state.initialized_directives = 1
                     self._process_db_data()
 
                     if not self._video_updater.is_alive():
@@ -268,6 +277,40 @@ class VideoDBWatcher(threading.Thread):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
         self._video_updater.stop()
+
+    def _initialize_serving_directives(self):
+        '''Save current experiment state and serving fracs to mastermind
+         
+        When Mastermind server starts, the experiment_states and current
+        serving directives are loaded from the database. If experiment
+        is already complete, we will keep its complete state and not
+        changing its serving directives.
+        '''
+        _log.info('Loading current experiment info and updating in mastermind')
+
+        for platform in neondata.AbstractPlatform.get_all():
+            if not platform.serving_enabled:
+                continue
+            for video_id in platform.get_internal_video_ids():
+                video_metadata = neondata.VideoMetadata.get(video_id)
+                account_id = video_metadata.get_account_id()
+                if not video_metadata.serving_enabled:
+                    continue
+                video_status = neondata.VideoStatus.get(video_id,
+                                                        log_missing=False)
+                if video_status is None:
+                    continue
+
+                # Get all thumbnails
+                thumbnail_status_list = neondata.ThumbnailStatus.get_many(
+                    set(video_metadata.thumbnail_ids), log_missing=False)
+                thumbnail_status_list = [x for x in thumbnail_status_list if
+                                         x is not None]
+
+                self.mastermind.update_experiment_state_directive(
+                    video_id,
+                    video_status,
+                    thumbnail_status_list)
 
     def _process_db_data(self):
         _log.info('Polling the video database for a full batch update')
@@ -450,6 +493,9 @@ class VideoDBWatcher(threading.Thread):
             _log.error('Could not find information about video %s' % video_id)
             return
 
+        
+        thumb_ids = sorted(set(video_metadata.thumbnail_ids))
+
         try:
             abtest, serving_enabled = self._platform_options[
                 (video_metadata.get_account_id(),
@@ -462,9 +508,8 @@ class VideoDBWatcher(threading.Thread):
 
         if serving_enabled and video_metadata.serving_enabled:
             thumbnails = []
-            thumbs = neondata.ThumbnailMetadata.get_many(
-                video_metadata.thumbnail_ids)
-            for thumb_id, meta in zip(video_metadata.thumbnail_ids, thumbs):
+            thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
+            for thumb_id, meta in zip(thumb_ids, thumbs):
                 if meta is None:
                     statemon.state.increment('no_thumbnailmetadata')
                     _log.error('Could not find metadata for thumb %s' %
@@ -473,8 +518,7 @@ class VideoDBWatcher(threading.Thread):
                 else:
                     thumbnails.append(meta)
 
-            serving_urls = neondata.ThumbnailServingURLs.get_many(
-                video_metadata.thumbnail_ids)
+            serving_urls = neondata.ThumbnailServingURLs.get_many(thumb_ids)
             for url_obj in serving_urls:
                 if url_obj is not None:
                     self.directive_pusher.add_serving_urls(
@@ -486,7 +530,7 @@ class VideoDBWatcher(threading.Thread):
                                               abtest)
         else:
             self.mastermind.remove_video_info(video_id)
-            for thumb_id in video_metadata.thumbnail_ids:
+            for thumb_id in thumb_ids:
                 self.directive_pusher.del_serving_urls(thumb_id)
 
     def process_queued_video_updates(self):
@@ -551,7 +595,7 @@ class StatsDBWatcher(threading.Thread):
     def __del__(self):
         if self._update_stats_timer and self._update_stats_timer.is_alive():
             self._update_stats_timer.cancel()
-        super(DirectivePublisher, self).__del__()
+        super(StatsDBWatcher, self).__del__()
 
     def _update_time_since_stats_update(self):
         if self.last_update is not None:
@@ -1382,8 +1426,8 @@ class DirectivePublisher(threading.Thread):
         try:
             customer_error_jobs= set([])
             request_keys = [(video.job_id, video.get_account_id()) for
-                                video in neondata.VideoMetadata.get_many(video_ids)
-                                if video is not None]
+                            video in neondata.VideoMetadata.get_many(video_ids)
+                            if video is not None]
             def _set_state(request_dict):
                 for obj in request_dict.itervalues():
                     # Handle customer_error videos. Don't change their states
@@ -1408,13 +1452,20 @@ class DirectivePublisher(threading.Thread):
             statemon.state.increment('unexpected_db_update_error')
             _log.exception('Unexpected error when updating serving state in '
                            'database %s' % e)
+            # We didn't update the database so don't say that the
+            # videos were published. This will trigger a retry next
+            # time the directives are pushed.
+            with self.lock:
+                self.last_published_videos = \
+                  self.last_published_videos - video_ids
         finally:
             self._incr_pending_modify(-len(video_ids))
 
     def _send_callbacks(self):
         try:
-            self.callback_manager.schedule_all_callbacks(
-                self.last_published_videos)
+            if options.send_callbacks:
+                self.callback_manager.schedule_all_callbacks(
+                    self.last_published_videos)
         except Exception as e:
             _log.warn('Unexpected error when sending a customer '
                       'callback: %s' % e)

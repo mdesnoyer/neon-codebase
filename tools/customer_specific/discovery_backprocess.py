@@ -79,43 +79,62 @@ def main():
     n_errors = 0
     while True:
 
-        videos = yield bc_api.search_videos(
-            _all=[('network', 'dsc')],
-            exact=True,
-            video_fields=video_fields,
-            sort_by='CREATION_DATE:DESC',
-            page=cur_page,
-            async=True)
-        cur_page += 1
+        try:
+
+            videos = yield bc_api.search_videos(
+                _all=[('network', 'dsc')],
+                exact=True,
+                video_fields=video_fields,
+                sort_by='CREATION_DATE:DESC',
+                page=cur_page,
+                page_size=50,
+                async=True)
+            cur_page += 1
                     
-        if len(videos) == 0:
-            break
-        
-        videos = [x for x in videos if 
-                  'newmediapaid' in x['customFields'] and 
-                  x['customFields']['newmediapaid'] 
-                  not in plat.videos]
+            if len(videos) == 0:
+                break
 
-        if len(videos) == 0:
-            continue
+            videos = [x for x in videos if 
+                      'newmediapaid' in x['customFields'] and 
+                      x['customFields']['newmediapaid'] 
+                      not in plat.videos]
 
-        _log.info('Found %i videos to submit on this page' % len(videos))
+            if len(videos) == 0:
+                time.sleep(0.1)
+                continue
 
-        results = yield integration.submit_many_videos(
-            videos, grab_new_thumb=False, continue_on_error=True)
+            _log.info('Found %i videos to submit on this page' % len(videos))
 
-        n_errors += len([x for x in results.values() 
-                         if isinstance(x, Exception)])
-        n_processed += len(videos)
+            futures = [integration.submit_one_video_object(x, grab_new_thumb=False)
+                       for x in videos]
+            
+            results = []
+            try:
+                results = yield futures
+            except Exception as e:
+                _log.error('Error submitting video: %s' % e)
 
-        job_id = None
-        if len(results) > 0:
-            job_id = results.values()[0]
+            #results = yield integration.submit_many_videos(
+            #    videos, grab_new_thumb=False,
+            #    continue_on_error=True)
 
-        _log.info('Processed %i videos. %i failed. Recent job %s' % 
-                  (n_processed, n_errors, job_id))
+            n_errors += len([x for x in results
+                             if isinstance(x, Exception)])
+            n_processed += len(videos)
 
-        time.sleep(3600.0 / options.max_submit_rate * len(videos))
+            job_id = None
+            #if len(results) > 0:
+            #    job_id = results[0]
+
+            _log.info('Processed %i videos. %i failed. Recent job %s' % 
+                      (n_processed, n_errors, job_id))
+
+            time.sleep(3600.0 / options.max_submit_rate * len(videos))
+
+        except Exception as e:
+            _log.exception('Unexpected exception. Waiting 5 minutes to try again')
+            time.sleep(300.0)
+            _log.info('Continuing')
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

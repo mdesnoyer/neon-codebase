@@ -806,7 +806,7 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.log-aggregation-enable=true',
                  '--yarn-key-value',
-                 'yarn.scheduler.maximum-allocation-mb=12000'])]
+                 'yarn.scheduler.maximum-allocation-mb=16000'])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
