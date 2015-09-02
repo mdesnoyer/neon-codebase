@@ -674,7 +674,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=10.0):
+    def unsubscribe(self, channel=None, timeout=20.0):
         '''Unsubscribe from channel.
 
         channel - Channel to unsubscribe from
@@ -693,7 +693,7 @@ class PubSubConnection(threading.Thread):
             lambda: self._unsubscribe_impl(channel, timeout))
         yield unsub_future
 
-    def _unsubscribe_impl(self, channel=None, timeout=10.0):
+    def _unsubscribe_impl(self, channel=None, timeout=20.0):
         try:
             with self._publock:
                 if channel is None:
