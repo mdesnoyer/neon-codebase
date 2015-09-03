@@ -1885,7 +1885,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     # On any kind of exception
                     # TODO: get nearest to original frame_size
                     # For IGN this is sufficient, enhance this when needed
-                    s_tup = max(s_urls.size_map, key=lambda item:item[0])
+                    s_tup = max(s_urls, key=lambda item:item[0])
                     o_url = s_urls.get_serving_url(s_tup[0], s_tup[1]) 
 
                 response['original_thumbnail'] = o_url
