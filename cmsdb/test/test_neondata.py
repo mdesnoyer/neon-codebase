@@ -754,14 +754,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         api_request.save_default_thumbnail()
         self.assertEquals(get_video_mock.call_count, 0)
 
-        
-        # Add an old url and there is no video data in the database yet
-        api_request.previous_thumbnail = 'old_thumbnail'
-        with self.assertLogExists(logging.ERROR, 
-                                 'VideoMetadata for job .* is missing'):
-            with self.assertRaises(neondata.DBStateError):
-                api_request.save_default_thumbnail()
-
         # Add the video data to the database
         video = VideoMetadata('acct1_vid1')
         add_thumb_mock = MagicMock()
@@ -771,14 +763,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         add_thumb_mock.return_value = add_future
         get_video_mock.side_effect = lambda x, callback: callback(video)
         
-        api_request.save_default_thumbnail()
-        self.assertEquals(add_thumb_mock.call_count, 1)
-        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
-        self.assertEquals(url_seen, 'old_thumbnail')
-        self.assertEquals(thumbmeta.rank, 0)
-        self.assertEquals(thumbmeta.type, ThumbnailType.DEFAULT)
-        add_thumb_mock.reset_mock()
-
         # Use the default_thumbnail attribute
         api_request.default_thumbnail = 'new_thumbnail'
         api_request.save_default_thumbnail()

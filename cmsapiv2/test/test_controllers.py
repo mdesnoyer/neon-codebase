@@ -772,8 +772,12 @@ class TestVideoHandler(TestControllersBase):
     
     @tornado.testing.gen_test
     def test_post_video(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image] 
+        #self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        #self.im_download_mock.side_effect = [self.random_image]
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -781,6 +785,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
+        cmsdb_download_image_mocker.stop()
 
     def test_post_failed_to_download_thumbnail(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' \
@@ -930,7 +935,7 @@ class TestVideoHandler(TestControllersBase):
         response = self.wait()
         self.assertEquals(response.code, 409) 
         rjson = json.loads(response.body) 
-        data = rjson['data']  
+        data = rjson['data'] 
         self.assertTrue(first_job_id in data)
 
     @tornado.testing.gen_test
@@ -1128,7 +1133,8 @@ class TestThumbnailHandler(TestControllersBase):
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code,202)
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        self.im_download_mock.side_effect = [self.random_image] 
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah2.jpg' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST', 
@@ -1136,7 +1142,10 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(response.code,202)
         internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'tn_test_vid2')
         video = neondata.VideoMetadata.get(internal_video_id)
+        thumbnail_ids = video.thumbnail_ids
         self.assertEquals(len(video.thumbnail_ids), 2)
+        #for tid in thumbnail_ids: 
+            
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):

@@ -728,7 +728,8 @@ class VideoHelper():
         request.callback_url = args.get('callback_url', None)
         request.video_title = args.get('video_title', None) 
         request.default_thumbnail = args.get('default_thumbnail_url', None) 
-        request.external_thumbnail_ref = args.get('thumbnail_ref', None)  
+        request.external_thumbnail_ref = args.get('thumbnail_ref', None) 
+        request.publish_date = args.get('publish_date', None) 
         yield tornado.gen.Task(request.save)
 
         if request: 
@@ -748,23 +749,35 @@ class VideoHelper():
         video = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
         if video is None:
+            # make sure we can download the image before creating requests 
             # create the api_request
             api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
                                                  args, 
                                                  account_id_api_key)
 
             video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
-                          request_id=api_request.job_id,
+                          #request_id=api_request.job_id,
                           video_url=args.get('video_url', None),
                           publish_date=args.get('publish_date', None),
                           duration=float(args.get('duration', 0.0)) or None, 
                           custom_data=args.get('custom_data', None), 
                           i_id=api_request.integration_id,
                           serving_enabled=False)
-            # save the video 
+            
+            default_thumbnail_url = args.get('default_thumbnail_url', None)
+            if default_thumbnail_url: 
+                # save the default thumbnail
+                image = yield video.download_image_from_url(default_thumbnail_url)
+                thumb = yield video.save_default_thumbnail_with_image(image, default_thumbnail_url,  
+                                                      args.get('thumbnail_ref', None), async=True)
+
+            # create the api_request
+            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
+                                                 args, 
+                                                 account_id_api_key)
+            # add the job id save the video
+            video.job_id = api_request.job_id 
             yield tornado.gen.Task(video.save)
-            # save the default thumbnail
-            new_thumb = yield api_request.save_default_thumbnail(async=True)
             raise tornado.gen.Return((video,api_request))
         else:
             raise AlreadyExists('job_id=%s' % (video.job_id))
@@ -802,7 +815,7 @@ class VideoHandler(APIV2Handler):
           'callback_url': Any(str, unicode, Length(min=1, max=512)), 
           'video_title': Any(str, unicode, Length(min=1, max=256)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
-          'publish_date': All(CustomVoluptuousTypes.ISO8601Date()), 
+          'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
           'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
           'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
@@ -849,19 +862,18 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint get request""" 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(str, unicode, Length(min=1, max=4096)),
+          Required('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
-        video_id = args['video_id']
         fields = args.get('fields', None) 
             
         vid_dict = {} 
         output_list = []
         internal_video_ids = [] 
-        video_ids = video_id.split(',')
+        video_ids = args['video_id'].split(',')
         for v_id in video_ids: 
             internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
             internal_video_ids.append(internal_video_id)
@@ -969,19 +981,8 @@ Custom Voluptuous Types
 *********************************************************************'''
 class CustomVoluptuousTypes(): 
     @staticmethod
-    def Date(fmt='%Y-%m-%dT%H:%M:%S.%fZ'):
+    def Date():
         return lambda v: dateutil.parser.parse(v)
-
-    @staticmethod
-    def ISO8601Date():
-        def f(v): 
-            for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.%fZ'): 
-                try: 
-                    return datetime.strptime(v, fmt)
-                except ValueError: 
-                    pass
-            raise Invalid("not an accepted date format") 
-        return f
 
     @staticmethod
     def CommaSeparatedList():

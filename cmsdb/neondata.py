@@ -1649,7 +1649,6 @@ class NeonUserAccount(NamespacedStoredObject):
         '''Adds a platform object to the account.'''
         if len(self.integrations) == 0:
             self.integrations = {}
-
         self.integrations[platform.integration_id] = platform.get_ovp()
 
     @utils.sync.optional_sync
@@ -1659,8 +1658,9 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-        for plat in [NeonPlatform, BrightcovePlatform, BrightcoveIntegration, 
-                     YoutubePlatform, OoyalaIntegration]:
+         
+        for plat in [NeonPlatform, BrightcovePlatform, 
+                     YoutubePlatform, BrightcoveIntegration, OoyalaIntegration]:
             ovp_map[plat.get_ovp()] = plat
 
         calls = []
@@ -1737,7 +1737,7 @@ class NeonUserAccount(NamespacedStoredObject):
             InternalVideoID.generate(self.neon_api_key, None),
             ttype=ThumbnailType.DEFAULT,
             rank=cur_rank)
-        yield tmeta.add_image_data(image, cdn_metadata, async=True)
+        yield tmeta.add_image_data(image, cdn_metadata=cdn_metadata, async=True)
         self.default_thumbnail_id = tmeta.key
         
         success = yield tornado.gen.Task(tmeta.save)
@@ -2518,7 +2518,7 @@ class BrightcoveIntegration(AbstractIntegration):
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
-        return "brightcove"
+        return "brightcove_integration"
 
     @classmethod
     @utils.sync.optional_sync
@@ -2720,10 +2720,14 @@ class BrightcoveIntegration(AbstractIntegration):
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
+    REFERENCE_ID = '_reference_id'
+    BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
-                last_process_date=None, abtest=False, callback_url=None):
+                last_process_date=None, abtest=False, callback_url=None,
+                uses_batch_provisioning=False,
+                id_field=BRIGHTCOVE_ID):
 
         ''' On every request, the job id is saved '''
 
@@ -2743,6 +2747,16 @@ class BrightcovePlatform(AbstractPlatform):
         self.playlist_feed_ids = []
         # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
+
+        # Does the customer use batch provisioning (i.e. FTP
+        # uploads). If so, we cannot rely on the last modified date of
+        # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
+        self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Which custom field to use for the video id. If it is
+        # BrightcovePlatform.REFERENCE_ID, then the reference_id field
+        # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
+        self.id_field = id_field
 
     @classmethod
     def get_ovp(cls):
@@ -3098,7 +3112,7 @@ class OoyalaIntegration(AbstractIntegration):
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
-        return "ooyala"
+        return "ooyala_integration"
 
     @classmethod
     @utils.sync.optional_sync
@@ -3594,13 +3608,12 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             callback=callback)
-
+    
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
         '''Save the default thumbnail by attaching it to a video.
-
-        The video metadata for this request must be in the database already.
+The video metadata for this request must be in the database already.
 
         Inputs:
         cdn_metadata - If known, the metadata to save to the cdn.
@@ -3610,16 +3623,6 @@ class NeonApiRequest(NamespacedStoredObject):
             thumb_url = self.default_thumbnail
         except AttributeError:
             thumb_url = None
-
-        if thumb_url is None:
-            # Fallback to the old previous_thumbnail
-            
-            # TODO(sunil): remove this once the video api server only
-            # handles default thumbnail.
-            try:
-                thumb_url = self.previous_thumbnail
-            except AttributeError:
-                thumb_url = None
 
         if not thumb_url:
             # No default thumb to upload
@@ -4054,7 +4057,7 @@ class ThumbnailMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def add_image_data(self, image, cdn_metadata=None):
+    def add_image_data(self, image, video_info=None, cdn_metadata=None):
         '''Incorporates image data to the ThumbnailMetadata object.
 
         Also uploads the image to the CDNs and S3.
@@ -4066,7 +4069,6 @@ class ThumbnailMetadata(StoredObject):
         
         '''        
         image = PILImageUtils.convert_to_rgb(image)
-        
         # Update the image metadata
         self.width = image.size[0]
         self.height = image.size[1]
@@ -4096,8 +4098,9 @@ class ThumbnailMetadata(StoredObject):
         # Host the image on the CDN
         if cdn_metadata is None:
             # Lookup the cdn metadata
-            video_info = yield tornado.gen.Task(VideoMetadata.get,
-                                                self.video_id)
+            if video_info is None: 
+                video_info = yield tornado.gen.Task(VideoMetadata.get,
+                                                    self.video_id)
 
             cdn_key = CDNHostingMetadataList.create_key(
                 video_info.get_account_id(), video_info.integration_id)
@@ -4273,7 +4276,7 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False):
+                      save_objects=False, video=None):
         '''Add thumbnail to the video.
 
         Saves the thumbnail object, and the video object if
@@ -4294,7 +4297,7 @@ class VideoMetadata(StoredObject):
         '''
         thumb.video_id = self.key
 
-        yield thumb.add_image_data(image, cdn_metadata, async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
@@ -4322,6 +4325,45 @@ class VideoMetadata(StoredObject):
         raise tornado.gen.Return(thumb)
 
     
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def download_image_from_url(self, image_url): 
+        try:
+            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+                    async=True)
+        except IOError, e:
+            msg = "IOError while downloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+        except tornado.httpclient.HTTPError as e:
+            msg = "HTTP Error while dowloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+
+        raise tornado.gen.Return(image)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save_default_thumbnail_with_image(self, image, url, external_thumbnail_id=None, cdn_metadata=None): 
+        '''
+        Have the image downloaded, don't have a video, but need to save a thumbnail
+ 
+        Inputs:
+        @image: a PIL image that was downloaded 
+        @url: url of the image to download 
+        
+        Outpus: 
+        @thumb: a ThumbnailMetadata object 
+        '''
+        thumb = ThumbnailMetadata(None,
+                      ttype=ThumbnailType.DEFAULT,
+                      external_id=external_thumbnail_id)
+        thumb.urls.append(url)
+        thumb = yield self.add_thumbnail(thumb, image, cdn_metadata, save_objects=True,
+                                         async=True)
+        raise tornado.gen.Return(thumb) 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4342,20 +4384,7 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        try:
-            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
-                    async=True)
-        except IOError, e:
-            msg = "IOError while downloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-        except tornado.httpclient.HTTPError as e:
-            msg = "HTTP Error while dowloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-
+        image = yield self.download_image_from_url(image_url, async=True) 
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
