@@ -49,9 +49,6 @@ import utils.statemon
 _log = logging.getLogger('airflow.dag.clicklogs')
 
 
-# PyCharm debugger
-# pydevd.settrace('localhost', port=55555, stdoutToServer=True, stderrToServer=True, suspend=False)
-
 # ----------------------------------------
 # Options and configurations with DAGs
 # ----------------------------------------
@@ -626,9 +623,7 @@ load_impala_tables = PythonOperator(
     python_callable=_load_impala_tables,
     provide_context=True,
     op_kwargs=dict(output_path=options.output_path),
-    retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
-    sla=timedelta(minutes=options.quiet_period+180))
-    # depends_on_past=True)
+    retry_delay=timedelta(seconds=random.randrange(30,300,step=30)))
 load_impala_tables.set_upstream(mr_cleaning_job)
 
 
