@@ -28,6 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import cmsdb.url2thumbnail
 import code
+import collections
 import concurrent.futures
 import contextlib
 import copy
@@ -1131,17 +1132,21 @@ class StoredObject(object):
 
             mappings = {}
             orig_objects = {}
+            key_sets = collections.defaultdict(list)
             for key, item in zip(keys, items):
                 if item is None:
                     if create_missing:
-                        mappings[key] = create_class(key)
+                        cur_obj = create_class(key)
                     else:
                         _log.error('Could not get redis object: %s' % key)
-                        mappings[key] = None
+                        cur_obj = None
                 else:
-                    mappings[key] = create_class._create(key, json.loads(item))
+                    cur_obj = create_class._create(key, json.loads(item))
                     orig_objects[key] = create_class._create(key,
                                                              json.loads(item))
+                mappings[key] = cur_obj
+                if cur_obj is not None:
+                    key_sets[cur_obj._set_keyname()].append(key)
             try:
                 func(mappings)
             finally:
@@ -1152,6 +1157,8 @@ class StoredObject(object):
 
                 if len(to_set) > 0:
                     pipe.mset(to_set)
+                for set_key, cur_keys in key_sets.iteritems():
+                    pipe.sadd(set_key, *cur_keys)
             return mappings
 
         db_connection = DBConnection.get(create_class)
@@ -1168,13 +1175,25 @@ class StoredObject(object):
         '''Save many objects simultaneously'''
         db_connection = DBConnection.get(cls)
         data = {}
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
         for obj in objects:
             data[obj.key] = obj.to_json()
+            key_sets[obj._set_keyname()].append(obj.key)
 
+        def _save_and_add2set(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.sadd(set_key, *keys)
+            pipe.mset(data)
+
+        lock_keys = key_sets.keys() + data.keys()
         if callback:
-            db_connection.conn.mset(data, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           lock_keys,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.mset(data)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                lock_keys)
 
     @classmethod
     def _erase_all_data(cls):
@@ -1201,11 +1220,25 @@ class StoredObject(object):
         The number of keys that were removed
         '''
         db_connection = DBConnection.get(cls)
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+        for key in keys:
+            obj = cls(key)
+            obj.key = key
+            key_sets[obj._set_keyname()].append(key)
+
+        def _del_and_remfromset(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.srem(set_key, *keys)
+            pipe.delete(keys)
             
         if callback:
-            db_connection.conn.delete(*keys, callback=callback)
+            db_connection.conn.transaction(_del_and_remfromset,
+                                           keys,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.delete(*keys)
+            return db_connection.blocking_conn.transaction(
+                _del_and_remfromset,
+                keys)
         
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
@@ -3555,31 +3588,9 @@ class ThumbnailURLMapper(object):
             #TODO: Is this imdata really needed ? 
             raise #self.value = ThumbnailID.generate(imdata) 
 
-    def save(self, callback=None):
-        ''' 
-        save url mapping 
-        ''' 
-        db_connection = DBConnection.get(self)
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.set(self.key, self.value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, self.value)
-
-    @classmethod
-    def save_all(cls, thumbnailMapperList, callback=None):
-        ''' multi save '''
-
-        db_connection = DBConnection.get(cls)
-        data = {}
-        for t in thumbnailMapperList:
-            data[t.key] = t.value 
-
-        if callback:
-            db_connection.conn.mset(data, callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
+    def to_json(self):
+        # Actually not json because we are only storing the value
+        return str(self.value)
 
     @classmethod
     def get_id(cls, key, callback=None):
