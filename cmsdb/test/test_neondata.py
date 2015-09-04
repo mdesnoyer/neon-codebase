@@ -1448,14 +1448,12 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       found_objs = yield tornado.gen.Task(VideoMetadata.get_many,
                                           ['acct1_v1', 'acct1_v2', 'acct1_v3'])
       self.assertEquals(found_objs, vids)
-      n_deleted = yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
-      self.assertEquals(n_deleted, 1)
+      yield tornado.gen.Task(VideoMetadata.delete, 'acct1_v1')
       self.assertIsNone(VideoMetadata.get('acct1_v1'))
       self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
       self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
-      n_deleted = yield tornado.gen.Task(VideoMetadata.delete_many,
-                                         ['acct1_v2', 'acct1_v3'])
-      self.assertEquals(n_deleted, 2)
+      yield tornado.gen.Task(VideoMetadata.delete_many,
+                             ['acct1_v2', 'acct1_v3'])
       self.assertIsNone(VideoMetadata.get('acct1_v1'))
       self.assertIsNone(VideoMetadata.get('acct1_v2'))
       self.assertIsNone(VideoMetadata.get('acct1_v3'))
@@ -1469,13 +1467,11 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       VideoMetadata.save_all(vids)
       found_objs = VideoMetadata.get_many(['acct1_v1', 'acct1_v2', 'acct1_v3'])
       self.assertEquals(found_objs, vids)
-      n_deleted = VideoMetadata.delete('acct1_v1')
-      self.assertEquals(n_deleted, 1)
+      self.assertTrue(VideoMetadata.delete('acct1_v1'))
       self.assertIsNone(VideoMetadata.get('acct1_v1'))
       self.assertIsNotNone(VideoMetadata.get('acct1_v2'))
       self.assertIsNotNone(VideoMetadata.get('acct1_v3'))
-      n_deleted = VideoMetadata.delete_many(['acct1_v2', 'acct1_v3'])
-      self.assertEquals(n_deleted, 2)
+      self.assertTrue(VideoMetadata.delete_many(['acct1_v2', 'acct1_v3']))
       self.assertIsNone(VideoMetadata.get('acct1_v1'))
       self.assertIsNone(VideoMetadata.get('acct1_v2'))
       self.assertIsNone(VideoMetadata.get('acct1_v3'))
@@ -1520,16 +1516,17 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       self.assertIsNotNone(NeonApiRequest.get('job2', 'acct1'))
       self.assertIsNotNone(NeonApiRequest.get('job3', 'acct1'))
       self.assertIsNotNone(NeonApiRequest.get('job4', 'acct1'))
-      deleted_counts = yield [
+      deleted_bool = yield [
         tornado.gen.Task(NeonApiRequest.delete, 'job1', 'acct1'),
         tornado.gen.Task(NeonApiRequest.delete_many,
                          [('job2', 'acct1'), ('job3', 'acct1'),
-                          ('job4', 'acct1')])]
-      self.assertEquals(deleted_counts, [1,3])
+                          ('job4', 'acct1'), ('job5', 'acct1')])]
+      self.assertEquals(deleted_bool, [True, True])
       self.assertIsNone(NeonApiRequest.get('job1', 'acct1'))
       self.assertIsNone(NeonApiRequest.get('job2', 'acct1'))
       self.assertIsNone(NeonApiRequest.get('job3', 'acct1'))
       self.assertIsNone(NeonApiRequest.get('job4', 'acct1'))
+      self.assertIsNone(NeonApiRequest.get('job5', 'acct1'))
 
     def test_creating_list_of_videos_sync(self):
       VideoMetadata('a1_v1').save()
@@ -1538,6 +1535,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         VideoMetadata('a2_v1'),
         VideoMetadata('a2_v2'),
         VideoMetadata('a2_v3')])
+      VideoMetadata.modify('a2_v4', lambda x: x, create_missing=True)
 
       conn = neondata.DBConnection.get(VideoMetadata)
       self.assertItemsEqual(conn.blocking_conn.smembers(
@@ -1545,7 +1543,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1', 'a1_v2'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v2', 'a2_v3'])
+        ['a2_v1', 'a2_v2', 'a2_v3', 'a2_v4'])
 
       # Now delete some
       VideoMetadata.delete_many(['a1_v2', 'a2_v2'])
@@ -1555,7 +1553,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v3'])
+        ['a2_v1', 'a2_v3', 'a2_v4'])
 
     @tornado.testing.gen_test
     def test_creating_list_of_videos_async(self):
@@ -1565,6 +1563,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         VideoMetadata('a2_v1'),
         VideoMetadata('a2_v2'),
         VideoMetadata('a2_v3')])
+      yield tornado.gen.Task(
+        VideoMetadata.modify, 'a2_v4', lambda x: x, create_missing=True)
 
       conn = neondata.DBConnection.get(VideoMetadata)
       self.assertItemsEqual(conn.blocking_conn.smembers(
@@ -1572,7 +1572,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1', 'a1_v2'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v2', 'a2_v3'])
+        ['a2_v1', 'a2_v2', 'a2_v3', 'a2_v4'])
 
       # Now delete some
       yield tornado.gen.Task(VideoMetadata.delete_many,
@@ -1583,7 +1583,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v3'])
+        ['a2_v1', 'a2_v3', 'a2_v4'])
 
     def test_creating_list_of_thumbs_sync(self):
       ThumbnailMetadata('a1_v1_t1').save()
@@ -1592,6 +1592,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ThumbnailMetadata('a1_v2_t1'),
         ThumbnailMetadata('a1_v2_t2'),
         ThumbnailMetadata('a1_v2_t3')])
+      ThumbnailMetadata.modify('a1_v2_t4', lambda x: x, create_missing=True)
 
       conn = neondata.DBConnection.get(ThumbnailMetadata)
       self.assertItemsEqual(conn.blocking_conn.smembers(
@@ -1599,7 +1600,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1_t1', 'a1_v1_t2'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3'])
+        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
 
       # Now delete some
       ThumbnailMetadata.delete_many(['a1_v1_t2', 'a1_v2_t2'])
@@ -1609,7 +1610,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1_t1'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t3'])
+        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
 
     @tornado.testing.gen_test
     def test_creating_list_of_thumbs_async(self):
@@ -1619,6 +1620,8 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ThumbnailMetadata('a1_v2_t1'),
         ThumbnailMetadata('a1_v2_t2'),
         ThumbnailMetadata('a1_v2_t3')])
+      yield tornado.gen.Task(
+        ThumbnailMetadata.modify, 'a1_v2_t4', lambda x: x, create_missing=True)
 
       conn = neondata.DBConnection.get(ThumbnailMetadata)
       self.assertItemsEqual(conn.blocking_conn.smembers(
@@ -1626,7 +1629,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1_t1', 'a1_v1_t2'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3'])
+        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
 
       # Now delete some
       yield tornado.gen.Task(ThumbnailMetadata.delete_many,
@@ -1637,8 +1640,107 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ['a1_v1_t1'])
       self.assertItemsEqual(conn.blocking_conn.smembers(
         ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t3'])
-    
+        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_requests_sync(self):
+      NeonApiRequest('j1', 'a1').save()
+      NeonApiRequest.save_all([
+        NeonApiRequest('j1', 'a2'),
+        NeonApiRequest('j2', 'a2'),
+        NeonApiRequest('j3', 'a2'),
+        NeonApiRequest('j2', 'a1')])
+      NeonApiRequest.modify('j4', 'a2', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonApiRequest)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1', 'request_a1_j2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
+
+      # Now delete some
+      NeonApiRequest.delete_many([('j2', 'a1'), ('j2', 'a2')])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_requests_async(self):
+      yield tornado.gen.Task(NeonApiRequest('j1', 'a1').save)
+      yield tornado.gen.Task(NeonApiRequest.save_all, [
+        NeonApiRequest('j1', 'a2'),
+        NeonApiRequest('j2', 'a2'),
+        NeonApiRequest('j3', 'a2'),
+        NeonApiRequest('j2', 'a1')])
+      yield tornado.gen.Task(NeonApiRequest.modify,
+                             'j4', 'a2', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonApiRequest)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1', 'request_a1_j2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
+
+      # Now delete some
+      yield tornado.gen.Task(NeonApiRequest.delete_many,
+                             [('j2', 'a1'), ('j2', 'a2')])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_namespaced_objects_sync(self):
+      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
+      objs[0].save()
+      NeonUserAccount.save_all(objs[1:3])
+      NeonUserAccount.modify(objs[3].neon_api_key,
+                             lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonUserAccount)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [x.key for x in objs])
+
+      # Now delete some
+      NeonUserAccount.delete_many([x.neon_api_key for x in objs[1:3]])
+      
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [objs[0].key, objs[3].key])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_namespaced_objects_async(self):
+      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
+      yield tornado.gen.Task(objs[0].save)
+      yield tornado.gen.Task(NeonUserAccount.save_all, objs[1:3])
+      yield tornado.gen.Task(NeonUserAccount.modify, 
+                             objs[3].neon_api_key,
+                             lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonUserAccount)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [x.key for x in objs])
+
+      # Now delete some
+      yield tornado.gen.Task(NeonUserAccount.delete_many,
+                             [x.neon_api_key for x in objs[1:3]])
+      
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [objs[0].key, objs[3].key])
       
       
             
