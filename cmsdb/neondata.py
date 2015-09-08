@@ -3098,7 +3098,7 @@ class NeonApiRequest(NamespacedStoredObject):
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None):
         splits = job_id.split('_')
-        if api_key is None and len(splits) == 3:
+        if len(splits) == 3:
             # job id was given as the raw key
             job_id = splits[2]
             api_key = splits[1]
