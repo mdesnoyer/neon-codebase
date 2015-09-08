@@ -93,7 +93,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         
         #patch for download_and_add_thumb
         self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
-        self.uc = self.utils_patch.start() 
+        self.uc = self.utils_patch.start()
 
         random.seed(984695198)
         
@@ -477,9 +477,10 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         image_future.set_result(self.random_image)
         self.im_download_mock.return_value = image_future
 
-        # Mock out http requests
+        # Mock out http callbacks
         self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
+        self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
+                                                require_async_kw=True)
         self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 
         # Mock out cloudinary
@@ -1119,8 +1120,10 @@ class SmokeTest(test_utils.neontest.TestCase):
         im_download_mock.return_value = image_future
 
         # Mock out http requests.
-        self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self._callback_wrap_mock(self.http_mocker.start())
+        self.http_mocker = patch(
+            'video_processor.client.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
+                                                require_async_kw=True)
         self.job_queue = multiprocessing.Queue() # Queue of job param dics
         def _http_response(request, **kw):
             if request.url.endswith('dequeue'):

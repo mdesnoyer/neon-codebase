@@ -157,13 +157,42 @@ class DBConnection(object):
         self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
         self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
-    def fetch_keys_from_db(self, key_prefix, callback=None):
-        ''' fetch keys that match a prefix '''
+    def fetch_keys_from_db(self, pattern, keys_per_call=10000,
+                           callback=None):
+        '''Gets a list of keys that match a pattern.
+
+        Uses SCAN to do it and not block the database
+        '''
+
+        keys = set([])
+        cursor = '0'
+        cnt = keys_per_call
+
+        def _handle_scan_result(result, cnt=keys_per_call):
+            cursor, data = result
+            keys.update(data)
+            if len(data) < (keys_per_call / 2):
+                cnt *= 2
+            if cursor == 0:
+                # We're done
+                callback(keys)
+            else:
+                self.conn.scan(cursor=cursor, match=pattern,
+                               count=cnt,
+                               callback=lambda x:_handle_scan_result(x, cnt))
 
         if callback:
-            self.conn.keys(key_prefix, callback)
+            self.conn.scan(cursor=cursor, match=pattern,
+                           count=cnt,
+                           callback=_handle_scan_result)
         else:
-            keys = self.blocking_conn.keys(key_prefix)
+            while cursor != 0:
+                cursor, data = self.blocking_conn.scan(cursor=cursor,
+                                                       match=pattern,
+                                                       count=cnt)
+                if len(data) < (keys_per_call /2):
+                    cnt *= 2
+                keys.update(data)
             return keys
 
     def clear_db(self):
@@ -645,7 +674,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=10.0):
+    def unsubscribe(self, channel=None, timeout=20.0):
         '''Unsubscribe from channel.
 
         channel - Channel to unsubscribe from
@@ -664,7 +693,7 @@ class PubSubConnection(threading.Thread):
             lambda: self._unsubscribe_impl(channel, timeout))
         yield unsub_future
 
-    def _unsubscribe_impl(self, channel=None, timeout=10.0):
+    def _unsubscribe_impl(self, channel=None, timeout=20.0):
         try:
             with self._publock:
                 if channel is None:
@@ -942,6 +971,41 @@ class StoredObject(object):
 
         Returns:
         A list of cls objects or None depending on create_default settings
+        '''
+        return cls._get_many_with_raw_keys(keys, create_default, log_missing,
+                                           callback=callback)
+
+    @classmethod
+    def get_many_with_pattern(cls, pattern, callback=None):
+        '''Returns many objects that match a pattern.
+
+        Inputs:
+        pattern - A pattern, usually with a * to match keys
+
+        Outputs:
+        A list of cls objects
+        '''
+        retval = []
+        db_connection = DBConnection.get(cls)
+
+        def filtered_callback(data_list):
+            callback([x for x in data_list if x is not None])
+
+        def process_keylist(keys):
+            cls._get_many_with_raw_keys(keys, callback=filtered_callback)
+            
+        if callback:
+            db_connection.fetch_keys_from_db(pattern, callback=process_keylist)
+        else:
+            keys = db_connection.fetch_keys_from_db(pattern)
+            return  [x for x in 
+                     cls._get_many_with_raw_keys(keys)
+                     if x is not None]
+
+    @classmethod
+    def _get_many_with_raw_keys(cls, keys, create_default=False,
+                                log_missing=True, callback=None):
+        '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
@@ -1276,25 +1340,9 @@ class NamespacedStoredObject(StoredObject):
         Returns:
         A list of cls objects.
         '''
-        retval = []
-        db_connection = DBConnection.get(cls)
-
-        def filtered_callback(data_list):
-            callback([x for x in data_list if x is not None])
-
-        def process_keylist(keys):
-            super(NamespacedStoredObject, cls).get_many(
-                keys, callback=filtered_callback)
-            
-        if callback:
-            db_connection.conn.keys(cls._baseclass_name().lower() + "_*",
-                                    callback=process_keylist)
-        else:
-            keys = db_connection.blocking_conn.keys(
-                cls._baseclass_name().lower()+"_*")
-            return  [x for x in 
-                     super(NamespacedStoredObject, cls).get_many(keys)
-                     if x is not None]
+        return super(NamespacedStoredObject, cls).get_many_with_pattern(
+            cls._baseclass_name().lower() + "_*",
+            callback=callback)
 
     @classmethod
     def iterate_all(cls, max_request_size=100):
@@ -1313,7 +1361,7 @@ class NamespacedStoredObject(StoredObject):
         the database at a time.
         '''
         db_connection = DBConnection.get(cls)
-        keys = db_connection.blocking_conn.keys(
+        keys = db_connection.fetch_keys_from_db(
             cls._baseclass_name().lower() + '_*')
         cur_idx = 0
         while cur_idx < len(keys):
@@ -1757,7 +1805,7 @@ class NeonUserAccount(NamespacedStoredObject):
         the database at a time.
         '''
         db_connection = DBConnection.get(VideoMetadata)
-        keys = db_connection.blocking_conn.keys(self.neon_api_key + '_*')
+        keys = db_connection.fetch_keys_from_db(self.neon_api_key + '_*')
         keys = [x for x in keys if len(x.split('_')) == 2]
         cur_idx = 0
         while cur_idx < len(keys):
@@ -1779,6 +1827,8 @@ class ExperimentStrategy(DefaultedStoredObject):
     
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
+                 min_conversion = 50,
+                 frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.RANDOM,
@@ -1800,6 +1850,15 @@ class ExperimentStrategy(DefaultedStoredObject):
         # explicitly chosen. This and chosen_thumb_overrides had
         # better not both be true.
         self.only_exp_if_chosen = only_exp_if_chosen
+
+        # minimum combined conversion numbers before calling an experiment
+        # complete
+        self.min_conversion = min_conversion
+
+        # Fraction adjusting power rate. When this number is 0, it is
+        # equivalent to standard t-test, when it is 1.0, it is the
+        # regular multi-bandit problem.
+        self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
         # experiment. The other baseline could be an editor generated
@@ -2280,24 +2339,6 @@ class AbstractPlatform(NamespacedStoredObject):
         return super(AbstractPlatform, cls).get_all(callback=callback)
 
     @classmethod
-    def get_all_platform_data(cls):
-        ''' get all platform data '''
-        db_connection = DBConnection.get(cls)
-        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
-        platform_data = []
-        for accnt in accounts:
-            api_key = accnt.split('_')[-2]
-            i_id = accnt.split('_')[-1]
-            jdata = db_connection.blocking_conn.get(accnt) 
-            if jdata:
-                platform_data.append(jdata)
-            else:
-                _log.debug("key=get_all_platform data"
-                            " msg=no data for acc %s i_id %s" % (api_key, i_id))
-        
-        return platform_data
-
-    @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
@@ -2432,10 +2473,13 @@ class BrightcovePlatform(AbstractPlatform):
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
-                id_field=BRIGHTCOVE_ID):
+                id_field=BRIGHTCOVE_ID,
+                enabled=True,
+                serving_enabled=True):
 
         ''' On every request, the job id is saved '''
-        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest,
+                                                 enabled, serving_enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -2532,8 +2576,8 @@ class BrightcovePlatform(AbstractPlatform):
 
         # Update the new_tid as the thumbnail for the video
         try:
-            image = utils.imageutils.PILImageUtils.download_image(
-                t_url)
+            image = yield utils.imageutils.PILImageUtils.download_image(
+                t_url, async=True)
             update_response = yield bc.update_thumbnail_and_videostill(
                 platform_vid,
                 new_tid,
@@ -3635,6 +3679,7 @@ class ThumbnailMetadata(StoredObject):
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
+        
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -3788,8 +3833,7 @@ class VideoMetadata(StoredObject):
         self.custom_data = custom_data or {}
 
         # The time the video was published in ISO 8601 format
-        self.publish_date = publish_date or \
-          datetime.datetime.now().isoformat()
+        self.publish_date = publish_date
 
     @classmethod
     def is_valid_key(cls, key):
@@ -3807,6 +3851,25 @@ class VideoMetadata(StoredObject):
         ''' framesize of the video '''
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
+
+    
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_videos_in_account(cls, api_key):
+        '''Returns all the VideoMetadata objects for a given account.'''
+        retval = []
+        db_connection = DBConnection.get(cls)
+        keys = yield tornado.gen.Task(
+            db_connection.fetch_keys_from_db,
+            '%s_*' % api_key)
+
+        # The above command will also get the thumbnail keys, so
+        # filter them out
+        keys = [x for x in keys if len(x.split('_')) == 2]
+
+        objs = yield tornado.gen.Task(cls.get_many, keys)
+        raise tornado.gen.Return(objs)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3892,6 +3955,7 @@ class VideoMetadata(StoredObject):
         try:
             image = yield utils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
+            
         except IOError, e:
             msg = "IOError while downloading image %s: %s" % (
                 image_url, e)
@@ -3993,7 +4057,8 @@ class VideoStatus(DefaultedStoredObject):
     '''
     def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
                  winner_tid=None,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 state_history=None):
         super(VideoStatus, self).__init__(video_id)
 
         # State of the experiment
@@ -4006,11 +4071,23 @@ class VideoStatus(DefaultedStoredObject):
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
 
+        # [(time, new_state)]
+        self.state_history = state_history or []
+
+    def set_experiment_state(self, value):
+        if value != self.experiment_state:
+            self.experiment_state = value
+            self.state_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 value))
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return VideoStatus.__name__
+
+    
 
 class AbstractJsonResponse(object):
     

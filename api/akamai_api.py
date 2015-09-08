@@ -26,8 +26,6 @@ import utils.logs
 import utils.neon
 import utils.sync
 
-from utils.http import RequestPool
-
 _log = logging.getLogger(__name__)
 
 HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']    
@@ -290,9 +288,10 @@ class AkamaiNetstorage(object):
                 headers=self._generate_akamai_headers(action_string, url),
                 request_timeout=10.0,
                 connect_timeout=5.0)
-            response = yield tornado.gen.Task(utils.http.send_request, req,
-                                              ntries=1,
-                                              do_logging=do_logging)
+            response = yield utils.http.send_request(req,
+                                                     ntries=1,
+                                                     do_logging=do_logging,
+                                                     async=True)
             if response.error is None:
                 raise tornado.gen.Return(response)
             delay = (1 << cur_try) * base_delay * random.random()
@@ -360,9 +359,11 @@ class AkamaiNetstorage(object):
                 headers=headers,
                 request_timeout=30.0,
                 connect_timeout=15.0)
-            response = yield tornado.gen.Task(utils.http.send_request, req,
-                                              ntries=1,
-                                              do_logging=do_logging)
+            response = yield utils.http.send_request(
+                req,
+                ntries=1,
+                do_logging=do_logging,
+                async=True)
             if response.error is None:
                 raise tornado.gen.Return(response)
             delay = (1 << cur_try) * base_delay * random.random()

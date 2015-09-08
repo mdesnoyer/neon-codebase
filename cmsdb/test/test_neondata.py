@@ -10,6 +10,8 @@ if sys.path[0] != __base_path__:
 import copy
 from concurrent.futures import Future
 import contextlib
+import datetime
+import dateutil.parser
 import logging
 import json
 import multiprocessing
@@ -140,6 +142,34 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         objs = yield tornado.gen.Task(AbstractPlatform.get_all)
 
         self.assertEquals(len(objs), 4)
+
+    @tornado.testing.gen_test
+    def test_async_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = yield tornado.gen.Task(conn.fetch_keys_from_db,
+                                      'neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
+
+    def test_sync_fetch_keys_from_db(self):
+        accts = []
+        for i in range(10):
+            new_acct = NeonUserAccount(str(i))
+            new_acct.save()
+            accts.append(new_acct)
+
+        conn = neondata.DBConnection.get(NeonUserAccount)
+        keys = conn.fetch_keys_from_db('neonuseraccount_*', 2)
+
+        self.assertEquals(len(keys), 10)
+        self.assertItemsEqual(keys, [x.key for x in accts])
 
     def test_default_bcplatform_settings(self):
         ''' brightcove defaults ''' 
@@ -678,6 +708,27 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         video_meta.save()
         neondata.VideoStatus(vid, winner_tid='acct1_vid1_t2').save()
         self.assertEquals(video_meta.get_winner_tid(), 'acct1_vid1_t2')
+
+    def test_video_status_history(self):
+        vid = InternalVideoID.generate('acct1', 'vid1')
+        neondata.VideoStatus(vid).save()
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.UNKNOWN)
+        self.assertEquals(video_status.state_history, [])
+        def _update(status):
+            status.set_experiment_state(neondata.ExperimentState.COMPLETE)
+        neondata.VideoStatus.modify(vid, _update)
+        video_status = neondata.VideoStatus.get(vid)
+        self.assertEquals(video_status.experiment_state, 
+                          neondata.ExperimentState.COMPLETE)
+        self.assertEquals(video_status.state_history[0][1],
+                          neondata.ExperimentState.COMPLETE)
+        new_time = dateutil.parser.parse(
+            video_status.state_history[0][0])
+        self.assertLess(
+            (datetime.datetime.utcnow() - new_time).total_seconds(),
+            600)
 
     def test_video_metadata_methods(self):
         '''
@@ -1834,7 +1885,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
         # Mock out the cdn url check
         self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
-        self.mock_cdn_url = self._callback_wrap_mock(
+        self.mock_cdn_url = self._future_wrap_mock(
             self.cdn_check_patcher.start().send_request)
         self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
 

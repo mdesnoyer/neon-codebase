@@ -90,8 +90,9 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         self.url2img = {}
         self.get_img_patcher = \
           patch('cmsdb.url2thumbnail.utils.http.send_request')
-        self.get_img_mock = self.get_img_patcher.start()
-        self.get_img_mock.side_effect = self._returnImageCallback
+        self.get_img_mock = self._future_wrap_mock(
+            self.get_img_patcher.start())
+        self.get_img_mock.side_effect = self._returnValidImage
 
     def tearDown(self):
         self.get_img_patcher.stop()
@@ -99,14 +100,7 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         
         super(TestURL2ThumbIndex, self).tearDown()
 
-    def _returnImageCallback(self, request, callback=None):
-        image = self._returnValidImage(request)
-        if callback:
-            tornado.ioloop.IOLoop.current().add_callback(callback, image)
-        else:
-            return image
-
-    def _returnValidImage(self, request):
+    def _returnValidImage(self, request, **kwargs):
         response = tornado.httpclient.HTTPResponse(request, 200,
                                                    buffer=StringIO())
         self.url2img[request.url].save(response.buffer, 'JPEG')
@@ -394,11 +388,11 @@ class TestURL2ThumbIndex(test_utils.neontest.AsyncTestCase):
         index = URL2ThumbnailIndex()
         index.build_index_from_neondata()
 
-        def return_error(x, callback=None):
-            callback(tornado.httpclient.HTTPResponse(
-                x, 200, error=tornado.httpclient.HTTPError(404)))
-
-        self.get_img_mock.side_effect = return_error
+        
+        # Mock out an error response
+        self.get_img_mock.side_effect = \
+          lambda x, **kw:  tornado.httpclient.HTTPResponse(
+                x, 200, error=tornado.httpclient.HTTPError(404))
 
         with self.assertLogExists(
                 logging.ERROR,
