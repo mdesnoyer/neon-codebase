@@ -175,7 +175,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
 
-            self.error(get_exc_message(exception), code=status_code)
+            self.error(get_exc_message(exception), code=self.get_status())
 
         elif isinstance(exception, AlreadyExists):
             self.set_status(ResponseCode.HTTP_CONFLICT)
