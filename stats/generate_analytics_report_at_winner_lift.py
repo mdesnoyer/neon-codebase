@@ -364,13 +364,25 @@ def calculate_raw_stats():
            tai='%s' %s''' %(options.pub_id,
                             statutils.get_time_clause(options.start_time,
                                                       options.end_time)))
-    rows = cursor.fetchall()
+    stat_rows = cursor.fetchall()
+
+    cursor.execute(
+         '''select cast(min(servertime) as timestamp),
+         cast(max(servertime) as timestamp) 
+         from eventsequences where 
+         tai='%s' %s''' %(options.pub_id,
+                            statutils.get_time_clause(options.start_time,
+                                                      options.end_time)))
+    time_rows = cursor.fetchall()
+    
     return pandas.Series({
-        'loads': rows[0][0],
-        'views' : rows[0][1],
-        'clicks' : rows[0][2],
-        'ads' : rows[0][3],
-        'video plays' : rows[0][4]})
+        'loads': stat_rows[0][0],
+        'views' : stat_rows[0][1],
+        'clicks' : stat_rows[0][2],
+        'ads' : stat_rows[0][3],
+        'video plays' : stat_rows[0][4],
+        'start time' : time_rows[0][0],
+        'end time' : time_rows[0][1]})
 
 def calculate_cmsdb_stats():
     _log.info('Getting some stats from the CMSDB')
@@ -410,8 +422,7 @@ def calculate_cmsdb_stats():
         })
     
         
-def main():
-    
+def main():    
     _log.info('Getting metadata about the videos.')
     video_info = neondata.VideoMetadata.get_many(get_video_ids())
     video_info = dict([(x.key, x) for x in video_info if x is not None])
