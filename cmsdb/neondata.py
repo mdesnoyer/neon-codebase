@@ -1189,15 +1189,18 @@ class StoredObject(object):
             for set_key, keys in key_sets.iteritems():
                 pipe.sadd(set_key, *keys)
             pipe.mset(data)
+            return True            
 
         lock_keys = key_sets.keys() + data.keys()
         if callback:
             db_connection.conn.transaction(_save_and_add2set,
                                            *lock_keys,
+                                           value_from_callable=True,
                                            callback=callback)
         else:
             return db_connection.blocking_conn.transaction(
                 _save_and_add2set,
+                value_from_callable=True,
                 *lock_keys)
 
     @classmethod
