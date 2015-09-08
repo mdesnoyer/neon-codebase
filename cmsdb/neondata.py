@@ -28,6 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import cmsdb.url2thumbnail
 import code
+import collections
 import concurrent.futures
 import contextlib
 import copy
@@ -824,6 +825,13 @@ class StoredObject(object):
         '''Converts a key to an id'''
         return key
 
+    def _set_keyname(self):
+        '''Returns the key in the database for the set that holds this object.
+
+        The result of the key lookup will be a set of objects for this class
+        '''
+        raise NotImplementedError()
+
     @classmethod
     def format_key(cls, key):
         return key
@@ -844,14 +852,28 @@ class StoredObject(object):
 
     def save(self, callback=None):
         '''Save the object to the database.'''
-        db_connection = DBConnection.get(self)
+        
         value = self.to_json()
+        def _save_and_add2set(pipe):
+            pipe.sadd(self._set_keyname(), self.key)
+            pipe.set(self.key, value)
+            return True
+            
+        db_connection = DBConnection.get(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            db_connection.conn.set(self.key, value, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           self._set_keyname(),
+                                           self.key,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                self._set_keyname(),
+                self.key,
+                value_from_callable=True)
 
 
     @classmethod
@@ -1115,17 +1137,21 @@ class StoredObject(object):
 
             mappings = {}
             orig_objects = {}
+            key_sets = collections.defaultdict(list)
             for key, item in zip(keys, items):
                 if item is None:
                     if create_missing:
-                        mappings[key] = create_class(key)
+                        cur_obj = create_class(key)
+                        if cur_obj is not None:
+                            key_sets[cur_obj._set_keyname()].append(key)
                     else:
                         _log.error('Could not get redis object: %s' % key)
-                        mappings[key] = None
+                        cur_obj = None
                 else:
-                    mappings[key] = create_class._create(key, json.loads(item))
+                    cur_obj = create_class._create(key, json.loads(item))
                     orig_objects[key] = create_class._create(key,
                                                              json.loads(item))
+                mappings[key] = cur_obj
             try:
                 func(mappings)
             finally:
@@ -1136,6 +1162,8 @@ class StoredObject(object):
 
                 if len(to_set) > 0:
                     pipe.mset(to_set)
+                for set_key, cur_keys in key_sets.iteritems():
+                    pipe.sadd(set_key, *cur_keys)
             return mappings
 
         db_connection = DBConnection.get(create_class)
@@ -1152,13 +1180,28 @@ class StoredObject(object):
         '''Save many objects simultaneously'''
         db_connection = DBConnection.get(cls)
         data = {}
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
         for obj in objects:
             data[obj.key] = obj.to_json()
+            key_sets[obj._set_keyname()].append(obj.key)
 
+        def _save_and_add2set(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.sadd(set_key, *keys)
+            pipe.mset(data)
+            return True            
+
+        lock_keys = key_sets.keys() + data.keys()
         if callback:
-            db_connection.conn.mset(data, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           *lock_keys,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.mset(data)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                value_from_callable=True,
+                *lock_keys)
 
     @classmethod
     def _erase_all_data(cls):
@@ -1172,7 +1215,7 @@ class StoredObject(object):
 
         Returns True if the object was successfully deleted
         '''
-        return StoredObject.delete_many([key], callback)
+        return cls._delete_many_raw_keys([key], callback)
 
     @classmethod
     def delete_many(cls, keys, callback=None):
@@ -1182,14 +1225,36 @@ class StoredObject(object):
         keys - List of keys to delete
 
         Returns:
-        The number of keys that were removed
+        True if it was delete sucessfully
         '''
+        return cls._delete_many_raw_keys(keys, callback)
+
+    @classmethod
+    def _delete_many_raw_keys(cls, keys, callback=None):
+        '''Deletes many objects by their raw keys'''
         db_connection = DBConnection.get(cls)
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+        for key in keys:
+            obj = cls(key)
+            obj.key = key
+            key_sets[obj._set_keyname()].append(key)
+
+        def _del_and_remfromset(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.srem(set_key, *keys)
+            pipe.delete(*keys)
+            return True
             
         if callback:
-            db_connection.conn.delete(*keys, callback=callback)
+            db_connection.conn.transaction(_del_and_remfromset,
+                                           *keys,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.delete(*keys)
+            return db_connection.blocking_conn.transaction(
+                _del_and_remfromset,
+                *keys,
+                value_from_callable=True)
         
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
@@ -1299,6 +1364,9 @@ class NamespacedStoredObject(StoredObject):
         return <Class>.__name__
         '''
         raise NotImplementedError()
+
+    def _set_keyname(self):
+        return 'objset:%s' % self._baseclass_name()
 
     @classmethod
     def format_key(cls, key):
@@ -1437,8 +1505,8 @@ class NeonApiKey(NamespacedStoredObject):
     ''' Static class to generate Neon API Key'''
 
     def __init__(self, a_id, api_key=None):
+        super(NeonApiKey, self).__init__(a_id)
         self.api_key = api_key
-        self.key = NeonApiKey.format_key(a_id) 
 
     @classmethod
     def _baseclass_name(cls):
@@ -1452,10 +1520,6 @@ class NeonApiKey(NamespacedStoredObject):
             chars=string.ascii_lowercase + string.digits):
         return ''.join(random.choice(chars) for x in range(size))
 
-    @classmethod
-    def format_key(cls, a_id):
-        ''' format db key  neonapikey_{aid}'''
-        return cls.__name__.lower() + '_%s' % a_id
         
     @classmethod
     def generate(cls, a_id):
@@ -1463,6 +1527,7 @@ class NeonApiKey(NamespacedStoredObject):
             if present in DB, then return it
         
         #NOTE: Generate method directly saves the key
+        TODO(mdesnoyer): Make this asynchronous
         '''
         api_key = NeonApiKey.id_generator()
         obj = NeonApiKey(a_id, api_key)
@@ -1614,9 +1679,12 @@ class NeonUserAccount(NamespacedStoredObject):
 
     '''
     def __init__(self, a_id, api_key=None, default_size=(160,90)):
+        splits = '_'.split(a_id)
+        if api_key is None and len(splits) == 2:
+            api_key = splits[1]
         self.account_id = a_id # Account id chosen when account is created
         self.neon_api_key = self.get_api_key() if api_key is None else api_key
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
+        super(NeonUserAccount, self).__init__(self.neon_api_key)
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
                 TrackerAccountID.generate(self.neon_api_key + "staging") 
@@ -1648,8 +1716,12 @@ class NeonUserAccount(NamespacedStoredObject):
         # Note: On DB retrieval the object gets created again, this may lead to
         # creation of an addional api key mapping ; hence prevent it
         # Figure out a cleaner implementation
-        if NeonUserAccount.__name__ not in self.account_id: 
-            return NeonApiKey.generate(self.account_id) 
+        try:
+            return self.neon_api_key
+        except AttributeError:
+            if NeonUserAccount.__name__.lower() not in self.account_id:
+                return NeonApiKey.generate(self.account_id) 
+            return 'None'
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -3025,6 +3097,11 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None):
+        splits = job_id.split('_')
+        if len(splits) == 3:
+            # job id was given as the raw key
+            job_id = splits[2]
+            api_key = splits[1]
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -3075,6 +3152,10 @@ class NeonApiRequest(NamespacedStoredObject):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
         return '_'.join([api_key, job_id])
+
+    def _set_keyname(self):
+        return '%s:%s' % (super(NeonApiRequest, self)._set_keyname(),
+                          self.api_key)
 
     @classmethod
     def _baseclass_name(cls):
@@ -3158,14 +3239,16 @@ class NeonApiRequest(NamespacedStoredObject):
             callback=callback)
 
     @classmethod
-    def modify(cls, job_id, api_key, func, callback=None):
+    def modify(cls, job_id, api_key, func, create_missing=False, 
+               callback=None):
         return super(NeonApiRequest, cls).modify(
             cls._generate_subkey(job_id, api_key),
             func,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -3174,6 +3257,7 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
@@ -3515,7 +3599,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             return obj
 
         
-class ThumbnailURLMapper(object):
+class ThumbnailURLMapper(NamespacedStoredObject):
     '''
     Schema to map thumbnail url to thumbnail ID. 
 
@@ -3526,6 +3610,7 @@ class ThumbnailURLMapper(object):
     
     # NOTE: This has been deprecated and hence not being updated to be a stored
     object
+    TODO: Remove this object. It is no longer needed
     '''
     
     def __init__(self, thumbnail_url, tid, imdata=None):
@@ -3536,31 +3621,13 @@ class ThumbnailURLMapper(object):
             #TODO: Is this imdata really needed ? 
             raise #self.value = ThumbnailID.generate(imdata) 
 
-    def save(self, callback=None):
-        ''' 
-        save url mapping 
-        ''' 
-        db_connection = DBConnection.get(self)
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.set(self.key, self.value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, self.value)
+    def to_json(self):
+        # Actually not json because we are only storing the value
+        return str(self.value)
 
     @classmethod
-    def save_all(cls, thumbnailMapperList, callback=None):
-        ''' multi save '''
-
-        db_connection = DBConnection.get(cls)
-        data = {}
-        for t in thumbnailMapperList:
-            data[t.key] = t.value 
-
-        if callback:
-            db_connection.conn.mset(data, callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
+    def _baseclass_name(cls):
+        return ThumbnailURLMapper.__name__.lower()
 
     @classmethod
     def get_id(cls, key, callback=None):
@@ -3618,6 +3685,10 @@ class ThumbnailMetadata(StoredObject):
         
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
+
+    def _set_keyname(self):
+        '''Key the set by the video id'''
+        return 'objset:%s' % self.key.rpartition('_')[0]
 
     @classmethod
     def is_valid_key(cls, key):
@@ -3834,6 +3905,10 @@ class VideoMetadata(StoredObject):
 
         # The time the video was published in ISO 8601 format
         self.publish_date = publish_date
+
+    def _set_keyname(self):
+        '''Key by the account id'''
+        return 'objset:%s' % self.get_account_id()
 
     @classmethod
     def is_valid_key(cls, key):
