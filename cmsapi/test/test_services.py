@@ -332,7 +332,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         tai = json.loads(response.body)["tracker_account_id"]
         return api_key
 
-    def create_brightcove_account(self, expected_code=201):
+    def create_brightcove_account(self, expected_code=200):
         ''' create brightcove platform account '''
 
         #create a neon account first
@@ -1601,7 +1601,51 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(res['original_thumbnail'],
                             "http://%s_t2_120_90.jpg" % vid)
 
+    def test_get_abtest_state_new_serving_urls(self):
+        '''
+        A/B test state response
+        '''
+
+        self.api_key = self.create_neon_account()
         
+        ext_vid = 'vid1'
+        vid = neondata.InternalVideoID.generate(self.api_key, ext_vid)
+        
+        #Save thumbnails 
+        TMD = neondata.ThumbnailMetadata
+        thumbs = [
+            TMD('%s_t1' % vid, vid, ['t1.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.8),
+            TMD('%s_t2' % vid, vid, ['t2.jpg'], None, None, None,
+                              None, None, None, serving_frac=0.15)
+            ]
+        TMD.save_all(thumbs)
+        
+        #Save VideoMetadata
+        tids = [thumb.key for thumb in thumbs]
+        v0 = neondata.VideoMetadata(vid, tids, 'reqid0', 'v0.mp4',
+                                    frame_size=(54,54))
+        v0.save()
+        vid_status = neondata.VideoStatus(
+            vid,
+            experiment_state=neondata.ExperimentState.COMPLETE)
+        vid_status.winner_tid = '%s_t2' % vid
+        vid_status.save()
+       
+        #Set up Serving URLs 
+        for thumb in thumbs:
+            inp = neondata.ThumbnailServingURLs('%s' % thumb.key, base_url='a')
+            inp.add_serving_url('a/neontn123_14234ab_t1_w800_h600.jpg', 800, 600) 
+            inp.add_serving_url('a/neontn1234_124ab_t2_w120_h90.jpg', 120, 90) 
+            inp.save()
+        
+        url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
+                            '%s/abteststate/%s' %(self.a_id, "0", ext_vid))  
+        resp = self.get_request(url, self.api_key)
+        res = json.loads(resp.body)
+        self.assertEqual(res['data'][0]['url'], 'a/neontnpx6iaz6um8e8u1sk5pyknk60_vid1_t2_w800_h600.jpg') 
+        self.assertEqual(res['data'][0]['width'], 800)
+        self.assertEqual(res['data'][0]['height'], 600)
 
     @patch('utils.imageutils.utils.http')
     @patch('cmsdb.cdnhosting.S3Connection')
