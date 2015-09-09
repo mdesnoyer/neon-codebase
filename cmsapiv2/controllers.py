@@ -857,6 +857,7 @@ class VideoHandler(APIV2Handler):
         if response: 
             job_info = {} 
             job_info['job_id'] = api_request.job_id
+            job_info['video'] = new_video.__dict__
             statemon.state.increment('post_video_oks')
             self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
         else:
