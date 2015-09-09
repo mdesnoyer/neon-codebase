@@ -1231,6 +1231,37 @@ class TestThumbnailHandler(TestControllersBase):
 	url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
+class TestHealthCheckHandler(TestControllersBase): 
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start()) 
+        super(TestHealthCheckHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+        self.http_mocker.stop()
+
+    def test_healthcheck_success(self): 
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+	url = '/healthcheck/'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 200) 
+        
+    def test_healthcheck_failure(self): 
+        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 400)]
+	url = '/healthcheck/'
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 500) 
+
 class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()

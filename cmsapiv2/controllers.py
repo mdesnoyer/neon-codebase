@@ -43,6 +43,7 @@ import uuid
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 define("video_server_port", default=8081, help="what port the video server is running on", type=int)
+define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
 
 from utils import statemon
 statemon.define('post_account_oks', int) 
@@ -110,6 +111,7 @@ class apiv2(object):
     @staticmethod
     def api_key_required(func): 
         def _decorator(request, *args, **kwargs):
+            request.set_account_id() 
             verified = request.verify_account()
             if not verified: 
                 raise NotAuthorizedError()
@@ -120,7 +122,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
         self.set_header("Content-Type", "application/json")
         self.header_api_key = self.request.headers.get('X-Neon-API-Key')
-        self.account_id = self.request.uri.split('/')[3]
+        self.uri = self.request.uri 
+
+    def set_account_id(request): 
+        request.account_id = request.uri.split('/')[3]
 
     def verify_account(request):
         account = neondata.NeonUserAccount.get(request.account_id)
@@ -933,6 +938,23 @@ class VideoHandler(APIV2Handler):
         self.success(json.dumps(video.__dict__))
 
 '''*********************************************************************
+HealthCheckHandler 
+*********************************************************************'''
+class HealthCheckHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        apiv1_url = 'http://localhost:%s/healthcheck' % (options.cmsapiv1_port)
+        request = tornado.httpclient.HTTPRequest(url=apiv1_url,
+                                                 method="GET",
+                                                 request_timeout=4.0)
+        response = yield utils.http.send_request(request)
+        if response.code is 200: 
+            self.success('<html>Server OK</html>') 
+        else: 
+            raise Exception('unable to get to the v1 api', 
+                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR) 
+
+'''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
                                getting an optimizely integration 
 HTTP Verbs                   : get, post, put
@@ -1002,6 +1024,7 @@ class CustomVoluptuousTypes():
 Endpoints 
 *********************************************************************'''
 application = tornado.web.Application([
+    (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/accounts/?$', NewAccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', BrightcoveIntegrationHandler),
