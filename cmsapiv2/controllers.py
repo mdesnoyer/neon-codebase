@@ -42,6 +42,7 @@ import uuid
 
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
+define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 
 from utils import statemon
 statemon.define('post_account_oks', int) 
@@ -756,7 +757,6 @@ class VideoHelper():
                                                  account_id_api_key)
 
             video = neondata.VideoMetadata(neondata.InternalVideoID.generate(account_id_api_key, video_id),
-                          #request_id=api_request.job_id,
                           video_url=args.get('video_url', None),
                           publish_date=args.get('publish_date', None),
                           duration=float(args.get('duration', 0.0)) or None, 
@@ -839,7 +839,8 @@ class VideoHandler(APIV2Handler):
                                _set_serving_enabled)
             
         # add the job
-        vs_job_url = 'http://%s:8081/job' % options.video_server
+        vs_job_url = 'http://%s:%s/job' % (options.video_server, 
+                                           options.video_server_port)
         request = tornado.httpclient.HTTPRequest(url=vs_job_url,
                                                  method="POST",
                                                  body=api_request.to_json(),
