@@ -787,6 +787,7 @@ class StoredObject(object):
     ''' 
     def __init__(self, key):
         self.key = str(key)
+        self.created = self.updated = str(datetime.datetime.utcnow()) 
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -826,7 +827,9 @@ class StoredObject(object):
     def save(self, callback=None):
         '''Save the object to the database.'''
         db_connection = DBConnection.get(self)
+        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
+         
         if self.key is None:
             raise Exception("key not set")
         if callback:
@@ -1080,6 +1083,8 @@ class StoredObject(object):
                     if obj is not None and obj != orig_objects.get(key, None):
                         to_set[key] = obj.to_json()
 
+                to_set['updated'] = str(datetime.datetime.utcnow()) 
+
                 if len(to_set) > 0:
                     pipe.mset(to_set)
             return mappings
@@ -1099,6 +1104,7 @@ class StoredObject(object):
         db_connection = DBConnection.get(cls)
         data = {}
         for obj in objects:
+            obj.updated = str(datetime.datetime.utcnow())
             data[obj.key] = obj.to_json()
 
         if callback:
@@ -1607,9 +1613,6 @@ class NeonUserAccount(NamespacedStoredObject):
         # under this account.
         self.default_thumbnail_id = None
          
-        # the created/updated date in utc of this object 
-        self.created = self.updated = str(datetime.datetime.utcnow())
-
         # create on account creation this gives access to the API, passed via header
         self.api_v2_key = NeonApiKey.id_generator()
         

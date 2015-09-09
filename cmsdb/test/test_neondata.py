@@ -943,13 +943,28 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
 
         with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db'))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db')
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
         with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db',
-                                                     log_missing=False))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db', log_missing=False)
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
     class ChangeTrap:
         '''Helper class to test subscribing to changes.'''
@@ -1514,7 +1529,6 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
         found_obj = self.wait()
-
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
     def test_sync_good_connection(self):
