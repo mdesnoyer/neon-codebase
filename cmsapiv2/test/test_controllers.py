@@ -234,15 +234,15 @@ class TestAccountHandler(TestControllersBase):
 	url = '/api/v2/accounts?customer_name=123abc'
 	response = yield self.http_client.fetch(self.get_url(url), 
 			       body='',
-                               callback=self.stop,  
    			       method='POST', 
    			       allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
 	self.assertEquals(rjson['customer_name'], '123abc') 
 	url = '/api/v2/%s' % (rjson['account_id']) 
+        header = { 'X-Neon-API-Key': rjson['api_key'] }
 	response = yield self.http_client.fetch(self.get_url(url),
-                                         callback=self.stop, 
+                                         headers=header,  
                        			 method="GET")
         rjson2 = json.loads(response.body) 
         self.assertEquals(rjson['account_id'],rjson2['account_id']) 
@@ -260,14 +260,17 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
-                                                method='PUT', 
+                                                method='PUT',
+                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url), 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                headers = header,  
                                                 method="GET")
         rjson = json.loads(response.body)
         default_size = rjson['default_size']
@@ -276,9 +279,10 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_update_acct_height_only(self): 
-        # do an extra get here, in case we've been modifying this user elsewhere
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
+                                                headers=header,  
                                                 method="GET")
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
@@ -287,10 +291,12 @@ class TestAccountHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
+                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
+                                                headers=header,  
                                                 method="GET")
         new_user = json.loads(response.body)
         default_size_new = new_user['default_size']
@@ -300,8 +306,10 @@ class TestAccountHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_update_acct_width_only(self): 
         # do a get here to test and make sure the height wasn't messed up
+        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
+                                                headers=header,  
                                                 method="GET")
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
@@ -310,16 +318,40 @@ class TestAccountHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
+                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
+                                                headers=header,  
                                                 method="GET")
         new_user = json.loads(response.body)
         default_size_new = new_user['default_size']
         self.assertEquals(default_size_new[0],1200)
         self.assertEquals(default_size_new[1],default_size_old[1])
 
+    def test_get_acct_unauthorized(self):
+        header = { 'X-Neon-API-Key': 'this_is_invalid_for_sure' }
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
+        self.http_client.fetch(self.get_url(url), 
+                               headers=header, 
+                               callback=self.stop,  
+                               method="GET")
+        response = self.wait()
+        self.assertEquals(response.code, 401) 
+        
+    def test_update_acct_unauthorized(self):
+        header = { 'X-Neon-API-Key': 'this_is_invalid_for_sure' }
+        url = '/api/v2/%s?default_width=1200' % (self.user.neon_api_key) 
+        response = self.http_client.fetch(self.get_url(url), 
+                                          body='', 
+                                          method='PUT', 
+                                          headers=header,  
+                                          callback=self.stop, 
+                                          allow_nonstandard_methods=True)
+        response = self.wait() 
+        self.assertEquals(response.code, 401) 
+ 
     def test_get_acct_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.AccountHandler.get')
 	url = '/api/v2/%s' % '1234234'

@@ -234,7 +234,7 @@ class AccountHelper():
     @tornado.gen.coroutine
     def formatUserReturn(user_account):
         # we don't want to send back everything, build up object of what we want to send back 
-        rv_account = {} 
+        rv_account = {}
         rv_account['tracker_account_id'] = user_account.tracker_account_id
         # this is weird, but neon_api_key is actually the "id" on this table, it's what we 
         # use to get information about the account, so send back api_key (as account_id) 
@@ -248,6 +248,11 @@ class AccountHelper():
         rv_account['api_key'] = user_account.api_v2_key
         rv_account['customer_name'] = user_account.customer_name
         raise tornado.gen.Return(rv_account)
+
+    #@staticmethod 
+    #@tornado.gen.coroutine
+    #admin_only_decorator
+    #def listAllAccounts(
     
 '''****************************************************************
 NewAccountHandler
@@ -305,7 +310,11 @@ class AccountHandler(APIV2Handler):
 
         if not user_account: 
             raise NotFoundError()
-         
+        # on the public endpoint, we dont want another user 
+        # to be able to get a specific account
+        if self.header_api_key != user_account.api_v2_key: 
+            raise NotAuthorizedError()
+ 
         user_account = yield AccountHelper.formatUserReturn(user_account)
         statemon.state.increment('get_account_oks')
         self.success(json.dumps(user_account))
@@ -326,7 +335,12 @@ class AccountHandler(APIV2Handler):
         acct_internal = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
 
         if not acct_internal: 
-            raise NotFoundError() 
+            raise NotFoundError()
+ 
+        # on the public endpoint, we dont want another user 
+        # to be able to update a specific account
+        if self.header_api_key != acct_internal.api_v2_key: 
+            raise NotAuthorizedError()
 
         acct_for_return = yield AccountHelper.formatUserReturn(acct_internal)
         def _update_account(a):
