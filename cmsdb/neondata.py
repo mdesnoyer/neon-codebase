@@ -827,6 +827,8 @@ class StoredObject(object):
     def save(self, callback=None):
         '''Save the object to the database.'''
         db_connection = DBConnection.get(self)
+        if not hasattr(self, 'created'): 
+            self.created = str(datetime.datetime.utcnow())
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
          
@@ -868,6 +870,10 @@ class StoredObject(object):
             try:
                 for k, value in data_dict.iteritems():
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
+                if not hasattr(obj, 'created'): 
+                    obj.__dict__['created'] = str(datetime.datetime.utcnow())
+                if not hasattr(obj, 'updated'): 
+                    obj.__dict__['updated'] = str(datetime.datetime.utcnow())
             except ValueError:
                 return None
         
@@ -1313,7 +1319,7 @@ class NamespacedStoredObject(StoredObject):
                      if x is not None]
 
     @classmethod
-    def iterate_all(cls, max_request_size=100):
+    def iterate_all(cls, max_request_size=100, cur_idx=0):
         '''A synchronous function that returns an iterator across all the
         objects in the database.
 
@@ -1327,11 +1333,12 @@ class NamespacedStoredObject(StoredObject):
         Inputs:
         max_request_size - Maximum number of objects to request from
         the database at a time.
+        cur_idx - what index to start from 
         '''
         db_connection = DBConnection.get(cls)
         keys = db_connection.blocking_conn.keys(
             cls._baseclass_name().lower() + '_*')
-        cur_idx = 0
+        #cur_idx = 0
         while cur_idx < len(keys):
             cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
             for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
@@ -1926,6 +1933,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
                  rendition_sizes=None):
+
         self.key = key
 
         # List of url prefixes to put in front of the path. If there
@@ -1957,6 +1965,9 @@ class CDNHostingMetadata(NamespacedStoredObject):
             [640, 360],
             [640, 480],
             [1280, 720]]
+
+        # the created and updated on these objects
+        self.created = self.updated = str(datetime.datetime.utcnow())
 
     # TODO(sunil or mdesnoyer): Write a function to add a new
     # rendition size to the list and upload the requisite images to
