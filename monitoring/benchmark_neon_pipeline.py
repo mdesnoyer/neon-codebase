@@ -26,12 +26,12 @@ define("cmsapi_host", default="services.neon-lab.com", help="cmsapi server", typ
 define("isp_host", default="i1.neon-images.com", help="host where the isp is")
 define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
-define("sleep", default=1800, help="sleep time between inserting new jobs",
-       type=int)
+define("sleep", default=1800, type=float,
+       help="sleep time between inserting new jobs in seconds")
 define("serving_timeout", default=2000.0, type=float,
        help="Timeout to get to serving state in seconds")
 define("isp_timeout", default=500.0, type=float,
-       help='Timeout to see the video being served by isp')
+       help='Timeout to see the video being served by isp in seconds')
 define("test_video", default="https://neon-test.s3.amazonaws.com/output.mp4",
        help='Video to test with')
 

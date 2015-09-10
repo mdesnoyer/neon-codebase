@@ -76,6 +76,12 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         super(BenchmarkTest, self).tearDown()
 
+    def _check_request_cleanup(self):
+        '''Checks that the request object is cleaned up in the database.'''
+        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
+        self.assertNotIn('vid1', 
+                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+
     def test_video_serving(self):
         self.request.state = neondata.RequestState.SERVING
         self.request.save()
@@ -86,10 +92,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.neon_request_mock.assertCalled()
         self.isp_mock.assertCalled()
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         self.assertGreater(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.time_to_finished'),
@@ -110,10 +113,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
@@ -128,10 +128,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
@@ -149,10 +146,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(benchmark_neon_pipeline.JobFailed):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
@@ -182,10 +176,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.not_available_in_isp'), 1)
@@ -208,10 +199,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.not_available_in_isp'), 1)
@@ -237,10 +225,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.neon_request_mock.assertCalled()
         self.isp_mock.assertCalled()
 
-        # Make sure that everything is cleaned up
-        self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
+        self._check_request_cleanup()
 
         self.assertGreater(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.time_to_finished'),
