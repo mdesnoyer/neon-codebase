@@ -39,6 +39,7 @@ from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, In
 import logging
 _log = logging.getLogger(__name__)
 import uuid
+import jwt
 
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
@@ -117,6 +118,16 @@ class apiv2(object):
                 raise NotAuthorizedError()
             return func(request, *args, **kwargs)
         return wraps(func)(_decorator)
+    
+    ''' 
+    TODO finish implementation 
+    def internal_only_api(func): 
+        def _decorator(request, *args, **kwargs):
+            if not verified: 
+                raise NotAuthorizedError()
+            return func(request, *args, **kwargs)
+        return wraps(func)(_decorator)
+    ''' 
  
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
@@ -137,6 +148,12 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if account_api_key not in request.header_api_key:
             return False
         return True
+    
+    ''' 
+    TODO finish implementation 
+    def verify_internal_access(request): 
+        blah2 = jwt.decode(blah, 'secret', algorithms=['HS256'])
+    ''' 
         
     def parse_args(self):
         args = {} 
@@ -311,7 +328,7 @@ class AccountHandler(APIV2Handler):
         if not user_account: 
             raise NotFoundError()
         # on the public endpoint, we dont want another user 
-        # to be able to get a specific account
+        # to be able to get an account they do not own
         if self.header_api_key != user_account.api_v2_key: 
             raise NotAuthorizedError()
  
@@ -338,7 +355,7 @@ class AccountHandler(APIV2Handler):
             raise NotFoundError()
  
         # on the public endpoint, we dont want another user 
-        # to be able to update a specific account
+        # to be able to update an account they do not own
         if self.header_api_key != acct_internal.api_v2_key: 
             raise NotAuthorizedError()
 
@@ -866,7 +883,7 @@ class VideoHandler(APIV2Handler):
                                                  request_timeout=30.0,
                                                  connect_timeout=10.0)
 
-        response = utils.http.send_request(request)
+        response = yield tornado.gen.Task(utils.http.send_request, request)
 
         if response: 
             job_info = {} 
@@ -962,12 +979,13 @@ class HealthCheckHandler(APIV2Handler):
         request = tornado.httpclient.HTTPRequest(url=apiv1_url,
                                                  method="GET",
                                                  request_timeout=4.0)
-        response = yield utils.http.send_request(request)
+        response = yield tornado.gen.Task(utils.http.send_request, request)
         if response.code is 200: 
             self.success('<html>Server OK</html>') 
         else: 
             raise Exception('unable to get to the v1 api', 
-                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR) 
+                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/

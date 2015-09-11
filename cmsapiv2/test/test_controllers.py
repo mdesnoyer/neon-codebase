@@ -18,6 +18,7 @@ import utils.http
 import urllib
 import test_utils.neontest
 import uuid
+import jwt
 from mock import patch
 from cmsdb import neondata
 from StringIO import StringIO
@@ -807,7 +808,8 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' % (self.account_id_api_key, self.test_i_id)
         cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
         cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
-        cmsdb_download_image_mock.side_effect = [self.random_image] 
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -823,6 +825,7 @@ class TestVideoHandler(TestControllersBase):
         cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
         cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image] 
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -852,7 +855,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_duration(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&duration=1354' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -868,7 +871,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_float_duration(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&duration=1354.54' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -884,7 +887,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_one(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18T06:36:40.123Z' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -900,7 +903,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_two(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18T06:36:40Z' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -916,7 +919,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_three(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -933,7 +936,7 @@ class TestVideoHandler(TestControllersBase):
     def test_post_video_with_publish_date_invalid(self):
         with self.assertRaises(tornado.httpclient.HTTPError):  
             url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-0' % (self.account_id_api_key, self.test_i_id)
-            self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+            self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='POST',
@@ -943,7 +946,7 @@ class TestVideoHandler(TestControllersBase):
     def test_post_video_with_custom_data(self):
         custom_data = urllib.quote(json.dumps({ "a" : 123456 }))
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&custom_data=%s' % (self.account_id_api_key, self.test_i_id, custom_data)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -960,7 +963,7 @@ class TestVideoHandler(TestControllersBase):
         # use self.stop/wait to make sure we get the response back and 
         # not an exception, we don't want no exception
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         self.http_client.fetch(self.get_url(url),
                                callback = self.stop, 
                                body='',
@@ -973,7 +976,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertNotEquals(first_job_id,'')
         
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         self.http_client.fetch(self.get_url(url),
                                callback=self.stop,
                                body='',
@@ -1290,18 +1293,18 @@ class TestHealthCheckHandler(TestControllersBase):
     def tearDown(self): 
         self.redis.stop()
         self.http_mocker.stop()
-
+ 
     def test_healthcheck_success(self): 
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
 	url = '/healthcheck/'
-        self.http_client.fetch(self.get_url(url),
+        response = self.http_client.fetch(self.get_url(url),
                                callback=self.stop, 
                                method='GET')
         response = self.wait()
         self.assertEquals(response.code, 200) 
         
     def test_healthcheck_failure(self): 
-        self.http_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 400)]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
 	url = '/healthcheck/'
         self.http_client.fetch(self.get_url(url),
                                callback=self.stop, 
