@@ -816,8 +816,27 @@ class VideoHelper():
             yield tornado.gen.Task(video.save)
             raise tornado.gen.Return((video,api_request))
         else:
-            raise AlreadyExists('job_id=%s' % (video.job_id))
-         # TODO (elif) add a reprocess flag to this thing
+            reprocess = bool(int(args.get('reprocess', 0))) 
+            if reprocess:
+                
+                reprocess_url = 'http://%s:%s/reprocess' % (options.video_server, 
+                                                            options.video_server_port)
+                # get the neonapirequest 
+                api_request = neondata.NeonApiRequest.get(video.job_id, account_id_api_key)
+                
+                # send the request to the video server
+                request = tornado.httpclient.HTTPRequest(url=reprocess_url,
+                                                         method="POST",
+                                                         body=api_request.to_json(),
+                                                         request_timeout=30.0,
+                                                         connect_timeout=15.0)
+                response = yield tornado.gen.Task(utils.http.send_request, request)
+                if response and response.code is 200: 
+                    raise tornado.gen.Return((video,api_request))
+                else:  
+                    raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+            else: 
+                raise AlreadyExists('job_id=%s' % (video.job_id))
 
     @staticmethod 
     @tornado.gen.coroutine
@@ -854,6 +873,7 @@ class VideoHandler(APIV2Handler):
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
           'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
+          'reprocess': All(Coerce(int), Range(min=0, max=1)),
           'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
         })
 
@@ -885,14 +905,14 @@ class VideoHandler(APIV2Handler):
 
         response = yield tornado.gen.Task(utils.http.send_request, request)
 
-        if response: 
+        if response and response.code is 200: 
             job_info = {} 
             job_info['job_id'] = api_request.job_id
             job_info['video'] = new_video.__dict__
             statemon.state.increment('post_video_oks')
             self.success(json.dumps(job_info), code=ResponseCode.HTTP_ACCEPTED) 
         else:
-            raise Exception('unable to communicate with video server', HTTP_INTERNAL_SERVER_ERRROR)
+            raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
         
     @apiv2.api_key_required
     @tornado.gen.coroutine

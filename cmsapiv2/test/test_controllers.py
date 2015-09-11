@@ -988,6 +988,69 @@ class TestVideoHandler(TestControllersBase):
         data = rjson['data'] 
         self.assertTrue(first_job_id in data)
 
+    def test_post_two_videos_with_reprocess(self):
+        # use self.stop/wait to make sure we get the response back and 
+        # not an exception, we don't want no exception
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_client.fetch(self.get_url(url),
+                               callback = self.stop, 
+                               body='',
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        first_job_id = rjson['job_id']  
+        self.assertNotEquals(first_job_id,'')
+        
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=1' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               body='',
+                               method='POST',
+                              allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body)
+        self.assertEquals(first_job_id, rjson['job_id'])
+
+    def test_post_video_with_vserver_fail(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
+        self.http_client.fetch(self.get_url(url),
+                               callback = self.stop, 
+                               body='',
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 500) 
+
+    def test_post_two_videos_with_reprocess_fail(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_client.fetch(self.get_url(url),
+                               callback = self.stop, 
+                               body='',
+                               method='POST',
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        first_job_id = rjson['job_id']  
+        self.assertNotEquals(first_job_id,'')
+        
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=1' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop,
+                               body='',
+                               method='POST',
+                              allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 500) 
+
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
         try: 
