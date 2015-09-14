@@ -67,7 +67,7 @@ def get_video_ids():
     cursor = conn.cursor()
     cursor.execute(
     """select distinct regexp_extract(thumbnail_id, 
-    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageclicks where 
+    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
     thumbnail_id is not NULL and
     tai='%s' %s""" % (options.pub_id, 
                       statutils.get_time_clause(options.start_time,
@@ -193,7 +193,9 @@ def collect_stats(thumb_info, video_info,
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
-                if cur_thumb.type == baseline_type:
+                impr_count = cum_impr.iloc[-1].get(thumb_id, None)
+                if (cur_thumb.type == baseline_type and impr_count is not None
+                    and impr_count > options.min_impressions):
                     if base_rank is None or cur_thumb.rank < base_rank:
                         base_thumb = cur_thumb
                         base_rank = cur_thumb.rank
