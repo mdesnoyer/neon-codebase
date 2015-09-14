@@ -136,7 +136,7 @@ class Cluster():
     # Memory GB, on demand price)
     instance_info = {
         'hi1.4xlarge' : (2048., 60.5, 3.1),
-        'hs1.8xlarge' : (48000., 117., 4.6)
+        'hs1.8xlarge' : (48000., 117., 4.6),
         'cc2.8xlarge' : (3360, 60.5, 2.0),
         'd2.2xlarge' : (12000, 61.0, 1.38),
         'd2.4xlarge' : (48000, 122.0, 2.76),
