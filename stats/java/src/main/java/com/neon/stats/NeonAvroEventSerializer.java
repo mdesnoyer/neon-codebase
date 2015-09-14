@@ -44,6 +44,8 @@ import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.neon.Tracker.*;
+
 import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.*;
 
 /**
@@ -77,6 +79,9 @@ public class AvroEventSerializer implements EventSerializer, Configurable {
   private String compressionCodec;
   private Map<String, Schema> schemaCache = new HashMap<String, Schema>();
 
+  private GenericRecord trackerEvent = null;
+  private GenericDatumReader<TrackerEvent> eventReader = null;
+
   private AvroEventSerializer(OutputStream out) {
     this.out = out;
   }
@@ -106,16 +111,26 @@ public class AvroEventSerializer implements EventSerializer, Configurable {
       initialize(event);
     }
 
+    trackerEvent = null;
     Schema schema = getSchema(event); 
+    
+    eventReader = 
+	new GenericDatumReader<TrackerEvent>(schema, TrackerEvent.getClassSchema());
 
-    dataFileWriter.appendEncoded(ByteBuffer.wrap(event.getBody()));
-    //It seems that the generic data writer can have an updated schema
-    //but not the datafilewriter itself. Possible solution is to update
-    //the generic writer and then create a new DFW, copy everything from
-    //the old one, and delete the old one. This has a lot of overhead.
+    BinaryDecoder binaryDecoder = 
+	DecoderFactory.get().binaryDecoder(event.getBody(), null);
 
-    //If the rules of Schema Evolution are followed this may be a non-issue
-    //It's not as robust though.
+    try {
+	trackerEvent = eventReader.read(null, binaryDecoder);
+    } catch (IOException e) {
+      logger.error("Error reading avro event " + e.toString());
+      return;
+    } catch (AvroRuntimeException e) {
+      logger.error("Error parsing avro event " + e.toString());
+      return;
+    }
+
+    dataFileWriter.append(trackerEvent);
   }
 
   private void initialize(Event event) throws IOException {
