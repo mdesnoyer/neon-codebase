@@ -10,7 +10,6 @@ from glob import glob
 import caffe
 import cv2
 import numpy as np
-from caffe.proto import caffe_pb2
 
 caffe.set_mode_gpu()
 
@@ -18,10 +17,11 @@ class predictor(caffe.Net):
     def __init__(self, model_file, pretrained_file):
         '''
         model_file = the deploy prototext
-        pretrained_file = the *.caffenet file with 
+        pretrained_file = the *.caffemodel file with 
             pretrained weights.
         '''
         caffe.Net.__init__(self, model_file, pretrained_file, caffe.TEST)
+        in_ = self.inputs[0]
         self.image_dims = np.array(self.blobs[in_].data.shape[1:])
 
     def __call__(self, data_array):
@@ -30,18 +30,18 @@ class predictor(caffe.Net):
         N x 3 x H x W array of N images that have already
         been preprocessed and resized.
         '''
-        if type(data_array).__module__ == np.__name__:
+        if type(data_array).__module__ != np.__name__:
             raise TypeError("data_array type is %s, must be %s"%(
                 str(type(data_array)), str(np.__name__)))
-        if data_array.dtype == np.dtype('float32'):
+        if data_array.dtype != np.dtype('float32'):
             raise ValueError("data_array must be float32")
-        if data_array.shape[1:] == self.image_dims:
+        if np.any(data_array.shape[1:] != self.image_dims):
             raise ValueError(
                 "data_array must have shape N x %i x %i x %i"%(
                 self.image_dims[0], self.image_dims[1], self.image_dims[2]))
         out = self.forward_all(**{self.inputs[0]: data_array})
         predictions = out[self.outputs[0]]
-        return predictions
+        return list(predictions[:,0])
 
 class preprocess(object):
     ''' 
@@ -51,7 +51,7 @@ class preprocess(object):
     in the openCV fashion (B, G, R order) or are provided
     as such.
     '''
-    def __init__(self, image_dims, image_mean=None):
+    def __init__(self, image_dims, image_mean=[104, 117, 123]):
         '''
         image_dims = W x H array / list / tuple
         image_mean = triple of channel mean values 
@@ -67,7 +67,9 @@ class preprocess(object):
         read it in. 
         '''
         img = cv2.imread(imgfn)
-        assert img != None, "Could not find image %s"%(imgfn)
+        if img == None:
+            raise ValueError("Could not find image %s"%(imgfn))
+        return img
 
     def __call__(self, img):
         if type(img) == str:
@@ -82,7 +84,6 @@ class preprocess(object):
         elif img.shape[2] != 3:
             raise ValueError("Image has the incorrect number of channels")
         # subtract the channelwise image means
-        img -= self.img_mean
-        img = img.transpose(2, 1, 0)
+        img -= self.image_mean
+        img = img.transpose(2, 0, 1)
         return img
-        
