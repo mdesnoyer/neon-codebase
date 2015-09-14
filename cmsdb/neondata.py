@@ -2486,20 +2486,22 @@ class AbstractPlatform(NamespacedStoredObject):
                                self.neon_api_key, '0',
                                _del_video)
 
-        # delete the video object
-        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
-
         # delete the request object
-        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+        yield tornado.gen.Task(NeonApiRequest.delete,
+                               self.videos[platform_vid],
                                self.neon_api_key)
 
-        # delete the thumbnails
-        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                               vm.thumbnail_ids)
+        if vm is not None:
+            # delete the video object
+            yield tornado.gen.Task(VideoMetadata.delete, i_vid)
 
-        # delete the serving urls
-        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
-                               vm.thumbnail_ids)
+            # delete the thumbnails
+            yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                                   vm.thumbnail_ids)
+
+            # delete the serving urls
+            yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                                   vm.thumbnail_ids)
         
 class NeonPlatform(AbstractPlatform):
     '''
