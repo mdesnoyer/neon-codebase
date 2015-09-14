@@ -614,16 +614,20 @@ default_args = {
 clicklogs = DAG('clicklogs', default_args=default_args,
                 schedule_interval=timedelta(hours=options.clicklog_period))
 
+# TODO(mdesnoyer): Delete this because a separate process should
+# handle bringing the cluster back up.
+
 # Start the EMR cluster if it isn't running
-cluster_start = PythonOperator(
-    task_id='cluster_start',
-    dag=clicklogs,
-    python_callable=_cluster_status,
-    execution_timeout=timedelta(hours=1))
+#cluster_start = PythonOperator(
+#    task_id='cluster_start',
+#    dag=clicklogs,
+#    python_callable=_cluster_status,
+#    execution_timeout=timedelta(hours=1))
 # Use for alarming on failure
 # on_failure_callback=
 
 # Create the Impala Parquet-formatted tables if they don't exist
+create_tables = []
 for event in __EVENTS:
     op = PythonOperator(
         task_id='create_tables_%s' % event,
@@ -637,7 +641,7 @@ for event in __EVENTS:
 cloudwatch_metrics = DummyOperator(
     task_id='cloudwatch_metrics',
     dag=clicklogs)
-cloudwatch_metrics.set_upstream(cluster_start)
+cloudwatch_metrics.set_upstream(create_tables)
 
 # Wait a while after the execution date interval has passed before
 # processing to allow Trackserver/Flume to transmit log files to be to

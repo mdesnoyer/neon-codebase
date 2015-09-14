@@ -12,6 +12,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import code
+import os
 import signal
 import stats.cluster
 import subprocess
@@ -30,6 +31,7 @@ define('task_regex', default='load_impala_table_.*',
 from utils import statemon
 statemon.define('cluster_is_alive', int)
 statemon.define('cluster_deaths', int)
+statemon.define('tasks_cleared', int, default=1)
 
 def main():
 
@@ -43,11 +45,19 @@ def main():
                     'Cluster died. Restarting it and clearing airflow jobs')
                 statemon.state.increment('cluster_deaths')
                 cluster.connect()
-                
+                statemon.state.tasks_cleared = 0
+
+            if not statemon.state.tasks_cleared:
                 try:
                     subprocess.check_output(['airflow', 'clear',
                                              '-t', options.task_regex,
-                                             '-d'])
+                                             '-d'],
+                                             stderr=subprocess.STDOUT,
+                        env=os.environ)
+                    statemon.state.tasks_cleared = 1
+                except subprocess.CalledProcessError as e:
+                    _log.error('Error clearing airflow jobs: %s' % e.output)
+                    statemon.state.tasks_cleared = 0
                 
         except Exception as e:
             _log.exception('Unexpected Error: %s' % e)
