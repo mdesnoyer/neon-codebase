@@ -717,6 +717,8 @@ class StatsDBWatcher(threading.Thread):
             return False
         
         cursor = self.impala_conn.cursor()
+        most_recent_data = None
+        cur_table_build = None
 
         try:
 
@@ -769,6 +771,12 @@ class StatsDBWatcher(threading.Thread):
                     statemon.state.good_connection_to_impala = 0
                     self.is_loaded.set()
                     return False
+                most_recent_data = datetime.datetime.utcfromtimestamp(
+                    play_result[0][0])
+                is_newer = (self.last_update is None or
+                            most_recent_data > self.last_update)
+                if not is_newer:
+                    return False
             except impala.error.RPCError as e:
                 _log.error('SQL Error. Probably a table is not available yet. '
                            '%s' % e)
@@ -779,8 +787,7 @@ class StatsDBWatcher(threading.Thread):
             cursor.close()
 
         # Update the state variables
-        self.last_update = datetime.datetime.utcfromtimestamp(
-            play_result[0][0])
+        self.last_update = most_recent_data
         self.last_table_build = cur_table_build
         
         return is_newer

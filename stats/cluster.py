@@ -36,11 +36,13 @@ import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
+define("cluster_type", default="testing_cluster",
+       help="Value of the cluster-type tag")
 define("cluster_name", default="Neon Cluster",
        help="Name of any cluster that is created")
 define("cluster_region", default='us-east-1',
        help='Amazon region where the cluster resides')
-define("public_ip", default='')
+define("public_ip", default='', help='Public elastic ip to assign to cluster')
 define("use_public_ip", default=0,
        help="If set, uses the public ip to talk to the cluster.")
 define("ssh_key", default="s3://neon-keys/emr-runner-2015.pem",
@@ -54,12 +56,19 @@ define("mapreduce_status_port", default=9046,
 define("s3_jar_bucket", default="neon-emr-packages",
        help='S3 bucket where jobs will be stored')
 define("cluster_subnet_id", default="subnet-74c10003",
-       help='The VPC Subnet Id where the cluster should run. Default: vpc-90ad09f5 subnet'
-            ' Stats Cluster (10.0.128.0/17).')
+       help=('The VPC Subnet Id where the cluster should run. '
+             'Default: vpc-90ad09f5 subnet Stats Cluster (10.0.128.0/17).'))
 define("cluster_log_uri",default="s3://neon-cluster-logs/",
        help='Where to store EMR Job flow cluster logs.')
 define("master_instance_type", default="r3.xlarge",
        help='The instance type/size of the EMR MASTER node.')
+define("min_hdd_space", default=15000, help='Min amount of disk space (GB)')
+define("min_memory", default=180,
+       help='Min amount of memory in the cluster (GB)')
+define("min_core_instances", default=2,
+       help='Minimum number of core instances')
+define("yarn_max_memory_allocation", default=16000,
+       help='Max memory allocation (MB) for containers in YARN')
 
 from utils import statemon
 statemon.define("master_connection_error", int)
@@ -123,30 +132,14 @@ def EC2Connection(cluster_region, **kwargs):
     return boto.ec2.connect_to_region(cluster_region, **kwargs)
 
 class Cluster():
-    # The possible instance and their multiplier of processing
-    # power relative to the r3.xlarge. Bigger machines are
-    # slightly better than an integer multiplier because of
-    # network reduction.
-    #
-    # This table is (type, multiplier, on demand price)
-    #instance_info = {
-    #    'r3.2xlarge' : (2.1, 0.70),
-    #    'r3.4xlarge' : (4.4, 1.40),
-    #    'r3.8xlarge' : (9.6, 2.80),
-    #    'hi1.4xlarge' : (2.5, 3.10),
-    #    'm2.4xlarge' : (2.2, 0.98)
-    #    }
-
-    # We are basing it on a combination of memory and disk space
+    # The possible instance and their specs. The format is (HDD GB,
+    # Memory GB, on demand price)
     instance_info = {
-        #'m2.2xlarge' : (1.0, 0.49),
-        #'m2.4xlarge' : (2.1, 0.98),
-        #'r3.4xlarge' : (3.1, 1.40),
-        #'r3.8xlarge' : (6.2, 2.80),
-        'hi1.4xlarge' : (6.1, 3.1),
-        'cc2.8xlarge' : (9.1, 2.0),
-        'd2.2xlarge' : (6.5,1.38),
-        'd2.4xlarge' : (9.7,2.76),
+        'hi1.4xlarge' : (2048., 60.5, 3.1),
+        'hs1.8xlarge' : (48000., 117., 4.6)
+        'cc2.8xlarge' : (3360, 60.5, 2.0),
+        'd2.2xlarge' : (12000, 61.0, 1.38),
+        'd2.4xlarge' : (48000, 122.0, 2.76),
         }
 
     # Possible cluster roles
@@ -155,25 +148,30 @@ class Cluster():
     ROLE_TESTING = 'testing'
     
     '''Class representing the cluster'''
-    def __init__(self, cluster_type=None, cluster_name=None, cluster_region=None, cluster_subnet_id=None,
-                 cluster_log_uri=None, n_core_instances=None, public_ip=None):
+    def __init__(self, cluster_type=None, cluster_name=None,
+                 cluster_region=None, cluster_subnet_id=None,
+                 cluster_log_uri=None, public_ip=None,
+                 min_hdd=None, min_memory=None, min_core_instances=None):
         '''
         cluster_type - Cluster type to connect to. Uses the cluster-type tag.
         cluster_name - The Name tag to assign the Cluster
         cluster_subnet_id - The VPC SubnetId where the cluster should run.
         cluster_log_uri - The S3 URI where EMR logs should be saved
-        n_core_instances - Number of r3.xlarge core instances.
-                           We will use the cheapest type of r3 instances
-                           that are equivalent to this number of r3.xlarge.
         public_ip - The public ip to assign to the cluster
+        min_hdd - Minimum hdd space (GB)
+        min_memory - Minimum memory (GB)
+        min_core_instances - Minimum number of core instances
         '''
-        self.cluster_type = (cluster_type if cluster_type else options.cluster_type)
-        self.cluster_name = (cluster_name if cluster_name else options.cluster_name)
-        self.cluster_region = (cluster_region if cluster_region else options.cluster_region)
-        self.public_ip = (public_ip if public_ip else options.public_ip)
-        self.cluster_log_uri = (cluster_log_uri if cluster_log_uri else options.cluster_log_uri)
-        self.cluster_subnet_id = (cluster_subnet_id if cluster_subnet_id else options.cluster_subnet_id)
-        self.n_core_instances = (n_core_instances if n_core_instances else options.n_core_instances)
+        self.cluster_type = cluster_type or options.cluster_type
+        self.cluster_name = cluster_name or options.cluster_name
+        self.cluster_region = cluster_region or options.cluster_region
+        self.public_ip = public_ip or options.public_ip
+        self.cluster_log_uri = cluster_log_uri or options.cluster_log_uri
+        self.cluster_subnet_id = cluster_subnet_id or options.cluster_subnet_id
+        self.min_hdd = min_hdd or options.min_hdd_space
+        self.min_memory = min_memory or options.min_memory
+        self.min_core_instances = (min_core_instances or 
+                                   options.min_core_instances)
         self.cluster_id = None
         self.master_ip = None
         self.master_id = None
@@ -241,8 +239,8 @@ class Cluster():
                 self._create()
             else:
                 _log.info("Found cluster %s of type %s with id %s" %
-                          (self.cluster_name, self.cluster_type, self.cluster_id))
-                self._set_requested_core_instances()
+                          (self.cluster_name, self.cluster_type,
+                           self.cluster_id))
 
     def run_map_reduce_job(self, jar, main_class, input_path,
                            output_path, map_memory_mb=None,
@@ -554,8 +552,7 @@ class Cluster():
         except AttributeError:
             instance_count = group.num_instances
             
-        self.n_core_instances = instance_count * \
-          Cluster.instance_info[group.instancetype][0]
+        self.n_core_instances = instance_count
 
     def change_instance_group_size(self, group_type, incr_amount=None,
                                    new_size=None):
@@ -698,18 +695,18 @@ class Cluster():
             if cluster.name != self.cluster_name:
                 # The cluster has to have the right name to be a possible match
                 continue
-            cluster_info = conn.describe_cluster(cluster.id)
             create_time = dateutil.parser.parse(
-                cluster_info.status.timeline.creationdatetime)
-            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
-                self.cluster_type and
-                self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
-                Cluster.ROLE_PRIMARY and (
-                    most_recent is None or create_time > most_recent)):
-                self.cluster_id = cluster.id
-                most_recent = create_time
-                cluster_found = cluster_info
-            time.sleep(1) # Avoid AWS throttling
+                cluster.status.timeline.creationdatetime)
+            if (most_recent is None or create_time > most_recent):
+                cluster_info = conn.describe_cluster(cluster.id)
+                if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                    self.cluster_type and
+                    self._get_cluster_tag(cluster_info, 'cluster-role', '') ==
+                    Cluster.ROLE_PRIMARY):
+                    self.cluster_id = cluster.id
+                    most_recent = create_time
+                    cluster_found = cluster_info
+                time.sleep(1) # Avoid AWS throttling
         
         if cluster_found is None:
             raise ClusterInfoError('Could not find a cluster of type %s'
@@ -755,14 +752,6 @@ class Cluster():
         if self.master_ip is None:
             raise MasterMissingError("Could not find the master ip")
         _log.info("Found master ip address %s" % self.master_ip)
-
-    def _set_requested_core_instances(self):
-        '''Sets self.n_core_instances to what is currently requested.'''
-        found_group = self._get_instance_group_info('CORE')
-
-        if found_group is not None:
-            self.n_core_instances = int(found_group.requestedinstancecount) * \
-              Cluster.instance_info[found_group.instancetype][0]
 
     def _get_instance_group_info(self, group_type):
         conn = EmrConnection(self.cluster_region)
@@ -822,7 +811,8 @@ class Cluster():
                  '--yarn-key-value',
                  'yarn.log-aggregation-enable=true',
                  '--yarn-key-value',
-                 'yarn.scheduler.maximum-allocation-mb=12000'])]
+                 ('yarn.scheduler.maximum-allocation-mb=%d' % 
+                  options.yarn_max_memory_allocation)])]
             
         steps = [
             boto.emr.step.InstallHiveStep('0.11.0.2')]
@@ -893,18 +883,23 @@ class Cluster():
         self.public_ip = None
         self.set_public_ip(cluster_ip)
 
-    def _get_core_instance_group(self):   
+    def _get_instances_needed(self, disk, memory):
+        '''Get the number if instances needed if they have given disk and mem.
+        '''
+        return max([math.ceil(self.min_memory / memory),
+                    math.ceil(self.min_hdd / disk),
+                    self.min_core_instances])
+
+    def _get_core_instance_group(self):
              
         # Calculate the expected costs for each of the instance type options
-        data = [(itype, math.ceil(self.n_core_instances / x[0]), 
-                 x[0] * math.ceil(self.n_core_instances / x[0]), 
-                 x[1], cur_price, avg_price)
+        data = [(itype, self._get_instances_needed(x[0], x[1]), 
+                 x[2], cur_price, avg_price)
                  for itype, x in Cluster.instance_info.items()
                  for cur_price, avg_price in [self._get_spot_prices(itype)]]
-        data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
-                                           -x[1]))
-        chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
-          avg_spot_price = data[0]
+        data = sorted(data, key=lambda x: (np.mean(x[3:5]) * x[1], -x[1]))
+        chosen_type, count, on_demand_price, cur_spot_price, avg_spot_price = \
+          data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))

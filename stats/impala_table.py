@@ -43,11 +43,11 @@ define("schema_bucket", default="neon-avro-schema",
        help=("Bucket that must contain the compiled schema to define the "
              "tables."))
 define("mr_jar", default=None, type=str, help="Mapreduce jar")
-define("schema_path", default=None, help="s3:// URL where to store the "
-                                         "compiled schema which defines the Avro tables.")
 define("compiled_schema_path",
        default=os.path.join(__base_path__, 'schema', 'compiled'),
        help='Path to the bucket of compiled avro schema')
+define("parquet_memory", default=16000, type=int,
+       help='Memory (MB) for the parquet loading mapreduce job')
 
 statemon.define("stats_cleaning_job_failures", int)
 statemon.define("impala_table_creation_failure", int)
@@ -74,7 +74,8 @@ class ImpalaTable(object):
 
         self.event_schema = '%sHive' % self.event
         self.schema_file = '%s.avsc' % self.event_schema
-        self.avro_schema = avro.schema.parse(open(os.path.join(options.compiled_schema_path, self.schema_file)).read())
+        self.avro_schema = avro.schema.parse(open(os.path.join(
+            options.compiled_schema_path, self.schema_file)).read())
 
         self.status = 'INIT'
 
@@ -134,10 +135,10 @@ class ImpalaTable(object):
         impala_cursor = self.impala_conn.cursor()
         if self.exists(table):
             # The table is already there, so we just need to refresh it
-            return impala_cursor.execute("refresh %s" % table)
+            return impala_cursor.execute("refresh {table}".format(table=table))
         else:
             # It's not there, so we need to refresh all the metadata
-            return impala_cursor.execute('invalidate metadata {table}'.format(table=table))
+            return impala_cursor.execute('invalidate metadata')
 
     def exists(self, table):
         """Does the table exist in Impala?"""
@@ -188,12 +189,7 @@ class ImpalaTable(object):
 
     def _schema_path(self):
         """Render the Avro schema path"""
-
-        if options.schema_path:
-            s3url = urlparse(options.schema_path)
-            return 's3://%s%s' % (s3url.netloc, os.path.join(s3url.path, self.schema_file))
-        else:
-            return 's3://%s/%s' % (options.schema_bucket, self.schema_file)
+        return 's3://%s/%s' % (options.schema_bucket, self.schema_file)
 
     def _upload_schema(self):
         """
@@ -304,7 +300,8 @@ class ImpalaTable(object):
         '''Load data into the Parquet table from the external Avro table
         :param execution_date: the Airflow execution_date object
         :param_type datetime.datetime:
-        :param hour_interval: The hour interval, from dag.schedule_interval property of type timedelta
+        :param hour_interval: The hour interval, from dag.schedule_interval 
+                              property of type timedelta
         :param_type integer:
         '''
         # Building parquet tables takes a lot of
@@ -315,22 +312,30 @@ class ImpalaTable(object):
             parq_table = self._parquet_table()
             avro_table = self._avro_table(execution_date)
 
-            _log.info('Loading to Impala Parquet-format table {parq} from {avro}'.format(parq=parq_table,
-                                                                                         avro=avro_table))
+            _log.info('Loading to Impala Parquet-format table {parq} from '
+                      '{avro}'.format(parq=parq_table, avro=avro_table))
+            heap_size = int(options.parquet_memory * 0.8)
             self.hive.execute('SET hive.exec.compress.output=true')
             self.hive.execute('SET avro.output.codec=snappy')
             self.hive.execute('SET parquet.compression=SNAPPY')
             self.hive.execute('SET hive.exec.dynamic.partition.mode=nonstrict')
 
-            self.hive.execute('SET mapreduce.reduce.memory.mb=12000')
-            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx11000m')
-            self.hive.execute('SET mapreduce.map.memory.mb=12000')
-            self.hive.execute('SET mapreduce.map.java.opts=-Xmx11000m')
+            self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm' %
+                              options.heap_size))
+            self.hive.execute('SET mapreduce.map.memory.mb=%d' %
+                              options.parquet_memory)
+            self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm' %
+                              options.heap_size)
 
-            # Hour calculation is used with Airflow and maps to a DAGs schedule_interval.
-            #  e.g: timedelta(days=0.125) == 3 hours
+            # Hour calculation is used with Airflow and maps to a DAGs
+            #  schedule_interval.  
+            #  e.g: timedelta(days=0.125) == 3
+            #  hours
             #
-            _log.debug('Parquet table loading hour_interval: {hi}'.format(hi=hour_interval))
+            _log.debug('Parquet table loading hour_interval: {hi}'.format(
+                hi=hour_interval))
             sql = """
             insert overwrite table %s
             partition(tai, yr, mnth, day, hr)
@@ -338,12 +343,13 @@ class ImpalaTable(object):
             year(cast(serverTime as timestamp)),
             month(cast(serverTime as timestamp)),
             day(cast(serverTime as timestamp)),
-            (FLOOR((hour(cast(serverTime as timestamp))+%d)/%d)-1)*%d
+            FLOOR(hour(cast(serverTime as timestamp)) / %d) * %d
             from %s""" % (parq_table,
                           ','.join(x.name for x in self.avro_schema.fields),
-                          hour_interval,hour_interval,hour_interval,
+                          hour_interval, hour_interval,
                           avro_table)
-            _log.debug('LOAD Impala-Parquet table command: {sql}'.format(sql=sql))
+            _log.debug('LOAD Impala-Parquet table command: {sql}'.format(
+                sql=sql))
             self.hive.execute(sql)
             self._refresh_table(parq_table)
 
@@ -424,7 +430,8 @@ class ImpalaTableLoader(threading.Thread):
     Load cleaned data to the Impala Parquet-format table
     """
 
-    def __init__(self, cluster, event, execution_date, hour_interval, input_path):
+    def __init__(self, cluster, event, execution_date, hour_interval,
+                 input_path):
         super(ImpalaTableLoader, self).__init__()
         self.event = event
         self.cluster = cluster
@@ -452,23 +459,29 @@ class ImpalaTableLoader(threading.Thread):
             self.table.transport.open()
             avro_table = self.table._avro_table(self.execution_date)
             if self.table.exists(avro_table):
-                _log.error("Avro table for event '%s' exists: %s" % (self.event, avro_table))
+                _log.error("Avro table for event '%s' exists: %s" % 
+                           (self.event, avro_table))
             else:
-                self.table.create_avro_table(self.execution_date, self.input_path)
+                self.table.create_avro_table(self.execution_date,
+                                             self.input_path)
 
             parq_table = self.table._parquet_table()
             if self.table.exists(parq_table):
-                _log.debug("Parquet table for event '%s' exists: %s" % (self.event, parq_table))
-                self.table.load_parquet_table(self.execution_date, self.hour_interval)
+                _log.debug("Parquet table for event '%s' exists: %s" % 
+                           (self.event, parq_table))
+                self.table.load_parquet_table(self.execution_date,
+                                              self.hour_interval)
                 self.table.drop_avro_table(self.execution_date)
             else:
-                _log.error("Parquet table for event '%s' missing: %s" % (self.event, parq_table))
+                _log.error("Parquet table for event '%s' missing: %s" %
+                           (self.event, parq_table))
                 raise ImpalaTableLoadError
 
             self.status = 'SUCCESS'
 
         except:
-            _log.exception('Error loading Impala table for event %s' % self.event)
+            _log.exception('Error loading Impala table for event %s' %
+                           self.event)
             if self._drop_avro_on_failure:
                 self.table.drop_avro_table(self.execution_date)
             raise
@@ -477,99 +490,18 @@ class ImpalaTableLoader(threading.Thread):
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 
+def update_table_build_times(new_date):
+    _log.debug("Updating the table build times")
+    
+    impala_conn = impala.dbapi.connect(host=cluster.master_ip,
+                                       port=options.impala_port)
+    cursor = impala_conn.cursor()
+    cursor.execute('create table if not exists table_build_times '
+                   '(done_time timestamp) stored as PARQUET')
+    cursor.execute("insert into table_build_times (done_time) values ('%s')" %
+                   datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
-def build_impala_tables(cluster, action, timeout=None, **kwargs):
-    '''Builds the impala tables.
-
-    Blocks until the tables are built.
-
-    Inputs:
-    input_path - The input path, which should be the output of the
-                 RawTrackerMR job.
-    cluster - A Cluster object for working with the cluster
-    timeout - If specified, it will timeout after this number of seconds
-
-    Returns:
-    true on success
-    '''
-
-    if action == 'build':
-        _log.info("Building the Impala tables")
-    elif action == 'load':
-        execution_date = kwargs['execution_date']
-        input_path = kwargs['input_path']
-        hour_interval = kwargs['hour_interval']
-        _log.info("Loading the Impala tables for {dt} from {path}".format(
-            dt=execution_date.strftime('%Y-%m-%d %H:%M:%S'),
-            path=input_path))
-
-    if timeout is not None:
-        budget_time = datetime.datetime.now() + \
-                      datetime.timedelta(seconds=timeout)
-
-    threads = []
-    for event in ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
-                  'EventSequence']:
-    # for event in ['ImageVisible']:
-        _log.debug("event '%s' table:" % event)
-        if action == 'build':
-            thread = ImpalaTableBuilder(cluster=cluster, event=event)
-        elif action == 'load':
-            thread = ImpalaTableLoader(cluster=cluster, event=event, execution_date=execution_date,
-                                       hour_interval=hour_interval, input_path=input_path)
-        thread.start()
-        threads.append(thread)
-        time.sleep(5)
-
-    # Wait for all of the tables to be built
-    for thread in threads:
-        time_left = None
-        if timeout is not None:
-            time_left = (budget_time - datetime.datetime.now()).total_seconds()
-            if time_left < 0:
-                raise TimeoutException()
-        thread.join(time_left)
-        if thread.is_alive():
-            for t2 in threads:
-                t2.stop()
-            raise TimeoutException()
-        if thread.status != 'SUCCESS':
-            _log.error("Error {action}ing Impala {event} table. State is {state}. See logs.".format(
-                action=action, event=event, state=thread.status))
-            raise ImpalaError("Error building impala table")
-
-    _log.info('Finished building Impala tables')
-    return True
-
-
-def run_batch_cleaning_job(cluster, input_path, output_path, jar=None, timeout=None):
-    '''Runs the mapreduce job that cleans the raw events.
-
-    The events are output in a format that can be read by hive as an
-    external table.
-
-    Inputs:
-    input_path - The s3 path for the raw data
-    output_path - The output path for the raw data
-    timeout - Time in seconds    
-    '''
-    _log.info("Starting batch event cleaning job")
-    if not jar:
-        jar = options.mr_jar
-    try:
-        cluster.run_map_reduce_job(jar,
-                                   'com.neon.stats.RawTrackerMR',
-                                   input_path,
-                                   output_path,
-                                   map_memory_mb=2048,
-                                   timeout=timeout)
-    except Exception as e:
-        _log.error('Error running the batch cleaning job: %s' % e)
-        statemon.state.increment('stats_cleaning_job_failures')
-        raise
-
-    _log.info("Batch event cleaning job done")
-
+    _log.debug('Finished building Impala tables')
 
 def wait_for_running_batch_job(cluster, sample_period=30):
     '''Blocks until a currently running batch cleaning job is done.
