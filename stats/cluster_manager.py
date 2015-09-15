@@ -48,7 +48,7 @@ def main():
                 statemon.state.tasks_cleared = 0
 
             if not statemon.state.tasks_cleared:
-                _log.info('Clearing airflow tasks %s' options.task_regex)
+                _log.info('Clearing airflow tasks %s' % options.task_regex)
                 try:
                     subprocess.check_output(['airflow', 'clear',
                                              '-t', options.task_regex,
