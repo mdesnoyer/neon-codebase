@@ -25,7 +25,7 @@ _log = logging.getLogger(__name__)
 
 from utils.options import define, options
 define('dag', default='clicklogs', help='Dag whose jobs to clear from the db')
-define('task_regex', default='load_impala_table_.*',
+define('task_regex', default='create_table.*',
        help='Regex of the dag tasks to clear')
 
 from utils import statemon
@@ -48,10 +48,12 @@ def main():
                 statemon.state.tasks_cleared = 0
 
             if not statemon.state.tasks_cleared:
+                _log.info('Clearing airflow tasks %s' options.task_regex)
                 try:
                     subprocess.check_output(['airflow', 'clear',
                                              '-t', options.task_regex,
-                                             '-d'],
+                                             '-d',
+                                             options.dag],
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
                     statemon.state.tasks_cleared = 1

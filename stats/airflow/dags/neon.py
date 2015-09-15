@@ -116,6 +116,8 @@ TAI = re.compile(r'^[\w]{3,15}$')
 EPOCH = dateutils.timezone(datetime(1970, 1, 1), timezone='utc')
 PROTECTED_PREFIXES = [r'^/$', r'v[0-9].[0-9]']
 
+class ClusterDown(Exception): pass
+
 class ClusterGetter(object):
     cluster = None
 
@@ -134,8 +136,9 @@ def _cluster_status():
         :return: True if the cluster is running
         """
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
-    return cluster.is_alive()
+    if not cluster.is_alive():
+        raise ClusterDown()
+    return True
 
 
 def _create_tables(**kwargs):
@@ -618,30 +621,19 @@ clicklogs = DAG('clicklogs', default_args=default_args,
 # handle bringing the cluster back up.
 
 # Start the EMR cluster if it isn't running
-#cluster_start = PythonOperator(
-#    task_id='cluster_start',
-#    dag=clicklogs,
-#    python_callable=_cluster_status,
-#    execution_timeout=timedelta(hours=1))
+check_cluster = PythonOperator(
+    task_id='check_cluster',
+    dag=clicklogs,
+    python_callable=_cluster_status,
+    execution_timeout=timedelta(hours=1))
 # Use for alarming on failure
 # on_failure_callback=
-
-# Create the Impala Parquet-formatted tables if they don't exist
-create_tables = []
-for event in __EVENTS:
-    op = PythonOperator(
-        task_id='create_tables_%s' % event,
-        dag=clicklogs,
-        python_callable=_create_tables,
-        op_kwargs=dict(event=event))
-    op.set_upstream(cluster_start)
-    create_tables.append(op)
 
 # Create Cloudwatch Alarms for the cluster
 cloudwatch_metrics = DummyOperator(
     task_id='cloudwatch_metrics',
     dag=clicklogs)
-cloudwatch_metrics.set_upstream(create_tables)
+cloudwatch_metrics.set_upstream(check_cluster)
 
 # Wait a while after the execution date interval has passed before
 # processing to allow Trackserver/Flume to transmit log files to be to
@@ -652,7 +644,7 @@ quiet_period = PythonOperator(
     python_callable=_quiet_period,
     provide_context=True,
     op_kwargs=dict(quiet_period=timedelta(minutes=options.quiet_period)))
-quiet_period.set_upstream(create_tables)
+quiet_period.set_upstream(check_cluster)
 
 # Determine if the execution date has input files
 has_input_files = BranchPythonOperator(
@@ -697,6 +689,16 @@ mr_cleaning_job = PythonOperator(
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
+# Create the Impala Parquet-formatted tables if they don't exist
+create_tables = []
+for event in __EVENTS:
+    op = PythonOperator(
+        task_id='create_table_%s' % event,
+        dag=clicklogs,
+        python_callable=_create_tables,
+        op_kwargs=dict(event=event))
+    create_tables.append(op)
+
 
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
@@ -708,7 +710,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)))
-    op.set_upstream(mr_cleaning_job)
+    op.set_upstream(create_tables + [mr_cleaning_job])
     load_impala_tables.append(op)
 
 
@@ -739,43 +741,4 @@ hdfs_maintenance = PythonOperator(
     op_kwargs=dict(days_ago=30))
 hdfs_maintenance.set_upstream(load_impala_tables)
 
-# ----------------------------------
-# cluster - restart the cluster if it goes away
-# ----------------------------------
-cluster = DAG('cluster', default_args=default_args,
-                schedule_interval=timedelta(hours=1))
-
-# Start the EMR cluster if it isn't running
-cluster_cluster_start = BranchPythonOperator(
-    task_id='cluster_start',
-    dag=cluster,
-    python_callable=_cluster_status,
-    execution_timeout=timedelta(hours=1))
-# Use for alarming on failure
-# on_failure_callback=
-
-# Create the Impala Parquet-formatted tables if they don't exist
-create_tables = []
-for event in __EVENTS:
-    op = PythonOperator(
-        task_id='create_tables_%s' % event,
-        dag=cluster,
-        python_callable=_create_tables,
-        op_kwargs=dict(event=event))
-    op.set_upstream(cluster_start)
-    create_tables.append(op)
-
-# Clear all the older loading jobs because they need to be redone
-clear_old_impala_load = PythonOperator(
-    task_id='clear_old_impala_load',
-    dag=cluster,
-    python_callable=_clear_all_tasks,
-    op_kwargs=dict(operators=load_impala_tables, downstream=True))
-clear_old_impala_load.set_upstream(create_tables)
-
-# Create Cloudwatch Alarms for the cluster
-cluster_cloudwatch_metrics = DummyOperator(
-    task_id='cloudwatch_metrics',
-    dag=cluster)
-cluster_cloudwatch_metrics.set_upstream(cluster_cluster_start)
 
