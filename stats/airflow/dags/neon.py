@@ -109,7 +109,7 @@ utils.monitor.MonitoringAgent().start()
 # ----------------------------------
 
 __EVENTS = ['ImageLoad', 'ImageVisible','ImageClick', 'AdPlay', 'VideoPlay',
-          'VideoViewPercentage' 'EventSequence']
+          'VideoViewPercentage', 'EventSequence']
 
 # Tracker Account Ids: alpha-numeric string 3-15 chars long
 TAI = re.compile(r'^[\w]{3,15}$')  
