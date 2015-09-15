@@ -40,3 +40,5 @@ nose-cov==1.6
 happybase==0.9
 pyhs2==0.6.0
 scikit-learn==0.16.1
+psycopg2==2.6.1
+queries==1.7.5
