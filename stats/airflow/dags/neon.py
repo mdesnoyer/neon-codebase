@@ -67,7 +67,7 @@ from utils.options import options
 options.define('quiet_period', default=45, type=int,
                help=('Number of minutes to wait before processing the most '
                      'recent clicklogs.'))
-options.define('mr_jar', default='neon-stats-1.0-job.jar',
+options.define('mr_jar', default='neon-stats-1.0-job.jar', type=str,
                help=('Jar for the map reduce cleaning job to run relative to '
                      'stats/java/target/'))
 options.define('input_path', default='s3://neon-tracker-logs-v2/v2.2',
