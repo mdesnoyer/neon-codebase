@@ -25,6 +25,8 @@ from utils.options import define, options
 from utils import statemon
 from utils import strutils
 
+from collections import defaultdict as ddict
+
 _log = logging.getLogger(__name__)
 
 define('modify_pool_size', type=int, default=5,
@@ -42,12 +44,81 @@ statemon.define('critical_error', int)
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
 
+class ScoreType(object):
+    '''
+    Exports some variable names that map to integers
+    to refer to the different scoring types.
+    '''
+    RANK_CENTRALITY = 2
+    CLASSICAL = 1
+    UNKNOWN = 0
+    DEFAULT = RANK_CENTRALITY
+
+class ModelMapper(object):
+    '''
+    Stores relevant information about the model used for a given
+    video, particularly with respect to computing the score
+    priors. This was made necessary by the move to using Rank
+    Centrality and, more broadly, no longer binning scores into
+    [1, 7]. 
+
+    Note: This makes several simplifying assumptions. Namely, 
+    if a model is not in `classical models,' then it is using
+    Rank Centrality, and is assumed to have a mean of 1. Generally
+    when Rank Centrality is estimated the sum of the vector is 1--
+    since the vector corresponds to transition probabilities. But
+    since we wanted to the mean to not be dependent on the number
+    of tested items, the sum of the vector corresponds to the number
+    of training items, and hence the mean is definitionally one.
+
+    IF YOU PLAN ON MAKING MORE MODELS USING THE CLASSICAL SCORING 
+    METHOD, YOU MUST ADD THEM TO CLASSICAL_MODELS.
+    '''
+    MODEL2TYPE = ddict(lambda: ScoreType.DEFAULT,
+        {x:ScoreType.CLASSICAL for x in ['20130924_textdiff',
+        '20130924_crossfade','p_20150722_withCEC_w20',
+        '20130924_crossfade_withalg','p_20150722_withCEC_w40',
+        '20150206_flickr_slow_memcache','20130924',
+        'p_20150722_withCEC_w10','p_20150722_withCEC_wA',
+        'p_20150722_withCEC_wNone']})
+    MODEL2TYPE[None] = ScoreType.UNKNOWN # reserved for unknown models
+
+    @classmethod
+    def _add_model(cls, modelid, score_type=ScoreType.DEFAULT):
+        if ((score_type != ScoreType.RANK_CENTRALITY) and
+            (score_type != ScoreType.CLASSICAL) and
+            (score_type != ScoreType.UNKNOWN)):
+            _log.error('Invalid score type specification for model '
+                       '%s defaulting to UNKNOWN'%(modelid))
+            score_type = ScoreType.UNKNOWN
+            # if it's already in there, do not attempt to change
+            if ModelMapper.MODEL2TYPE.has_key(modelid):
+                _log.error('Model %s with invalid score type %s'
+                    ' is already in MODEL2TYPE, original score '
+                    'type remains'%(str(modelid), str(score_type)))
+                return
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            _log.info('Model %s is not in model dicts; adding it,'
+                  ' as score type %s'%(str(modelid), str(score_type)))
+        cls.MODEL2TYPE[modelid] = score_type
+
+    @classmethod
+    def get_model_type(cls, modelid):
+        '''
+        Returns the model type given either a model
+        number or a model name.
+        '''
+        if not ModelMapper.MODEL2TYPE.has_key(modelid):
+            ModelMapper._add_model(modelid)
+        return ModelMapper.MODEL2TYPE[modelid]
+
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
-    def __init__(self, account_id, testing_enabled, thumbnails=[]):
+    def __init__(self, account_id, testing_enabled, thumbnails=[], score_type=ScoreType.UNKNOWN):
         self.account_id = str(account_id)
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
+        self.score_type = score_type
 
     def __str__(self):
         return strutils.full_object_str(self)
@@ -169,15 +240,19 @@ class Mastermind(object):
     '''
     PRIOR_IMPRESSION_SIZE = 10
     PRIOR_CTR = 0.1
+    VALUE_THRESHOLD = 0.01
     
     def __init__(self):
         self.video_info = {} # video_id -> VideoInfo
         
         # account_id -> neondata.ExperimentStrategy
-        self.experiment_strategy = {} 
+        self.experiment_strategy = {}
         
         # video_id -> ((account_id, video_id), [(thumb_id, fraction)])
-        self.serving_directive = {} 
+        self.serving_directive = {}
+
+        # video_id -> neondata.ExperimentState
+        self.experiment_state = {}
         
         # For thread safety
         self.lock = multiprocessing.RLock()
@@ -225,11 +300,13 @@ class Mastermind(object):
         '''
         if video_ids is None:
             with self.lock:
-                video_ids = self.video_info.keys()
+                keys = self.serving_directive.keys()
+        else:
+            keys = video_ids
 
-        for video_id in video_ids:
+        for key in keys:
             try:
-                directive = self.serving_directive[video_id]
+                directive = self.serving_directive[key]
                 video_id = directive[0][1]
                 yield (directive[0],
                        [('_'.join([video_id, thumb_id]), frac)
@@ -239,6 +316,86 @@ class Mastermind(object):
                 # don't have information about this video id
                 # anymore. Oh well.
                 pass
+
+    def _thumbnail_status_to_directive(self, thumbnail_status):
+        '''Convert thubmnail_status to serving directive
+
+        Inputs:
+        thumbnails_status - ThumbnailStatus
+
+        Returns:
+        tuple (video_id, (thumbnail_id, directive)) video_id is 
+        extracted from thumbnail_status. directive is the serving fraction
+        '''
+
+        # An example of ThumbnailStatus id: thumbnailstatus_acct1_vid1_v1t2
+        # It contains four parts: thumbnails status, account id, video id
+        # and thumbnail id.
+        ids = str(thumbnail_status.get_id()).split('_')
+        if len(ids) != 3:
+            _log.error('The thumbnail_status id %s does not seem to be valid.' %
+                thumbnail_status.get_id())
+            return (None, None)
+        else:
+            video_id = ('_').join([ids[0], ids[1]])
+            thumbnail_partial_id = ids[2]
+            if (thumbnail_status is None or 
+                thumbnail_status.serving_frac is None or 
+                thumbnail_status.serving_frac == ''):
+                return (video_id, None)
+            return (video_id,
+                    (thumbnail_partial_id,
+                     float(thumbnail_status.serving_frac)))
+
+    def update_experiment_state_directive(self, video_id, video_status,
+                                          thumbnail_status_list):
+        '''Add a video experiment state to the experiment_state
+
+        Inputs:
+        video_id - video_id to be updated
+        video_status: neondata.VideoStatus object
+        thumbnail_status_list: list of thumbnail status objects
+
+        '''
+        if video_id is not None and len(thumbnail_status_list) > 0:
+            with self.lock:
+                has_error = False
+                self.experiment_state[video_id] = video_status.experiment_state
+                directive_list = []
+                frac_sum = 0.0
+                for thumbnail_status in thumbnail_status_list:
+                    if thumbnail_status is None:
+                        continue
+                    t_video_id, directive = \
+                        self._thumbnail_status_to_directive(thumbnail_status)
+                    if t_video_id is None or directive is None:
+                        has_error = True;
+                        break
+                    if t_video_id != video_id:
+                        _log.error('ThumbnailStatus video id %s does not match'
+                                   ' the query video id %s' % (t_video_id,
+                                   video_id))
+                        has_error = True
+                        break
+                    frac_sum = frac_sum + directive[1]
+                    directive_list.append(directive)
+                if not has_error:
+                    if abs(frac_sum - 1.0) >= 0.001:
+                        has_error = True
+                        _log.error('ThumbnailStatus of video id %s does not'
+                                   ' sum to 1.0' % video_id)
+                    # Validate the summation.
+
+                if has_error:
+                    self.experiment_state[video_id] = \
+                        neondata.ExperimentState.UNKNOWN
+                else:
+                    # No Error so set the serving directive
+                    account_id = video_id.split('_')[0]
+                    self.serving_directive[video_id] = \
+                        ((account_id, video_id), directive_list)
+
+
 
     def update_video_info(self, video_metadata, thumbnails,
                           testing_enabled=True):
@@ -270,13 +427,18 @@ class Mastermind(object):
                                 'account id %s and it should not have') % 
                                 (video_id, video_metadata.get_account_id()))
                     video_info.account_id = video_metadata.get_account_id()
+                video_info.score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 
             except KeyError:
                 # No information about this video yet, so add it to the index
+                score_type = ModelMapper.get_model_type(
+                    video_metadata.model_version)
                 video_info = VideoInfo(
                     video_metadata.get_account_id(),
                     testing_enabled,
-                    thumbnail_infos)
+                    thumbnail_infos,
+                    score_type=score_type)
                 self.video_info[video_id] = video_info
 
             self._calculate_new_serving_directive(video_id)
@@ -286,6 +448,8 @@ class Mastermind(object):
         with self.lock:
             if video_id in self.video_info:
                 del self.video_info[video_id]
+            if video_id in self.experiment_state:
+                del self.experiment_state[video_id]
             if video_id in self.serving_directive:
                 del self.serving_directive[video_id]
                 self._incr_pending_modify(1)
@@ -343,6 +507,20 @@ class Mastermind(object):
             _log.error('Invalid account id %s and strategy: %s' %
                        (account_id, strategy))
             return
+
+        # Clean up data types in the experiment strategy
+        try:
+            strategy.exp_frac = float(strategy.exp_frac)
+            strategy.holdback_frac = float(strategy.holdback_frac)
+            strategy.frac_adjust_rate = float(strategy.frac_adjust_rate)
+            strategy.min_conversion = int(strategy.min_conversion)
+            strategy.max_neon_thumbs = (None if strategy.max_neon_thumbs 
+                                        is None else 
+                                        int(strategy.max_neon_thumbs))
+        except ValueError as e:
+            _log.error('Invalid entry in experiment strategy %s' %
+                       strategy.get_id())
+            return
         
         with self.lock:
             try:
@@ -381,6 +559,12 @@ class Mastermind(object):
             statemon.state.increment('critical_error') 
             return
         
+        # if video has already finished the experiment, just keep the
+        # previous directive.
+        if self.experiment_state.get(video_id, None) == \
+           neondata.ExperimentState.COMPLETE:
+            return
+
         result = self._calculate_current_serving_directive(
             video_info, video_id)
         if result is None:
@@ -388,6 +572,7 @@ class Mastermind(object):
             return 
 
         experiment_state, new_directive, value_left, winner_tid = result
+        self.experiment_state[video_id] = experiment_state
                     
         try:
             old_directive = self.serving_directive[video_id][1]
@@ -515,8 +700,10 @@ class Mastermind(object):
         if strategy.max_neon_thumbs is not None:
             neon_thumbs = [thumb for thumb in candidates if 
                            thumb.type == neondata.ThumbnailType.NEON]
-            neon_thumbs = sorted(neon_thumbs,
-                                 key=lambda x: (x.rank, -x.model_score))
+            neon_thumbs = sorted(
+                neon_thumbs,
+                key=lambda x: (x.rank, -x.model_score if x.model_score else 
+                               float('inf')))
             if len(neon_thumbs) > strategy.max_neon_thumbs:
                 candidates = candidates.difference(
                     neon_thumbs[strategy.max_neon_thumbs:])
@@ -548,13 +735,19 @@ class Mastermind(object):
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.MULTIARMED_BANDIT):
             experiment_state, bandit_frac, value_left, winner_tid = \
-              self._get_bandit_fracs(strategy, baseline, editor, candidates)
+              self._get_bandit_fracs(strategy,
+                                     baseline,
+                                     editor,
+                                     candidates,
+                                     video_info,
+                                     strategy.min_conversion,  
+                                     strategy.frac_adjust_rate)
             run_frac.update(bandit_frac)
         elif (strategy.experiment_type == 
             neondata.ExperimentStrategy.SEQUENTIAL):
             experiment_state, seq_frac, value_left, winner_tid = \
               self._get_sequential_fracs(strategy, baseline, editor,
-                                         candidates)
+                                         candidates, video_info)
             run_frac.update(seq_frac)
         else:
             _log.error('Invalid experiment type for video %s : %s' % 
@@ -563,7 +756,9 @@ class Mastermind(object):
             return None
         return (experiment_state, run_frac, value_left, winner_tid)
 
-    def _get_bandit_fracs(self, strategy, baseline, editor, candidates):
+    def _get_bandit_fracs(self, strategy, baseline, editor, candidates,
+                          video_info, min_conversion = 50, 
+                          frac_adjust_rate = 1.0):
         '''Gets the serving fractions for a multi-armed bandit strategy.
 
         This uses the Thompson Sampling heuristic solution. See
@@ -576,7 +771,7 @@ class Mastermind(object):
         experiment_state = neondata.ExperimentState.RUNNING
         value_remaining = None
         winner_tid = None
-        experiment_frac = strategy.exp_frac
+        experiment_frac = float(strategy.exp_frac)
                 
         if (editor is not None and 
             baseline is not None and 
@@ -588,7 +783,7 @@ class Mastermind(object):
         
         # First allocate the non-experiment portion
         non_exp_thumb = None
-        if strategy.exp_frac >= 1.0:
+        if experiment_frac >= 1.0:
             # When the experimental fraction is 100%, put everything
             # into the valid bandits that makes sense.
             if editor is not None:
@@ -600,14 +795,14 @@ class Mastermind(object):
         else:
             if editor is None:
                 if baseline:
-                    run_frac[baseline.id] = 1.0 - strategy.exp_frac
+                    run_frac[baseline.id] = 1.0 - experiment_frac
                     non_exp_thumb = baseline
                 else:
                     # There is nothing to run in the main fraction, so
                     # run the experiment over everything.
                     experiment_frac = 1.0
             else:
-                run_frac[editor.id] = 1.0 - strategy.exp_frac
+                run_frac[editor.id] = 1.0 - experiment_frac
                 non_exp_thumb = editor
                 if baseline and strategy.always_show_baseline:
                     valid_bandits.add(baseline)
@@ -617,28 +812,36 @@ class Mastermind(object):
         # Now determine the serving percentages for each valid bandit
         # based on a prior of its model score and its measured ctr.
         bandit_ids = [x.id for x in valid_bandits]
-        conv = dict([(x.id, self._get_prior_conversions(x) +
+        conv = dict([(x.id, self._get_prior_conversions(x, video_info) +
                       x.get_conversions())
                 for x in valid_bandits])
         imp = dict([(x.id, Mastermind.PRIOR_IMPRESSION_SIZE * 
                              (1 - Mastermind.PRIOR_CTR) + 
-                             x.get_impressions() - conv[x.id])
+                             x.get_impressions())
                              for x in valid_bandits])
+
+        # Calculation the summation of all conversions.
+        total_conversions = sum(x.get_conversions() for x in valid_bandits)
+        if non_exp_thumb is not None:
+            total_conversions = total_conversions + non_exp_thumb.get_conversions()
 
         # Run the monte carlo series
         MC_SAMPLES = 1000.
-        mc_series = [spstats.beta.rvs(max(1, conv[x]),
-                                      max(1, imp[x]),
-                                      size=MC_SAMPLES)
-                                      for x in bandit_ids]
+
+        # Change: the formula in the paper is conversions+1,
+        #         impressions-conversions+1
+        mc_series = [spstats.beta.rvs(conv[x] + 1,
+                                      max(imp[x] - conv[x], 0) + 1,
+                                      size=MC_SAMPLES) for x in bandit_ids]
         if non_exp_thumb is not None:
-            conv = self._get_prior_conversions(non_exp_thumb) + \
+            conv = self._get_prior_conversions(non_exp_thumb, video_info) + \
               non_exp_thumb.get_conversions()
             mc_series.append(
-                spstats.beta.rvs(max(1, conv),
-                                 max(1, Mastermind.PRIOR_IMPRESSION_SIZE * 
+                spstats.beta.rvs(max(conv, 0) + 1,
+                                 max(Mastermind.PRIOR_IMPRESSION_SIZE * 
                                         (1 - Mastermind.PRIOR_CTR) + 
-                                        non_exp_thumb.get_impressions()-conv),
+                                        non_exp_thumb.get_impressions() - 
+                                        conv , 0) + 1,
                                  size=MC_SAMPLES))
 
         win_frac = np.array(np.bincount(np.argmax(mc_series, axis=0)),
@@ -667,10 +870,14 @@ class Mastermind(object):
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
-        if win_frac[winner_idx] >= 0.95:
+        # Change the winning strategy to value_remaining is less than 0.01 (by the paper)
+        # Means that 95% of chance the value remaining is 1% of the picked winner.
+        # This will make it comes to conclusion quicker comparing to 
+        # using: if win_frac[winner_idx] >= 0.95:
+        if value_remaining <= Mastermind.VALUE_THRESHOLD:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                impressions[winner_idx] >= 500):
+                impressions[winner_idx] >= 500 and total_conversions >= min_conversion):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
                 try:
@@ -697,19 +904,29 @@ class Mastermind(object):
                     win_frac[other_idx] = \
                       0.1 / np.sum(win_frac[other_idx]) * win_frac[other_idx]
 
+        # Adjust the run_frac according to frac_adjust_rate,
+        # if frac_adjust_rate == 0.0, then all the fractions are equal.
+        # If frac_adjust_rate == 1.0, then run_frac stays the same.
+
+        # TODO: now the adjustment is equal for all fractions.
+        # TODO: We will change it to be related to the prior instead.
+        win_frac = win_frac ** frac_adjust_rate
+        win_frac = win_frac / np.sum(win_frac)
+
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
         if non_exp_thumb is not None:
             win_frac = np.around(win_frac[:-1], 2)
             win_frac = win_frac / np.sum(win_frac)
+
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
         return (experiment_state, run_frac, value_remaining, winner_tid)
         
 
-    def _get_prior_conversions(self, thumb_info):
+    def _get_prior_conversions(self, thumb_info, video_info):
         '''Get the number of conversions we would expect based on the model 
         score.'''
         
@@ -725,17 +942,36 @@ class Mastermind(object):
             else:
                 return max(1.0, (Mastermind.PRIOR_CTR * 
                                  Mastermind.PRIOR_IMPRESSION_SIZE))
+        if video_info.score_type == ScoreType.CLASSICAL:
+            # then it was calculated using Borda Count
+            # original doc:
+            # Peg a score of 5.5 as a 10% lift over random and a score of
+            # 4.0 as neutral
+            return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * 
+                            Mastermind.PRIOR_CTR * 
+                            Mastermind.PRIOR_IMPRESSION_SIZE))
+        elif video_info.score_type == ScoreType.RANK_CENTRALITY:
+            # then it was calculated using Rank Centrality
+            # in which case the lift is given directly by RC
+            # of course, the calculated score only accounts for
+            # about 22% of the variance (computed by Spearman's Rho)
+            # and so we should regress it back to the mean
+            # lift is given by the ratio of the images scores, 
+            # regressed to the mean by some prior. Furthermore, 
+            # we assume the mean value, which is 1 due to how we 
+            # compute rank centrality.
+            prior = 0.3
+            return max(1.0, prior * score + (1-prior) * 1.0) 
+        else:
+            # then it is none, assume a lift of 0%
+            return max(1.0, (1. * Mastermind.PRIOR_CTR * 
+                             Mastermind.PRIOR_IMPRESSION_SIZE))
 
-        # Peg a score of 5.5 as a 10% lift over random and a score of
-        # 4.0 as neutral
-        return max(1.0, ((0.10*(score-4.0)/1.5 + 1) * Mastermind.PRIOR_CTR * 
-                         Mastermind.PRIOR_IMPRESSION_SIZE))
-
-    def _get_sequential_fracs(self, strategy, baseline, editor, candidates):
+    def _get_sequential_fracs(self, strategy, baseline, editor, candidates, video_info):
         '''Gets the serving fractions for a sequential testing strategy.'''
         _log.error('Sequential seving strategy is not implemented. '
                    'Falling back to the multi armed bandit')
-        return self._get_bandit_fracs(strategy, baseline, editor, candidates)
+        return self._get_bandit_fracs(strategy, baseline, editor, candidates, video_info)
 
     def _get_experiment_done_fracs(self, strategy, baseline, editor, winner):
         '''Returns the serving fractions for when the experiment is complete.
@@ -829,7 +1065,6 @@ def _modify_many_serving_fracs(mastermind, video_id, new_directive,
             serving_frac=frac,
             ctr=ctrs[thumb_id])
             for thumb_id, frac in new_directive.iteritems()]
-
         neondata.ThumbnailStatus.save_all(objs)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
@@ -845,9 +1080,11 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         full_winner = winner_tid
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
-        neondata.VideoStatus(video_id, experiment_state,
-                             full_winner,
-                             value_left).save()
+        def _update(status):
+           status.set_experiment_state(experiment_state)
+           status.winner_tid = full_winner
+           status.experiment_value_remaining = value_left
+        neondata.VideoStatus.modify(video_id, _update, create_missing=True)
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

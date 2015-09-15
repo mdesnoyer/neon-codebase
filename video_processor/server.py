@@ -325,7 +325,7 @@ class FairWeightedRequestQueue(object):
             url=urlparse.urlunparse(url_parse),
             request_timeout=5.0) 
             
-        result = yield tornado.gen.Task(utils.http.send_request, req)
+        result = yield utils.http.send_request(req, async=True)
 
         if not result.error:
             headers = result.headers

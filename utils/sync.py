@@ -9,8 +9,10 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
   sys.path.insert(0, __base_path__)
 
+import concurrent.futures
 import contextlib
 import functools
+import threading
 import tornado.ioloop
 
 def optional_sync(func):
@@ -93,3 +95,53 @@ def bounded_io_loop():
     finally:
         old_ioloop.make_current()
         temp_ioloop.close()
+
+class LockAquireThread(threading.Thread):
+    '''A thread that will set a future when a lock is aquired.'''
+    def __init__(self, lock):
+        super(LockAquireThread, self).__init__()
+        self.lock = lock
+        self.future = concurrent.futures.Future()
+        self.daemon = True
+
+    def run(self):
+        try:
+            if not self.future.set_running_or_notify_cancel():
+                return
+            self.lock.acquire()
+            self.future.set_result(True)
+        except Exception as e:
+            self.future.set_exception(e)
+        
+
+class FutureLock(object):
+    '''Object that wrap a lock but returns a Future on aquire().
+
+    Can be used to use syncronization primitives in coroutines. e.g.
+
+    _lock = FutureLock(multiprocessing.Semaphore())
+
+    yield _lock.acquire()
+    try:
+      do something
+    finally:
+      _lock.release()
+    '''
+    def __init__(self, lock):
+        self.lock = lock
+
+    def acquire(self):
+        '''Exactly like normal acquire but returns a Future if it's not ready.'''
+        if self.lock.acquire(False):
+            # We have the lock
+            future = concurrent.futures.Future()
+            future.set_result(True)
+            return future
+
+        # We need to wait, so setup the future
+        thread = LockAquireThread(self.lock)
+        thread.start()
+        return thread.future
+
+    def release(self):
+        self.lock.release()

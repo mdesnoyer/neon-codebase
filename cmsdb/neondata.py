@@ -28,6 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import cmsdb.url2thumbnail
 import code
+import collections
 import concurrent.futures
 import contextlib
 import copy
@@ -158,13 +159,42 @@ class DBConnection(object):
         self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
         self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
-    def fetch_keys_from_db(self, key_prefix, callback=None):
-        ''' fetch keys that match a prefix '''
+    def fetch_keys_from_db(self, pattern, keys_per_call=10000,
+                           callback=None):
+        '''Gets a list of keys that match a pattern.
+
+        Uses SCAN to do it and not block the database
+        '''
+
+        keys = set([])
+        cursor = '0'
+        cnt = keys_per_call
+
+        def _handle_scan_result(result, cnt=keys_per_call):
+            cursor, data = result
+            keys.update(data)
+            if len(data) < (keys_per_call / 2):
+                cnt *= 2
+            if cursor == 0:
+                # We're done
+                callback(keys)
+            else:
+                self.conn.scan(cursor=cursor, match=pattern,
+                               count=cnt,
+                               callback=lambda x:_handle_scan_result(x, cnt))
 
         if callback:
-            self.conn.keys(key_prefix, callback)
+            self.conn.scan(cursor=cursor, match=pattern,
+                           count=cnt,
+                           callback=_handle_scan_result)
         else:
-            keys = self.blocking_conn.keys(key_prefix)
+            while cursor != 0:
+                cursor, data = self.blocking_conn.scan(cursor=cursor,
+                                                       match=pattern,
+                                                       count=cnt)
+                if len(data) < (keys_per_call /2):
+                    cnt *= 2
+                keys.update(data)
             return keys
 
     def clear_db(self):
@@ -646,7 +676,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=10.0):
+    def unsubscribe(self, channel=None, timeout=20.0):
         '''Unsubscribe from channel.
 
         channel - Channel to unsubscribe from
@@ -665,7 +695,7 @@ class PubSubConnection(threading.Thread):
             lambda: self._unsubscribe_impl(channel, timeout))
         yield unsub_future
 
-    def _unsubscribe_impl(self, channel=None, timeout=10.0):
+    def _unsubscribe_impl(self, channel=None, timeout=20.0):
         try:
             with self._publock:
                 if channel is None:
@@ -806,6 +836,13 @@ class StoredObject(object):
         '''Converts a key to an id'''
         return key
 
+    def _set_keyname(self):
+        '''Returns the key in the database for the set that holds this object.
+
+        The result of the key lookup will be a set of objects for this class
+        '''
+        raise NotImplementedError()
+
     @classmethod
     def format_key(cls, key):
         return key
@@ -832,12 +869,25 @@ class StoredObject(object):
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
          
+        def _save_and_add2set(pipe):
+            pipe.sadd(self._set_keyname(), self.key)
+            pipe.set(self.key, value)
+            return True
+            
         if self.key is None:
             raise Exception("key not set")
         if callback:
-            db_connection.conn.set(self.key, value, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           self._set_keyname(),
+                                           self.key,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.set(self.key, value)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                self._set_keyname(),
+                self.key,
+                value_from_callable=True)
 
 
     @classmethod
@@ -962,6 +1012,41 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
+        return cls._get_many_with_raw_keys(keys, create_default, log_missing,
+                                           callback=callback)
+
+    @classmethod
+    def get_many_with_pattern(cls, pattern, callback=None):
+        '''Returns many objects that match a pattern.
+
+        Inputs:
+        pattern - A pattern, usually with a * to match keys
+
+        Outputs:
+        A list of cls objects
+        '''
+        retval = []
+        db_connection = DBConnection.get(cls)
+
+        def filtered_callback(data_list):
+            callback([x for x in data_list if x is not None])
+
+        def process_keylist(keys):
+            cls._get_many_with_raw_keys(keys, callback=filtered_callback)
+            
+        if callback:
+            db_connection.fetch_keys_from_db(pattern, callback=process_keylist)
+        else:
+            keys = db_connection.fetch_keys_from_db(pattern)
+            return  [x for x in 
+                     cls._get_many_with_raw_keys(keys)
+                     if x is not None]
+
+    @classmethod
+    def _get_many_with_raw_keys(cls, keys, create_default=False,
+                                log_missing=True, callback=None):
+        '''Gets many objects with raw keys instead of namespaced ones.
+        '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
             if callback:
@@ -1070,17 +1155,21 @@ class StoredObject(object):
 
             mappings = {}
             orig_objects = {}
+            key_sets = collections.defaultdict(list)
             for key, item in zip(keys, items):
                 if item is None:
                     if create_missing:
-                        mappings[key] = create_class(key)
+                        cur_obj = create_class(key)
+                        if cur_obj is not None:
+                            key_sets[cur_obj._set_keyname()].append(key)
                     else:
                         _log.error('Could not get redis object: %s' % key)
-                        mappings[key] = None
+                        cur_obj = None
                 else:
-                    mappings[key] = create_class._create(key, json.loads(item))
+                    cur_obj = create_class._create(key, json.loads(item))
                     orig_objects[key] = create_class._create(key,
                                                              json.loads(item))
+                mappings[key] = cur_obj
             try:
                 func(mappings)
             finally:
@@ -1093,6 +1182,8 @@ class StoredObject(object):
 
                 if len(to_set) > 0:
                     pipe.mset(to_set)
+                for set_key, cur_keys in key_sets.iteritems():
+                    pipe.sadd(set_key, *cur_keys)
             return mappings
 
         db_connection = DBConnection.get(create_class)
@@ -1109,14 +1200,29 @@ class StoredObject(object):
         '''Save many objects simultaneously'''
         db_connection = DBConnection.get(cls)
         data = {}
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
         for obj in objects:
             obj.updated = str(datetime.datetime.utcnow())
             data[obj.key] = obj.to_json()
+            key_sets[obj._set_keyname()].append(obj.key)
 
+        def _save_and_add2set(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.sadd(set_key, *keys)
+            pipe.mset(data)
+            return True            
+
+        lock_keys = key_sets.keys() + data.keys()
         if callback:
-            db_connection.conn.mset(data, callback)
+            db_connection.conn.transaction(_save_and_add2set,
+                                           *lock_keys,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.mset(data)
+            return db_connection.blocking_conn.transaction(
+                _save_and_add2set,
+                value_from_callable=True,
+                *lock_keys)
 
     @classmethod
     def _erase_all_data(cls):
@@ -1130,7 +1236,7 @@ class StoredObject(object):
 
         Returns True if the object was successfully deleted
         '''
-        return StoredObject.delete_many([key], callback)
+        return cls._delete_many_raw_keys([key], callback)
 
     @classmethod
     def delete_many(cls, keys, callback=None):
@@ -1140,14 +1246,36 @@ class StoredObject(object):
         keys - List of keys to delete
 
         Returns:
-        The number of keys that were removed
+        True if it was delete sucessfully
         '''
+        return cls._delete_many_raw_keys(keys, callback)
+
+    @classmethod
+    def _delete_many_raw_keys(cls, keys, callback=None):
+        '''Deletes many objects by their raw keys'''
         db_connection = DBConnection.get(cls)
+        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+        for key in keys:
+            obj = cls(key)
+            obj.key = key
+            key_sets[obj._set_keyname()].append(key)
+
+        def _del_and_remfromset(pipe):
+            for set_key, keys in key_sets.iteritems():
+                pipe.srem(set_key, *keys)
+            pipe.delete(*keys)
+            return True
             
         if callback:
-            db_connection.conn.delete(*keys, callback=callback)
+            db_connection.conn.transaction(_del_and_remfromset,
+                                           *keys,
+                                           value_from_callable=True,
+                                           callback=callback)
         else:
-            return db_connection.blocking_conn.delete(*keys)
+            return db_connection.blocking_conn.transaction(
+                _del_and_remfromset,
+                *keys,
+                value_from_callable=True)
         
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
@@ -1258,6 +1386,9 @@ class NamespacedStoredObject(StoredObject):
         '''
         raise NotImplementedError()
 
+    def _set_keyname(self):
+        return 'objset:%s' % self._baseclass_name()
+
     @classmethod
     def format_key(cls, key):
         ''' Format the database key with a class specific prefix '''
@@ -1298,25 +1429,9 @@ class NamespacedStoredObject(StoredObject):
         Returns:
         A list of cls objects.
         '''
-        retval = []
-        db_connection = DBConnection.get(cls)
-
-        def filtered_callback(data_list):
-            callback([x for x in data_list if x is not None])
-
-        def process_keylist(keys):
-            super(NamespacedStoredObject, cls).get_many(
-                keys, callback=filtered_callback)
-            
-        if callback:
-            db_connection.conn.keys(cls._baseclass_name().lower() + "_*",
-                                    callback=process_keylist)
-        else:
-            keys = db_connection.blocking_conn.keys(
-                cls._baseclass_name().lower()+"_*")
-            return  [x for x in 
-                     super(NamespacedStoredObject, cls).get_many(keys)
-                     if x is not None]
+        return super(NamespacedStoredObject, cls).get_many_with_pattern(
+            cls._baseclass_name().lower() + "_*",
+            callback=callback)
 
     @classmethod
     def iterate_all(cls, max_request_size=100, cur_idx=0):
@@ -1336,7 +1451,7 @@ class NamespacedStoredObject(StoredObject):
         cur_idx - what index to start from 
         '''
         db_connection = DBConnection.get(cls)
-        keys = db_connection.blocking_conn.keys(
+        keys = db_connection.fetch_keys_from_db(
             cls._baseclass_name().lower() + '_*')
         #cur_idx = 0
         while cur_idx < len(keys):
@@ -1412,8 +1527,8 @@ class NeonApiKey(NamespacedStoredObject):
     ''' Static class to generate Neon API Key'''
 
     def __init__(self, a_id, api_key=None):
+        super(NeonApiKey, self).__init__(a_id)
         self.api_key = api_key
-        self.key = NeonApiKey.format_key(a_id) 
 
     @classmethod
     def _baseclass_name(cls):
@@ -1427,10 +1542,6 @@ class NeonApiKey(NamespacedStoredObject):
             chars=string.ascii_lowercase + string.digits):
         return ''.join(random.choice(chars) for x in range(size))
 
-    @classmethod
-    def format_key(cls, a_id):
-        ''' format db key  neonapikey_{aid}'''
-        return cls.__name__.lower() + '_%s' % a_id
         
     @classmethod
     def generate(cls, a_id):
@@ -1438,6 +1549,7 @@ class NeonApiKey(NamespacedStoredObject):
             if present in DB, then return it
         
         #NOTE: Generate method directly saves the key
+        TODO(mdesnoyer): Make this asynchronous
         '''
         api_key = NeonApiKey.id_generator()
         obj = NeonApiKey(a_id, api_key)
@@ -1599,8 +1711,11 @@ class NeonUserAccount(NamespacedStoredObject):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
+        splits = '_'.split(a_id)
+        if api_key is None and len(splits) == 2:
+            api_key = splits[1]
         self.neon_api_key = self.get_api_key() if api_key is None else api_key
-        self.key = self.__class__.__name__.lower()  + '_' + self.neon_api_key
+        super(NeonUserAccount, self).__init__(self.neon_api_key)
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
                 TrackerAccountID.generate(self.neon_api_key + "staging") 
@@ -1646,8 +1761,12 @@ class NeonUserAccount(NamespacedStoredObject):
         # Note: On DB retrieval the object gets created again, this may lead to
         # creation of an addional api key mapping ; hence prevent it
         # Figure out a cleaner implementation
-        if NeonUserAccount.__name__ not in self.account_id: 
-            return NeonApiKey.generate(self.account_id) 
+        try:
+            return self.neon_api_key
+        except AttributeError:
+            if NeonUserAccount.__name__.lower() not in self.account_id:
+                return NeonApiKey.generate(self.account_id) 
+            return 'None'
 
     def get_processing_priority(self):
         return self.processing_priority
@@ -1803,7 +1922,7 @@ class NeonUserAccount(NamespacedStoredObject):
         the database at a time.
         '''
         db_connection = DBConnection.get(VideoMetadata)
-        keys = db_connection.blocking_conn.keys(self.neon_api_key + '_*')
+        keys = db_connection.fetch_keys_from_db(self.neon_api_key + '_*')
         keys = [x for x in keys if len(x.split('_')) == 2]
         cur_idx = 0
         while cur_idx < len(keys):
@@ -1825,6 +1944,8 @@ class ExperimentStrategy(DefaultedStoredObject):
     
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
+                 min_conversion = 50,
+                 frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
                  baseline_type=ThumbnailType.RANDOM,
@@ -1846,6 +1967,15 @@ class ExperimentStrategy(DefaultedStoredObject):
         # explicitly chosen. This and chosen_thumb_overrides had
         # better not both be true.
         self.only_exp_if_chosen = only_exp_if_chosen
+
+        # minimum combined conversion numbers before calling an experiment
+        # complete
+        self.min_conversion = min_conversion
+
+        # Fraction adjusting power rate. When this number is 0, it is
+        # equivalent to standard t-test, when it is 1.0, it is the
+        # regular multi-bandit problem.
+        self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
         # experiment. The other baseline could be an editor generated
@@ -2346,24 +2476,6 @@ class AbstractPlatform(NamespacedStoredObject):
         return super(AbstractPlatform, cls).get_all(callback=callback)
 
     @classmethod
-    def get_all_platform_data(cls):
-        ''' get all platform data '''
-        db_connection = DBConnection.get(cls)
-        accounts = db_connection.blocking_conn.keys(cls.__name__.lower() + "*")
-        platform_data = []
-        for accnt in accounts:
-            api_key = accnt.split('_')[-2]
-            i_id = accnt.split('_')[-1]
-            jdata = db_connection.blocking_conn.get(accnt) 
-            if jdata:
-                platform_data.append(jdata)
-            else:
-                _log.debug("key=get_all_platform data"
-                            " msg=no data for acc %s i_id %s" % (api_key, i_id))
-        
-        return platform_data
-
-    @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
@@ -2439,20 +2551,22 @@ class AbstractPlatform(NamespacedStoredObject):
                                self.neon_api_key, '0',
                                _del_video)
 
-        # delete the video object
-        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
-
         # delete the request object
-        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+        yield tornado.gen.Task(NeonApiRequest.delete,
+                               self.videos[platform_vid],
                                self.neon_api_key)
 
-        # delete the thumbnails
-        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                               vm.thumbnail_ids)
+        if vm is not None:
+            # delete the video object
+            yield tornado.gen.Task(VideoMetadata.delete, i_vid)
 
-        # delete the serving urls
-        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
-                               vm.thumbnail_ids)
+            # delete the thumbnails
+            yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                                   vm.thumbnail_ids)
+
+            # delete the serving urls
+            yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                                   vm.thumbnail_ids)
         
 class NeonPlatform(AbstractPlatform):
     '''
@@ -2498,7 +2612,9 @@ class BrightcoveIntegration(AbstractIntegration):
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
-                id_field=BRIGHTCOVE_ID):
+                id_field=BRIGHTCOVE_ID,
+                enabled=True,
+                serving_enabled=True):
 
         ''' On every request, the job id is saved '''
 
@@ -2741,11 +2857,14 @@ class BrightcovePlatform(AbstractPlatform):
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
-                id_field=BRIGHTCOVE_ID):
+                id_field=BRIGHTCOVE_ID,
+                enabled=True,
+                serving_enabled=True):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest)
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest,
+                                                 enabled, serving_enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -2842,8 +2961,8 @@ class BrightcovePlatform(AbstractPlatform):
 
         # Update the new_tid as the thumbnail for the video
         try:
-            image = utils.imageutils.PILImageUtils.download_image(
-                t_url)
+            image = yield utils.imageutils.PILImageUtils.download_image(
+                t_url, async=True)
             update_response = yield bc.update_thumbnail_and_videostill(
                 platform_vid,
                 new_tid,
@@ -3459,6 +3578,11 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None):
+        splits = job_id.split('_')
+        if len(splits) == 3:
+            # job id was given as the raw key
+            job_id = splits[2]
+            api_key = splits[1]
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
@@ -3509,6 +3633,10 @@ class NeonApiRequest(NamespacedStoredObject):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
         return '_'.join([api_key, job_id])
+
+    def _set_keyname(self):
+        return '%s:%s' % (super(NeonApiRequest, self)._set_keyname(),
+                          self.api_key)
 
     @classmethod
     def _baseclass_name(cls):
@@ -3592,14 +3720,16 @@ class NeonApiRequest(NamespacedStoredObject):
             callback=callback)
 
     @classmethod
-    def modify(cls, job_id, api_key, func, callback=None):
+    def modify(cls, job_id, api_key, func, create_missing=False, 
+               callback=None):
         return super(NeonApiRequest, cls).modify(
             cls._generate_subkey(job_id, api_key),
             func,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, callback=None):
+    def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -3608,6 +3738,7 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             func,
+            create_missing=create_missing,
             callback=callback)
 
     @classmethod
@@ -3938,7 +4069,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
             return obj
 
         
-class ThumbnailURLMapper(object):
+class ThumbnailURLMapper(NamespacedStoredObject):
     '''
     Schema to map thumbnail url to thumbnail ID. 
 
@@ -3949,6 +4080,7 @@ class ThumbnailURLMapper(object):
     
     # NOTE: This has been deprecated and hence not being updated to be a stored
     object
+    TODO: Remove this object. It is no longer needed
     '''
     
     def __init__(self, thumbnail_url, tid, imdata=None):
@@ -3959,31 +4091,13 @@ class ThumbnailURLMapper(object):
             #TODO: Is this imdata really needed ? 
             raise #self.value = ThumbnailID.generate(imdata) 
 
-    def save(self, callback=None):
-        ''' 
-        save url mapping 
-        ''' 
-        db_connection = DBConnection.get(self)
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.set(self.key, self.value, callback)
-        else:
-            return db_connection.blocking_conn.set(self.key, self.value)
+    def to_json(self):
+        # Actually not json because we are only storing the value
+        return str(self.value)
 
     @classmethod
-    def save_all(cls, thumbnailMapperList, callback=None):
-        ''' multi save '''
-
-        db_connection = DBConnection.get(cls)
-        data = {}
-        for t in thumbnailMapperList:
-            data[t.key] = t.value 
-
-        if callback:
-            db_connection.conn.mset(data, callback)
-        else:
-            return db_connection.blocking_conn.mset(data)
+    def _baseclass_name(cls):
+        return ThumbnailURLMapper.__name__.lower()
 
     @classmethod
     def get_id(cls, key, callback=None):
@@ -4041,6 +4155,10 @@ class ThumbnailMetadata(StoredObject):
         
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
+
+    def _set_keyname(self):
+        '''Key the set by the video id'''
+        return 'objset:%s' % self.key.rpartition('_')[0]
 
     @classmethod
     def is_valid_key(cls, key):
@@ -4101,6 +4219,7 @@ class ThumbnailMetadata(StoredObject):
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
+        
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -4258,8 +4377,11 @@ class VideoMetadata(StoredObject):
         self.custom_data = custom_data or {}
 
         # The time the video was published in ISO 8601 format
-        self.publish_date = publish_date or \
-          datetime.datetime.now().isoformat()
+        self.publish_date = publish_date
+
+    def _set_keyname(self):
+        '''Key by the account id'''
+        return 'objset:%s' % self.get_account_id()
 
     @classmethod
     def is_valid_key(cls, key):
@@ -4277,6 +4399,25 @@ class VideoMetadata(StoredObject):
         ''' framesize of the video '''
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
+
+    
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_videos_in_account(cls, api_key):
+        '''Returns all the VideoMetadata objects for a given account.'''
+        retval = []
+        db_connection = DBConnection.get(cls)
+        keys = yield tornado.gen.Task(
+            db_connection.fetch_keys_from_db,
+            '%s_*' % api_key)
+
+        # The above command will also get the thumbnail keys, so
+        # filter them out
+        keys = [x for x in keys if len(x.split('_')) == 2]
+
+        objs = yield tornado.gen.Task(cls.get_many, keys)
+        raise tornado.gen.Return(objs)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4489,7 +4630,8 @@ class VideoStatus(DefaultedStoredObject):
     '''
     def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
                  winner_tid=None,
-                 experiment_value_remaining=None):
+                 experiment_value_remaining=None,
+                 state_history=None):
         super(VideoStatus, self).__init__(video_id)
 
         # State of the experiment
@@ -4502,11 +4644,23 @@ class VideoStatus(DefaultedStoredObject):
         # from the monte carlo analysis.
         self.experiment_value_remaining = experiment_value_remaining
 
+        # [(time, new_state)]
+        self.state_history = state_history or []
+
+    def set_experiment_state(self, value):
+        if value != self.experiment_state:
+            self.experiment_state = value
+            self.state_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 value))
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return VideoStatus.__name__
+
+    
 
 class AbstractJsonResponse(object):
     

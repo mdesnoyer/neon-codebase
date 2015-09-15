@@ -21,7 +21,7 @@ redis==2.10.3
 shortuuid==0.3
 simplejson==2.3.2
 svmlight==0.4
-tornado==4.1
+tornado==4.2.1
 coverage==3.7
 BeautifulSoup4==4.3.2
 pylint==1.1.0
