@@ -479,7 +479,7 @@ def _run_mr_cleaning_job(**kwargs):
                                    cleaning_job_input_path,
                                    cleaning_job_output_path,
                                    map_memory_mb=options.cleaning_mr_memory,
-                                   kwargs['timeout'])
+                                   timeout=kwargs['timeout'])
     except Exception as e:
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')
