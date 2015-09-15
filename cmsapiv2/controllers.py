@@ -831,7 +831,7 @@ class VideoHelper():
                                                          request_timeout=30.0,
                                                          connect_timeout=15.0)
                 response = yield tornado.gen.Task(utils.http.send_request, request)
-                if response and response.code is 200: 
+                if response and response.code is ResponseCode.HTTP_OK: 
                     raise tornado.gen.Return((video,api_request))
                 else:  
                     raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
@@ -905,7 +905,7 @@ class VideoHandler(APIV2Handler):
 
         response = yield tornado.gen.Task(utils.http.send_request, request)
 
-        if response and response.code is 200: 
+        if response and response.code is ResponseCode.HTTP_OK: 
             job_info = {} 
             job_info['job_id'] = api_request.job_id
             job_info['video'] = new_video.__dict__
