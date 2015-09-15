@@ -813,7 +813,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         add_future.set_result(MagicMock())
         add_thumb_mock.return_value = add_future
         get_video_mock.side_effect = lambda x, callback: callback(video)
-        
         # Use the default_thumbnail attribute
         api_request.default_thumbnail = 'new_thumbnail'
         api_request.save_default_thumbnail()

@@ -826,9 +826,17 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
-        classcmp = cmp(self.__class__, other.__class__)
+        classcmp = cmp(self.__class__, other.__class__) 
         if classcmp:
             return classcmp
+
+        obj_one = set(self.__dict__).difference(('created', 'updated'))
+        obj_two = set(other.__dict__).difference(('created', 'updated')) 
+        classcmp = obj_one == obj_two and all(self.__dict__[k] == other.__dict__[k] for k in obj_one)
+
+        if classcmp: 
+            return 0
+ 
         return cmp(self.__dict__, other.__dict__)
 
     @classmethod
@@ -4472,9 +4480,9 @@ class VideoMetadata(StoredObject):
     def download_and_add_thumbnail(self, 
                                    thumb=None, 
                                    image_url=None,
+                                   cdn_metadata=None,
                                    image=None, 
                                    external_thumbnail_id=None, 
-                                   cdn_metadata=None,
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata

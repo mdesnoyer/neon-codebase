@@ -171,24 +171,6 @@ class TestCase(unittest.TestCase):
         outer_mock.side_effect = _do_callback
         return inner_mock
 
-    def _future_wrap_mock(self, outer_mock):
-        '''Sets up a mock that mocks out a call that returns a future.
-
-        Input: outer_mock - Mock of the function that needs a future
-        Returns: 
-        mock that can be used to set the actual function return value/exception
-        '''
-        inner_mock = MagicMock()
-        def _build_future(*args, **kwargs):
-            future = concurrent.futures.Future()
-            try:
-                future.set_result(inner_mock(*args, **kwargs))
-            except Exception as e:
-                future.set_exception(e)
-            return future
-        outer_mock.side_effect = _build_future
-        return inner_mock
-
 class LogCaptureHandler(logging.Handler):
     '''A class that just collects all the logs.'''
     def __init__(self):
