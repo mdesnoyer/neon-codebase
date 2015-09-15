@@ -2650,18 +2650,6 @@ class BrightcoveIntegration(AbstractIntegration):
         ''' return ovp name'''
         return "brightcove_integration"
 
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
-
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this integration.'''
         return api.brightcove_api.BrightcoveApi(
@@ -2842,10 +2830,6 @@ class BrightcoveIntegration(AbstractIntegration):
         req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
                 request_timeout=60.0, connect_timeout=10.0)
         http_client.fetch(req, callback)
-
-    @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
@@ -3248,18 +3232,6 @@ class OoyalaIntegration(AbstractIntegration):
         return "ooyala_integration"
 
     @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
-    
-    @classmethod
     def generate_signature(cls, secret_key, http_method, 
                     request_path, query_params, request_body=''):
         ''' Generate signature for ooyala requests'''
@@ -3375,10 +3347,6 @@ class OoyalaIntegration(AbstractIntegration):
                         %vid_request.key)
         raise tornado.gen.Return(True)
     
-    @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
-
 # DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
     '''
@@ -3777,6 +3745,7 @@ The video metadata for this request must be in the database already.
 
         # Check to see if there is already a thumbnail that the system
         # knows about (and thus was already uploaded)
+        
         video = yield tornado.gen.Task(
             VideoMetadata.get,
             InternalVideoID.generate(self.api_key,
@@ -4451,7 +4420,6 @@ class VideoMetadata(StoredObject):
                        object.
         '''
         thumb.video_id = self.key
-
         yield thumb.add_image_data(image, self, cdn_metadata, async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
@@ -4501,28 +4469,12 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def save_default_thumbnail_with_image(self, image, url, external_thumbnail_id=None, cdn_metadata=None): 
-        '''
-        Have the image downloaded, don't have a video, but need to save a thumbnail
- 
-        Inputs:
-        @image: a PIL image that was downloaded 
-        @url: url of the image to download 
-        
-        Outpus: 
-        @thumb: a ThumbnailMetadata object 
-        '''
-        thumb = ThumbnailMetadata(None,
-                      ttype=ThumbnailType.DEFAULT,
-                      external_id=external_thumbnail_id)
-        thumb.urls.append(url)
-        thumb = yield self.add_thumbnail(thumb, image, cdn_metadata, save_objects=True,
-                                         async=True)
-        raise tornado.gen.Return(thumb) 
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def download_and_add_thumbnail(self, thumb, image_url, cdn_metadata=None,
+    def download_and_add_thumbnail(self, 
+                                   thumb=None, 
+                                   image_url=None,
+                                   image=None, 
+                                   external_thumbnail_id=None, 
+                                   cdn_metadata=None,
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata
@@ -4539,7 +4491,12 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        image = yield self.download_image_from_url(image_url, async=True) 
+        if image is None: 
+            image = yield self.download_image_from_url(image_url, async=True) 
+        if thumb is None: 
+            thumb = ThumbnailMetadata(None,
+                          ttype=ThumbnailType.DEFAULT,
+                          external_id=external_thumbnail_id)
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)

@@ -35,6 +35,7 @@ from functools import wraps
 import utils.sync
 from utils.options import define, options
 from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any
+from urlparse import urlparse 
 
 import logging
 _log = logging.getLogger(__name__)
@@ -135,8 +136,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.header_api_key = self.request.headers.get('X-Neon-API-Key')
         self.uri = self.request.uri 
 
-    def set_account_id(request): 
-        request.account_id = request.uri.split('/')[3]
+    def set_account_id(request):
+        parsed_url = urlparse(request.uri) 
+        request.account_id = parsed_url.path.split('/')[3]
 
     def verify_account(request):
         account = neondata.NeonUserAccount.get(request.account_id)
@@ -249,7 +251,7 @@ class AccountHelper():
     """Class responsible for helping the account handlers."""
     @staticmethod 
     @tornado.gen.coroutine
-    def formatUserReturn(user_account):
+    def format_user_return(user_account):
         # we don't want to send back everything, build up object of what we want to send back 
         rv_account = {}
         rv_account['tracker_account_id'] = user_account.tracker_account_id
@@ -296,7 +298,7 @@ class NewAccountHandler(APIV2Handler):
 
         output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
         user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
-        user = yield AccountHelper.formatUserReturn(user)
+        user = yield AccountHelper.format_user_return(user)
             
         _log.debug(('New Account has been added : name = %s id = %s') 
                    % (user['customer_name'], user['account_id']))
@@ -332,7 +334,7 @@ class AccountHandler(APIV2Handler):
         if self.header_api_key != user_account.api_v2_key: 
             raise NotAuthorizedError()
  
-        user_account = yield AccountHelper.formatUserReturn(user_account)
+        user_account = yield AccountHelper.format_user_return(user_account)
         statemon.state.increment('get_account_oks')
         self.success(json.dumps(user_account))
  
@@ -359,7 +361,7 @@ class AccountHandler(APIV2Handler):
         if self.header_api_key != acct_internal.api_v2_key: 
             raise NotAuthorizedError()
 
-        acct_for_return = yield AccountHelper.formatUserReturn(acct_internal)
+        acct_for_return = yield AccountHelper.format_user_return(acct_internal)
         def _update_account(a):
             a.default_size = list(a.default_size) 
             a.default_size[0] = int(args.get('default_width', acct_internal.default_size[0]))
@@ -378,7 +380,7 @@ class IntegrationHelper():
     """Class responsible for helping the integration handlers."""
     @staticmethod 
     @tornado.gen.coroutine
-    def createIntegration(acct, args, integration_type):
+    def create_integration(acct, args, integration_type):
         """Creates an integration for any integration type. 
         
         Keyword arguments: 
@@ -386,42 +388,36 @@ class IntegrationHelper():
         args - the args sent in via the API request 
         integration_type - the type of integration to create 
         """ 
-        def _createOoyalaIntegration(p):
-            try:
-                p.account_id = acct.neon_api_key
-                p.partner_code = args['publisher_id'] 
-                p.ooyala_api_key = args.get('ooyala_api_key', None)
-                p.api_secret = args.get('ooyala_api_secret', None)
-            except KeyError as e: 
-                pass 
+        def _create_ooyala_integration(p):
+            p.account_id = acct.neon_api_key
+            p.partner_code = args['publisher_id'] 
+            p.ooyala_api_key = args.get('ooyala_api_key', None)
+            p.api_secret = args.get('ooyala_api_secret', None)
              
-        def _createBrightcoveIntegration(p):
-            try:
-                current_time = time.time()
-                p.account_id = acct.neon_api_key
-                p.publisher_id = args['publisher_id'] 
-                p.read_token = args.get('read_token', p.read_token)
-                p.write_token = args.get('write_token', p.write_token)
-                p.callback_url = args.get('callback_url', p.callback_url)
-                playlist_feed_ids = args.get('playlist_feed_ids', None)
-                if playlist_feed_ids: 
-                    p.playlist_feed_ids = playlist_feed_ids.split(',')
-                p.id_field = args.get('id_field', p.id_field) 
-                p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
-                                                              p.uses_batch_provisioning)))
-            except KeyError as e: 
-                pass
+        def _create_brightcove_integration(p):
+            current_time = time.time()
+            p.account_id = acct.neon_api_key
+            p.publisher_id = args['publisher_id'] 
+            p.read_token = args.get('read_token', p.read_token)
+            p.write_token = args.get('write_token', p.write_token)
+            p.callback_url = args.get('callback_url', p.callback_url)
+            playlist_feed_ids = args.get('playlist_feed_ids', None)
+            if playlist_feed_ids: 
+                p.playlist_feed_ids = playlist_feed_ids.split(',')
+            p.id_field = args.get('id_field', p.id_field) 
+            p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
+                                                          p.uses_batch_provisioning)))
  
         integration_id = uuid.uuid1().hex
         if integration_type == neondata.IntegrationType.OOYALA: 
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
                                               integration_id, 
-                                              _createOoyalaIntegration, 
+                                              _create_ooyala_integration, 
                                               create_missing=True) 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
                                                  integration_id, 
-                                                 _createBrightcoveIntegration, 
+                                                 _create_brightcove_integration, 
                                                  create_missing=True) 
         
         result = yield tornado.gen.Task(acct.modify, 
@@ -444,7 +440,7 @@ class IntegrationHelper():
 
     @staticmethod 
     @tornado.gen.coroutine
-    def getIntegration(integration_id, integration_type): 
+    def get_integration(integration_id, integration_type): 
         """Gets an integration based on integration_id, account_id, and type.  
         
         Keyword arguments: 
@@ -462,11 +458,6 @@ class IntegrationHelper():
             raise tornado.gen.Return(integration) 
         else: 
             raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
-
-    @staticmethod 
-    @tornado.gen.coroutine
-    def addVideoResponses(account): 
-        return ""
 
 '''*********************************************************************
 OoyalaIntegrationHandler
@@ -490,7 +481,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-        integration = yield tornado.gen.Task(IntegrationHelper.createIntegration, acct, args, neondata.IntegrationType.OOYALA)
+        integration = yield tornado.gen.Task(IntegrationHelper.create_integration, acct, args, neondata.IntegrationType.OOYALA)
         statemon.state.increment('post_ooyala_oks')
         self.success(json.dumps(integration.__dict__))
  
@@ -506,7 +497,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         args['account_id'] = account_id = str(account_id)
         schema(args)
         integration_id = args['integration_id'] 
-        integration = yield IntegrationHelper.getIntegration(integration_id, 
+        integration = yield IntegrationHelper.get_integration(integration_id, 
                                                     neondata.IntegrationType.OOYALA)
 
         statemon.state.increment('get_ooyala_oks')
@@ -528,7 +519,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         schema(args)
         integration_id = args['integration_id'] 
             
-        integration = yield IntegrationHelper.getIntegration(integration_id, 
+        integration = yield IntegrationHelper.get_integration(integration_id, 
                                                      neondata.IntegrationType.OOYALA)
 
         def _update_integration(p):
@@ -540,7 +531,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                         integration_id, 
                                         _update_integration)
 
-        ooyala_integration = yield IntegrationHelper.getIntegration(integration_id, 
+        ooyala_integration = yield IntegrationHelper.get_integration(integration_id, 
                                                             neondata.IntegrationType.OOYALA)
  
         statemon.state.increment('put_ooyala_oks')
@@ -568,7 +559,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-        integration = yield IntegrationHelper.createIntegration(acct, 
+        integration = yield IntegrationHelper.create_integration(acct, 
                                                              args, 
                                                              neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('post_brightcove_oks')
@@ -586,7 +577,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args['account_id'] = account_id = str(account_id)
         schema(args)
         integration_id = args['integration_id'] 
-        integration = yield IntegrationHelper.getIntegration(integration_id,  
+        integration = yield IntegrationHelper.get_integration(integration_id,  
                                                        neondata.IntegrationType.BRIGHTCOVE) 
         statemon.state.increment('get_brightcove_oks')
         self.success(json.dumps(integration.__dict__))
@@ -609,7 +600,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         integration_id = args['integration_id'] 
         schema(args)
 
-        integration = yield IntegrationHelper.getIntegration(integration_id,  
+        integration = yield IntegrationHelper.get_integration(integration_id,  
                                                   neondata.IntegrationType.BRIGHTCOVE) 
 
         def _update_integration(p):
@@ -626,7 +617,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                      integration_id, 
                                      _update_integration)
 
-        integration = yield IntegrationHelper.getIntegration(integration_id,  
+        integration = yield IntegrationHelper.get_integration(integration_id,  
                                                   neondata.IntegrationType.BRIGHTCOVE) 
  
         statemon.state.increment('put_brightcove_oks')
@@ -674,8 +665,8 @@ class ThumbnailHandler(APIV2Handler):
                                                    rank=cur_rank)
         # upload image to cdn 
         yield video.download_and_add_thumbnail(new_thumbnail,
-                                               args['thumbnail_location'],
-                                               cdn_metadata,
+                                               external_thumbnail_id=args['thumbnail_location'],
+                                               cdn_metadata=cdn_metadata,
                                                async=True)
         #save the thumbnail
         yield tornado.gen.Task(new_thumbnail.save)
@@ -746,7 +737,7 @@ class VideoHelper():
     """helper class designed to help the video endpoint handle requests"""  
     @staticmethod 
     @tornado.gen.coroutine 
-    def createApiRequest(args, account_id_api_key):
+    def create_api_request(args, account_id_api_key):
         """creates an API Request object 
         
         Keyword arguments: 
@@ -774,7 +765,7 @@ class VideoHelper():
 
     @staticmethod 
     @tornado.gen.coroutine 
-    def createVideoAndRequest(args, account_id_api_key):
+    def create_video_and_request(args, account_id_api_key):
         """creates Video object and ApiRequest object and 
            sends them back to the caller as a tuple
          
@@ -788,7 +779,7 @@ class VideoHelper():
         if video is None:
             # make sure we can download the image before creating requests 
             # create the api_request
-            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
+            api_request = yield tornado.gen.Task(VideoHelper.create_api_request, 
                                                  args, 
                                                  account_id_api_key)
 
@@ -804,11 +795,11 @@ class VideoHelper():
             if default_thumbnail_url: 
                 # save the default thumbnail
                 image = yield video.download_image_from_url(default_thumbnail_url)
-                thumb = yield video.save_default_thumbnail_with_image(image, default_thumbnail_url,  
-                                                      args.get('thumbnail_ref', None), async=True)
+                thumb = yield video.download_and_add_thumbnail(image=image, image_url=default_thumbnail_url,  
+                                                      external_thumbnail_id=args.get('thumbnail_ref', None), async=True)
 
             # create the api_request
-            api_request = yield tornado.gen.Task(VideoHelper.createApiRequest, 
+            api_request = yield tornado.gen.Task(VideoHelper.create_api_request, 
                                                  args, 
                                                  account_id_api_key)
             # add the job id save the video
@@ -840,7 +831,7 @@ class VideoHelper():
 
     @staticmethod 
     @tornado.gen.coroutine
-    def getThumbnailsFromIds(tids):
+    def get_thumbnails_from_ids(tids):
         """gets thumbnailmetadata objects 
          
         Keyword arguments: 
@@ -882,7 +873,7 @@ class VideoHandler(APIV2Handler):
         schema(args)
           
         # add the video / request
-        video_and_request = yield tornado.gen.Task(VideoHelper.createVideoAndRequest, 
+        video_and_request = yield tornado.gen.Task(VideoHelper.create_video_and_request, 
                                                    args, 
                                                    account_id_api_key)
         new_video = video_and_request[0] 
@@ -947,7 +938,7 @@ class VideoHandler(APIV2Handler):
                    new_video = {} 
                    for field in field_set: 
                        if field == 'thumbnails':
-                           new_video['thumbnails'] = yield VideoHelper.getThumbnailsFromIds(obj['thumbnail_ids'])
+                           new_video['thumbnails'] = yield VideoHelper.get_thumbnails_from_ids(obj['thumbnail_ids'])
                        elif field in obj: 
                            new_video[field] = obj[field] 
                    if new_video: 

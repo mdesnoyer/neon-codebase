@@ -2322,7 +2322,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
             pil_mock.download_image.return_value = image_future
 
             yield video_info.download_and_add_thumbnail(
-                thumb_info, "http://my_image.jpg", [], async=True,
+                thumb_info, "http://my_image.jpg", cdn_metadata=[], async=True,
                 save_objects=True)
 
             # Check that the image was downloaded

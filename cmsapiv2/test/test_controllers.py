@@ -167,7 +167,69 @@ class TestNewAccountHandler(TestControllersBase):
                                                 headers=header) 
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew') 
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+ 
+    @tornado.testing.gen_test 
+    def test_account_is_verified(self):
+        params = json.dumps({'customer_name': 'meisnew'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        api_key = rjson['api_key']
+        account_id = rjson['account_id'] 
+        url = '/api/v2/%s?default_height=1200' % (account_id) 
+        header = { 'X-Neon-API-Key': rjson['api_key'] }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='PUT', 
+                                                headers=header)
+        self.assertEquals(response.code, 200)
+ 
+    @tornado.testing.gen_test 
+    def test_account_is_verified_no_api_key(self):
+        params = json.dumps({'customer_name': 'meisnew'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        api_key = rjson['api_key']
+        account_id = rjson['account_id']
+        with self.assertRaises(tornado.httpclient.HTTPError):  
+            url = '/api/v2/%s?default_height=1200' % (account_id) 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
+
+    @tornado.testing.gen_test 
+    def test_account_is_verified_bad_api_key(self):
+        params = json.dumps({'customer_name': 'meisnew'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        api_key = 'this_is_a_bad_api_key'
+        account_id = rjson['account_id']
+        header = { 'X-Neon-API-Key': api_key }
+        with self.assertRaises(tornado.httpclient.HTTPError):  
+            url = '/api/v2/%s?default_height=1200' % (account_id) 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
 
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -330,7 +392,17 @@ class TestAccountHandler(TestControllersBase):
         default_size_new = new_user['default_size']
         self.assertEquals(default_size_new[0],1200)
         self.assertEquals(default_size_new[1],default_size_old[1])
-
+    
+    def test_update_account_does_not_exist(self): 
+        url = '/api/v2/doesnotexist?default_height=1200&default_width=1500' 
+        self.http_client.fetch(self.get_url(url), 
+                               body='',
+                               method='PUT',
+                               callback=self.stop, 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 404) 
+ 
     def test_get_acct_unauthorized(self):
         header = { 'X-Neon-API-Key': 'this_is_invalid_for_sure' }
         url = '/api/v2/%s' % (self.user.neon_api_key) 
@@ -958,6 +1030,17 @@ class TestVideoHandler(TestControllersBase):
         internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertTrue(video.custom_data is not None)
+
+    def test_post_video_with_bad_custom_data(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&custom_data=%s' % (self.account_id_api_key, self.test_i_id, 4)
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_client.fetch(self.get_url(url),
+                               body='',
+                               method='POST',
+                               callback=self.stop, 
+                               allow_nonstandard_methods=True)
+        response = self.wait()
+        self.assertEquals(response.code, 400) 
 
     def test_post_two_videos(self):
         # use self.stop/wait to make sure we get the response back and 

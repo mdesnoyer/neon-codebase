@@ -1735,7 +1735,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             thumb_futures.append(vmdata.download_and_add_thumbnail(
                 new_thumb,
                 url,
-                cdn_metadata,
+                cdn_metadata=cdn_metadata,
                 async=True))
                                                                 
             cur_rank -= cur_rank
