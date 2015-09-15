@@ -870,12 +870,15 @@ class Cluster():
             cur_state = conn.describe_jobflow(self.cluster_id)
 
         _log.info('Making the new cluster primary')
-        for cluster in emr_iterator(conn, 'clusters'):
-            try:
-                self._get_cluster_tag(cluster, 'cluster-role')
+        for cluster in emr_iterator(conn, 'clusters',
+                                    cluster_states=['STARTING',
+                                                    'BOOTSTRAPPING',
+                                                    'RUNNING',
+                                                    'WAITING']):
+            cluster_info = conn.describe_cluster(cluster.id)
+            if (self._get_cluster_tag(cluster_info, 'cluster-type', '') == 
+                self.cluster_type):
                 conn.remove_tags(cluster.id, ['cluster-role'])
-            except KeyError:
-                pass
         conn.add_tags(self.cluster_id, {
             'cluster-role' : Cluster.ROLE_PRIMARY})
         self._find_master_info()
