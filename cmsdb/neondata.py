@@ -928,10 +928,6 @@ class StoredObject(object):
             try:
                 for k, value in data_dict.iteritems():
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
-                if not hasattr(obj, 'created'): 
-                    obj.__dict__['created'] = str(datetime.datetime.utcnow())
-                if not hasattr(obj, 'updated'): 
-                    obj.__dict__['updated'] = str(datetime.datetime.utcnow())
             except ValueError:
                 return None
         
@@ -2105,7 +2101,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
             [1280, 720]]
 
         # the created and updated on these objects
-        self.created = self.updated = str(datetime.datetime.utcnow())
+        # self.created = self.updated = str(datetime.datetime.utcnow())
 
     # TODO(sunil or mdesnoyer): Write a function to add a new
     # rendition size to the list and upload the requisite images to
@@ -4348,7 +4344,7 @@ class VideoMetadata(StoredObject):
         self.serving_url = None
 
         # when was this object created or updated, set to current time on creation
-        self.created = self.updated = str(datetime.datetime.utcnow())
+        # self.created = self.updated = str(datetime.datetime.utcnow())
         
         # A dictionary of extra metadata
         self.custom_data = custom_data or {}
