@@ -2298,8 +2298,9 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, integration_id, enabled=True):
+    def __init__(self, enabled=True):
         
+        integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -2308,7 +2309,8 @@ class AbstractIntegration(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower() 
+        return cls.__name__.lower()
+
 
 # DEPRECATED use AbstractIntegration instead
 class AbstractPlatform(NamespacedStoredObject):
@@ -2626,7 +2628,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(i_id)
+        super(BrightcoveIntegration, self).__init__(enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -3213,8 +3215,13 @@ class OoyalaIntegration(AbstractIntegration):
     '''
     OOYALA Integration
     '''
-    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
-                 o_api_key=None, api_secret=None, auto_update=False): 
+    def __init__(self, 
+                 i_id=None, 
+                 a_id='', 
+                 p_code=None, 
+                 api_key=None, 
+                 api_secret=None, 
+                 auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -3223,14 +3230,11 @@ class OoyalaIntegration(AbstractIntegration):
 
         '''
 
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
-
-        super(OoyalaIntegration, self).__init__(api_key, i_id)
+        super(OoyalaIntegration, self).__init__()
  
         self.account_id = a_id
         self.partner_code = p_code
-        self.ooyala_api_key = o_api_key
+        self.api_key = api_key
         self.api_secret = api_secret 
         self.auto_update = auto_update 
     
@@ -4347,9 +4351,6 @@ class VideoMetadata(StoredObject):
         # after the request state has been changed to SERVING
         self.serving_url = None
 
-        # when was this object created or updated, set to current time on creation
-        # self.created = self.updated = str(datetime.datetime.utcnow())
-        
         # A dictionary of extra metadata
         self.custom_data = custom_data or {}
 

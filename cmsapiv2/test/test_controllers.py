@@ -494,8 +494,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_put_integration(self):
-        ooyala_api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_key)
+        api_key = 'testapikey' 
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -504,12 +504,12 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           self.test_i_id)
 
-        self.assertEquals(platform.ooyala_api_key, ooyala_api_key)
+        self.assertEquals(platform.api_key, api_key)
     @tornado.testing.gen_test 
     def test_put_integration_dne(self):
         try: 
-            ooyala_api_key = 'testapikey' 
-            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&ooyala_api_key=%s' % (self.account_id_api_key, ooyala_api_key)
+            api_key = 'testapikey' 
+            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&ooyala_api_key=%s' % (self.account_id_api_key, api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='PUT', 
@@ -519,8 +519,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
-        ooyala_api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_key)
+        api_key = 'testapikey' 
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -535,7 +535,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           self.test_i_id)
 
-        self.assertEquals(platform.ooyala_api_key, ooyala_api_key) 
+        self.assertEquals(platform.api_key, api_key) 
         self.assertEquals(platform.api_secret, ooyala_api_secret)
  
     def test_get_integration_exceptions(self):

@@ -388,37 +388,29 @@ class IntegrationHelper():
         args - the args sent in via the API request 
         integration_type - the type of integration to create 
         """ 
-        def _create_ooyala_integration(p):
-            p.account_id = acct.neon_api_key
-            p.partner_code = args['publisher_id'] 
-            p.ooyala_api_key = args.get('ooyala_api_key', None)
-            p.api_secret = args.get('ooyala_api_secret', None)
              
-        def _create_brightcove_integration(p):
-            current_time = time.time()
-            p.account_id = acct.neon_api_key
-            p.publisher_id = args['publisher_id'] 
-            p.read_token = args.get('read_token', p.read_token)
-            p.write_token = args.get('write_token', p.write_token)
-            p.callback_url = args.get('callback_url', p.callback_url)
+        if integration_type == neondata.IntegrationType.OOYALA: 
+            integration = neondata.OoyalaIntegration()
+            integration.account_id = acct.neon_api_key
+            integration.partner_code = args['publisher_id'] 
+            integration.api_key = args.get('ooyala_api_key', integration.api_key)
+            integration.api_secret = args.get('ooyala_api_secret', integration.api_secret)
+            integration.save()
+
+        elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
+            integration = neondata.BrightcoveIntegration()
+            integration.account_id = acct.neon_api_key
+            integration.publisher_id = args['publisher_id'] 
+            integration.read_token = args.get('read_token', integration.read_token)
+            integration.write_token = args.get('write_token', integration.write_token)
+            integration.callback_url = args.get('callback_url', integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
             if playlist_feed_ids: 
-                p.playlist_feed_ids = playlist_feed_ids.split(',')
-            p.id_field = args.get('id_field', p.id_field) 
-            p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
-                                                          p.uses_batch_provisioning)))
- 
-        integration_id = uuid.uuid1().hex
-        if integration_type == neondata.IntegrationType.OOYALA: 
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
-                                              integration_id, 
-                                              _create_ooyala_integration, 
-                                              create_missing=True) 
-        elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
-                                                 integration_id, 
-                                                 _create_brightcove_integration, 
-                                                 create_missing=True) 
+                integration.playlist_feed_ids = playlist_feed_ids.split(',')
+            integration.id_field = args.get('id_field', integration.id_field) 
+            integration.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
+                                                          integration.uses_batch_provisioning)))
+            integration.save()
         
         result = yield tornado.gen.Task(acct.modify, 
                                         acct.neon_api_key, 
@@ -427,12 +419,10 @@ class IntegrationHelper():
         # ensure the integration made it to the database by executing a get
         if integration_type == neondata.IntegrationType.OOYALA: 
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                              integration_id)
+                                              integration.integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                              integration_id)
-
-
+                                              integration.integration_id)
         if integration: 
             raise tornado.gen.Return(integration)
         else: 
@@ -523,7 +513,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                      neondata.IntegrationType.OOYALA)
 
         def _update_integration(p):
-            p.ooyala_api_key = args.get('ooyala_api_key', integration.ooyala_api_key)
+            p.api_key = args.get('ooyala_api_key', integration.api_key)
             p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
             p.partner_code = args.get('publisher_id', integration.partner_code)
  
