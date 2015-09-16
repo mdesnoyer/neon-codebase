@@ -696,20 +696,18 @@ mr_cleaning_job = PythonOperator(
     # depends_on_past=True) # depend on past task executions to serialize the mr_cleaning process
 mr_cleaning_job.set_upstream(stage_files)
 
-# Create the Impala Parquet-formatted tables if they don't exist
-create_tables = []
-for event in __EVENTS:
-    op = PythonOperator(
-        task_id='create_table_%s' % event,
-        dag=clicklogs,
-        python_callable=_create_tables,
-        op_kwargs=dict(event=event))
-    create_tables.append(op)
-
 
 # Load the cleaned files from Map/Reduce into Impala
 load_impala_tables = []
 for event in __EVENTS:
+    # Create the table if it doesn't exist
+    create_op = PythonOperator(
+        task_id='create_table_%s' % event,
+        dag=clicklogs,
+        python_callable=_create_tables,
+        op_kwargs=dict(event=event))
+
+    # Load the data into the impala table
     op = PythonOperator(
         task_id='load_impala_table_%s' % event,
         dag=clicklogs,
@@ -717,7 +715,7 @@ for event in __EVENTS:
         provide_context=True,
         op_kwargs=dict(output_path=options.output_path, event=event),
         retry_delay=timedelta(seconds=random.randrange(30,300,step=30)))
-    op.set_upstream(create_tables + [mr_cleaning_job])
+    op.set_upstream([create_op, mr_cleaning_job])
     load_impala_tables.append(op)
 
 
