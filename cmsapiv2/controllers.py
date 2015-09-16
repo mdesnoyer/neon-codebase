@@ -265,7 +265,7 @@ class AccountHelper():
         rv_account['created'] = user_account.created 
         rv_account['updated'] = user_account.updated
         rv_account['api_key'] = user_account.api_v2_key
-        rv_account['customer_name'] = user_account.customer_name
+        rv_account['name'] = user_account.name
         raise tornado.gen.Return(rv_account)
 
     #@staticmethod 
@@ -282,14 +282,14 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('customer_name') : Any(str, unicode, Length(min=1, max=1024)),
+          Required('name') : Any(str, unicode, Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
         })
         args = self.parse_args()
         schema(args) 
-        user = neondata.NeonUserAccount(uuid.uuid1().hex, customer_name=args['customer_name'])
+        user = neondata.NeonUserAccount(uuid.uuid1().hex, name=args['name'])
         user.default_size = list(user.default_size) 
         user.default_size[0] = args.get('default_width', neondata.DefaultSizes.WIDTH)
         user.default_size[1] = args.get('default_height', neondata.DefaultSizes.HEIGHT)
@@ -301,7 +301,7 @@ class NewAccountHandler(APIV2Handler):
         user = yield AccountHelper.format_user_return(user)
             
         _log.debug(('New Account has been added : name = %s id = %s') 
-                   % (user['customer_name'], user['account_id']))
+                   % (user['name'], user['account_id']))
         statemon.state.increment('post_account_oks')
  
         self.success(json.dumps(user))

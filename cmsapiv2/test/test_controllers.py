@@ -147,18 +147,18 @@ class TestNewAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
-        url = '/api/v2/accounts?customer_name=meisnew'
+        url = '/api/v2/accounts?name=meisnew'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['name'], 'meisnew')
  
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -167,11 +167,11 @@ class TestNewAccountHandler(TestControllersBase):
                                                 headers=header) 
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['name'], 'meisnew')
  
     @tornado.testing.gen_test 
     def test_account_is_verified(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -192,7 +192,7 @@ class TestNewAccountHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_account_is_verified_no_api_key(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -212,7 +212,7 @@ class TestNewAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_account_is_verified_bad_api_key(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -248,7 +248,7 @@ class TestAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         self.verify_account_mocker = patch(
             'cmsapiv2.controllers.APIV2Handler.verify_account')
@@ -294,14 +294,14 @@ class TestAccountHandler(TestControllersBase):
     
     @tornado.testing.gen_test 
     def test_get_acct_does_exist(self):
-	url = '/api/v2/accounts?customer_name=123abc'
+	url = '/api/v2/accounts?name=123abc'
 	response = yield self.http_client.fetch(self.get_url(url), 
 			       body='',
    			       method='POST', 
    			       allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-	self.assertEquals(rjson['customer_name'], '123abc') 
+	self.assertEquals(rjson['name'], '123abc') 
 	url = '/api/v2/%s' % (rjson['account_id']) 
         header = { 'X-Neon-API-Key': rjson['api_key'] }
 	response = yield self.http_client.fetch(self.get_url(url),
@@ -312,14 +312,14 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_basic_post_account(self):
-        url = '/api/v2/accounts?customer_name=123abc'
+        url = '/api/v2/accounts?name=123abc'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], '123abc') 
+        self.assertEquals(rjson['name'], '123abc') 
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
@@ -440,7 +440,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testiid' 
@@ -559,7 +559,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testbciid' 
@@ -840,7 +840,7 @@ class TestVideoHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
@@ -1276,7 +1276,7 @@ class TestThumbnailHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
         neondata.ThumbnailMetadata('testingtid', width=500).save()
@@ -1462,7 +1462,7 @@ class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,customer_name='testingaccount')
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         super(TestAPIKeyRequired, self).setUp()
 
