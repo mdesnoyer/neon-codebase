@@ -15,6 +15,7 @@ add_subdirectory(clickTracker)
 add_subdirectory(controllers)
 add_subdirectory(cmsdb)
 add_subdirectory(cmsapi)
+add_subdirectory(cmsapiv2)
 add_subdirectory(api)
 add_subdirectory(imageservingplatform/neon_isp)
 
