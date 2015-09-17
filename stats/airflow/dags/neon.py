@@ -92,22 +92,15 @@ options.define('clicklog_period', default=3, type=int,
 
 # Use Neon's options module for configuration parsing
 try:
-    __done_init
-except NameError:
-    __done_init = False
-
-if not __done_init:
-    try:
-        args = options.parse_options(['-c', conf.get('neon', 'config_file')],
-                                     watch_file=True)
-    except AirflowConfigException:
-        # No config file specified, so we'll just use the defaults from above
-        pass
-    # The rest of Neon Init
-    socket.setdefaulttimeout(30)
-    utils.logs.AddConfiguredLogger()
-    utils.monitor.start_agent()
-    __done_init = True
+    args = options.parse_options(['-c', conf.get('neon', 'config_file')],
+                                 watch_file=True)
+except AirflowConfigException:
+    # No config file specified, so we'll just use the defaults from above
+    pass
+# The rest of Neon Init
+socket.setdefaulttimeout(30)
+utils.logs.AddConfiguredLogger()
+utils.monitor.start_agent()
 
 
 
