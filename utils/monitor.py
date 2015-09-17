@@ -59,7 +59,7 @@ class MonitoringAgent(threading.Thread):
 
 agent = MonitoringAgent()
 def start_agent(self):
-    if not agent.is_alive()
+    if not agent.is_alive():
         agent.start()
     
 
