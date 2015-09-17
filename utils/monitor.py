@@ -56,3 +56,10 @@ class MonitoringAgent(threading.Thread):
         while True:
             send_statemon_data()
             time.sleep(options.sleep_interval)
+
+agent = MonitoringAgent()
+def start_agent(self):
+    if not agent.is_alive()
+        agent.start()
+    
+

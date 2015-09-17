@@ -106,7 +106,7 @@ if not __done_init:
     # The rest of Neon Init
     socket.setdefaulttimeout(30)
     utils.logs.AddConfiguredLogger()
-    utils.monitor.MonitoringAgent().start()
+    utils.monitor.start_agent()
     __done_init = True
 
 
