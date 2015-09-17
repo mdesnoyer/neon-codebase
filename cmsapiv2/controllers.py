@@ -1005,7 +1005,16 @@ LiveStreamHandler : class responsible for creating a new live stream job
 *********************************************************************'''
 class LiveStreamHandler(tornado.web.RequestHandler): 
     def __init__(self): 
-        super(LiveStreamHandler, self).__init__() 
+        super(LiveStreamHandler, self).__init__()
+ 
+'''*********************************************************************
+VideoSearchHandler : class responsible for searching videos
+   HTTP Verbs     : get
+        Notes     : outside of scope of phase 1, future implementation
+*********************************************************************'''
+class VideoSearchHandler(tornado.web.RequestHandler): 
+    def __init__(self): 
+        super(VideoSearchHandler, self).__init__() 
 
 '''*********************************************************************
 Controller Defined Exceptions 
@@ -1065,6 +1074,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
