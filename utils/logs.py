@@ -91,10 +91,10 @@ def currentframe():
 if hasattr(sys, '_getframe'): currentframe = lambda: sys._getframe(3)
 # done filching
 
-_done_configure = False
+added_configured_logger = False
 def AddConfiguredLogger():
     '''Adds a root logger defined by the config parameters.'''
-    if _done_configure:
+    if added_configured_logger:
         _log.warning('Already added logging')
     stdout_stream = None
     if options.do_stdout:
@@ -123,7 +123,7 @@ def AddConfiguredLogger():
     logging.getLogger('tornado.access').propagate = False
 
     logging.captureWarnings(True)
-    _done_configure = True
+    added_configured_logger = True
 
 def CreateLogger(name=None,
                  stream=None,
