@@ -362,13 +362,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 'auto_update': autoupdate}
         return self.put_request(url, vals, self.api_key)
 
-    def update_brightcove_thumbnail(self, vid, tid):
-        ''' update thumbnail for a brightcove video given thumbnail id'''
-
-        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
-                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
-        vals = {'current_thumbnail' : tid }
-        return self.put_request(url, vals, self.api_key)
   
     ## HTTP Side efffect for all Tornado HTTP Requests
 
@@ -634,154 +627,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
 
-    def test_brightcove_web_account_flow(self):
-        #Create Neon Account --> Bcove Integration --> update Integration --> 
-        #query videos --> autopublish --> verify autopublish
-        with options._set_bounded('cmsdb.neondata.dbPort',
-                                  self.redis.port):
-        
-            #create neon account
-            api_key = self.create_neon_account()
-            self.assertEqual(api_key, neondata.NeonApiKey.get_api_key(self.a_id))
-
-            #Setup Side effect for the http clients
-            self.cp_mock_async_client.side_effect = \
-                                self._success_http_side_effect
-
-            #create brightcove account
-            self.create_brightcove_account()
-        
-            #process requests
-            reqs = self._create_neon_api_requests()
-            self._process_brightcove_neon_api_requests(reqs)
-            
-            videos = []
-            vitems = json.loads(bcove_responses.find_all_videos_response)
-            for item in vitems['items']:
-                videos.append(str(item['id']))                             
-
-            #update a thumbnail
-            new_tids = [] 
-            for vid, job_id in zip(videos, self.job_ids):
-                i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-                vmdata= neondata.VideoMetadata.get(i_vid)
-                tids = vmdata.thumbnail_ids
-                new_tids.append(tids[1])
-                #set neon rank 2 
-                resp = self.update_brightcove_thumbnail(vid, tids[1])
-                self.assertEqual(resp.code, 200)
-                
-                #assert request state
-                vid_request = neondata.NeonApiRequest.get(job_id,
-                                                          self.api_key)
-                self.assertEqual(vid_request.state,neondata.RequestState.ACTIVE)
-
-            thumbs = []
-            items = self._get_video_status_brightcove()
-            for item, tid in zip(items['items'], new_tids):
-                vr = neondata.VideoResponse(None, None, None, None, None,
-                                        None, None, None, None, None)
-                vr.__dict__ = item
-                thumbs.append(vr.current_thumbnail)
-            self.assertItemsEqual(thumbs, new_tids)
-
-    #Failure test cases
-    #Database failure on account creation, updation
-    #Brightcove API failures
-
-    def test_update_thumbnail_fails(self):
-        with options._set_bounded('api.brightcove_api.max_retries', 1):
-            with options._set_bounded('cmsdb.neondata.dbPort',
-                                      self.redis.port):
-                self._setup_initial_brightcove_state()
-                self._test_update_thumbnail_fails()
-    
-    def _test_update_thumbnail_fails(self):
-
-        download_mock = MagicMock()
-        fail_image_func = lambda x: tornado.httpclient.HTTPResponse(x, 500,
-                    buffer=StringIO("Server error"))
-        download_mock.side_effect = fail_image_func
-        
-        def _failure_http_side_effect(request):
-            if mock_image_url_prefix in request.url:
-                response = download_mock(request)
-
-            elif "http://api.brightcove.com/services/post" in request.url:
-                itype = "THUMBNAIL"
-                if "VIDEO_STILL" in request.body:
-                    itype = "VIDEO_STILL"
-
-                response = tornado.httpclient.HTTPResponse(request, 502,
-                    buffer=StringIO
-                        ('{"result": {"displayName":"test","id":123,'
-                        '"referenceId":"test_ref_id","remoteUrl":null,"type":"%s"},'
-                        '"error": "mock error", "id": null}'%itype))
-            return response
-
-        vids = self._get_videos()
-        vid  = vids[0]
-        tids = self._get_thumbnails(vid)
-        
-        #Failed to download Image; Expect internal error 500
-        self.cp_mock_async_client.side_effect = \
-                _failure_http_side_effect
-        with self.assertLogExists(logging.ERROR, 'Error retrieving image'):
-            resp = self.update_brightcove_thumbnail(vid, tids[1]) 
-        self.assertEqual(resp.code, 502) 
-
-        #Brightcove api error, gateway error 502
-        _log.info('starting now')
-        download_mock.side_effect = lambda x: create_random_image_response()
-        with self.assertLogExists(logging.ERROR, 'Internal Brightcove error'):
-            resp = self.update_brightcove_thumbnail(vid, tids[1]) 
-        self.assertEqual(resp.code, 502) 
-
-        #Successful update of thumbnail
-        self.cp_mock_async_client.side_effect =\
-                self._success_http_side_effect
-        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
-        self.assertEqual(resp.code, 200) 
-
-        #Induce Failure again, bcove api error
-        self.cp_mock_async_client.side_effect =\
-                _failure_http_side_effect 
-        resp = self.update_brightcove_thumbnail(vid, tids[1]) 
-        self.assertEqual(resp.code, 502) 
-
-    #TODO: Test creation of individual request
-
     ######### BCOVE HANDLER Test cases ##########################
-
-    def test_bh_update_thumbnail(self):
-        ''' Brightcove support handler tests (check thumb/update thumb) '''
-        
-        self._setup_initial_brightcove_state()
-        vids = self._get_videos()
-        vid  = vids[0]
-        job_id = self.job_ids[0]
-        tids = self._get_thumbnails(vid)
-        i_vid = neondata.InternalVideoID.generate(self.api_key, vid)
-        tid  = tids[0]
-        url = self.get_url('/api/v1/brightcovecontroller/%s/updatethumbnail/%s' 
-                        %(self.api_key, i_vid))
-        vals = {'thumbnail_id' : tid }
-        resp = self.post_request(url, vals, self.api_key)
-        self.assertEqual(resp.code, 200)
-
-        #assert request state is not updated to active
-        vid_request = neondata.NeonApiRequest.get(job_id, self.api_key)
-        self.assertEqual(vid_request.state, neondata.RequestState.FINISHED)
-        
-        #assert the previous thumbnail is still the thumb in DB
-        self.update_brightcove_thumbnail(vid, tid)
-        tid2 = tids[1]
-        vals = {'thumbnail_id' : tid2}
-        resp = self.post_request(url, vals, self.api_key)
-        self.assertEqual(resp.code, 200)
-        tids = neondata.ThumbnailMetadata.get_many([tid,tid2])
-        self.assertTrue(tids[0].chosen)
-        self.assertFalse(tids[1].chosen)
         
 
     def test_pagination_videos_brighcove(self):
@@ -950,21 +796,22 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(ordered_videos[:page_size],
                          result_vids)
 
-        #publish a couple of videos
-        vids = self._get_videos()[:page_size]
-        for vid in vids:
-            tid = self._get_thumbnails(vid)[0] 
-            update_response = self.update_brightcove_thumbnail(vid, tid)
-            self.assertEqual(update_response.code, 200)
+        #fail a couple of videos
+        def _fail_video(x):
+            x.state = neondata.RequestState.FAILED
+        vids = []
+        for item in items[:page_size]:
+            neondata.NeonApiRequest.modify(item['job_id'], self.api_key,
+                                           _fail_video)
+            vids.append(item['video_id'])
 
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
-                '%s/videos/published?page_no=%s&page_size=%s'
+                '%s/videos/failed?page_no=%s&page_size=%s'
                 %(self.a_id, self.b_id, page_no, page_size))
         resp = self.get_request(url, self.api_key)
         items = json.loads(resp.body)['items']
         result_vids = [x['video_id'] for x in items]
-        self.assertItemsEqual(vids,
-                result_vids)
+        self.assertItemsEqual(vids, result_vids)
 
     def test_tracker_account_id_mapper(self):
         '''

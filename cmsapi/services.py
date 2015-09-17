@@ -460,7 +460,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     return
 
                 if "brightcove_integrations" == itype:
-                    yield self.create_brightcove_video_request(i_id)
+                    yield self.create_neon_thumbnail_api_request(i_id)
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
                 # TODO(Sunil): Expose when necessary
@@ -567,6 +567,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         data = '{"error": "internal error adding custom thumb"}'
                         statemon.state.increment('custom_thumbnail_not_added')
                         self.send_json_response(data, 500)
+                        return
                     except tornado.web.MissingArgumentError, e:
                         data = '{"error": "missing thumbnail_id or thumbnails argument"}'
                         _log.warn('Missing argument %s' % e) 
@@ -578,23 +579,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         data = '{"error": "internal error"}'
                         statemon.state.increment('unexpected_exception')
                         self.send_json_response(data, 500)
-
-                    if "brightcove_integrations" == itype:
-                        yield self.update_video_brightcove(i_id, i_vid,
-                                                           new_tid)
                         return
+                
+                    self.method_not_supported()
+                    return
                     
-                    elif "ooyala_integrations" == itype:
-                        #Temp support for both arguments
-                        if new_tid is None:
-                            self.get_argument('current_thumbnail', None)
-                            if new_tid is None:
-                                data = '{"error": "missing thumbnail_id argument"}'
-                                statemon.state.increment('thumbnail_args_missing')
-                                self.send_json_response(data, 400)
-                                return
-                        yield self.update_video_ooyala(i_id, i_vid, new_tid)
-                        return
                 else:
                     self.method_not_supported()
                     return
@@ -1240,78 +1229,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         self.send_json_response(data, 200)
 
     @tornado.gen.coroutine
-    def create_brightcove_video_request(self, i_id):
-        ''' Create request for brightcove video 
-        submit a job on neon server, update video in the brightcove account
-        '''
-        #check video id
-        try:
-            vid = self.get_argument('video_id')
-        except:
-            data = '{"error": "video_id not set"}'
-            statemon.state.increment('video_id_missing')
-            self.send_json_response(data, 400)
-            
-        account = yield tornado.gen.Task(
-            neondata.BrightcovePlatform.get,
-            self.api_key,
-            i_id)
-
-        if account:
-            #submit job for processing
-            result = yield tornado.gen.Task(account.create_job)
-            if not result: 
-                data = '{"error": ""}'
-                self.send_json_response(data, 200)  
-            else:
-                data = '{"error": "failed to create job, bad request"}'
-                statemon.state.increment('job_creation_fail')
-                self.send_json_response(data, 400)  
-        else:
-            data = '{"error": "no such account"}'
-            statemon.state.increment('account_not_found')
-            self.send_json_response(data, 400)
-        
-    @tornado.gen.coroutine
-    def update_video_brightcove(self, i_id, i_vid, new_tid):
-        ''' update thumbnail for a brightcove video '''
-        #TODO : Check for the linked youtube account 
-        
-        p_vid = neondata.InternalVideoID.to_external(i_vid)
-        #Get account/integration
-        ba = yield tornado.gen.Task(neondata.BrightcovePlatform.get,
-                self.api_key,i_id)
-
-        if not ba:
-            _log.error("key=update_video_brightcove" 
-                    " msg=account doesnt exist api key=%s " 
-                    "i_id=%s"%(self.api_key,i_id))
-            data = '{"error": "no such account"}'
-            statemon.state.increment('account_not_found')
-            self.send_json_response(data, 400)
-            return
-
-        result = yield tornado.gen.Task(ba.update_thumbnail, i_vid, new_tid)
-        
-        if result:
-            _log.info("key=update_video_brightcove" 
-                        " msg=thumbnail updated for video=%s tid=%s"\
-                        %(p_vid, new_tid))
-            data = ''
-            self.send_json_response(data, 200)
-            return
-        else:
-            if result is None:
-                data = '{"error": "internal error"}'
-                self.send_json_response(data, 500)
-                return
-            else:
-                data = '{"error": "brightcove api failure"}'
-                statemon.state.increment('brightcove_api_failure')
-                self.send_json_response(data, 502)
-                return
-
-    @tornado.gen.coroutine
     def create_account_and_neon_integration(self, a_id):
         '''
         Create Neon user account and add neon integration
@@ -1628,41 +1545,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
 
-    @tornado.gen.coroutine
-    def update_video_ooyala(self, i_id, i_vid, new_tid):
-        ''' update thumbnail for a Ooyala video '''
-        
-        p_vid = neondata.InternalVideoID.to_external(i_vid)
-        
-        #Get account/integration
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.get,
-                self.api_key, i_id)
-        if not oo:
-            _log.error("key=update_video_ooyala" 
-                    " msg=account doesnt exist api key=%s " 
-                    "i_id=%s"%(self.api_key,i_id))
-            data = '{"error": "no such account"}'
-            statemon.state.increment('account_not_found')
-            self.send_json_response(data, 400)
-            raise tornado.gen.Return()
-
-        result = yield tornado.gen.Task(oo.update_thumbnail, i_vid, new_tid)
-        
-        if result:
-            _log.info("key=update_video_ooyala" 
-                        " msg=thumbnail updated for video=%s tid=%s"\
-                        %(p_vid, new_tid))
-            data = ''
-            self.send_json_response(data, 200)
-        else:
-            if result is None:
-                data = '{"error": "ooyala api failure"}'
-                statemon.state.increment('ooyala_api_failure')
-                self.send_json_response(data, 502)
-            else:
-                data = '{"error": "internal error"}'
-                self.send_json_response(data, 500)
-
     # Get all the video ids
     @tornado.gen.coroutine
     def get_all_video_ids(self, itype, i_id):
@@ -1927,74 +1809,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         statemon.state.increment('thumb_updated')
         self.send_json_response('', 202)
 
-
-######################################################################
-## Brightcove support handler -- Mainly used by brigthcovecontroller 
-######################################################################
-
-class BcoveHandler(tornado.web.RequestHandler):
-    @tornado.gen.coroutine
-    def get(self, *args, **kwargs):
-        ''' get '''
-        self.finish()
-
-    @tornado.gen.coroutine
-    def post(self, *args, **kwargs):
-        ''' post '''
-
-        self.internal_video_id = self.request.uri.split('/')[-1]
-        method = self.request.uri.split('/')[-2]
-        self.a_id = self.request.uri.split('/')[-3] #internal a_id (api_key)
-        
-        if "update" in method:
-            #update thumbnail  (vid, new tid)
-            yield self.update_thumbnail()
-        else:
-            raise tornado.web.MissingArgumentError('method')
-
-
-    @tornado.gen.coroutine
-    def update_thumbnail(self):
-        ''' /api/v1/brightcovecontroller/%s/updatethumbnail/%s '''
-
-        try:
-            new_tid = self.get_argument('thumbnail_id')
-            nosave = self.get_argument('nosavedb', True)
-        except:
-            self.set_status(400)
-            self.finish()
-            return
-        vmdata = yield tornado.gen.Task(
-                 neondata.VideoMetadata.get, self.internal_video_id)
-        if vmdata:
-            i_id = vmdata.integration_id
-            ba  = yield tornado.gen.Task(
-                  neondata.BrightcovePlatform.get, self.a_id, i_id)
-            if ba:
-                bcove_vid = neondata.InternalVideoID.to_external(
-                    self.internal_video_id)
-                result = yield tornado.gen.Task(
-                    ba.update_thumbnail,
-                    self.internal_video_id, new_tid, True) #nosave true
-                if result:
-                    self.set_status(200)
-                else:
-                    _log.error("key=bcove_handler "
-                            " msg=failed to update thumbnail for" 
-                            " %s %s"%(self.internal_video_id, new_tid))
-                    self.set_status(502)
-            else:
-                _log.error("key=bcove_handler msg=failed to fetch " 
-                           " neondata.BrightcovePlatform %s i_id %s" % 
-                           (self.a_id, i_id))
-                self.set_status(502)
-        else:
-            _log.error("key=bcove_handler "
-                    " msg=failed to fetch video metadata or video not present for "
-                    "%s %s"%(self.internal_video_id, new_tid))
-            self.set_status(502)
-        self.finish()
-
 class HealthCheckHandler(tornado.web.RequestHandler):
     '''Handler for health check ''' 
 
@@ -2027,8 +1841,7 @@ class HealthCheckHandler(tornado.web.RequestHandler):
 application = tornado.web.Application([
         (r"/healthcheck(.*)", HealthCheckHandler),
         (r'/api/v1/accounts(.*)', CMSAPIHandler),
-        (r'/api/v1/jobs(.*)', CMSAPIHandler),
-        (r'/api/v1/brightcovecontroller(.*)', BcoveHandler)],
+        (r'/api/v1/jobs(.*)', CMSAPIHandler)],
         gzip=True)
 
 def main():

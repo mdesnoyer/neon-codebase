@@ -187,53 +187,6 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             thumb_url, still_url = self.api.get_current_thumbnail_url('vid_1')
             self.assertIsNone(thumb_url)
             self.assertIsNone(still_url)
-      
-    @patch('api.brightcove_api.utils.http.send_request')
-    def test_check_feed(self, utils_http_patch):
-    
-        def _side_effect(request, *args, **kwargs):
-            if "submitvideo" in request.url:
-                response = HTTPResponse(request, 200,
-                    buffer=StringIO('{"job_id":"j123"}'))
-            if "find_modified_videos" in request.url:
-                response = bcove_find_modified_videos_response 
-            if "find_all_videos" in request.url:
-                response = bcove_response
-            return response
-        
-        bcove_request = HTTPRequest(
-            'http://api.brightcove.com/services/library?'
-            'get_item_count=true&command=find_all_videos&page_size=5&sort_by='
-            'publish_date&token=rtoken&page_number=0&\
-             output=json&media_delivery=http')
-
-        bcove_response = HTTPResponse(bcove_request, 200,
-                buffer=StringIO(bcove_responses.find_all_videos_response))
-    
-        bcove_find_modified_videos_response = \
-                HTTPResponse(bcove_request, 200,
-                buffer=StringIO(bcove_responses.find_modified_videos_response))
-
-        self.outer_http_mock.side_effect = _side_effect
-        utils_http_patch.side_effect = _side_effect
-        
-        a_id = 'test' 
-        i_id = 'i123'
-        nvideos = 6
-        na = neondata.NeonUserAccount('acct1')
-        na.save()
-        def _setup_plat(x):
-            x.publisher_id = 'p1'
-            x.read_token = 'rt'
-            x.write_token = 'wt'
-            x.last_process_date = 21492000000
-            x.account_created = 21492000
-        bp = neondata.BrightcovePlatform.modify(na.neon_api_key, i_id,
-                                                _setup_plat,
-                                                create_missing=True)
-        bp.check_feed_and_create_api_requests()
-        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
-        self.assertEqual(len(u_bp.get_videos()), nvideos)
 
     @patch('api.brightcove_api.BrightcoveApi.write_connection.send_request') 
     @tornado.testing.gen_test 
@@ -300,76 +253,6 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         imdata = json.loads(j_imdata)
         self.assertTrue(imdata["params"]["image"]["remoteUrl"], r_url)
 
-    @patch('api.brightcove_api.utils.http')
-    def test_create_video_request(self, http_mock): 
-        send_request_mock = self._callback_wrap_mock(http_mock.send_request)
-        send_request_mock.side_effect = [HTTPResponse(HTTPRequest("http://test"), 200)]
-                                          
-        bc = api.brightcove_api.BrightcoveApi(
-            "neon_api_key", "publisher_id",
-            "read_token", "write_token", callback_url="http://callback.invalid")
- 
-        response = bc.format_neon_api_request('vid1', 'http://fake_dl_url', callback=None)
-        cargs, kwargs = send_request_mock.call_args
-        call_json = json.loads(cargs[0].body)
-        self.assertEquals(call_json['callback_url'], "http://callback.invalid") 
-
-    def test_select_rendition(self):
-        '''
-        Test the selection of the right rendition
-        
-        Assert that url is returned irrespective of framewidth 
-        '''
-        vitems = json.loads(bcove_responses.find_all_videos_response)
-        bc = api.brightcove_api.BrightcoveApi(
-            "neon_api_key", "publisher_id",
-            "read_token", "write_token", False)
-       
-        frame_widths = [None, 640, 720, 420]
-        for item in vitems['items']:
-            for fwidth in frame_widths:
-                url = bc.get_video_url_to_download(item, fwidth)
-                self.assertIsNotNone(url)
-        
-        # Check max rendition returned of frame width 1280
-        item = vitems['items'][-1]
-        url = bc.get_video_url_to_download(item, None)
-        self.assertEqual(url,
-                        "http://brightcove.vo.llnwd.net/e1/uds/pd/2294876105001/2294876105001_2635148067001_PA220134.mp4")
-
-    @patch('api.brightcove_api.utils.http.send_request')
-    def test_create_request_from_playlist(self, utils_http):
-        p_response = HTTPResponse(HTTPRequest("http://bcove"), 200,
-                buffer=StringIO(bcove_responses.find_playlist_by_id_response))
-        n_response = HTTPResponse(HTTPRequest("http://neon"), 200,
-                    buffer=StringIO('{"job_id":"j123"}'))
-        def _side_effect(request, callback=None, *args, **kwargs):
-            if "submitvideo" in request.url:
-                return n_response
-            else:
-                return p_response
-
-        utils_http.side_effect = _side_effect
-        a_id = 'test' 
-        i_id = 'i123'
-        nvideos = 2 
-        na = neondata.NeonUserAccount('acct1')
-        na.save()
-        def _setup_plat(x):
-            x.publisher_id = 'p1'
-            x.read_token = 'rt'
-            x.write_token = 'wt'
-            x.last_process_date = 21492000000
-            x.account_created = 21492000
-            x.add_video('v1', 'j1')
-            x.playlist_feed_ids.append('1234')
-        bp = neondata.BrightcovePlatform.modify(na.neon_api_key, i_id,
-                                                _setup_plat,
-                                                create_missing=True)
-        bp.check_playlist_feed_and_create_requests()
-        u_bp = neondata.BrightcovePlatform.get(na.neon_api_key, i_id)
-        self.assertEqual(len(u_bp.get_videos()), nvideos)
-        self.assertListEqual(u_bp.get_videos(), ['v1', '4100953290001'])
 
     def test_find_videos_by_ids_basic(self):
         self._set_videos_to_return([
