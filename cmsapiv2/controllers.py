@@ -919,25 +919,31 @@ class VideoHandler(APIV2Handler):
  
         videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
                                         internal_video_ids) 
+        new_videos = []
         if videos:  
-           new_videos = [] 
-           if fields:
-               field_set = set(fields.split(','))
-               for obj in videos:
+           for obj in videos:
+               try: 
                    obj = obj.__dict__
-                   new_video = {} 
-                   for field in field_set: 
-                       if field == 'thumbnails':
-                           new_video['thumbnails'] = yield VideoHelper.get_thumbnails_from_ids(obj['thumbnail_ids'])
-                       elif field in obj: 
-                           new_video[field] = obj[field] 
+                   new_video = {}
+                   if fields:  
+                       field_set = set(fields.split(','))
+                       for field in field_set: 
+                           if field == 'thumbnails':
+                               new_video['thumbnails'] = yield VideoHelper.get_thumbnails_from_ids(obj['thumbnail_ids'])
+                           elif field in obj: 
+                               new_video[field] = obj[field]
+                   else: 
+                       new_video = obj 
                    if new_video: 
                        new_videos.append(new_video)
-           else: 
-               new_videos = [obj.__dict__ for obj in videos] 
+               except AttributeError: 
+                   pass 
 
            vid_dict['videos'] = new_videos
            vid_dict['video_count'] = len(new_videos)
+            
+        if vid_dict['video_count'] is 0: 
+            raise NotFoundError('video(s) do not exist with id(s): %s' % (args['video_id']))
 
         statemon.state.increment('get_video_oks')
         self.success(json.dumps(vid_dict))
