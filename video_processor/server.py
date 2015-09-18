@@ -67,7 +67,6 @@ statemon.define('too_many_job_retries', int)
 statemon.define('bad_request', int)
 statemon.define('neon_requests', int)
 statemon.define('brightcove_requests', int)
-statemon.define('ooyala_requests', int)
 
 # Constants
 TOP_THUMBNAILS = "topn"
@@ -745,25 +744,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
                 statemon.state.increment('brightcove_requests')
-
-            elif "ooyala" in self.request.uri:
-                request_type = "ooyala"
-                oo_api_key = params["oo_api_key"]
-                oo_secret_key = params["oo_secret_key"]
-                autosync = params["autosync"]
-                api_request = neondata.OoyalaApiRequest(
-                    job_id,
-                    api_key, 
-                    i_id,
-                    vid,
-                    title,
-                    url,
-                    oo_api_key,
-                    oo_secret_key, 
-                    http_callback,
-                    default_thumbnail=default_thumbnail)
-                api_request.autosync = autosync
-                statemon.state.increment('ooyala_requests')
 
             else:
                 request_type = "neon"

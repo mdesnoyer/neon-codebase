@@ -363,10 +363,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     elif itype  == "brightcove_integrations":
                         yield self.get_video_status("brightcove", i_id,
                                                     video_ids, video_state)
-
-                    elif itype == "ooyala_integrations":
-                        yield self.get_video_status("ooyala", i_id,
-                                                    video_ids, video_state)
                     
                     elif itype == "youtube_integrations":
                         statemon.state.increment('not_supported')
@@ -448,8 +444,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 if "brightcove_integrations" in self.request.uri:
                     yield self.create_brightcove_integration()
                 
-                elif "ooyala_integrations" in self.request.uri:
-                    yield self.create_ooyala_integration()
 
             #Video Request creation   
             elif method == 'create_video_request':
@@ -463,9 +457,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     yield self.create_neon_thumbnail_api_request(i_id)
                 elif "neon_integrations" == itype:
                     yield self.create_neon_video_request_from_ui(i_id)
-                # TODO(Sunil): Expose when necessary
-                #elif "ooyala_integrations" == itype:
-                #    self.create_ooyala_video_request(i_id)
                 else:
                     self.method_not_supported()
 
@@ -516,8 +507,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             if method is None or method == "update":
                 if "brightcove_integrations" == itype:
                     yield self.update_brightcove_integration(i_id)
-                elif "ooyala_integrations" == itype:
-                    yield self.update_ooyala_integration(i_id)
                 elif itype is None:
                     #Update basic neon account
                     self.method_not_supported()
@@ -1397,151 +1386,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     "msg=no such account %s integration id %s"\
                     % (self.api_key, i_id))
             data = '{"error": "account doesnt exists"}'
-            statemon.state.increment('account_not_found')
-            self.send_json_response(data, 400)
-   
-    ##################################################################
-    # Ooyala Methods
-    ##################################################################
-
-    @tornado.gen.coroutine
-    def create_ooyala_integration(self):
-        '''
-        Create Ooyala Integration
-        '''
-
-        try:
-            a_id = self.request.uri.split('/')[-2]
-            i_id = InputSanitizer.to_string(
-                self.get_argument("integration_id"))
-            partner_code = InputSanitizer.to_string(
-                self.get_argument("partner_code"))
-            oo_api_key = InputSanitizer.to_string(
-                self.get_argument("oo_api_key"))
-            oo_secret_key = InputSanitizer.to_string(
-                self.get_argument("oo_secret_key"))
-            autosync = InputSanitizer.to_bool(self.get_argument("auto_update"))
-
-        except Exception,e:
-            _log.error("key=create_ooyla_account msg= %s" %e)
-            data = '{"error": "API Params missing"}'
-            statemon.state.increment('api_params_missing')
-            self.send_json_response(data, 400)
-            return 
-
-        na = yield tornado.gen.Task(neondata.NeonUserAccount.get,
-                                    self.api_key)
-        #Create and Add Platform Integration
-        if na:
-            
-            #Check if integration exists
-            if len(na.integrations) >0 and na.integrations.has_key(i_id):
-                data = '{"error": "integration already exists"}'
-                self.send_json_response(data, 409)
-            else:
-                def _initialize_oo_plat(x):
-                    x.account_id = a_id
-                    x.partner_code = partner_code
-                    x.ooyala_api_key = oo_api_key
-                    x.api_secret = oo_secret_key
-                    x.auto_update = autosync
-
-                oo_account = yield tornado.gen.Task(
-                    neondata.OoyalaPlatform.modify,
-                    self.api_key, i_id,
-                    _initialize_oo_plat,
-                    create_missing=True)
-
-                na = yield tornado.gen.Task(
-                    neondata.NeonUserAccount.modify,
-                    self.api_key,
-                    lambda x: x.add_platform(oo_account))
-                
-                if na:
-                    
-                    response = yield tornado.gen.Task(
-                        oo_account.create_video_requests_on_signup, 10)
-                    ctime = datetime.datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S")
-                    video_response = []
-                    if not response:
-                        _log.error("key=create_ooyala_account " 
-                                    " msg=ooyala api call failed or token error")
-                        data = '{"error": "invalid api key or secret"}'
-                        self.send_json_response(data, 502)
-                        return
-                   
-                    #if reponse is empty? no videos in the account
-                    #Build video response
-                    for item in response:
-                        t_urls = []
-                        thumbs = []
-                        t_urls.append(item['preview_image_url'])
-                        tm = neondata.ThumbnailMetadata(
-                                0,
-                                neondata.InternalVideoID.generate(self.api_key,
-                                    item["embed_code"]),
-                                t_urls, ctime, 0, 0, "ooyala", 0, 0)
-                        thumbs.append(tm.to_dict_for_video_response())
-                        vr = neondata.VideoResponse(item["embed_code"],
-                              None,
-                              "processing",
-                              "ooyala",
-                              i_id,
-                              item['name'],
-                              None,
-                              None,
-                              0, #current tid,add fake tid
-                              thumbs)
-                        video_response.append(vr.to_dict())
-                        
-                    vstatus_response = GetVideoStatusResponse(
-                                        video_response, len(video_response))
-                    data = vstatus_response.to_json() 
-                    self.send_json_response(data, 201)
-                    return
-                else:
-                    data = '{"error": "platform was not added,\
-                                account creation issue"}'
-                    statemon.state.increment('account_not_created')
-                    self.send_json_response(data, 500)
-
-    #2. Update  the Account
-    @tornado.gen.coroutine
-    def update_ooyala_integration(self, i_id):
-        ''' Update Ooyala account details '''
-    
-        try:
-            partner_code = InputSanitizer.to_string(
-                self.get_argument("partner_code"))
-            oo_api_key = InputSanitizer.to_string(
-                self.get_argument("oo_api_key"))
-            oo_secret_key = InputSanitizer.to_string(
-                self.get_argument("oo_secret_key"))
-            autosync = InputSanitizer.to_bool(self.get_argument("auto_update"))
-        except Exception,e:
-            _log.error("key=update ooyala account msg= %s" %e)
-            data = '{"error": "API Params missing"}'
-            statemon.state.increment('api_params_missing')
-            self.send_json_response(data, 400)
-            return
-
-        uri_parts = self.request.uri.split('/')
-
-        def _update_fields(x):
-            x.partner_code = partner_code
-            x.ooyala_api_key = oo_api_key
-            x.api_secret = oo_secret_key 
-            x.autosync = autosync
-
-        oo = yield tornado.gen.Task(neondata.OoyalaPlatform.modify,
-                                    self.api_key, i_id, _update_fields)
-        if oo:
-            data = ''
-            self.send_json_response(data, 200)
-        else:
-            _log.error("key=update_ooyala_integration msg=no such account ") 
-            data = '{"error": "Account doesnt exists"}'
             statemon.state.increment('account_not_found')
             self.send_json_response(data, 400)
 
