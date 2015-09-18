@@ -16,7 +16,6 @@ import java.io.OutputStream;
 import java.util.Arrays;
 
 import org.apache.avro.Schema;
-import org.apache.avro.SchemaBuilder;
 import org.apache.avro.file.DataFileReader;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
@@ -89,9 +88,8 @@ public class NeonTestAvroEventSerializer {
     Schema[] schemaArray = new Schema[3];
     File schemaFile = null;
     File[] schemaFileArray = new File[3];
-    GenericRecordBuilder recordBuilder = null;
-
-	Schema schema = null;
+    Schema schema = null;
+    
     for(int i = 0; i < 3; i++){
     	JSONObject schemaJson = null;
     	if(i == 1){
@@ -108,7 +106,6 @@ public class NeonTestAvroEventSerializer {
     		                "{\"name\": \"dummyField\", \"type\" : [ \"null\" , \"int\" ], \"default\" : \nnull}"));
     	}
     	schema = new Schema.Parser().parse(schemaJson.toString());
-        recordBuilder = new GenericRecordBuilder(schema);
         schemaFile = null;
         if (useSchemaUrl) {
           schemaFile = File.createTempFile(getClass().getSimpleName(), ".avsc");
@@ -117,8 +114,6 @@ public class NeonTestAvroEventSerializer {
         }
         schemaArray[i] = schema;
     }
-    
-    
     
     EventSerializer.Builder builder = new NeonAvroEventSerializer.Builder();
     EventSerializer serializer = builder.build(ctx, out);
@@ -130,13 +125,13 @@ public class NeonTestAvroEventSerializer {
                 (CharSequence) "acct1_vid1_thumb1", "acct1_vid2_thumb2"));
 
         GenericRecord record = null;
-        if(i != 1){
+        if(i == 1){
         	record  =
-                buildDefaultGenericEvent(schemaArray[i]).set("dummyField", null)
+                buildDefaultGenericEvent(schemaArray[i])
                     .set("eventType", EventType.IMAGE_VISIBLE)
                     .set("eventData", visEvent).build();
         } else {
-        	record = buildDefaultGenericEvent(schemaArray[i])
+        	record = buildDefaultGenericEvent(schemaArray[i]).set("dummyField", null)
         			.set("eventType", EventType.IMAGE_VISIBLE)
         			.set("eventData", visEvent).build();
         }
@@ -153,13 +148,31 @@ public class NeonTestAvroEventSerializer {
 
     }
     
-    
     serializer.flush();
     serializer.beforeClose();
     out.flush();
     out.close();
   }
 
+  private GenericRecordBuilder buildDefaultGenericEvent(Schema schema) {
+	    return new GenericRecordBuilder(schema)
+	        .set("pageId", new Utf8("pageId_dummy"))
+	        .set("trackerAccountId", "trackerAccountId_dummy")
+	        .set("trackerType", TrackerType.IGN)
+	        .set("pageURL", "pageUrl_dummy")
+	        .set("refURL", "refUrl_dummy")
+	        .set("serverTime", 1416612478000L)
+	        .set("clientTime", 1416612478000L)
+	        .set("clientIP", "clientIp_dummy")
+	        .set("neonUserId", "neonUserId_dummy")
+	        .set("userAgent", "userAgentDummy")
+	        .set("agentInfo", null)
+	        .set(
+	            "ipGeoData",
+	            GeoData.newBuilder().setCity("Toronto").setCountry("CAN")
+	                .setZip(null).setRegion("ON").setLat(null).setLon(null).build());
+	  }
+  
   private byte[] serializeAvro(Object datum, Schema schema) throws IOException {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     ReflectDatumWriter<Object> writer = new ReflectDatumWriter<Object>(schema);
@@ -185,22 +198,4 @@ public class NeonTestAvroEventSerializer {
     Assert.assertEquals("Should have found a total of 3 events", 3, numEvents);
   }
   
-  private GenericRecordBuilder buildDefaultGenericEvent(Schema schema) {
-	    return new GenericRecordBuilder(schema)
-	        .set("pageId", new Utf8("pageId_dummy"))
-	        .set("trackerAccountId", "trackerAccountId_dummy")
-	        .set("trackerType", TrackerType.IGN)
-	        .set("pageURL", "pageUrl_dummy")
-	        .set("refURL", "refUrl_dummy")
-	        .set("serverTime", 1416612478000L)
-	        .set("clientTime", 1416612478000L)
-	        .set("clientIP", "clientIp_dummy")
-	        .set("neonUserId", "neonUserId_dummy")
-	        .set("userAgent", "userAgentDummy")
-	        .set("agentInfo", null)
-	        .set(
-	            "ipGeoData",
-	            GeoData.newBuilder().setCity("Toronto").setCountry("CAN")
-	                .setZip(null).setRegion("ON").setLat(null).setLon(null).build());
-	  }
 }
