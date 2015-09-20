@@ -401,6 +401,7 @@ class VideoDBWatcher(threading.Thread):
         '''
         with self._subscribe_lock:
             if account_id not in self._account_subscribers:
+                _log.debug('Subscribing to changes in account %s' % account_id)
                 thumb_pubsub = neondata.ThumbnailMetadata.subscribe_to_changes(
                     lambda key, obj, op: self._schedule_video_update(
                         '_'.join(key.split('_')[0:2]), is_push_update=True),
