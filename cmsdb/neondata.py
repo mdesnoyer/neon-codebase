@@ -479,7 +479,8 @@ class PubSubConnection(threading.Thread):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        super(PubSubConnection, self).__init__()
+        super(PubSubConnection, self).__init__(name='PubSubConnection[%s]' 
+                                               % class_name)
         self.class_name = class_name
         self._client = None
         self._pubsub = None
@@ -498,9 +499,9 @@ class PubSubConnection(threading.Thread):
         # The channels subscribed to. pattern => function
         self._channels = {}
 
-        self.connect()
-
         self.daemon = True
+
+        self.connect()
 
     def __del__(self):
         self.close()
@@ -517,14 +518,37 @@ class PubSubConnection(threading.Thread):
                                                      address[1])
             self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
 
-            # Re-subscribe to channels
-            for pattern, func in self._channels.items():
-                self._subscribe_impl(func, pattern)
-
             self.connected = True
             self._address = address
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _resubscribe(self):
+        '''Resubscribes to channels.'''
+        
+        # Re-subscribe to channels
+        error = None
+        for pattern, func in self._channels.items():
+            self._running.set()
+            if not self.is_alive():
+                self.start()
+            for i in range(options.maxRedisRetries):
+                try:
+                    if self._pubsub is None:
+                        return
+                    yield self._subscribe_impl(func, pattern)
+                    break
+                except DBConnectionError as e:
+                    _log.error('Error subscribing to channel %s: %s' %
+                               (pattern, e))
+                    error = e
+                    delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                    yield tornado.gen.sleep(delay)
+            if error is not None:
+                raise error
+
     def reconnect(self):
+        '''Reconnects to the database.'''
         self.close()
         self.connect()
 
@@ -544,18 +568,25 @@ class PubSubConnection(threading.Thread):
 
                     if self._address != _get_db_address(self.class_name):
                         self.reconnect()
-                
-                    # This will cause any callbacks that aren't
-                    # subscribe/unsubscribe messages to be called.
-                    msg = self._pubsub.get_message()
+                        # Resubscribe asynchronously because this
+                        # thread has to handle the subscription acks
+                        thread = threading.Thread(target=self._resubscribe,
+                                                  name='resubscribe')
+                        thread.daemon = True
+                        thread.start()
 
-                    self._handle_sub_unsub_messages(msg)
+                    if self._pubsub.connection is not None:
+                        # This will cause any callbacks that aren't
+                        # subscribe/unsubscribe messages to be called.
+                        msg = self._pubsub.get_message()
 
-                    # Look for any subscription or unsubscription timeouts
-                    self._handle_timedout_futures(self._unsub_futures)
-                    self._handle_timedout_futures(self._sub_futures)
+                        self._handle_sub_unsub_messages(msg)
 
-                    error_count = 0
+                        # Look for any subscription or unsubscription timeouts
+                        self._handle_timedout_futures(self._unsub_futures)
+                        self._handle_timedout_futures(self._sub_futures)
+
+                        error_count = 0
                 
             except Exception as e:
                 _log.exception('Error in thread listening to objects %s. '
@@ -568,6 +599,13 @@ class PubSubConnection(threading.Thread):
 
                 # Force reconnection
                 self.reconnect()
+                # Resubscribe asynchronously because this
+                # thread has to handle the subscription acks
+                thread = threading.Thread(target=self._resubscribe,
+                                          name='resubscribe')
+                thread.daemon = True
+                thread.start()
+                        
             time.sleep(0.05)
 
     def close(self):
@@ -627,7 +665,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def subscribe(self, func, pattern='*', timeout=10.0):
+    def subscribe(self, func, pattern='*', timeout=20.0):
         '''Subscribe to channel(s)
 
         func - Function to run with each data point
@@ -637,17 +675,37 @@ class PubSubConnection(threading.Thread):
         '''
         with self._publock:
             self._channels[pattern] = func
-        
-        pool = concurrent.futures.ThreadPoolExecutor(1)
-        sub_future = yield pool.submit(
-            lambda: self._subscribe_impl(func, pattern, timeout=timeout))
 
-        # Start the thread so that we can receive and service messages
-        self._running.set()
-        if not self.is_alive():
-            self.start()
+        error = None
+        for i in range(options.maxRedisRetries):
+            try:
+                pool = concurrent.futures.ThreadPoolExecutor(1)
+                sub_future = yield pool.submit(
+                    lambda: self._subscribe_impl(func, pattern,
+                                                 timeout=timeout))
 
-        yield sub_future
+                # Start the thread so that we can receive and service messages
+                self._running.set()
+                if not self.is_alive():
+                    self.start()
+
+                yield sub_future
+                return
+            except DBConnectionError as e:
+                error = e
+                _log.error('Error subscribing to %s on try %d: %s' %
+                           (pattern, i, e))
+                delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                yield tornado.gen.sleep(delay)
+
+        with self._publock:
+            try:
+                del self._channels[pattern]
+            except KeyError:
+                pass
+
+        raise error
+                
 
     def _subscribe_impl(self, func, pattern='*', timeout=10.0):
         try:
@@ -658,9 +716,9 @@ class PubSubConnection(threading.Thread):
                     self._pubsub.subscribe(**{pattern: func})
 
                 if pattern in self._sub_futures:
-                    return self._sub_futures[pattern]
+                    return self._sub_futures[pattern][0]
                 future = concurrent.futures.Future()
-                self._sub_futures[pattern] = (future, time.time()+timeout)
+                self._sub_futures[pattern] = (future, time.time() + timeout)
                 return future
                 
         except redis.exceptions.RedisError as e:
@@ -681,19 +739,34 @@ class PubSubConnection(threading.Thread):
 
         channel - Channel to unsubscribe from
         '''
-        with self._publock:
+        def _remove_channel():
+            with self._publock:
+                try:
+                    if channel is None:
+                        self._channels = {}
+                    else:
+                        del self._channels[channel]
+                except KeyError:
+                    return
+        
+
+        error = None
+        for i in range(options.maxRedisRetries):
             try:
-                if channel is None:
-                    self._channels = {}
-                else:
-                    del self._channels[channel]
-            except KeyError:
+                pool = concurrent.futures.ThreadPoolExecutor(1)
+                unsub_future = yield pool.submit(
+                    lambda: self._unsubscribe_impl(channel, timeout))
+                yield unsub_future
                 return
-            
-        pool = concurrent.futures.ThreadPoolExecutor(1)
-        unsub_future = yield pool.submit(
-            lambda: self._unsubscribe_impl(channel, timeout))
-        yield unsub_future
+
+            except DBConnectionError as e:
+                error = e
+                _log.error('Error unsubscribing from %s on try %d: %s' %
+                           (channel, i, e))
+                delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                yield tornado.gen.sleep(delay)
+
+        raise error
 
     def _unsubscribe_impl(self, channel=None, timeout=20.0):
         try:
@@ -707,9 +780,9 @@ class PubSubConnection(threading.Thread):
                     self._pubsub.unsubscribe([channel])
                 self._running.set()
                 if channel in self._unsub_futures:
-                    return self._unsub_futures[channel]
+                    return self._unsub_futures[channel][0]
                 future = concurrent.futures.Future()
-                self._unsub_futures[channel] = (future, time.time()+timeout)
+                self._unsub_futures[channel] = (future, time.time() + timeout)
                 return future
         except redis.exceptions.RedisError as e:
             msg = 'Error unsubscribing to channel %s: %s' % (channel, e)
