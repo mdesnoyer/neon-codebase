@@ -297,8 +297,9 @@ class RedisRetryWrapper(object):
                     busy_count += 1
                     time.sleep(delay)
                 except Exception as e:
-                    _log.error('Error talking to redis on attempt %i: %s' % 
-                               (cur_try, e))
+                    _log.error('Error talking to sync redis on attempt %i'
+                               ' for function %s: %s' % 
+                               (cur_try, attr, e))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
                         raise
@@ -415,8 +416,9 @@ class RedisAsyncWrapper(object):
                     delay = (1 << busy_count) * 0.2
                     busy_count += 1
                 else:
-                    _log.error('Error talking to redis on attempt %i: %s' % 
-                               (cur_try, future.exception()))
+                    _log.error('Error talking to async redis on attempt %i for'
+                               ' call %s: %s' % 
+                               (cur_try, attr, future.exception()))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
                         raise future.exception()
@@ -665,7 +667,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def subscribe(self, func, pattern='*', timeout=20.0):
+    def subscribe(self, func, pattern='*', timeout=10.0):
         '''Subscribe to channel(s)
 
         func - Function to run with each data point
@@ -734,7 +736,7 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=20.0):
+    def unsubscribe(self, channel=None, timeout=10.0):
         '''Unsubscribe from channel.
 
         channel - Channel to unsubscribe from
@@ -768,7 +770,7 @@ class PubSubConnection(threading.Thread):
 
         raise error
 
-    def _unsubscribe_impl(self, channel=None, timeout=20.0):
+    def _unsubscribe_impl(self, channel=None, timeout=10.0):
         try:
             with self._publock:
                 if channel is None:
