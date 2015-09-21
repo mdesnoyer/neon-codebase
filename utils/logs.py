@@ -252,7 +252,8 @@ class TornadoHTTPHandler(logging.Handler):
         '''Emits a log event in the logging_thread.'''
         response = yield self.request_pool.send_request(
             self.generate_request(record),
-            do_logging=False)
+            do_logging=False,
+            async=True)
         if response.error:
             try:
                 raise response.error
