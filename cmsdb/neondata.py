@@ -1245,7 +1245,7 @@ class StoredObject(object):
                         if cur_obj is not None:
                             key_sets[cur_obj._set_keyname()].append(key)
                     else:
-                        _log.error('Could not get redis object: %s' % key)
+                        _log.warn_n('Could not get redis object: %s' % key)
                         cur_obj = None
                 else:
                     cur_obj = create_class._create(key, json.loads(item))

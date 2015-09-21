@@ -96,6 +96,19 @@ def bounded_io_loop():
         old_ioloop.make_current()
         temp_ioloop.close()
 
+class IOLoopThread(threading.Thread):
+    '''A thread that just runs an io loop.'''
+    def __init__(self):
+        super(IOLoopThread, self).__init__()
+        self.io_loop = tornado.ioloop.IOLoop()
+
+    def run(self):
+        self.io_loop.make_current()
+        self.io_loop.start()
+
+    def stop(self):
+        self.io_loop.stop()
+
 class LockAquireThread(threading.Thread):
     '''A thread that will set a future when a lock is aquired.'''
     def __init__(self, lock):

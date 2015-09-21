@@ -111,7 +111,8 @@ class RequestPool(object):
     Ensures that target isn't hit too hard too quickly.
     Includes exponential retries.
     '''
-    def __init__(self, max_connections=1, limit_for_subprocs=False):
+    def __init__(self, max_connections=1, limit_for_subprocs=False,
+                 thread_safe=False):
         '''Creates the request pool.
 
         Inputs:
@@ -121,11 +122,15 @@ class RequestPool(object):
                              max_connections per process, which makes 
                              the synchronization much more efficient if you 
                              don't need strict limits. 
+        thread_safe - If False, send_request can only be submitted from a
+                      single thread. It will be more efficient though.
         '''
-        self._thread_lock = threading.RLock()
         if limit_for_subprocs:
             self._lock = utils.sync.FutureLock(
                 multiprocessing.BoundedSemaphore(max_connections))
+        elif thread_safe:
+            self._lock = utils.sync.FutureLock(
+                threading.BoundedSemaphore(max_connections))
         else:
             self._lock = tornado.locks.BoundedSemaphore(max_connections)
 
@@ -140,14 +145,12 @@ class RequestPool(object):
         request - A tornado.httpclient.HTTPRequest object
         kwargs - Passed to the module level send_request
         '''
-        with self._thread_lock:
-            yield self._lock.acquire()
+        yield self._lock.acquire()
         try:
             kwargs['async'] = True
             response = yield send_request(request, **kwargs)
             raise tornado.gen.Return(response)
         finally:
-            with self._thread_lock:
-                self._lock.release()
+            self._lock.release()
 
                 

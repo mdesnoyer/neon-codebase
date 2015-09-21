@@ -22,6 +22,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import atexit
 import copy
 import datetime
 import json
@@ -34,6 +35,7 @@ import threading
 import tornado.httpclient
 import urllib
 import urllib2
+import utils.sync
 
 from utils.options import define, options
 ### Options to define the root logger when AddConfiguredLogger is called ###
@@ -219,6 +221,13 @@ class TornadoHTTPHandler(logging.Handler):
         import utils.http
         self.request_pool = utils.http.RequestPool(5)
 
+        self.logging_thread = utils.sync.IOLoopThread()
+        self.logging_thread.daemon = True
+        self.logging_thread.start()
+
+    def __del__(self):
+        self.logging_thread.stop()
+
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
         retval = copy.copy(record.__dict__)
@@ -238,24 +247,30 @@ class TornadoHTTPHandler(logging.Handler):
                      'Content-length' : len(data) },
             body=data)
 
-    def emit(self, record):
-        # Define the callback function so that we don't block here
-        def handle_response(response):
-            if response.error:
-                try:
-                    raise response.error
-                except:
-                    curtime = datetime.datetime.utcnow()
-                    if (self.last_emit_error is None or 
-                        (curtime - self.last_emit_error).total_seconds() >
-                        self.emit_error_sampling_period):
-                        self.last_emit_error = curtime
-                        self.handleError(record)
+    @tornado.gen.coroutine
+    def _emit_in_thread(self, record):
+        '''Emits a log event in the logging_thread.'''
+        response = yield self.request_pool.send_request(
+            self.generate_request(record),
+            do_logging=False)
+        if response.error:
+            try:
+                raise response.error
+            except:
+                curtime = datetime.datetime.utcnow()
+                if (self.last_emit_error is None or 
+                    (curtime - self.last_emit_error).total_seconds() >
+                    self.emit_error_sampling_period):
+                    self.last_emit_error = curtime
+                    self.handleError(record)
+        else:
+            raise tornado.gen.Return(response)
 
+    def emit(self, record):
         try:
-            self.request_pool.send_request(self.generate_request(record),
-                                           callback=handle_response,
-                                           do_logging=False)
+            # Send it off to the logging thread so that we don't block here
+            self.logging_thread.io_loop.add_callback(self._emit_in_thread,
+                                                     record)
         except:
             curtime = datetime.datetime.utcnow()
             if (self.last_emit_error is None or 
