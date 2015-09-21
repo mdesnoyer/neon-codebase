@@ -399,7 +399,8 @@ class JobManager(object):
             while self._dead_clients:
                 dcq = self._dead_clients.pop()
                 logging.debug('Deregistering client %i'%(dcq))
-                _ = self._output_queues.pop(dcq)
+                dead_queue = self._output_queues.pop(dcq)
+                dead_queue.join()
 
     def _submit(self):
         '''
