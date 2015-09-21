@@ -385,7 +385,7 @@ class _Predictor(object):
             self._fkids.release()
             self._filter_jobs()
             image = self._prep(image)
-
+        logging.debug('Submitting '+str(jid))
         job = self._submit(image, jid, 
                            self._pending,
                            self._complete,
@@ -397,20 +397,40 @@ class _Predictor(object):
         '''
         Halts the process and kills the thread.
         '''
+        logging.debug('Stopping')
         self._kill.set()
         for job in self._pending:
             job.cancel()
 
+    def reset(self):
+        '''
+        Removes pending jobs, and empties out
+        the results and pending lists.
+        '''
+        logging.debug('Resetting self')
+        for job in self._pending:
+            job.cancel()
+
+        while self._complete or self._pending:
+            self._filter_jobs()
+
     def get(self):
+        '''
+        Returns results as tuples:
+        id, score
+        '''
         self._filter_jobs()
         while len(self._complete):
             results.append(self._complete.pop())
+            self._total+=1
+        logging.debug('%i jobs finished [%i total]'%(len(results), self._total))
         return results
     
     def _filter_jobs(self):
         '''
         Filters pending jobs in-place
         '''
+        logging.debug('Filtering jobs in-place')
         index = 0
         while index < len(self._pending):
             cont = self._fkids.acquire(False)
@@ -419,7 +439,11 @@ class _Predictor(object):
             b1 = self._pending[index].is_cancelled()
             b2 = self._pending[index].is_finished()
             if b1 or b2:
-                _ = self._pending.pop(index)
+                j = self._pending.pop(index)
+                if b1:
+                    logging.debug('Filtering job %s because it was cancelled'%(j.id))
+                if b2:
+                    logging.debug('Filtering job %s because it is done'%(j.id))
             else:
                 index += 1
 

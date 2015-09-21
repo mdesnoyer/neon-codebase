@@ -6,11 +6,12 @@ It is a python wrapper for the GPU implementation for our
 new model, which is based off Google's 'Inception' architecture.
 '''
 
+import logging
 import multiprocessing
 import os
 import threading
-import logging
 from glob import glob
+from Queue import Queue
 from time import time
 
 import cv2
@@ -31,6 +32,10 @@ if _unset_glog_level:
 
 logging.basicConfig(level=logging.DEBUG,
                     format='[%(levelname)s][%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
+                    )
+# temporarily, since we're *only* using debug
+logging.basicConfig(level=logging.DEBUG,
+                    format='[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
                     )
 
 caffe.set_mode_gpu()
@@ -157,8 +162,7 @@ class _Predictor(object):
         self._valid_videos = valid_videos
         self._client_has_died = client_has_died
         self._terminate = terminate
-        self._pending_requests = []
-        self._cur_video = cid # initialize to the client ID
+        self._cur_video = self.cid # initialize to the client ID
         self._results = []
         self._get_result_thread = None
         self._fully_init = False
@@ -169,8 +173,11 @@ class _Predictor(object):
         Locally initialize the results thread
         '''
         logging.debug('Starting the threads locally')
+        self._submit_allow = threading.Semaphore(self.max)
+        self._wait_for_results = threading.Condition
         self._get_result_thread = threading.Thread(
-                target=self._get_result)
+                target=self._get_result,
+                name='Result Fetch')
         self._get_result_thread.daemon = True
         self._get_result_thread.start()
         self._fully_init = True
@@ -191,11 +198,13 @@ class _Predictor(object):
         if not self._fully_init:
             logging.debug('Locally starting threads')
             self._start_result()
-        if len(self._pending_requests) >= self.max:
-            logging.debug('Too many pending requests(%i)'%(
-                len(self._pending_requests)))
-            return
-            # don't submit the job!
+        # acquire permission to submit job
+        logging.debug('Awaiting permission to submit job')
+        proceed = self._submit_allow.acquire(blocking=False)
+        if not proceed:
+            logging.debug('TOO MANY JOBS SUBMITTED. WAITING.')
+            self._submit_allow.acquire()
+        logging.debug('Permission acquired')
         if vid == None:
             logging.debug('video id is undefined, assigning it to %i'%(
                 self._cur_video))
@@ -205,9 +214,8 @@ class _Predictor(object):
                 self._total_jobs))
             jid = self._total_jobs
         self._check_vid(vid)
-        self._inQ.put((self.cid, vid, jid), 
-                      self.prep(data))
-        self._pending_requests.append(jid)
+        self._putQ.put(((self.cid, vid, jid), 
+                              self._prep(data)))
         self._total_jobs += 1
         logging.debug('%ith job submitted'%(self._total_jobs))
 
@@ -231,9 +239,6 @@ class _Predictor(object):
             logging.debug('Purging %i results awaiting integration'%(
                 len(self._results)))
             self._results = []
-            logging.debug('Purging %i pending jobs from jobs list'%(
-                len(self._pending)))
-            self._pending = []
 
     def _get_result(self):
         '''
@@ -247,12 +252,8 @@ class _Predictor(object):
         '''
         logging.debug('Results fetcher started')
         while True:
-            logging.debug('Fetching finished results')
-            try:
-                item = self._getQ.get_nowait()
-            except:
-                continue
-            if self._terminate:
+            item = self._getQ.get()
+            if self._terminate.is_set():
                 logging.debug('Termination order recieved!')
                 return
             if item == None:
@@ -261,15 +262,14 @@ class _Predictor(object):
                 return
             else:
                 (cid, vid, jid), score = item
-                try:
-                    logging.debug('Attempting to remove job id from pending')
-                    self._pending_requests.remove(jid)
-                except:
-                    logging.debug('Invalid pending job ID')
+                logging.debug('Job %i obtained, score: %.3f'%(
+                    jid, score))
                 if vid != self._cur_video:
                     logging.debug('Obtained result corresponds to finished video')
                     continue
                 self._results.append((vid, jid, score))
+            self._submit_allow.release()
+
 
     def results(self):
         '''
@@ -284,15 +284,21 @@ class _Predictor(object):
         logging.debug('Stopping...')
         logging.debug('Enqueueing null result')
         self._getQ.put(None)
-        logging.debug('Removing self from active clients')
-        self._clients.remove(self)
-        logging.debug('Adding self to dead clients list')
-        self._dead_clients.append(self)
-        logging.debug('Notifying JobManager')
-        with self._client_has_died:
-            self._client_has_died.notify_all()
+        if not self._terminate.is_set():
+            logging.debug('Removing self from active clients')
+            self._clients.remove(self.cid)
+            logging.debug('Adding self to dead clients list')
+            self._dead_clients.append(self.cid)
+            logging.debug('Notifying JobManager')
+            with self._client_has_died:
+                self._client_has_died.notify_all()
+        else:
+            logging.debug('JobManager is already dead.')
         logging.debug('Joining results thread')
         self._get_result_thread.join()
+
+    def __del__(self):
+        self.stop()
 
 
 class JobManager(object):
@@ -319,7 +325,7 @@ class JobManager(object):
                  batchSize=32, image_dims=[224,224,3],
                  image_mean=[104,117,123], N=None):
         logging.debug('Initializing')
-        self._manager = multiprocess.Manager()
+        self._manager = multiprocessing.Manager()
         self._clients = self._manager.list()
         self._dead_clients = self._manager.list()
         self._valid_videos = self._manager.list()
@@ -331,11 +337,11 @@ class JobManager(object):
         self._batchSize = batchSize
         self._image_dims = image_dims
         self._image_mean = image_mean
-        self._gpu2mgr = threading.Queue()
+        self._gpu2mgr = Queue()
         if N == None:
             N = np.inf
         self._max = N
-        self._client2mgr = Queue()
+        self._client2mgr = multiprocessing.Queue()
         self._submit_thread = None
         self._garbage_collect_thread = None
         self._start_threads()
@@ -350,23 +356,27 @@ class JobManager(object):
         input handling threads.
         '''
         self._submit_thread = threading.Thread(
-            target=self._submit)
+            target=self._submit,
+            name='Submission and Allocation')
         self._submit_thread.daemon = True
         self._garbage_collect_thread = threading.Thread(
-            target=self._garbage_collect)
+            target=self._garbage_collect,
+            name='Garbage Collector')
         self._garbage_collect_thread.daemon = True
         logging.debug('Starting garbage collector daemon')
         self._garbage_collect_thread.start()
         logging.debug('Starting submission / allocation daemon')
         self._submit_thread.start()
 
-    def register_client(self, cmax=self._max, cid=None):
+    def register_client(self, cmax=None, cid=None):
         '''
         Register and returns a new _Predictor object
         '''
         # instantiate a new queue
+        if cmax == None:
+            cmax = self._max
         mgr2client = self._manager.Queue()
-        new_client = _Predictor(self.client2mgr, mgr2client,
+        new_client = _Predictor(self._client2mgr, mgr2client,
             cmax, self._prep, self._clients,
             self._dead_clients, self._valid_videos,
             self._client_has_died, self._terminate)
@@ -389,6 +399,7 @@ class JobManager(object):
                 return # you've been ordered to die
             while self._dead_clients:
                 dcq = self._dead_clients.pop()
+                logging.debug('Deregistering client %i'%(dcq))
                 _ = self._output_queues.pop(dcq)
 
     def _submit(self):
@@ -398,20 +409,20 @@ class JobManager(object):
         '''
         logging.debug('Instantiating contiguous GPU data array')
         gpuArray = np.ascontiguousarray(
-            np.zeros(self._batchSize, 
+            np.zeros((self._batchSize, 
                      self._image_dims[2],
                      self._image_dims[0],
-                     self._image_dims[1]
+                     self._image_dims[1])
             ).astype(np.float32))
         
-        def _grab(is_first):
+        def _grab(is_first=False):
             if is_first:
                 item = self._client2mgr.get()
                 if self._terminate.is_set():
                     return
                 return item
             try:
-                item = self._client2mgr.get_nowait()
+                item = self._client2mgr.get(timeout=1)
                 return item
             except:
                 pass
@@ -429,8 +440,9 @@ class JobManager(object):
                 if self._terminate.is_set():
                     logging.debug('Received termination order!')
                     return
+                ID, data = item
                 client, video, jid = ID
-                if client not in self._valid_clients:
+                if client not in self._clients:
                     logging.debug('Job request from dead/invalid client')
                     continue
                 if video not in self._valid_videos:
@@ -441,7 +453,7 @@ class JobManager(object):
                 break
             # grab remaining data
             while True:
-                if len(pending) >= self.batchSize:
+                if len(pending) >= self._batchSize:
                     logging.debug('Batch is ready')
                     return pending
                 item = _grab()
@@ -451,7 +463,7 @@ class JobManager(object):
                 if item == None:
                     logging.debug('Reached end of waiting jobs')
                     break
-                if client not in self._valid_clients:
+                if client not in self._clients:
                     logging.debug('Job request from dead/invalid client')
                     continue
                 if video not in self._valid_videos:
@@ -462,7 +474,6 @@ class JobManager(object):
                 gpuArray[len(pending)-1,:,:,:] = data
             return pending
 
-
         while True:
             pending = _grab_data()
             if self._terminate.is_set():
@@ -471,12 +482,22 @@ class JobManager(object):
             scores = self._gpu_mgr(gpuArray[:len(pending),:,:,:])
             for sid, score in zip(pending, scores):
                 cid, vid, jid = sid
+                logging.debug('Enqueueing job %i on video %i for client %i'%(
+                    jid, vid, cid))
+                self._output_queues[cid].put((sid, score))
 
     def stop(self):
         '''
         Stops the associated threads, as well
         as all child predictors.
         '''
+        try:
+            if self._terminate.is_set():
+                logging.debug('Already terminated.')
+                return
+        except:
+            logging.debug('Already terminated.')
+            return 
         logging.debug('Termination request initiated')
         logging.debug('Bringing down job server')
         self._terminate.set()
@@ -492,4 +513,11 @@ class JobManager(object):
         self._garbage_collect_thread.join()
         logging.debug('Joining submittor / allocator')
         self._submit_thread.join()
+        logging.debug('Shutting down threaded queue')
+        with self._gpu2mgr.all_tasks_done:
+            self._gpu2mgr.all_tasks_done.notify_all()
+        logging.debug('Joining threaded queue')
+        self._gpu2mgr.join()
 
+    def __del__(self):
+        self.stop()
