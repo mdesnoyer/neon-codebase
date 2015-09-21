@@ -174,7 +174,6 @@ class _Predictor(object):
         '''
         logging.debug('Starting the threads locally')
         self._submit_allow = threading.Semaphore(self.max)
-        self._wait_for_results = threading.Condition
         self._get_result_thread = threading.Thread(
                 target=self._get_result,
                 name='Result Fetch')
