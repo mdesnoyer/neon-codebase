@@ -4,6 +4,9 @@
 This is the core of the model when using GPU Video Clients.
 It is a python wrapper for the GPU implementation for our 
 new model, which is based off Google's 'Inception' architecture.
+
+NOTE:
+All of this is contingent on using BGR images in the openCV style!
 '''
 
 import logging
@@ -31,12 +34,12 @@ if _unset_glog_level:
 
 
 logging.basicConfig(level=logging.DEBUG,
-                    format='[%(levelname)s][%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
-                    )
+                    format='[%(levelname)s][%(process)-10s][%(threadName)-10s]'\
+                    '[%(funcName)s] %(message)s',)
 # temporarily, since we're *only* using debug
 logging.basicConfig(level=logging.DEBUG,
-                    format='[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
-                    )
+                    format='[%(process)-10s][%(threadName)-10s][%(funcName)s]' \
+                    ' %(message)s',)
 
 caffe.set_mode_gpu()
 
@@ -66,15 +69,16 @@ class _GPUMgr(caffe.Net):
         N x 3 x H x W array of N images that have already
         been preprocessed and resized.
         '''
-        logging.debug('Running chunk of %i images on GPU'%(data_array.shape[0]))
+        logging.debug('Running chunk of %i images on GPU' % (
+            data_array.shape[0]))
         if type(data_array).__module__ != np.__name__:
-            raise TypeError("data_array type is %s, must be %s"%(
+            raise TypeError("data_array type is %s, must be %s" % (
                 str(type(data_array)), str(np.__name__)))
         if data_array.dtype != np.dtype('float32'):
             raise ValueError("data_array must be float32")
         if np.any(data_array.shape[1:] != self.image_dims):
             raise ValueError(
-                "data_array must have shape N x %i x %i x %i"%(
+                "data_array must have shape N x %i x %i x %i" % (
                 self.image_dims[0], self.image_dims[1], self.image_dims[2]))
         out = self.forward_all(**{self.inputs[0]: data_array})
         predictions = np.exp(out[self.outputs[0]])
@@ -103,31 +107,32 @@ class _Preprocess(object):
         If img is provided as a filename, this will
         read it in. 
         '''
-        img = cv2.imread(imgfn)
-        if img == None:
-            raise ValueError("Could not find image %s"%(imgfn))
-        return img
+        bgr_img = cv2.imread(imgfn)
+        if bgr_img == None:
+            raise ValueError("Could not find image %s" % (imgfn))
+        return bgr_img
 
-    def __call__(self, img):
+    def __call__(self, bgr_img):
         '''
         Actually performs the preprocessing
         '''
         logging.debug('Preprocessing image')
         if type(img) == str:
-            img = self._read(img)
-        if not type(img).__module__ == np.__name__:
+            bgr_img = self._read(bgr_img)
+        if not type(bgr_img).__module__ == np.__name__:
             raise TypeError("Image must be a numpy array (or str filename)")
-        img = img.astype(np.float32)
-        img = cv2.resize(img, (self.image_dims[0], self.image_dims[1]))
-        if img.shape[2] == 1:
+        if bgr_img.dtype != np.float32: 
+            bgr_img = bgr_img.astype(np.float32)
+        bgr_img = cv2.resize(img, (self.image_dims[0], self.image_dims[1]))
+        if bgr_img.shape[2] == 1:
             # it's a black and white image, we have to colorize it
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            bgr_img = cv2.cvtColor(bgr_img, cv2.COLOR_GRAY2BGR)
         elif img.shape[2] != 3:
             raise ValueError("Image has the incorrect number of channels")
         # subtract the channelwise image means
-        img -= self.image_mean
-        img = img.transpose(2, 0, 1)
-        return img
+        bgr_img -= self.image_mean
+        bgr_img = bgr_img.transpose(2, 0, 1)
+        return bgr_img
 
 class _Predictor(object):
     '''
@@ -181,15 +186,15 @@ class _Predictor(object):
         self._get_result_thread.start()
         self._fully_init = True
 
-    def predict(self, data, vid=None, jid=None):
+    def predict(self, bgr_img, vid=None, jid=None):
         '''
-        Asynchronously predicts data. if vid, the video
+        Asynchronously predicts scores. if vid, the video
         id, is None, then it uses the client id. If jid, 
         the job ID, is None, then it uses the total jobs
         submitted so far.
 
         Jobs in the putQ have the form:
-        (ID, data)
+        (ID, bgr_img)
 
         where ID is 
         (cid, vid, jid)
@@ -205,18 +210,18 @@ class _Predictor(object):
             self._submit_allow.acquire()
         logging.debug('Permission acquired')
         if vid == None:
-            logging.debug('video id is undefined, assigning it to %i'%(
+            logging.debug('video id is undefined, assigning it to %i' % (
                 self._cur_video))
             vid = self._cur_video
         if jid == None:
-            logging.debug('job id is currently undefined, assigning it to %i'%(
+            logging.debug('job id is currently undefined, assigning to %i' % (
                 self._total_jobs))
             jid = self._total_jobs
         self._check_vid(vid)
         self._putQ.put(((self.cid, vid, jid), 
-                              self._prep(data)))
+                              self._prep(bgr_img)))
         self._total_jobs += 1
-        logging.debug('%ith job submitted'%(self._total_jobs))
+        logging.debug('%ith job submitted' % (self._total_jobs))
 
     def _check_vid(self, vid):
         '''
@@ -225,17 +230,18 @@ class _Predictor(object):
         changes
         '''
         if self._cur_video != vid:
-            logging.debug('New video seen: %i vs. %i'%(vid,
+            logging.debug('New video seen: %i vs. %i' % (vid,
                 self._cur_video))
             try:
                 logging.debug('Attempting to remove from valid videos')
                 self._valid_videos.remove(self.cur_video)
             except:
-                logging.debug('Invalid video id, although this may not be a problem')
+                logging.debug('Invalid video id, although this may not be a ' \
+                    'problem')
             self._valid_videos.append(vid)
             self._cur_video = vid
             # remove pending results
-            logging.debug('Purging %i results awaiting integration'%(
+            logging.debug('Purging %i results awaiting integration' % (
                 len(self._results)))
             self._results = []
 
@@ -261,10 +267,11 @@ class _Predictor(object):
                 return
             else:
                 (cid, vid, jid), score = item
-                logging.debug('Job %i obtained, score: %.3f'%(
+                logging.debug('Job %i obtained, score: %.3f' % (
                     jid, score))
                 if vid != self._cur_video:
-                    logging.debug('Obtained result corresponds to finished video')
+                    logging.debug('Obtained result corresponds to finished ' \
+                        'video')
                     continue
                 self._results.append((vid, jid, score))
             self._submit_allow.release()
@@ -321,15 +328,16 @@ class JobManager(object):
     FOR NOW, this will only work with 1 GPU. 
     '''
     def __init__(self, model_file, pretrained_file,
-                 batchSize=32, image_dims=[224,224,3],
-                 image_mean=[104,117,123], N=None):
+                 batchSize = 32, image_dims = [224, 224, 3],
+                 image_mean = [104, 117, 123], N = None):
         logging.debug('Initializing')
         self._manager = multiprocessing.Manager()
         self._clients = self._manager.list()
         self._dead_clients = self._manager.list()
         self._valid_videos = self._manager.list()
         self._terminate = self._manager.Event()
-        self._client_has_died = self._manager.Condition() # wakes up the garbage collector thread
+        # _client_has_died wakes up the garbage collector thread
+        self._client_has_died = self._manager.Condition()
         self._output_queues = dict()  # client ID --> output pipeline (queue)
         self._pretrained = pretrained_file
         self._model = model_file
@@ -380,7 +388,7 @@ class JobManager(object):
             self._dead_clients, self._valid_videos,
             self._client_has_died, self._terminate)
         cid = id(new_client)
-        logging.debug('Predictor %i instantiated'%(cid))
+        logging.debug('Predictor %i instantiated' % (cid))
         self._output_queues[cid] = mgr2client 
         self._clients.append(cid)
         return new_client
@@ -398,7 +406,7 @@ class JobManager(object):
                 return # you've been ordered to die
             while self._dead_clients:
                 dcq = self._dead_clients.pop()
-                logging.debug('Deregistering client %i'%(dcq))
+                logging.debug('Deregistering client %i' % (dcq))
                 dead_queue = self._output_queues.pop(dcq)
                 dead_queue.join()
 
@@ -440,7 +448,7 @@ class JobManager(object):
                 if self._terminate.is_set():
                     logging.debug('Received termination order!')
                     return
-                ID, data = item
+                ID, bgr_img = item
                 client, video, jid = ID
                 if client not in self._clients:
                     logging.debug('Job request from dead/invalid client')
@@ -449,7 +457,7 @@ class JobManager(object):
                     logging.debug('Job request for invalid / completed video')
                     continue
                 pending.append(ID)
-                gpuArray[len(pending)-1,:,:,:] = data
+                gpuArray[len(pending)-1,:,:,:] = bgr_img
                 break
             # grab remaining data
             while True:
@@ -469,9 +477,9 @@ class JobManager(object):
                 if video not in self._valid_videos:
                     logging.debug('Job request for invalid / completed video')
                     continue
-                ID, data = item
+                ID, bgr_img = item
                 pending.append(ID)
-                gpuArray[len(pending)-1,:,:,:] = data
+                gpuArray[len(pending)-1,:,:,:] = bgr_img
             return pending
 
         while True:
@@ -479,10 +487,10 @@ class JobManager(object):
             if self._terminate.is_set():
                 logging.debug('Received termination order!')
                 return
-            scores = self._gpu_mgr(gpuArray[:len(pending),:,:,:])
+            scores = self._gpu_mgr(gpuArray[:len(pending), :, :, :])
             for sid, score in zip(pending, scores):
                 cid, vid, jid = sid
-                logging.debug('Enqueueing job %i on video %i for client %i'%(
+                logging.debug('Enqueueing job %i on video %i for client %i' % (
                     jid, vid, cid))
                 self._output_queues[cid].put((sid, score))
 
