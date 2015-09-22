@@ -98,8 +98,8 @@ def bounded_io_loop():
 
 class IOLoopThread(threading.Thread):
     '''A thread that just runs an io loop.'''
-    def __init__(self):
-        super(IOLoopThread, self).__init__()
+    def __init__(self, name=None):
+        super(IOLoopThread, self).__init__(name=name)
         self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
     def __del__(self):

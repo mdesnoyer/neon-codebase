@@ -32,6 +32,7 @@ import platform
 import SocketServer
 import sys
 import threading
+import tornado.gen
 import tornado.httpclient
 import urllib
 import urllib2
@@ -44,7 +45,8 @@ define('file', default=None, type=str,
 define('level', default='info', type=str,
        help=('Default logging level. '
        '"debug", "info", "warn", "error" or "critical"'))
-define('format', default='%(asctime)s %(levelname)s:%(name)s %(message)s',
+define('format', default=('%(asctime)s %(levelname)s:%(name)s[%(threadName)s]'
+                          ' %(message)s'),
        help='Default log format')
 define('do_stderr', default=1, type=int,
        help=('1 if we will generate a stderr output, 0 otherwise. '
@@ -221,7 +223,8 @@ class TornadoHTTPHandler(logging.Handler):
         import utils.http
         self.request_pool = utils.http.RequestPool(5)
 
-        self.logging_thread = utils.sync.IOLoopThread()
+        self.logging_thread = utils.sync.IOLoopThread(
+            name='logs{%s}' % self.__class__)
         self.logging_thread.daemon = True
         self.logging_thread.start()
 
