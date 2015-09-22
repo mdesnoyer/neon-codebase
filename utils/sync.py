@@ -100,7 +100,10 @@ class IOLoopThread(threading.Thread):
     '''A thread that just runs an io loop.'''
     def __init__(self):
         super(IOLoopThread, self).__init__()
-        self.io_loop = tornado.ioloop.IOLoop()
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+
+    def __del__(self):
+        self.io_loop.close()
 
     def run(self):
         self.io_loop.make_current()

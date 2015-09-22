@@ -1497,7 +1497,10 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
         publisher.start()
 
-    atexit.register(tornado.ioloop.IOLoop.current().stop)
+    ioloop = tornado.ioloop.IOLoop()
+    ioloop.make_current()
+
+    atexit.register(ioloop.stop)
     atexit.register(publisher.stop)
     atexit.register(videoDbThread.stop)
     atexit.register(statsDbThread.stop)
@@ -1508,8 +1511,8 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
         statemon.state.last_publish_time = (
             datetime.datetime.utcnow() -
             publisher.last_publish_time).total_seconds()
-    tornado.ioloop.PeriodicCallback(update_publish_time, 10000)
-    tornado.ioloop.IOLoop.current().start()
+    tornado.ioloop.PeriodicCallback(update_publish_time, 10000, io_loop=ioloop)
+    ioloop.start()
 
     publisher.join(300)
     videoDbThread.join(30)
