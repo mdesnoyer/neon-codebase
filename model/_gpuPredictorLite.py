@@ -281,6 +281,8 @@ class _Predictor(object):
         '''
         Returns results
         '''
+        cur_res = self._results[:]
+        self._results = [] 
         return self._results
 
     def stop(self):

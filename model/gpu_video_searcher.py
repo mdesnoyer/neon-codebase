@@ -81,35 +81,52 @@ class GPUVideoSearch(object):
         self._predictor = predictor
         self._algo = search_algo
         self._chooser = None
-        self._kill_switch = Threading.Event()
-        self._complete = Threading.Event()
+        self._kill_switch = threading.Event()
+        self._complete = threading.Event()
+        self._video_queue = threading.Queue()
+        self._finalized = threading.Event()
+        self._result_obtained = threading.Event()
+        self._result_request = threading.Event()
+        self._start_thread()
         self.result = []
 
-    def choose_thumbnails(self, video_file, n=1):
+    def _start_thread(self):
         '''
-        Selects thumbnails based on the asynchronous
-        activity of the GPU. choose_thumbnails spawns
-        a thread (_choose_thumbnails), which runs
-        continuously in the background until it is 
-        instructed to stop.
+        Starts the thread.
         '''
-        logging.debug('Beginning to choose thumbnails...')
-        self._complete.clear()
-        self._kill_switch.clear() 
-        self._chooser = threading.Thread(
+        self._result_obtained.set()
+        self._chooser_thread = threading.Thread(
             target=self._choose_thumbnails,
-            args=(video_file, n))
-        self._choose.start()
-        return True
+            name='thumbnail selector')
+        self._chooser_thread.start()
+
+    def _chooser(self):
+        '''
+        Runs _choose_thumbnails until a new
+        video enters the queue. 
+        '''
+        while True:
+            item = self._video_queue.get()
+            if item == None:
+                logging.debug('Chooser is shutting down!')
+                return
+            if self._kill_switch.is_set():
+                logging.debug('Server is shutting down!')
+                return
+            video_file, n = item
+            self._result_obtained.wait()
+            self._result_obtained.clear()
+            self._choose_thumbnails(video_file, n)
+
 
     def _choose_thumbnails(self, video_file, n):
         logging.debug('Starting')
         seek_loc = [None]
         results = []
-        self._predictor.reset()
         # get the number of frames
         video = cv2.VideoCapture(video_file)
         nframes = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
+        vid = id(video)
         selector = self._algo(nframes)
 
         def get_frame(video, f):
@@ -130,8 +147,16 @@ class GPUVideoSearch(object):
         '''
         while True:
             if self._kill_switch.is_set():
+                logging.debug('Termination request!')
+                self.results = results
                 break
-            for i in self._predictor.get():
+            if self._result_request.is_set():
+                logging.debug('Received result request, halting search.')
+                self.results = results
+                self._finalized.set()
+                self._result_request.clear()
+                break
+            item = self._predictor.results():
                 # i is (id, score)
                 # id will be: <VIDEO_FILE>_<FRAME>
                 frame = int(i[0].split('_')[-1])
@@ -151,16 +176,38 @@ class GPUVideoSearch(object):
                 logging.debug('Request %s'%(jid))
                 self._predictor(img, jid)
 
+    def get_result(self):
+        self._result_request.set()
+        self._finalized.wait()
+        cur_res = self.results
+        self._finalized.clear()
+        self._result_obtained.set()
+        return cur_res
 
+    def choose_thumbnails(self, video_file, n=1):
+        '''
+        Selects thumbnails based on the asynchronous
+        activity of the GPU. choose_thumbnails spawns
+        a thread (_choose_thumbnails), which runs
+        continuously in the background until it is 
+        instructed to stop.
+        '''
+        logging.debug('Beginning to choose thumbnails...')
+        self._video_queue.put((video_file, n))
+        return True
 
     def stop(self):
         '''
         Stops the chooser
         '''
         logging.debug('Stopping')
+        self._video_queue.put(None)
         self._kill_switch.set()
-        if self._chooser != None:
-            self._chooser.join()
+        if self._chooser_thread != None:
+            logging.debug('Joining chooser')
+            self._chooser_thread.join()
+        logging.debug('Joining video queue')
+        self._video_queue.join()
 
     def kill(self):
         '''
@@ -169,8 +216,10 @@ class GPUVideoSearch(object):
         logging.debug('Killing everything')
         self._kill_switch.set()
         self._predictor.stop()
-        if self._chooser != None:
-            self._chooser.join()
+        if self._chooser_thread != None:
+            self._chooser_thread.join()
+        logging.debug('Joining video queue')
+        self._video_queue.join()
 
 '''
 MonteCarloMetropolisHastings is a searching method
