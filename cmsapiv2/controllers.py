@@ -34,7 +34,7 @@ from datetime import datetime
 from functools import wraps 
 import utils.sync
 from utils.options import define, options
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any, Optional
 from urlparse import urlparse 
 
 import logging
@@ -971,6 +971,96 @@ class VideoHandler(APIV2Handler):
         self.success(json.dumps(video.__dict__))
 
 '''*********************************************************************
+VideoStatsHandler 
+*********************************************************************'''
+class VideoStatsHandler(APIV2Handler):
+    @apiv2.api_key_required
+    @tornado.gen.coroutine
+    def get(self, account_id): 
+        """gets the video statuses of 1 -> n videos""" 
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+        internal_video_ids = [] 
+        stats_dict = {} 
+        video_ids = args['video_id'].split(',')
+
+        for v_id in video_ids: 
+            internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
+            internal_video_ids.append(internal_video_id)
+        
+        # even if the video_id does not exist an object is returned 
+        video_statuses = yield tornado.gen.Task(neondata.VideoStatus.get_many, 
+                                                internal_video_ids)
+        video_statuses = [obj.__dict__ for obj in video_statuses] 
+        stats_dict['statistics'] = video_statuses
+        stats_dict['count'] = len(video_statuses)
+
+        self.success(json.dumps(stats_dict))
+
+'''*********************************************************************
+ThumbnailStatsHandler 
+*********************************************************************'''
+class ThumbnailStatsHandler(APIV2Handler):
+    @apiv2.api_key_required
+    @tornado.gen.coroutine
+    def get(self, account_id): 
+        """handles a thumbnail stats request
+           account_id/thumbnail_ids - returns stats information about thumbnails
+           account_id/video_id - returns stats information about all thumbnails 
+                                 for that video 
+        """
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Optional('thumbnail_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          Optional('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList(20))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+        thumbnail_ids = args.get('thumbnail_id', None) 
+        video_ids = args.get('video_id', None)
+        
+        if not video_ids and not thumbnail_ids: 
+            raise MultipleInvalid('a pair of either account_id/thumbnail_id or account_id/video_id is required') 
+        if video_ids and thumbnail_ids: 
+            raise MultipleInvalid('a pair of either account_id/thumbnail_id or account_id/video_id is required, but not both')
+        
+        if thumbnail_ids:
+            thumbnail_ids = thumbnail_ids.split(',')
+            objects = yield tornado.gen.Task(neondata.ThumbnailStatus.get_many,
+                                             thumbnail_ids)
+        elif video_ids:
+            video_ids = video_ids.split(',')
+            internal_video_ids = []
+            # first get all the internal_video_ids 
+            for v_id in video_ids: 
+                internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,v_id)
+                internal_video_ids.append(internal_video_id)
+            # now get all the videos  
+            videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, internal_video_ids)
+            # get the list of thumbnail_ids 
+            thumbnail_ids = []
+            for video in videos:
+                if video:  
+                    thumbnail_ids = thumbnail_ids + video.thumbnail_ids
+            # finally get the thumbnail_statuses for these things
+            objects = yield tornado.gen.Task(neondata.ThumbnailStatus.get_many, 
+                                             thumbnail_ids)
+
+        # build up the stats_dict and send it back 
+        stats_dict = {} 
+        objects = [obj.__dict__ for obj in objects] 
+        stats_dict['statistics'] = objects
+        stats_dict['count'] = len(objects)
+
+        self.success(json.dumps(stats_dict))
+
+'''*********************************************************************
 HealthCheckHandler 
 *********************************************************************'''
 class HealthCheckHandler(APIV2Handler):
@@ -986,7 +1076,6 @@ class HealthCheckHandler(APIV2Handler):
         else: 
             raise Exception('unable to get to the v1 api', 
                             ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
-
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
@@ -1051,9 +1140,15 @@ class CustomVoluptuousTypes():
         return lambda v: dateutil.parser.parse(v)
 
     @staticmethod
-    def CommaSeparatedList():
-        return lambda v: v.split(',')
-       
+    def CommaSeparatedList(limit=100):
+        def f(v): 
+            csl_list = v.split(',') 
+            if len(csl_list) > limit: 
+                raise Invalid("list exceeds limit (%d)" % limit) 
+            else: 
+                return True 
+        return f 
+        #return lambda v: v.split(',')
     @staticmethod
     def Dictionary():
         def f(v):
@@ -1076,6 +1171,10 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 
