@@ -83,7 +83,6 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
   private GenericRecord trackerEvent = null;
   private GenericDatumReader<TrackerEvent> eventReader = null;
-  private Schema origSchema;
   
   private NeonAvroEventSerializer(OutputStream out) {
     this.out = out;
@@ -116,14 +115,18 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
     trackerEvent = null;
     Schema schema = getSchema(event);
-    eventReader = new GenericDatumReader<TrackerEvent>(schema, origSchema);
 
+    eventReader = new GenericDatumReader<TrackerEvent>(schema, TrackerEvent.getClassSchema());
+
+    System.out.println(schema);
+    System.out.println(TrackerEvent.getClassSchema());
+    
     BinaryDecoder binaryDecoder =
         DecoderFactory.get().binaryDecoder(event.getBody(), null);
     
     try {
-   	trackerEvent = eventReader.read(null, binaryDecoder);
-   	dataFileWriter.append(trackerEvent);
+    	trackerEvent = eventReader.read(null, binaryDecoder);
+   		dataFileWriter.append(trackerEvent);
        } catch (IOException e) {
          logger.error("Error reading avro event " + e.toString());
          return;
@@ -134,8 +137,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
   }
 
   private void initialize(Event event) throws IOException {
-    Schema schema = getSchema(event);
-    origSchema = schema;
+    Schema schema = TrackerEvent.getClassSchema();//getSchema(event);
     writer = new GenericDatumWriter<Object>(schema);
     dataFileWriter = new DataFileWriter<Object>(writer);
 

@@ -39,6 +39,8 @@ public class NeonTestAvroEventSerializer {
 
   private File file;
 
+  private Schema[] schemaArray = new Schema[3];
+
   @Before
   public void setUp() throws Exception {
     file = File.createTempFile(getClass().getSimpleName(), "");
@@ -85,7 +87,6 @@ public class NeonTestAvroEventSerializer {
       ctx.put("compressionCodec", codec);
     }
 
-    Schema[] schemaArray = new Schema[3];
     File schemaFile = null;
     File[] schemaFileArray = new File[3];
     Schema schema = null;
@@ -101,9 +102,8 @@ public class NeonTestAvroEventSerializer {
     		    schemaJson
     		        .getJSONArray("fields")
     		        .put(
-    		            new JSONObject(//For some reason \"null\" raises errors, but \nnull does not. They're both supposed to represent a
-    		            			   //default value of null, but only the second one works.
-    		                "{\"name\": \"dummyField\", \"type\" : [ \"null\" , \"int\" ], \"default\" : \nnull}"));
+    		            new JSONObject(
+    		                "{\"name\": \"dummyField\", \"type\" : [ \"null\" , \"int\" ], \"default\" : \"null\"}"));
     	}
     	schema = new Schema.Parser().parse(schemaJson.toString());
         schemaFile = null;
@@ -131,7 +131,7 @@ public class NeonTestAvroEventSerializer {
                     .set("eventType", EventType.IMAGE_VISIBLE)
                     .set("eventData", visEvent).build();
         } else {
-        	record = buildDefaultGenericEvent(schemaArray[i]).set("dummyField", null)
+        	record = buildDefaultGenericEvent(schemaArray[i]).set("dummyField", 78)
         			.set("eventType", EventType.IMAGE_VISIBLE)
         			.set("eventData", visEvent).build();
         }
@@ -145,6 +145,7 @@ public class NeonTestAvroEventSerializer {
             schemaFileArray[i].toURI().toURL().toExternalForm());
       }
       serializer.write(event);
+      System.out.println(i);
 
     }
     
@@ -188,11 +189,12 @@ public class NeonTestAvroEventSerializer {
     DatumReader<GenericRecord> reader = new GenericDatumReader<GenericRecord>();
     DataFileReader<GenericRecord> fileReader =
         new DataFileReader<GenericRecord>(file, reader);
-    GenericRecord record = new GenericData.Record(fileReader.getSchema());
     int numEvents = 0;
     while (fileReader.hasNext()) {
+      GenericRecord record = new GenericData.Record(schemaArray[numEvents]);
       fileReader.next(record);
       numEvents++;
+      System.out.println("NumEvents: " + numEvents);
     }
     fileReader.close();
     Assert.assertEquals("Should have found a total of 3 events", 3, numEvents);
