@@ -1180,7 +1180,7 @@ class TestVideoHandler(TestControllersBase):
        
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['video_count'], 1)
+        self.assertEquals(rjson['video_count'], 2)
         videos = rjson['videos']
         self.assertEquals(videos[0]['key'], vm1.key) 
  

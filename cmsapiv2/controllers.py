@@ -920,6 +920,8 @@ class VideoHandler(APIV2Handler):
         videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
                                         internal_video_ids) 
         new_videos = []
+        empty = True 
+        index = 0 
         if videos:  
            for obj in videos:
                try: 
@@ -936,13 +938,17 @@ class VideoHandler(APIV2Handler):
                        new_video = obj 
                    if new_video: 
                        new_videos.append(new_video)
-               except AttributeError: 
-                   pass 
+                       empty = False 
+               except AttributeError:
+                   new_videos.append({'error' : 'video does not exist', 'video_id' : video_ids[index] }) 
+                   pass
+ 
+               index += 1
 
            vid_dict['videos'] = new_videos
            vid_dict['video_count'] = len(new_videos)
             
-        if vid_dict['video_count'] is 0: 
+        if vid_dict['video_count'] is 0 or empty: 
             raise NotFoundError('video(s) do not exist with id(s): %s' % (args['video_id']))
 
         statemon.state.increment('get_video_oks')
