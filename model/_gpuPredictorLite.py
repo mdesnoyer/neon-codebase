@@ -2,7 +2,7 @@
 ~ Simplified Version ~
 
 This is the core of the model when using GPU Video Clients.
-It is a python wrapper for the GPU implementation for our 
+It is a python wrapper for the GPU implementation for our
 new model, which is based off Google's 'Inception' architecture.
 
 NOTE:
@@ -20,7 +20,7 @@ from time import time
 import cv2
 import numpy as np
 
-# this will prevent caffe from printing thousands 
+# this will prevent caffe from printing thousands
 # of lines to stderr
 if 'GLOG_minloglevel' not in os.environ:
     # Hide INFO and WARNING, show ERROR and FATAL
@@ -50,7 +50,7 @@ class _GPUMgr(caffe.Net):
     off to the GPU
 
     model_file : the deploy prototext
-    pretrained_file : the *.caffemodel file with 
+    pretrained_file : the *.caffemodel file with
                       pretrained weights.
     '''
     def __init__(self, model_file, pretrained_file):
@@ -65,7 +65,7 @@ class _GPUMgr(caffe.Net):
 
     def __call__(self, data_array):
         '''
-        Actually executes the prediction, provided with an 
+        Actually executes the prediction, provided with an
         N x 3 x H x W array of N images that have already
         been preprocessed and resized.
         '''
@@ -85,7 +85,7 @@ class _GPUMgr(caffe.Net):
         return list(predictions[:,0])
 
 class _Preprocess(object):
-    ''' 
+    '''
     preprocesses images so they are appropriate to be
     fed into the GPU, and reorients their dimensions
     as necessary. Note that images are either read in
@@ -95,17 +95,17 @@ class _Preprocess(object):
     def __init__(self, image_dims, image_mean=[104, 117, 123]):
         '''
         image_dims = W x H array / list / tuple
-        image_mean = triple of channel mean values 
+        image_mean = triple of channel mean values
         '''
         self.image_dims = image_dims
         if image_mean == None:
-            image_mean = [0, 0, 0] 
+            image_mean = [0, 0, 0]
         self.image_mean = image_mean
 
     def _read(self, imgfn):
         '''
         If img is provided as a filename, this will
-        read it in. 
+        read it in.
         '''
         bgr_img = cv2.imread(imgfn)
         if bgr_img == None:
@@ -121,7 +121,7 @@ class _Preprocess(object):
             bgr_img = self._read(bgr_img)
         if not type(bgr_img).__module__ == np.__name__:
             raise TypeError("Image must be a numpy array (or str filename)")
-        if bgr_img.dtype != np.float32: 
+        if bgr_img.dtype != np.float32:
             bgr_img = bgr_img.astype(np.float32)
         bgr_img = cv2.resize(img, (self.image_dims[0], self.image_dims[1]))
         if bgr_img.shape[2] == 1:
@@ -152,7 +152,7 @@ class _Predictor(object):
         clients = the global list of valid clients
         dead_clients = the global list of dead clients
         valid_videos = a list of valid videos
-        client_has_died = a condition that incidates that 
+        client_has_died = a condition that incidates that
                           this client has died.
         terminate = an event that terminates all child
                     processes of the JobManager.
@@ -189,14 +189,14 @@ class _Predictor(object):
     def predict(self, bgr_img, vid=None, jid=None):
         '''
         Asynchronously predicts scores. if vid, the video
-        id, is None, then it uses the client id. If jid, 
+        id, is None, then it uses the client id. If jid,
         the job ID, is None, then it uses the total jobs
         submitted so far.
 
         Jobs in the putQ have the form:
         (ID, bgr_img)
 
-        where ID is 
+        where ID is
         (cid, vid, jid)
         '''
         if not self._fully_init:
@@ -218,8 +218,8 @@ class _Predictor(object):
                 self._total_jobs))
             jid = self._total_jobs
         self._check_vid(vid)
-        self._putQ.put(((self.cid, vid, jid), 
-                              self._prep(bgr_img)))
+        self._putQ.put(((self.cid, vid, jid),
+                        self._prep(bgr_img)))
         self._total_jobs += 1
         logging.debug('%ith job submitted' % (self._total_jobs))
 
@@ -247,9 +247,9 @@ class _Predictor(object):
 
     def _get_result(self):
         '''
-        A synchronously fetches results from the 
+        A synchronously fetches results from the
         get Queue, which is populated by a thread
-        under the control of the video manager. 
+        under the control of the video manager.
         Because processing is done asynchronously,
         it's possible that it will return results
         that are no longer applicable, in which
@@ -274,16 +274,53 @@ class _Predictor(object):
                         'video')
                     continue
                 self._results.append((vid, jid, score))
-            self._submit_allow.release()
 
+    def _synchronous_get_result(self):
+        '''
+        Replicates the functionality of _get_result, but
+        does so synchronously.
+        '''
+        while True:
+            try:
+                item = self._getQ.get(timeout=0.1)
+            except:
+                break
+            if item == None:
+                break
+            if self._terminate.is_set():
+                break
+            (cid, vid, jid), score = item
+            logging.debug('Job %i obtained, score: %.3f' % (
+                jid, score))
+            if vid != self._cur_video:
+                logging.debug('Obtained result corresponds to finished ' \
+                    'video')
+                continue
+            self._results.append((vid, jid, score))
 
-    def results(self):
+    def results(self, fetchallrem=False):
         '''
-        Returns results
+        Returns results. If fetchallrem is set to true, it will attempt
+        to fetch all the results that are waiting in the queue. Because
+        this calls _synchronous_get_result, there will be a delay of at
+        least 0.1 seconds. This can be changed in
+        _synchronous_get_result, and may (later) become a tunable
+        parameter.
+
+        ** fetchallrem is not currently used due to how the video
+        searcher's result handler is implemented.
         '''
-        cur_res = self._results[:]
-        self._results = [] 
-        return self._results
+        logging.debug('Result request received.')
+        logging.debug('Attempting to fetch any remaining results in '\
+            'the queue')
+        if fetchallrem:
+            self._synchronous_get_result()
+        cur_res = []
+        while len(self._results):
+            item = self._results.pop()
+            cur_res.append(item)
+        self._results = []
+        return cur_res
 
     def stop(self):
         '''
@@ -322,12 +359,12 @@ class JobManager(object):
         - MP List of dead client IDs
 
     Note that this JobManager is designed to run in the
-    main process, and further manages all GPU clients 
+    main process, and further manages all GPU clients
     from within Main(). However, since it uses Managed
     lists, this requires another process to take over as
     the Manager server.
 
-    FOR NOW, this will only work with 1 GPU. 
+    FOR NOW, this will only work with 1 GPU.
     '''
     def __init__(self, model_file, pretrained_file,
                  batchSize = 32, image_dims = [224, 224, 3],
@@ -356,7 +393,7 @@ class JobManager(object):
         self._start_threads()
         logging.debug('Starting GPU manager')
         self._gpu_mgr = _GPUMgr(self._model, self._pretrained)
-        self._prep = _Preprocess(self._image_dims, 
+        self._prep = _Preprocess(self._image_dims,
                                  self._image_mean)
 
     def _start_threads(self):
@@ -391,7 +428,7 @@ class JobManager(object):
             self._client_has_died, self._terminate)
         cid = id(new_client)
         logging.debug('Predictor %i instantiated' % (cid))
-        self._output_queues[cid] = mgr2client 
+        self._output_queues[cid] = mgr2client
         self._clients.append(cid)
         return new_client
 
@@ -419,12 +456,12 @@ class JobManager(object):
         '''
         logging.debug('Instantiating contiguous GPU data array')
         gpuArray = np.ascontiguousarray(
-            np.zeros((self._batchSize, 
+            np.zeros((self._batchSize,
                      self._image_dims[2],
                      self._image_dims[0],
                      self._image_dims[1])
             ).astype(np.float32))
-        
+
         def _grab(is_first=False):
             if is_first:
                 item = self._client2mgr.get()
@@ -442,7 +479,7 @@ class JobManager(object):
             Gracefully grabs all available to data
             that are in need of analysis
             '''
-            pending = [] 
+            pending = []
             # grab the first job
             while True:
                 logging.debug('Waiting on first job')
@@ -507,7 +544,7 @@ class JobManager(object):
                 return
         except:
             logging.debug('Already terminated.')
-            return 
+            return
         logging.debug('Termination request initiated')
         logging.debug('Bringing down job server')
         self._terminate.set()
