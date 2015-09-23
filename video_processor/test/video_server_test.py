@@ -605,6 +605,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(resp.body,'{}')
 
     @tornado.testing.gen_test
+    def test_jobs_handler(self):
+        req = neondata.NeonApiRequest('job21', self.api_key,
+                    'vid1', 't', 't', 'r', 'h')
+        req.save()
+        jdata = req.to_json()
+        resp = yield self.http_client.fetch(self.get_url('/job'),
+                                            method="POST", body=jdata)
+        self.assertEquals(resp.code, 200)
+
+    @tornado.testing.gen_test
     def test_requeue_handler(self):
         req = neondata.NeonApiRequest('job21', self.api_key,
                     'vid1', 't', 't', 'r', 'h')
