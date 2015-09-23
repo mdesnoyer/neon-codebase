@@ -1169,6 +1169,40 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test
+    def test_get_two_videos_one_dne(self):
+        vm1 = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm1.save()
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'))
+        vm.save()
+        url = '/api/v2/%s/videos?video_id=vid1,viddoesnotexist' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+       
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['video_count'], 2)
+        videos = rjson['videos']
+        self.assertEquals(videos[0]['key'], vm1.key) 
+ 
+    def test_get_video_dne(self):
+        url = '/api/v2/%s/videos?video_id=viddoesnotexist' % (self.account_id_api_key)
+        response = self.http_client.fetch(self.get_url(url),
+                                          self.stop, 
+                                          method='GET')
+       
+        response = self.wait()
+        self.assertEquals(response.code, 404)
+
+    def test_get_multiple_video_dne(self):
+        url = '/api/v2/%s/videos?video_id=viddoesnotexist,vidoerwe,w3asdfa324ad' % (self.account_id_api_key)
+        response = self.http_client.fetch(self.get_url(url),
+                                          self.stop, 
+                                          method='GET')
+       
+        response = self.wait()
+        self.assertEquals(response.code, 404)
+
+    @tornado.testing.gen_test
     def test_get_single_video_with_fields(self):
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
         vm.save()
