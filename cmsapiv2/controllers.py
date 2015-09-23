@@ -935,10 +935,10 @@ class VideoHandler(APIV2Handler):
                            elif field in obj: 
                                new_video[field] = obj[field]
                    else: 
-                       new_video = obj 
-                   if new_video: 
-                       new_videos.append(new_video)
-                       empty = False 
+                       new_video = obj
+ 
+                   new_videos.append(new_video)
+                   empty = False 
                except AttributeError:
                    new_videos.append({'error' : 'video does not exist', 'video_id' : video_ids[index] }) 
                    pass
