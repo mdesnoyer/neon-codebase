@@ -1617,9 +1617,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         status_one = rjson['statistics'][0]  
         status_two = rjson['statistics'][1] 
         self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_one['serving_frac'], 0.8)
         self.assertEquals(status_two['ctr'], 0.12)
-        self.assertEquals(status_two['serving_frac'], 0.3)
 
     @tornado.testing.gen_test
     def test_account_id_video_id_dne(self): 
@@ -1643,7 +1641,6 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.assertEquals(rjson['count'], 1)
         status_one = rjson['statistics'][0] 
         self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_one['serving_frac'], 0.8)
 
     @tornado.testing.gen_test
     def test_account_id_multiple_thumbnail_ids(self): 
@@ -1660,9 +1657,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         status_one = rjson['statistics'][0]  
         status_two = rjson['statistics'][1] 
         self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_one['serving_frac'], 0.8)
         self.assertEquals(status_two['ctr'], 0.12)
-        self.assertEquals(status_two['serving_frac'], 0.3)
 
     def test_video_id_limit(self): 
         url = '/api/v2/%s/stats/thumbnails?video_id=1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o' % (self.account_id_api_key) 

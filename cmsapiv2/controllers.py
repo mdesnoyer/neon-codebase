@@ -245,12 +245,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     __delete = delete
 
 '''****************************************************************
-AccountHelper
-****************************************************************'''
-class AccountHelper():
-    """Class responsible for helping the account handlers."""
+Return Formatter
+****************************************************************''' 
+class ReturnFormatter(): 
     @staticmethod 
-    @tornado.gen.coroutine
     def format_user_return(user_account):
         # we don't want to send back everything, build up object of what we want to send back 
         rv_account = {}
@@ -266,13 +264,14 @@ class AccountHelper():
         rv_account['updated'] = user_account.updated
         rv_account['api_key'] = user_account.api_v2_key
         rv_account['name'] = user_account.name
-        raise tornado.gen.Return(rv_account)
+        return rv_account
 
-    #@staticmethod 
-    #@tornado.gen.coroutine
-    #admin_only_decorator
-    #def listAllAccounts(
-    
+    @staticmethod 
+    def format_thumbnail_stats_return(tstat):
+        rv_tstat = {} 
+        rv_tstat['ctr'] = tstat.ctr
+        return rv_tstat
+   
 '''****************************************************************
 NewAccountHandler
 ****************************************************************'''
@@ -298,7 +297,7 @@ class NewAccountHandler(APIV2Handler):
 
         output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
         user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
-        user = yield AccountHelper.format_user_return(user)
+        user = ReturnFormatter.format_user_return(user)
             
         _log.debug(('New Account has been added : name = %s id = %s') 
                    % (user['name'], user['account_id']))
@@ -334,7 +333,7 @@ class AccountHandler(APIV2Handler):
         if self.header_api_key != user_account.api_v2_key: 
             raise NotAuthorizedError()
  
-        user_account = yield AccountHelper.format_user_return(user_account)
+        user_account = ReturnFormatter.format_user_return(user_account)
         statemon.state.increment('get_account_oks')
         self.success(json.dumps(user_account))
  
@@ -361,7 +360,7 @@ class AccountHandler(APIV2Handler):
         if self.header_api_key != acct_internal.api_v2_key: 
             raise NotAuthorizedError()
 
-        acct_for_return = yield AccountHelper.format_user_return(acct_internal)
+        acct_for_return = ReturnFormatter.format_user_return(acct_internal)
         def _update_account(a):
             a.default_size = list(a.default_size) 
             a.default_size[0] = int(args.get('default_width', acct_internal.default_size[0]))
@@ -1066,7 +1065,7 @@ class ThumbnailStatsHandler(APIV2Handler):
 
         # build up the stats_dict and send it back 
         stats_dict = {} 
-        objects = [obj.__dict__ for obj in objects] 
+        objects = [ReturnFormatter.format_thumbnail_stats_return(obj) for obj in objects] 
         stats_dict['statistics'] = objects
         stats_dict['count'] = len(objects)
 
@@ -1159,8 +1158,8 @@ class CustomVoluptuousTypes():
                 raise Invalid("list exceeds limit (%d)" % limit) 
             else: 
                 return True 
-        return f 
-        #return lambda v: v.split(',')
+        return f
+ 
     @staticmethod
     def Dictionary():
         def f(v):
