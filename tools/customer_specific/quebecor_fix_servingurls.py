@@ -66,7 +66,7 @@ def main():
             to_save = []
 
     neondata.ThumbnailServingURLs.save_all(to_save)
-    _log.info('Processed %d thumbs. %d modified. %d same. %d still bad' %
+    _log.info('Processed %d thumbs. %d modified. %d still bad' %
               (count, n_mod, n_still_bad))
 
 if __name__ == '__main__':
