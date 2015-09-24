@@ -195,7 +195,7 @@ class DBConnection(object):
                 if len(data) < (keys_per_call /2):
                     cnt *= 2
                 keys.update(data)
-            return keys
+            return list(keys)
 
     def clear_db(self):
         '''Erases all the keys in the database.
