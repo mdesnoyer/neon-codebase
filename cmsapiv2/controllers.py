@@ -1037,9 +1037,9 @@ class ThumbnailStatsHandler(APIV2Handler):
         video_ids = args.get('video_id', None)
         
         if not video_ids and not thumbnail_ids: 
-            raise MultipleInvalid('a pair of either account_id/thumbnail_id or account_id/video_id is required') 
+            raise MultipleInvalid('thumbnail_id or video_id is required') 
         if video_ids and thumbnail_ids: 
-            raise MultipleInvalid('a pair of either account_id/thumbnail_id or account_id/video_id is required, but not both')
+            raise MultipleInvalid('you can only have one of thumbnail_id or video_id') 
         
         if thumbnail_ids:
             thumbnail_ids = thumbnail_ids.split(',')

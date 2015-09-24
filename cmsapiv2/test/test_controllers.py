@@ -1658,6 +1658,20 @@ class TestThumbnailStatsHandler(TestControllersBase):
         status_two = rjson['statistics'][1] 
         self.assertEquals(status_one['ctr'], 0.23)
         self.assertEquals(status_two['ctr'], 0.12)
+        
+        # test url encoded 
+        encoded_params = urllib.urlencode({ 'thumbnail_id' : 'testingtid,testing_vtid_one' })
+        self.assertEquals('thumbnail_id=testingtid%2Ctesting_vtid_one', encoded_params) 
+        url = '/api/v2/%s/stats/thumbnails?%s' % (self.account_id_api_key, encoded_params) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
 
     def test_video_id_limit(self): 
         url = '/api/v2/%s/stats/thumbnails?video_id=1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o' % (self.account_id_api_key) 
