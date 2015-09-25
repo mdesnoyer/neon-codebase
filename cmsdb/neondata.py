@@ -195,7 +195,7 @@ class DBConnection(object):
                 if len(data) < (keys_per_call /2):
                     cnt *= 2
                 keys.update(data)
-            return keys
+            return list(keys)
 
     def clear_db(self):
         '''Erases all the keys in the database.
@@ -2906,161 +2906,7 @@ class BrightcovePlatform(AbstractPlatform):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update,
-            self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created, callback_url=self.callback_url)
-
-    @tornado.gen.engine
-    def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
-        ''' method to keep video metadata and thumbnail data consistent 
-        callback(None): bad request
-        callback(False): internal error
-        callback(True): success
-        '''
-        bc = self.get_api()
-
-        #Get video metadata
-        platform_vid = InternalVideoID.to_external(i_vid)
-        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
-        if not vmdata:
-            _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
-            callback(None)
-            return
-        
-        #Thumbnail ids for the video
-        tids = vmdata.thumbnail_ids
-        
-        #Aspect ratio of the video 
-        fsize = vmdata.get_frame_size()
-
-        #Get all thumbnails
-        thumbnails = yield tornado.gen.Task(
-                ThumbnailMetadata.get_many, tids)
-        t_url = None
-        
-        # Get the type of thumbnail (Neon/ Brighcove)
-        thumb_type = "" #type_rank
-
-        #Check if the new tid exists
-        for thumbnail in thumbnails:
-            if thumbnail.key == new_tid:
-                t_url = thumbnail.urls[0]
-                thumb_type = "bc" if thumbnail.type == "brightcove" else ""
-        
-        if not t_url:
-            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            callback(None)
-            return
-        
-
-        # Update the new_tid as the thumbnail for the video
-        try:
-            image = yield utils.imageutils.PILImageUtils.download_image(
-                t_url, async=True)
-            update_response = yield bc.update_thumbnail_and_videostill(
-                platform_vid,
-                new_tid,
-                image=image,
-                still_size=(self.video_still_width, None))
-        except Exception as e:
-            _log.error('Error updating the thumbnail and video still to '
-                       'Brightcove for video %s %s' % (i_vid, e))
-            callback(False)
-            return
-
-        thumb_bc_id, still_bc_id = update_response
-
-        def _update_external_tid(thumb_obj):
-            thumb_obj.external_id = thumb_bc_id
-
-        yield tornado.gen.Task(ThumbnailMetadata.modify,
-                               new_tid,
-                               _update_external_tid)
-
-        #NOTE: When the call is made from brightcove controller, do not 
-        #save the changes in the db, this is just a temp change for A/B testing
-        if nosave:
-            callback(True)
-            return
-
-        # Save the correct thumb to chosen in the database
-        def _set_chosen(thumb_dict):
-            for thumb_id, thumb in thumb_dict.iteritems():
-                if thumb is not None:
-                    thumb.chosen = thumb_id == new_tid
-        ret = yield tornado.gen.Task(
-            ThumbnailMetadata.modify_many, tids, _set_chosen)
-        if not ret:
-            _log.error("Error updating thumbnails in database")
-            callback(False)
-
-        # Update the request state
-        def _set_active(obj):
-            obj.state = RequestState.ACTIVE
-        ret = yield tornado.gen.Task(
-            NeonApiRequest.modify,
-            vmdata.job_id,
-            self.neon_api_key,
-            _set_active)
-        if not ret:
-            _log.error("Error updating request state in database")
-            callback(False)
-            
-        callback(True)
-
-    def create_job(self, vid, callback):
-        ''' Create neon job for particular video '''
-        def created_job(result):
-            if not result.error:
-                try:
-                    job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid, job_id)
-                    self.save(callback)
-                except Exception,e:
-                    callback(False)
-            else:
-                callback(False)
-        
-        vserver = options.video_server
-        self.get_api(vserver).create_video_request(vid, self.integration_id,
-                                            created_job)
-
-    def check_feed_and_create_api_requests(self):
-        ''' Use this only after you retreive the object from DB '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        bc.create_neon_api_requests(self.integration_id)    
-        bc.create_requests_unscheduled_videos(self.integration_id)
-
-    def check_feed_and_create_request_by_tag(self):
-        ''' Temp method to support backward compatibility '''
-        self.get_api().create_brightcove_request_by_tag(self.integration_id)
-
-    def check_playlist_feed_and_create_requests(self):
-        ''' Get playlists and create requests '''
-        
-        for pid in self.playlist_feed_ids:
-            self.get_api().create_request_from_playlist(pid, self.integration_id)
-
-    @tornado.gen.coroutine
-    def verify_token_and_create_requests_for_video(self, n):
-        ''' Method to verify brightcove token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with brightcove vid metadata
-        '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        val = yield bc.verify_token_and_create_requests(
-            self.integration_id, n)
-        raise tornado.gen.Return(val)
-
-    def sync_individual_video_metadata(self):
-        ''' sync video metadata from bcove individually using 
-        find_video_id api '''
-        self.get_api().bcove_api.sync_individual_video_metadata(
-            self.integration_id)
+            self.read_token, self.write_token)
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
@@ -3070,18 +2916,6 @@ class BrightcovePlatform(AbstractPlatform):
         ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
-
-    @staticmethod
-    def find_all_videos(token, limit, callback=None):
-        ''' find all brightcove videos '''
-
-        # Get the names and IDs of recently published videos:
-        url = 'http://api.brightcove.com/services/library?\
-                command=find_all_videos&sort_by=publish_date&token=' + token
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
-                request_timeout=60.0, connect_timeout=10.0)
-        http_client.fetch(req, callback)
 
     @classmethod
     def get_all(cls, callback=None):
@@ -3411,112 +3245,7 @@ class OoyalaPlatform(AbstractPlatform):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
-    def check_feed_and_create_requests(self):
-        '''
-        #check feed and create requests
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo.process_publisher_feed(copy.deepcopy(self)) 
-
-    #verify token and create requests on signup
-    def create_video_requests_on_signup(self, n, callback=None):
-        ''' Method to verify ooyala token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with ooyala vid metadata
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def update_thumbnail(self, i_vid, new_tid):
-        '''
-        Update the Preview image on Ooyala video 
-        
-        callback(None): bad request/ Gateway error
-        callback(False): internal error
-        callback(True): success
-
-        '''
-        #Get video metadata
-        platform_vid = InternalVideoID.to_external(i_vid)
-        
-        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
-        if not vmdata:
-            _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
-            raise tornado.gen.Return(None)
-        
-        #Thumbnail ids for the video
-        tids = vmdata.thumbnail_ids
-        
-        #Aspect ratio of the video 
-        fsize = vmdata.get_frame_size()
-
-        #Get all thumbnails
-        thumbnails = yield tornado.gen.Task(
-                ThumbnailMetadata.get_many, tids)
-        t_url = None
-        
-        #Check if the new tid exists
-        for thumb in thumbnails:
-            if thumb.key == new_tid:
-                t_url = thumb.urls[0]
-        
-        if not t_url:
-            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            raise tornado.gen.Return(None)
-            
-        
-        # Update the new_tid as the thumbnail for the video
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
-        update_result = yield tornado.gen.Task(oo.update_thumbnail,
-                                               platform_vid,
-                                               t_url,
-                                               new_tid,
-                                               fsize)
-        #check if thumbnail was updated 
-        if not update_result:
-            raise tornado.gen.Return(None)
-            
-      
-        #Update the database with video
-        #Get previous thumbnail and new thumb
-        modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-            thumbnails, new_tid)
-        modified_thumbs.append(new_thumb)
-        if old_thumb is None:
-            #old_thumb can be None if there was no neon thumb before
-            _log.debug("key=update_thumbnail" 
-                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
-        else:
-            modified_thumbs.append(old_thumb)
-       
-        #Verify that new_thumb data is not empty 
-        if new_thumb is not None:
-            res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                         modified_thumbs)  
-            if not res:
-                _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
-                                " failed for %s" %new_tid)
-                raise tornado.gen.Return(False)
-                
-        else:
-            _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
-            raise tornado.gen.Return(False)
-            
-
-        vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
-        vid_request.state = RequestState.ACTIVE
-        ret = vid_request.save()
-        if not ret:
-            _log.error("key=update_thumbnail msg=%s state not updated to active"
-                        %vid_request.key)
-        raise tornado.gen.Return(True)
+            return signature 
     
     @classmethod
     def get_all(cls, callback=None):
