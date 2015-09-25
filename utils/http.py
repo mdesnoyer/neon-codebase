@@ -21,9 +21,13 @@ import tornado.httpclient
 import tornado.ioloop
 import tornado.locks
 import utils.logs
+from utils import statemon
 import utils.sync
 
 _log = logging.getLogger(__name__)
+
+statemon.state.define('waiting_in_pools', int)
+_waiting_in_pools_ref = statemon.state.get_ref('waiting_in_pools')
 
 # TODO(mdesnoyer): Handle the stack on async requests so that the
 # callback will have a stack that looks like the original request
@@ -145,6 +149,7 @@ class RequestPool(object):
         request - A tornado.httpclient.HTTPRequest object
         kwargs - Passed to the module level send_request
         '''
+        statemon.state.increment(ref=_waiting_in_pools_ref)
         yield self._lock.acquire()
         try:
             kwargs['async'] = True
@@ -152,5 +157,6 @@ class RequestPool(object):
             raise tornado.gen.Return(response)
         finally:
             self._lock.release()
+            statemon.state.increment(ref=_waiting_in_pools_ref, diff=-1)
 
                 

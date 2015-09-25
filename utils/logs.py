@@ -36,6 +36,7 @@ import tornado.gen
 import tornado.httpclient
 import urllib
 import urllib2
+from utils import statemon
 import utils.sync
 
 from utils.options import define, options
@@ -69,6 +70,10 @@ define('access_log_file', default=None, type=str,
 define('loggly_base_url',
        default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
        help='Base url for the loggly endpoint')
+
+# State variables
+statemon.define('http_log_errors', int)
+_http_log_error_ref = statemon.state.get_ref('http_log_errors')
 
 # grabbed from logging.py
 #
@@ -256,12 +261,15 @@ class TornadoHTTPHandler(logging.Handler):
         response = yield self.request_pool.send_request(
             self.generate_request(record),
             do_logging=False,
+            ntries=1,
             async=True)
         if response.error:
             try:
                 raise response.error
             except:
                 curtime = datetime.datetime.utcnow()
+                statemon.state.increment(ref=_http_log_error_ref,
+                                         safe=False)
                 if (self.last_emit_error is None or 
                     (curtime - self.last_emit_error).total_seconds() >
                     self.emit_error_sampling_period):
