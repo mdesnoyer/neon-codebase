@@ -1470,6 +1470,18 @@ class NamespacedStoredObject(StoredObject):
             cur_idx += max_request_size
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        '''Return all the keys in the database for this object type.'''
+        db_connection = DBConnection.get(cls)
+        raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+            cls._baseclass_name().lower() + '_*')
+
+        raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
+                                  x is not None])
+
+    @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
         return super(NamespacedStoredObject, cls).modify(
             cls.format_key(key),
@@ -2484,6 +2496,24 @@ class AbstractPlatform(NamespacedStoredObject):
     def _get_all_impl(cls, callback=None):
         '''Implements get_all_instances for a single platform type.'''
         return super(AbstractPlatform, cls).get_all(callback=callback)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        neon_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+           NeonPlatform._baseclass_name().lower() + '_*')
+        bc_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+            BrightcovePlatform._baseclass_name().lower() + '_*')
+        oo_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+            BrightcovePlatform._baseclass_name().lower() + '_*')
+        yt_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+            YoutubePlatform._baseclass_name().lower() + '_*')
+
+        raw_keys = neon_keys + bc_keys + oo_keys + yt_keys
+
+        raise tornado.gen.Return([x.split('_')[1:] for x in raw_keys
+                                  if x is not None])
 
     @classmethod
     @utils.sync.optional_sync
@@ -3720,6 +3750,14 @@ class NeonApiRequest(NamespacedStoredObject):
             func,
             create_missing=create_missing,
             callback=callback)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        base_keys = yield super(NeonApiRequest, cls).get_all_keys(aync=True)
+
+        raise tornado.gen.Return([x.split('_')[::-1] for x in base_keys])
 
     @classmethod
     def delete(cls, job_id, api_key, callback=None):
