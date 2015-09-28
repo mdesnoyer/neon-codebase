@@ -9,6 +9,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
+import boto.sqs
+from boto.sqs.message import Message
 from cmsdb import neondata
 import concurrent.futures
 import logging
@@ -1001,7 +1003,57 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
         self.assertItemsEqual([x.api_request.job_id for x in jobs_found],
                               ['job%i' % i for i in range(7)])
          
-        
+class TestSQSServer(test_utils.neontest.TestCase):
+     '''Used to test the SQS queue'''
+
+     def setUp(self):
+         super(TestSQSServer, self).setUp()
+         self.SQS = video_processor.server.SQSServer('us-east-1',
+                                          'AKIAIG2UEH2FF6WSRXDA',
+                      '8lfXdfcCl3d2BZLA9CtMkCveeF2eUgUMYjR3YOhe')
+         self.m = None #Message()
+	 self.q = None #self.SQS.create_queue("test_queue")
+
+     def tearDown(self):
+         super(TestSQSServer, self).tearDown()
+     
+     def test_message_upload(self):
+         self.q = self.SQS.create_queue("test_queue")
+         self.m = Message()
+         self.m.set_body('hello')
+         self.SQS.write_message(self.m)
+         self.SQS.read_message(60, 2)
+         self.SQS.delete_queue("test_queue")
+         #self.SQS.create_queue("other_test_queue")
+
+     '''def test_get_all_queues(self):
+         self.SQS.get_all_queues()
+
+     def test_get_queue(self):
+         self.SQS.get_queue("test_queue")
+
+     def test_write_message(self):
+         self.m = Message()
+         self.m.set_body('hello')
+         self.SQS.write_message(self.m)
+
+     def test_read_message(self):
+         mes = self.SQS.read_message()
+         mes.get_body()'''
+
+     def test_delete_message(self):
+         self.q = self.SQS.create_queue("second_test_queue")
+         self.m = Message()
+         self.m.set_body('goodbye')
+         self.SQS.write_message(self.m)
+         self.SQS.message_count()
+         self.m = self.SQS.read_message()
+         self.SQS.delete_message(self.m)
+         self.SQS.message_count()
+         self.SQS.delete_queue("second_test_queue")
+
+     #def test_delete_queue(self):
+     #    self.SQS.delete_queue("test_queue")
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

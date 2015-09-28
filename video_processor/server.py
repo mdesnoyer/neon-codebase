@@ -12,6 +12,8 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import boto.exception
+import boto.sqs
+from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 from collections import deque
@@ -629,7 +631,7 @@ class RequeueHandler(tornado.web.RequestHandler):
                 key = data["_data"]["key"]
                 api_request = neondata.NeonApiRequest._create(key, data)
             except KeyError, e:
-                _log.error("Inavlid format for request json data")
+                _log.error("Invalid format for request json data")
                 statemon.state.increment('bad_request')
                 self.set_status(400)
                 self.finish()
@@ -659,6 +661,51 @@ class RequeueHandler(tornado.web.RequestHandler):
             raise tornado.web.HTTPError(500)
 
         self.finish()
+
+class SQSServer(object):
+    '''Replaces the current server code with an AWS SQS instance'''
+
+    def __init__(self, region, access_key, secret_key, num_queues=3):
+        self.conn = boto.sqs.connect_to_region(
+                    region, aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key)
+        
+        self.pq = Queue.PriorityQueue()
+        self.q = None
+
+        for i in range(num_queues):
+            self.q = create_queue("Priority " + str(i))
+            self.pq.put((i, self.q))
+        
+
+    def create_queue(self, queue_name, timeout=30):
+        return self.conn.create_queue(queue_name, timeout)
+
+    def create_queue_test(self, queue_name, timeout=30):
+        self.q = self.conn.create_queue(queue_name, timeout)
+
+    def get_all_queues(self):
+        return self.conn.get_all_queues()
+
+    def get_queue(self, queue_name):
+        return self.conn.get_queue(queue_name)
+
+    def write_message(self, message):
+        self.q.write(message)
+
+    def read_message(self, timeout=0, delay=0):
+        return self.q.read(timeout, delay)
+
+    def message_count(self):
+        return self.q.count()    
+
+    def delete_message(self, message):
+         self.q.delete_message(message)
+
+    def delete_queue(self, queue_name):
+        self.q = self.conn.get_queue(queue_name)
+        self.conn.delete_queue(self.q)
+
 
 ## ===================== API ===========================================#
 # External Handlers
