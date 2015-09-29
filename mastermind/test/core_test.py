@@ -1154,8 +1154,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
+        # With the new serving calculation, model score is used to encourage
+        # high serving percentages for high score thumbnails.
+        # Chosen one gets 5% lift. 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['ctr', 'bc', 'n1', 'n2'])
+                         ['ctr', 'n2', 'bc', 'n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1497,6 +1500,73 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(run_frac['b1'], 1.0/3.0)
         self.assertAlmostEqual(run_frac['n1'], 1.0/3.0)
         self.assertAlmostEqual(run_frac['n2'], 1.0/3.0)
+
+    def test_frac_with_model_score_prior(self):
+        # We will test frac calculation based on prior values.
+        # Two cases will be tested, with non_exp_thumb can be none or not none
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        self.assertAlmostEqual(run_frac['b1'], 1.0/4.8)
+        self.assertAlmostEqual(run_frac['n1'], 2.2/4.8)
+        self.assertAlmostEqual(run_frac['n2'], 1.6/4.8)
+
+        # adding non_exp_thumb is not none case.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+                               exp_frac = '0.5'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='brightcove',
+                                               chosen = True),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        self.assertAlmostEqual(run_frac['b1'], 1.0/4.8*0.5)
+        self.assertAlmostEqual(run_frac['n1'], 2.2/4.8*0.5)
+        self.assertAlmostEqual(run_frac['n2'], 1.6/4.8*0.5)
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):

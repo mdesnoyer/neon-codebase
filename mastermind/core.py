@@ -913,12 +913,29 @@ class Mastermind(object):
         win_frac = win_frac ** frac_adjust_rate
         win_frac = win_frac / np.sum(win_frac)
 
+
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
         # simulation.
         if non_exp_thumb is not None:
             win_frac = np.around(win_frac[:-1], 2)
             win_frac = win_frac / np.sum(win_frac)
+
+        # Use the _get_prior_conversions as the adjustment. And the percentage
+        # is normalized to one.
+        win_frac_prior = np.array([self._get_prior_conversions(x, video_info)
+            for x in valid_bandits])
+        # Optional, win_frac_prior will get adjusted by frac_adjust_rate
+        # For example, when frac_adjust_rate is 1.0, we are running the a
+        # full dynamic experiment, it probably doesn't make sense to keep a
+        # constant lift boost on top of a dynamic process. When frac_adjust_rate
+        # is 0, the serving percentage is constant, it makes sense to have a
+        # boost to the thumbnails with high scores.
+        win_frac_prior = win_frac_prior ** (1.0 - frac_adjust_rate)
+        # Adjust by model score and re-normalize.
+        win_frac = win_frac * win_frac_prior
+        win_frac = win_frac / np.sum(win_frac)
+
 
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
