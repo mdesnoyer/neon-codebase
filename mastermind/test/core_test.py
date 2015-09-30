@@ -1763,6 +1763,22 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
 
+    def test_update_video_with_new_editor_thumbnail(self):
+        #
+        self.mastermind.experiment_state['acct1_vid1'] = \
+          neondata.ExperimentState.COMPLETE
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon'),
+             ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
+                               ttype='brightcove', chosen=True)],
+             testing_enabled=True)
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
+
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestStatUpdating, self).setUp()

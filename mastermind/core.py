@@ -415,10 +415,17 @@ class Mastermind(object):
                 
                 # Update the statistics for all the thumbnails based
                 # on our known state.
+                # Also, we will find out if there are new thumbnails added,
+                # this can happen if editor add new thumbnails.
+                added_thumbnail_infos = []
                 for new_thumb in thumbnail_infos:
+                    is_exist = False
                     for old_thumb in video_info.thumbnails:
                         if new_thumb.id == old_thumb.id:
                             new_thumb.update_stats(old_thumb)
+                            is_existed = True
+                    if not is_exist:
+                        added_thumbnail_infos.append(new_thumb)
 
                 video_info.thumbnails = thumbnail_infos
                 video_info.testing_enabled = testing_enabled
@@ -429,7 +436,21 @@ class Mastermind(object):
                     video_info.account_id = video_metadata.get_account_id()
                 video_info.score_type = ModelMapper.get_model_type(
                     video_metadata.model_version)
-                
+
+                # If the video experiment ended, but there are new editor
+                # thumbnails added, we will restart the experiment again.
+                # TODO: validate if there is only one chosen?
+                if self.experiment_state.get(video_id, None) == \
+                    neondata.ExperimentState.COMPLETE:
+                    for thumb in added_thumbnail_infos:
+                        if thumb.type not in [neondata.ThumbnailType.NEON,
+                            neondata.ThumbnailType.CENTERFRAME,
+                            neondata.ThumbnailType.RANDOM,
+                            neondata.ThumbnailType.FILTERED]:
+                            self.experiment_state[video_id] = \
+                                neondata.ExperimentState.RUNNING
+                            break
+
             except KeyError:
                 # No information about this video yet, so add it to the index
                 score_type = ModelMapper.get_model_type(
@@ -669,7 +690,7 @@ class Mastermind(object):
                                   neondata.ThumbnailType.RANDOM,
                                   neondata.ThumbnailType.FILTERED]:
                 if (default is None or 
-                    default.type == neondata.ThumbnailType.DEFAULT 
+                    thumb.type == neondata.ThumbnailType.DEFAULT 
                     or thumb.rank < default.rank):
                     default = thumb
 
@@ -912,7 +933,6 @@ class Mastermind(object):
         # TODO: We will change it to be related to the prior instead.
         win_frac = win_frac ** frac_adjust_rate
         win_frac = win_frac / np.sum(win_frac)
-
 
         # The serving fractions for the experiment are just the
         # fraction of time that each thumb won the Monte Carlo
