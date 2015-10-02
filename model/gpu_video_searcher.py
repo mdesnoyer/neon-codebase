@@ -1,6 +1,7 @@
 import heapq
 import logging
 import threading
+from Queue import Queue
 from bisect import bisect_left as bidx
 from bisect import insort_left as bput
 
@@ -83,7 +84,7 @@ class GPUVideoSearch(object):
         self._chooser = None
         self._kill_switch = threading.Event()
         self._complete = threading.Event()
-        self._video_queue = threading.Queue()
+        self._video_queue = Queue()
         self._finalized = threading.Event()
         self._result_obtained = threading.Event()
         self._result_request = threading.Event()
@@ -133,7 +134,7 @@ class GPUVideoSearch(object):
             '''
             Obtains a specific frame from the video
             '''
-            more_data, cur_frame = seek_vide(vide, f,
+            more_data, cur_frame = seek_video(video, f,
                                 cur_frame=seek_loc[0])
             seek_loc[0] = cur_frame
             if not more_data:
