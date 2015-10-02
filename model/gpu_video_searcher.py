@@ -30,7 +30,7 @@ def seek_video(video, frame_no, cur_frame=None):
     video - An opencv VideoCapture object
     frame_no - The frame number to seek to
     do_log - True if logging should happen on errors
-    cur_frame - If you know the frame number that the video should be at, 
+    cur_frame - If you know the frame number that the video should be at,
                 put it here. It helps to identify error cases.
 
     Outputs:
@@ -38,7 +38,7 @@ def seek_video(video, frame_no, cur_frame=None):
     '''
 
     grab_sucess = True
-    if (cur_frame is not None and cur_frame > 0 and 
+    if (cur_frame is not None and cur_frame > 0 and
         video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES) == 0):
         while grab_sucess and cur_frame < frame_no:
             grab_sucess = video.grab()
@@ -49,7 +49,7 @@ def seek_video(video, frame_no, cur_frame=None):
                 (frame_no - cur_frame) < 4 and (frame_no - cur_frame) >= 0) ):
             # Seeking to a place in the video that's a ways away, so JUMP
             video.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, frame_no)
-            
+
         cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
         while grab_sucess and cur_frame < frame_no:
             grab_sucess = video.grab()
@@ -66,12 +66,39 @@ def seek_video(video, frame_no, cur_frame=None):
 '''
 class GPUVideoSearch(object):
     '''
-    Abstract GPU Video Searcher, preliminary
-    implementation: designed for testing 
-    _gpuPredictor and MonteCarloMetropolisHastings.
+    Begins a search of a video, using an asynchronous searching
+    technique that termed (somewhat erroneously) Monte Carlo
+    Metropolis Hastings.
 
-    Note: in contrast to the orthodox video searchers,
-    this simply gets a video file.
+    While search is asynchronous (scoring requests are
+    submitted to a job manager) as is results being obtaiend (it is
+    run as a separate thread), a sequence of locks ensures that
+    results are dispatched and obtained appropriately and not
+    clobbered by subsequent searches.
+
+    The sequence works like this:
+    - The instance of this class running in the main thread
+    is instructed to fetch the results. The function sets
+    the "_result_request" event, which indicates that someone
+    wants to see what the results are so far. It then waits
+    on _finalized.
+    - The separate thread that handles video searches sees the
+    result request, and stops submitting new requests.
+    - The predictor is requested to yield all available results
+    that are still in the queue.
+    - Results in hand, the video search thread indicates that the
+    video is done, and sets _finalized, and obtains the next video
+    for analysis. It then waits on _results_received
+    - The requester sees _finalized is set, and fetches the results,
+    and sets the _results_received event indicating that the results
+    are safely obtained.
+    - The video searcher sees that _results_received has been set,
+    and continues with the next analysis.
+
+    NOTE: If the video search completes before the results are
+    requested, the video searcher itself sets _result_request to true.
+    This means, essentially, that results have to be fetched before
+    a new video search can begin.
     '''
     def __init__(self, predictor, search_algo):
         '''
@@ -95,6 +122,7 @@ class GPUVideoSearch(object):
         '''
         Starts the thread.
         '''
+        logging.debug('Starting searcher thread')
         self._result_obtained.set()
         self._chooser_thread = threading.Thread(
             target=self._choose_thumbnails,
@@ -104,7 +132,7 @@ class GPUVideoSearch(object):
     def _chooser(self):
         '''
         Runs _choose_thumbnails until a new
-        video enters the queue. 
+        video enters the queue.
         '''
         while True:
             item = self._video_queue.get()
@@ -115,7 +143,10 @@ class GPUVideoSearch(object):
                 logging.debug('Server is shutting down!')
                 return
             video_file, n = item
+            logging.debug('Waiting until last result is obtained')
             self._result_obtained.wait()
+            logging.debug('Last result is obtained, resetting flag '\
+                'and starting search.')
             self._result_obtained.clear()
             self._choose_thumbnails(video_file, n)
 
@@ -148,7 +179,7 @@ class GPUVideoSearch(object):
         '''
         while True:
             if self._kill_switch.is_set():
-                logging.debug('Termination request!')
+                logging.debug('Received termination request!')
                 self.results = results
                 break
             if self._result_request.is_set():
@@ -157,25 +188,33 @@ class GPUVideoSearch(object):
                 self._finalized.set()
                 self._result_request.clear()
                 break
-            item = self._predictor.results():
-                # i is (id, score)
-                # id will be: <VIDEO_FILE>_<FRAME>
-                frame = int(i[0].split('_')[-1])
-                score = i[1]
-                logging.debug('Fetched %s'%i[0])
-                selector((frame, score))
-                if len(results) < n:
-                    heapq.heappush(results,
-                                   (score, frame))
-                else:
-                    heapq.heappushpop(results,
-                                      (score, frame))
-            for i in range(10):
-                f = selector()
-                jid = 'MOVIE_' + str(f)
-                img = get_frame(video, f)
-                logging.debug('Request %s'%(jid))
-                self._predictor(img, jid)
+            # obtain a frame request from the selector
+            nframe = selector()
+            # obtain that frame
+            bgr_img = get_frame(video, nframe)
+            # submit that frame request to the job manager
+            logging.debug('Requested score for frame %s'%(jid))
+            self._predictor.predict(bgr_img, vid, nframe)
+            # obtain the extant results from the predictor
+            self._update_results(results)
+
+    def _update_results(self, results, fetchallrem=False):
+        '''
+        Fetches results from the predictor.
+        '''
+        for result in self._predictor.results(fetchallrem):
+            cvid, frame, score = result
+            if not cvid == vid:
+                # TODO: turn this into a warning!
+                logging.debug('Returned VID is invalid')
+            logging.debug('Score for frame %s obtained'%result[1])
+            selector((frame, score))
+            if len(results) < n:
+                heapq.heappush(results,
+                               (score, frame))
+            else:
+                heapq.heappushpop(results,
+                                  (score, frame))
 
     def get_result(self):
         self._result_request.set()
@@ -190,7 +229,7 @@ class GPUVideoSearch(object):
         Selects thumbnails based on the asynchronous
         activity of the GPU. choose_thumbnails spawns
         a thread (_choose_thumbnails), which runs
-        continuously in the background until it is 
+        continuously in the background until it is
         instructed to stop.
         '''
         logging.debug('Beginning to choose thumbnails...')
@@ -225,10 +264,10 @@ class GPUVideoSearch(object):
 '''
 MonteCarloMetropolisHastings is a searching method
 where frames are sampled according to the probability,
-given their neighbors, that they have a high score. 
+given their neighbors, that they have a high score.
 Assuming that the scores of sequential frames are not
 completely independent, then this will eventually (and
-efficiently) converge to the correct distribution of 
+efficiently) converge to the correct distribution of
 scores over frames.
 '''
 
@@ -262,22 +301,21 @@ class MonteCarloMetropolisHastings(object):
     def _update(self, update):
         '''
         Updates the algorithm's current knoweldge
-        state. 
+        state.
 
         'update' is a list of tuples (x, y) where
         x - integer - the location of the sample
         y - float - the score of the sample
         '''
-        if update[1] = None:
+        if update[1] == None:
             # the image was rejected
             self.rejected.add(update[0])
         else:
             bput(self.samples, update[0])
             self.results[update[0]] = update[1]
-            self.max_score = max(self.max_score, 
+            self.max_score = max(self.max_score,
                                  update[1])
             self.tot_score += update[1]
-        self.n_samples += 1
         # a rejected image causes the mean score
         # to be reduced -- this is sensible since
         # the more rejections we get the less likely
@@ -286,7 +324,7 @@ class MonteCarloMetropolisHastings(object):
 
     def _find_n_neighbors(self, target, N):
         '''
-        Given a sorted list, returns the 
+        Given a sorted list, returns the
         N next smallest and the N next
         largest. Uses a bisection search.
 
@@ -310,7 +348,7 @@ class MonteCarloMetropolisHastings(object):
         '''
         Simpler version of find_n_neighbors,
         which only returns the left and right
-        neighbors for now. 
+        neighbors for now.
         '''
         v = bidx(self.samples, target)
         if not v:
@@ -353,6 +391,9 @@ class MonteCarloMetropolisHastings(object):
         while self.n_samples < self.N:
             sample = np.random.choice(self.N)
             if self._accept_sample(sample):
+                # increment n_samples to indicate that another
+                # sample has been 'taken'
+                self.n_samples += 1
                 return sample
 
     def _predict_score(self, neighbs, sample):
