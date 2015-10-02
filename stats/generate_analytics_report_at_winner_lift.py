@@ -67,7 +67,7 @@ def get_video_ids():
     cursor = conn.cursor()
     cursor.execute(
     """select distinct regexp_extract(thumbnail_id, 
-    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageclicks where 
+    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
     thumbnail_id is not NULL and
     tai='%s' %s""" % (options.pub_id, 
                       statutils.get_time_clause(options.start_time,
@@ -193,7 +193,9 @@ def collect_stats(thumb_info, video_info,
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
-                if cur_thumb.type == baseline_type:
+                impr_count = cum_impr.iloc[-1].get(thumb_id, None)
+                if (cur_thumb.type == baseline_type and impr_count is not None
+                    and impr_count > options.min_impressions):
                     if base_rank is None or cur_thumb.rank < base_rank:
                         base_thumb = cur_thumb
                         base_rank = cur_thumb.rank
@@ -364,13 +366,25 @@ def calculate_raw_stats():
            tai='%s' %s''' %(options.pub_id,
                             statutils.get_time_clause(options.start_time,
                                                       options.end_time)))
-    rows = cursor.fetchall()
+    stat_rows = cursor.fetchall()
+
+    cursor.execute(
+         '''select cast(min(servertime) as timestamp),
+         cast(max(servertime) as timestamp) 
+         from eventsequences where 
+         tai='%s' %s''' %(options.pub_id,
+                            statutils.get_time_clause(options.start_time,
+                                                      options.end_time)))
+    time_rows = cursor.fetchall()
+    
     return pandas.Series({
-        'loads': rows[0][0],
-        'views' : rows[0][1],
-        'clicks' : rows[0][2],
-        'ads' : rows[0][3],
-        'video plays' : rows[0][4]})
+        'loads': stat_rows[0][0],
+        'views' : stat_rows[0][1],
+        'clicks' : stat_rows[0][2],
+        'ads' : stat_rows[0][3],
+        'video plays' : stat_rows[0][4],
+        'start time' : time_rows[0][0],
+        'end time' : time_rows[0][1]})
 
 def calculate_cmsdb_stats():
     _log.info('Getting some stats from the CMSDB')
@@ -410,8 +424,7 @@ def calculate_cmsdb_stats():
         })
     
         
-def main():
-    
+def main():    
     _log.info('Getting metadata about the videos.')
     video_info = neondata.VideoMetadata.get_many(get_video_ids())
     video_info = dict([(x.key, x) for x in video_info if x is not None])

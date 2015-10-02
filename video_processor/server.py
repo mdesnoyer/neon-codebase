@@ -67,7 +67,6 @@ statemon.define('too_many_job_retries', int)
 statemon.define('bad_request', int)
 statemon.define('neon_requests', int)
 statemon.define('brightcove_requests', int)
-statemon.define('ooyala_requests', int)
 
 # Constants
 TOP_THUMBNAILS = "topn"
@@ -605,6 +604,32 @@ class DequeueHandler(tornado.web.RequestHandler):
 
         self.finish()
 
+class JobHandler(tornado.web.RequestHandler): 
+    def initialize(self, job_manager): 
+        super(JobHandler, self).initialize()
+        self.job_manager = job_manager 
+    @tornado.gen.coroutine
+    def post(self, *args, **kwargs): 
+        try: 
+            post_data = self.request.body 
+            json_data = json.loads(post_data) 
+            try:
+                key = json_data["_data"]["key"]
+                api_key = json_data["_data"]["api_key"] 
+                api_request = yield tornado.gen.Task(neondata.NeonApiRequest.get, key, api_key)
+                retval = yield self.job_manager.add_job(api_request)
+                self.set_status(200)
+                self.write('{"message":"successfully added job"}')
+                self.finish()
+            except KeyError as e:
+                _log.error("Inavlid format for request json data")
+                statemon.state.increment('bad_request')
+                self.set_status(400)
+                self.finish()
+        except Exception as e:
+            _log.error("key=job_handler msg=error %s" %e)
+            raise tornado.web.HTTPError(500)
+
 class RequeueHandler(tornado.web.RequestHandler):
     """ REQUEUE JOB Handler"""
     def initialize(self, job_manager, reprocess=False):
@@ -745,25 +770,6 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
                     default_thumbnail=default_thumbnail)
                 api_request.autosync = autosync
                 statemon.state.increment('brightcove_requests')
-
-            elif "ooyala" in self.request.uri:
-                request_type = "ooyala"
-                oo_api_key = params["oo_api_key"]
-                oo_secret_key = params["oo_secret_key"]
-                autosync = params["autosync"]
-                api_request = neondata.OoyalaApiRequest(
-                    job_id,
-                    api_key, 
-                    i_id,
-                    vid,
-                    title,
-                    url,
-                    oo_api_key,
-                    oo_secret_key, 
-                    http_callback,
-                    default_thumbnail=default_thumbnail)
-                api_request.autosync = autosync
-                statemon.state.increment('ooyala_requests')
 
             else:
                 request_type = "neon"
@@ -959,6 +965,7 @@ class Server(object):
              dict(job_manager=self.job_manager)),
             (r"/stats", StatsHandler,  dict(job_manager=self.job_manager)),
             (r"/dequeue", DequeueHandler, dict(job_manager=self.job_manager)),
+            (r"/job", JobHandler, dict(job_manager=self.job_manager)),
             (r"/requeue", RequeueHandler, dict(job_manager=self.job_manager,
                                                  reprocess=False)),
             (r"/reprocess", RequeueHandler, dict(job_manager=self.job_manager,
