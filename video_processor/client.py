@@ -25,6 +25,7 @@ if sys.path[0] != __base_path__:
 
 import atexit
 import boto.exception
+from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import cv2
@@ -41,6 +42,7 @@ import Queue
 import random
 import re
 import signal
+import server
 import socket
 import tempfile
 import tornado.web
@@ -845,17 +847,20 @@ class VideoClient(multiprocessing.Process):
         _log.debug("Dequeuing job [%s] " % (self.pid))
         headers = {'X-Neon-Auth' : options.server_auth} 
         result = None
-        dequeue_url = 'http://%s/dequeue' % options.video_server
+        '''dequeue_url = 'http://%s/dequeue' % options.video_server
         req = tornado.httpclient.HTTPRequest(
                                             url=dequeue_url,
                                             method="GET",
                                             headers=headers,
                                             request_timeout=60.0,
                                             connect_timeout=10.0)
-
-        response = utils.http.send_request(req)
+        '''
+        sqs_reader = server.SQSRead()
+        response = Message()
+        response = sqs_reader.read() #utils.http.send_request(req)
+   
         if not response.error:
-            result = response.body
+            result = JSON.parse(response.get_body())
              
             if result is not None and result != "{}":
                 try:

@@ -1008,53 +1008,40 @@ class TestSQSServer(test_utils.neontest.TestCase):
 
      def setUp(self):
          super(TestSQSServer, self).setUp()
-         self.SQS = video_processor.server.SQSServer('us-east-1',
-                                          'AKIAIG2UEH2FF6WSRXDA',
-                      '8lfXdfcCl3d2BZLA9CtMkCveeF2eUgUMYjR3YOhe')
-         self.m = None #Message()
-	 self.q = None #self.SQS.create_queue("test_queue")
+         region = 'us-east-1'
+         aws_key = 'AKIAIG2UEH2FF6WSRXDA'
+         secret_key = '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'
+         
+         serv = video_processor.server
+         self.SQSR = video_processor.server.SQSRead(region, aws_key, secret_key)
+         self.SQSW = serv.SQSWrite(region, aws_key, secret_key)
+         self.SQSD = serv.SQSDelete(region, aws_key, secret_key)
+         self.m = None
 
      def tearDown(self):
          super(TestSQSServer, self).tearDown()
      
      def test_message_upload(self):
-         self.q = self.SQS.create_queue("test_queue")
-         self.m = Message()
-         self.m.set_body('hello')
-         self.SQS.write_message(self.m)
-         self.SQS.read_message(60, 2)
-         self.SQS.delete_queue("test_queue")
-         #self.SQS.create_queue("other_test_queue")
+         for i in range(1, 101):
+             self.m = Message()
+             self.m.set_body(str(i))
+             self.SQSW.write_message(i%3, self.m)
 
-     '''def test_get_all_queues(self):
-         self.SQS.get_all_queues()
-
-     def test_get_queue(self):
-         self.SQS.get_queue("test_queue")
-
-     def test_write_message(self):
-         self.m = Message()
-         self.m.set_body('hello')
-         self.SQS.write_message(self.m)
-
-     def test_read_message(self):
-         mes = self.SQS.read_message()
-         mes.get_body()'''
-
-     def test_delete_message(self):
-         self.q = self.SQS.create_queue("second_test_queue")
-         self.m = Message()
-         self.m.set_body('goodbye')
-         self.SQS.write_message(self.m)
-         self.SQS.message_count()
-         self.m = self.SQS.read_message()
-         self.SQS.delete_message(self.m)
-         self.SQS.message_count()
-         self.SQS.delete_queue("second_test_queue")
-
-     #def test_delete_queue(self):
-     #    self.SQS.delete_queue("test_queue")
-
+         #self.SQS.message_count()
+         
+         #self.SQS.dump(1)
+         #self.SQS.dump(0)
+         #self.SQS.dump(2)
+         
+	 count = 100
+         while count > 0:
+             mes = self.SQSR.read_message()
+	     if mes != None:
+                  p = mes.message_attributes['priority']['string_value']
+                  self.SQSD.delete_message(int(p), mes)
+                  count = count - 1
+             #self.SQS.message_count()
+         
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()
