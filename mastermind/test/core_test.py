@@ -1533,6 +1533,91 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(run_frac['n1'], 2.2/4.8)
         self.assertAlmostEqual(run_frac['n2'], 1.6/4.8)
 
+        # Try the similar setup but frac_adjust_rate = 0.5
+        # The base_conversions/impressions are set the same.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.5,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        base_sum = 1.0 ** 0.5 + 2.2 ** 0.5 + 1.6 ** 0.5
+        self.assertAlmostEqual(run_frac['b1'], 1.0 ** 0.5 / base_sum, delta=0.05)
+        self.assertAlmostEqual(run_frac['n1'], 2.2 ** 0.5 / base_sum, delta=0.05)
+        self.assertAlmostEqual(run_frac['n2'], 1.6 ** 0.5 / base_sum, delta=0.05)
+
+        # Try the similar setup but frac_adjust_rate = 1.0
+        # In this case the different model score doesn't matter as much.
+        # notice the initial conversions are still adjusted so it will be
+        # a little different.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac_1, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=1100,
+                                               base_impressions=20000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=1100,
+                                               base_impressions=20000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=1100,
+                                               base_impressions=20000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        experiment_state, run_frac_2, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 0.2),
+                                               base_conversions=1100,
+                                               base_impressions=20000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 0.2),
+                                               base_conversions=1100,
+                                               base_impressions=20000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=1100,
+                                               base_impressions=20000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        self.assertAlmostEqual(run_frac_1['b1'], run_frac_2['b1'], delta=0.2)
+        self.assertAlmostEqual(run_frac_1['n1'], run_frac_2['b1'], delta=0.2)
+        self.assertAlmostEqual(run_frac_1['n2'], run_frac_2['b1'], delta=0.2)
+
         # adding non_exp_thumb is not none case.
         self.mastermind.update_experiment_strategy(
             'acct1',
@@ -1763,10 +1848,40 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
 
+    def test_update_video_with_thumbnail_but_no_directive_changes(self):
+        #
+        self.mastermind.experiment_state['acct1_vid1'] = \
+          neondata.ExperimentState.COMPLETE
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        # First test a case with update video info, but the experiemnt
+        # state should stay COMPLETE.
+        
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')],
+             testing_enabled=True)
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+        directives = [x for x in self.mastermind.get_directives()]
+        # Directives doesn't change because the experiment has ened.
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
+
+
     def test_update_video_with_new_editor_thumbnail(self):
         #
         self.mastermind.experiment_state['acct1_vid1'] = \
           neondata.ExperimentState.COMPLETE
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
@@ -1778,6 +1893,16 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
              testing_enabled=True)
         updated_state = self.mastermind.experiment_state['acct1_vid1']
         self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
+        directives = [x for x in self.mastermind.get_directives()]
+        self.assertEqual(len(directives), 1)
+        self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
+        # directive changes since the experiement restarted, and
+        # the strategy is changed with exp_frac=1.0
+        directive_dict = dict((x, y) for x, y in directives[0][1])
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 1.0/3.05)
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid2'], 1.0/3.05)
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid3'], 1.05/3.05)
+
 
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):

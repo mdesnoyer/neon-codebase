@@ -423,7 +423,7 @@ class Mastermind(object):
                     for old_thumb in video_info.thumbnails:
                         if new_thumb.id == old_thumb.id:
                             new_thumb.update_stats(old_thumb)
-                            is_existed = True
+                            is_exist = True
                     if not is_exist:
                         added_thumbnail_infos.append(new_thumb)
 
@@ -443,8 +443,7 @@ class Mastermind(object):
                 if self.experiment_state.get(video_id, None) == \
                     neondata.ExperimentState.COMPLETE:
                     for thumb in added_thumbnail_infos:
-                        if thumb.type not in [neondata.ThumbnailType.NEON,
-                            neondata.ThumbnailType.CENTERFRAME,
+                        if thumb.type not in [neondata.ThumbnailType.CENTERFRAME,
                             neondata.ThumbnailType.RANDOM,
                             neondata.ThumbnailType.FILTERED]:
                             self.experiment_state[video_id] = \
@@ -690,8 +689,8 @@ class Mastermind(object):
                                   neondata.ThumbnailType.RANDOM,
                                   neondata.ThumbnailType.FILTERED]:
                 if (default is None or 
-                    thumb.type == neondata.ThumbnailType.DEFAULT 
-                    or thumb.rank < default.rank):
+                    (thumb.type == neondata.ThumbnailType.DEFAULT 
+                     and thumb.rank < default.rank)):
                     default = thumb
 
         if strategy.chosen_thumb_overrides and chosen is not None:
