@@ -117,17 +117,17 @@ class _Preprocess(object):
         Actually performs the preprocessing
         '''
         logging.debug('Preprocessing image')
-        if type(img) == str:
+        if type(bgr_img) == str:
             bgr_img = self._read(bgr_img)
         if not type(bgr_img).__module__ == np.__name__:
             raise TypeError("Image must be a numpy array (or str filename)")
         if bgr_img.dtype != np.float32:
             bgr_img = bgr_img.astype(np.float32)
-        bgr_img = cv2.resize(img, (self.image_dims[0], self.image_dims[1]))
+        bgr_img = cv2.resize(bgr_img, (self.image_dims[0], self.image_dims[1]))
         if bgr_img.shape[2] == 1:
             # it's a black and white image, we have to colorize it
             bgr_img = cv2.cvtColor(bgr_img, cv2.COLOR_GRAY2BGR)
-        elif img.shape[2] != 3:
+        elif bgr_img.shape[2] != 3:
             raise ValueError("Image has the incorrect number of channels")
         # subtract the channelwise image means
         bgr_img -= self.image_mean
@@ -172,6 +172,7 @@ class _Predictor(object):
         self._get_result_thread = None
         self._fully_init = False
         self._total_jobs = 0
+        self._stopped = False
 
     def _start_result(self):
         '''
@@ -267,6 +268,8 @@ class _Predictor(object):
                 return
             else:
                 (cid, vid, jid), score = item
+                # allow it to submit more jobs
+                self._submit_allow.release()
                 logging.debug('Job %i obtained, score: %.3f' % (
                     jid, score))
                 if vid != self._cur_video:
@@ -311,9 +314,9 @@ class _Predictor(object):
         searcher's result handler is implemented.
         '''
         logging.debug('Result request received.')
-        logging.debug('Attempting to fetch any remaining results in '\
-            'the queue')
         if fetchallrem:
+            logging.debug('Attempting to fetch any remaining results in '\
+                'the queue')
             self._synchronous_get_result()
         cur_res = []
         while len(self._results):
@@ -326,21 +329,35 @@ class _Predictor(object):
         '''
         Locally terminate the results.
         '''
+        if self._stopped:
+            return
         logging.debug('Stopping...')
         logging.debug('Enqueueing null result')
-        self._getQ.put(None)
-        if not self._terminate.is_set():
-            logging.debug('Removing self from active clients')
-            self._clients.remove(self.cid)
-            logging.debug('Adding self to dead clients list')
-            self._dead_clients.append(self.cid)
-            logging.debug('Notifying JobManager')
-            with self._client_has_died:
-                self._client_has_died.notify_all()
-        else:
+        try:
+            self._getQ.put(None)
+        except:
+            logging.debug('Input queue no longer exists, must be dead!')
+        try:
+            if not self._terminate.is_set():
+                try:
+                    logging.debug('Removing video from active videos')
+                    self._valid_videos.remove(self.cur_video)
+                except:
+                    logging.debug('Failed to remove current video from active videos')
+                logging.debug('Removing self from active clients')
+                self._clients.remove(self.cid)
+                logging.debug('Adding self to dead clients list')
+                self._dead_clients.append(self.cid)
+                logging.debug('Notifying JobManager')
+                with self._client_has_died:
+                    self._client_has_died.notify_all()
+            else:
+                logging.debug('JobManager is already dead')
+            logging.debug('Joining results thread')
+            self._get_result_thread.join(5)
+        except:
             logging.debug('JobManager is already dead.')
-        logging.debug('Joining results thread')
-        self._get_result_thread.join()
+        self._stopped = True
 
     def __del__(self):
         self.stop()
@@ -395,6 +412,7 @@ class JobManager(object):
         self._gpu_mgr = _GPUMgr(self._model, self._pretrained)
         self._prep = _Preprocess(self._image_dims,
                                  self._image_mean)
+        self._stopped = False
 
     def _start_threads(self):
         '''
@@ -438,16 +456,22 @@ class JobManager(object):
         '''
         self._client_has_died.acquire()
         while True:
+            logging.debug('Waiting for dead client notification')
             self._client_has_died.wait()
             logging.debug('Notified of client death!')
-            if self._terminate.is_set():
-                logging.debug('Server is shutting down!')
-                return # you've been ordered to die
-            while self._dead_clients:
+            try:
+                self._terminate.is_set()
+                if self._terminate.is_set():
+                    logging.debug('Received termination order!')
+                    return
+            except:
+                logging.debug('Irregular termination -- likely by ctrl+C')
+                logging.debug('Bailing out!')
+            while len(self._dead_clients):
                 dcq = self._dead_clients.pop()
                 logging.debug('Deregistering client %i' % (dcq))
                 dead_queue = self._output_queues.pop(dcq)
-                dead_queue.join()
+                dead_queue.join(5)
 
     def _submit(self):
         '''
@@ -465,8 +489,14 @@ class JobManager(object):
         def _grab(is_first=False):
             if is_first:
                 item = self._client2mgr.get()
-                if self._terminate.is_set():
-                    return
+                try:
+                    self._terminate.is_set()
+                    if self._terminate.is_set():
+                        logging.debug('Received termination order!')
+                        return
+                except:
+                    logging.debug('Irregular termination -- likely by ctrl+C')
+                    logging.debug('Bailing out!')
                 return item
             try:
                 item = self._client2mgr.get(timeout=1)
@@ -484,8 +514,14 @@ class JobManager(object):
             while True:
                 logging.debug('Waiting on first job')
                 item = _grab(True)
-                if self._terminate.is_set():
-                    logging.debug('Received termination order!')
+                try:
+                    self._terminate.is_set()
+                    if self._terminate.is_set():
+                        logging.debug('Received termination order!')
+                        return
+                except:
+                    logging.debug('Irregular termination -- likely by ctrl+C')
+                    logging.debug('Bailing out!')
                     return
                 ID, bgr_img = item
                 client, video, jid = ID
@@ -504,9 +540,13 @@ class JobManager(object):
                     logging.debug('Batch is ready')
                     return pending
                 item = _grab()
-                if self._terminate.is_set():
-                    logging.debug('Received termination order!')
-                    return
+                try:
+                    self._terminate.is_set()
+                    if self._terminate.is_set():
+                        logging.debug('Received termination order!')
+                        return
+                except:
+                    logging.debug('Error occured, bailing out!')
                 if item == None:
                     logging.debug('Reached end of waiting jobs')
                     break
@@ -523,9 +563,13 @@ class JobManager(object):
 
         while True:
             pending = _grab_data()
-            if self._terminate.is_set():
-                logging.debug('Received termination order!')
-                return
+            try:
+                self._terminate.is_set()
+                if self._terminate.is_set():
+                    logging.debug('Received termination order!')
+                    return
+            except:
+                logging.debug('Error occured, bailing out!')
             scores = self._gpu_mgr(gpuArray[:len(pending), :, :, :])
             for sid, score in zip(pending, scores):
                 cid, vid, jid = sid
@@ -538,33 +582,48 @@ class JobManager(object):
         Stops the associated threads, as well
         as all child predictors.
         '''
-        try:
-            if self._terminate.is_set():
-                logging.debug('Already terminated.')
-                return
-        except:
-            logging.debug('Already terminated.')
+        if self._stopped:
             return
         logging.debug('Termination request initiated')
-        logging.debug('Bringing down job server')
-        self._terminate.set()
-        # terminate garbage collect
-        logging.debug('Notifying job collector')
-        with self._client_has_died:
-            self._client_has_died.notify_all()
-        # terminate submit -- in case it's waiting
-        # on a job.
-        logging.debug('Notifying submittor / allocator')
-        self._client2mgr.put(None)
-        logging.debug('Joining garbage collector')
-        self._garbage_collect_thread.join()
-        logging.debug('Joining submittor / allocator')
-        self._submit_thread.join()
-        logging.debug('Shutting down threaded queue')
-        with self._gpu2mgr.all_tasks_done:
-            self._gpu2mgr.all_tasks_done.notify_all()
-        logging.debug('Joining threaded queue')
-        self._gpu2mgr.join()
+        try:
+            logging.debug('Bringing down job server')
+            self._terminate.set()
+        except:
+            logging.debug('setting of _terminate failed')
+        try:
+            # terminate garbage collect
+            logging.debug('Notifying job collector')
+            with self._client_has_died:
+                self._client_has_died.notify_all()
+        except:
+            logging.debug('notify all on _client_has_died failed')
+        try:
+            # terminate submit -- in case it's waiting
+            # on a job.
+            logging.debug('Notifying submittor / allocator')
+            self._client2mgr.put(None)
+        except:
+            logging.debug('client --> mgr poison pill enqueue has failed.')
+        try:
+            logging.debug('Joining garbage collector')
+            self._garbage_collect_thread.join(5)
+        except:
+            logging.debug('Joining garbage collector has failed.')
+        try:
+            logging.debug('Joining submittor / allocator')
+            self._submit_thread.join(5)
+        except:
+            logging.debug('Submission/allocation join has failed.')
+        try:
+            logging.debug('Shutting down threaded queue')
+            with self._gpu2mgr.all_tasks_done:
+                self._gpu2mgr.all_tasks_done.notify_all()
+            logging.debug('Joining threaded queue')
+            self._gpu2mgr.join(5)
+        except:
+            logging.debug('Joining gpu2mgr has failed.')
+        self._stopped = True
 
     def __del__(self):
-        self.stop()
+        if not self._stopped:
+            self.stop()

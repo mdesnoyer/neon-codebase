@@ -5,6 +5,7 @@ from Queue import Queue
 from bisect import bisect_left as bidx
 from bisect import insort_left as bput
 
+import cv2
 import numpy as np
 
 logging.basicConfig(level=logging.DEBUG,
@@ -108,7 +109,7 @@ class GPUVideoSearch(object):
         '''
         self._predictor = predictor
         self._algo = search_algo
-        self._chooser = None
+        self._chooser_thread = None
         self._kill_switch = threading.Event()
         self._complete = threading.Event()
         self._video_queue = Queue()
@@ -116,6 +117,10 @@ class GPUVideoSearch(object):
         self._result_obtained = threading.Event()
         self._result_request = threading.Event()
         self._start_thread()
+        self._cur_video_id = None
+        self._cur_selector = None
+        logging.debug('_chooser_thread status is: ' 
+                      + str(self._chooser_thread.is_alive()))
         self.result = []
 
     def _start_thread(self):
@@ -123,9 +128,9 @@ class GPUVideoSearch(object):
         Starts the thread.
         '''
         logging.debug('Starting searcher thread')
-        self._result_obtained.set()
+        #self._result_obtained.set()
         self._chooser_thread = threading.Thread(
-            target=self._choose_thumbnails,
+            target=self._chooser,
             name='thumbnail selector')
         self._chooser_thread.start()
 
@@ -135,6 +140,7 @@ class GPUVideoSearch(object):
         video enters the queue.
         '''
         while True:
+            logging.debug('Waiting on item from _video_queue.')
             item = self._video_queue.get()
             if item == None:
                 logging.debug('Chooser is shutting down!')
@@ -143,13 +149,17 @@ class GPUVideoSearch(object):
                 logging.debug('Server is shutting down!')
                 return
             video_file, n = item
+            self._choose_thumbnails(video_file, n)
+            # # perhaps the below isn't necessary -- it only needs to
+            # # wait for the result to be OBTAINED.
+            # logging.debug('Waiting on result request')
+            # self._result_request.wait()
+            # logging.debug('Result request obtained!')
             logging.debug('Waiting until last result is obtained')
             self._result_obtained.wait()
             logging.debug('Last result is obtained, resetting flag '\
                 'and starting search.')
             self._result_obtained.clear()
-            self._choose_thumbnails(video_file, n)
-
 
     def _choose_thumbnails(self, video_file, n):
         logging.debug('Starting')
@@ -157,9 +167,10 @@ class GPUVideoSearch(object):
         results = []
         # get the number of frames
         video = cv2.VideoCapture(video_file)
-        nframes = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
-        vid = id(video)
-        selector = self._algo(nframes)
+        nframes = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        self._cur_video_id = id(video)
+        logging.debug('Instantiating algo with %i frames'%(nframes))
+        self._cur_selector = self._algo(nframes)
 
         def get_frame(video, f):
             '''
@@ -189,26 +200,35 @@ class GPUVideoSearch(object):
                 self._result_request.clear()
                 break
             # obtain a frame request from the selector
-            nframe = selector()
-            # obtain that frame
-            bgr_img = get_frame(video, nframe)
-            # submit that frame request to the job manager
-            logging.debug('Requested score for frame %s'%(jid))
-            self._predictor.predict(bgr_img, vid, nframe)
-            # obtain the extant results from the predictor
-            self._update_results(results)
+            nframe = self._cur_selector()
+            if nframe == None:
+                # then you've completed searching the video
+                logging.debug('Video search is complete!')
+                logging.debug('Waiting for result request')
+                self._result_request.wait()
+                logging.debug('Result request recieved after video is complete...finally')
+            else:
+                # obtain that frame
+                bgr_img = get_frame(video, nframe)
+                # submit that frame request to the job manager
+                logging.debug('Requested score for frame %s'%(nframe))
+                self._predictor.predict(bgr_img, self._cur_video_id, nframe)
+                # obtain the extant results from the predictor
+            logging.debug('Updating results')
+            self._update_results(results, n)
+            logging.debug('Results is now %i elements'%(len(results)))
 
-    def _update_results(self, results, fetchallrem=False):
+    def _update_results(self, results, n, fetchallrem=False):
         '''
         Fetches results from the predictor.
         '''
         for result in self._predictor.results(fetchallrem):
             cvid, frame, score = result
-            if not cvid == vid:
+            if not cvid == self._cur_video_id:
                 # TODO: turn this into a warning!
                 logging.debug('Returned VID is invalid')
             logging.debug('Score for frame %s obtained'%result[1])
-            selector((frame, score))
+            self._cur_selector((frame, score))
             if len(results) < n:
                 heapq.heappush(results,
                                (score, frame))
@@ -217,10 +237,15 @@ class GPUVideoSearch(object):
                                   (score, frame))
 
     def get_result(self):
+        logging.debug('Issueing request for results')
         self._result_request.set()
+        logging.debug('Waiting for finalization')
         self._finalized.wait()
+        logging.debug('Fetching results')
         cur_res = self.results
+        logging.debug('Clearing finalization')
         self._finalized.clear()
+        logging.debug('Notifying that results have been obtained')
         self._result_obtained.set()
         return cur_res
 
@@ -241,25 +266,31 @@ class GPUVideoSearch(object):
         Stops the chooser
         '''
         logging.debug('Stopping')
-        self._video_queue.put(None)
-        self._kill_switch.set()
+        try:
+            logging.debug('Inserting poison pill')
+            self._video_queue.put(None)
+        except:
+            logging.debug('Poison pill insertion has failed')
+            logging.debug('Failure could be due to irregular thread termination')
+        logging.debug('Stopping predictor')
+        self._predictor.stop()
+        try:
+            logging.debug('Setting kill switch')
+            self._kill_switch.set()
+        except:
+            logging.debug('Kill Switch set has failed for unknown reasons.')
         if self._chooser_thread != None:
             logging.debug('Joining chooser')
-            self._chooser_thread.join()
+            self._chooser_thread.join(5)
         logging.debug('Joining video queue')
-        self._video_queue.join()
-
-    def kill(self):
-        '''
-        Stops the chooser and everything else.
-        '''
-        logging.debug('Killing everything')
-        self._kill_switch.set()
-        self._predictor.stop()
-        if self._chooser_thread != None:
-            self._chooser_thread.join()
-        logging.debug('Joining video queue')
-        self._video_queue.join()
+        try:
+            self._video_queue.join(5)
+        except:
+            logging.debug('Failed to join video queue')
+            logging.debug('Failure could be due to irregular thread termination')
+    
+    def __del__(self):
+        self.stop()
 
 '''
 MonteCarloMetropolisHastings is a searching method
@@ -311,7 +342,6 @@ class MonteCarloMetropolisHastings(object):
             # the image was rejected
             self.rejected.add(update[0])
         else:
-            bput(self.samples, update[0])
             self.results[update[0]] = update[1]
             self.max_score = max(self.max_score,
                                  update[1])
@@ -357,14 +387,20 @@ class MonteCarloMetropolisHastings(object):
             yL = self.mean
         else:
             xL = self.samples[v-1]
-            yL = self.results[xL]
+            if not self.results.has_key(xL):
+                yL = self.mean
+            else:
+                yL = self.results[xL]
         if v == self.n_samples:
             # there are no higher samples
             xH = self.N
             yH = self.mean
         else:
             xH = self.samples[v]
-            yH = self.results[xH]
+            if not self.results.has_key(xH):
+                yH = self.mean
+            else:
+                yH = self.results[xH]
         return [(xL, yL), (xH, yH)]
 
     def _accept_sample(self, sample):
@@ -372,12 +408,18 @@ class MonteCarloMetropolisHastings(object):
         Returns true or false if the sample
         is to be accepted.
         '''
-        if not self.n_samples:
+        if not self.mean:
+            logging.debug('Mean is undefined! Accepting sample')
             return True
         if sample in self.results:
             return False
         if sample in self.rejected:
             return False
+        v = bidx(self.samples, sample)
+        if v < len(self.samples):
+            if self.samples[v] == sample:
+                # do not resample!
+                return False
         neighbs = self._bounds(sample)
         pred_score = self._predict_score(
                         neighbs, sample)
@@ -385,7 +427,7 @@ class MonteCarloMetropolisHastings(object):
         return np.random.rand() < criterion
 
     def _get(self):
-        '''
+        '''b
         Returns a sample
         '''
         while self.n_samples < self.N:
@@ -393,6 +435,7 @@ class MonteCarloMetropolisHastings(object):
             if self._accept_sample(sample):
                 # increment n_samples to indicate that another
                 # sample has been 'taken'
+                bput(self.samples, sample)
                 self.n_samples += 1
                 return sample
 
