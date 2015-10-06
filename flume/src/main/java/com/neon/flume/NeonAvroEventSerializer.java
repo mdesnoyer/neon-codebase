@@ -84,6 +84,9 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
   private GenericRecord trackerEvent = null;
   private GenericDatumReader<TrackerEvent> eventReader = null;
   
+  // State counters
+  NeonHBaseSerializerCounter counters = null;
+  
   private NeonAvroEventSerializer(OutputStream out) {
     this.out = out;
   }
@@ -94,6 +97,11 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
         context.getInteger(SYNC_INTERVAL_BYTES, DEFAULT_SYNC_INTERVAL_BYTES);
     compressionCodec =
         context.getString(COMPRESSION_CODEC, DEFAULT_COMPRESSION_CODEC);
+    
+    if (counters == null) {
+      counters = new NeonHBaseSerializerCounter("hbase_serializer");
+      counters.start();
+    }
   }
 
   @Override
@@ -107,8 +115,8 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     throw new UnsupportedOperationException("Avro API doesn't support append");
   }
 
-  @Override
-  public void write(Event event) throws IOException {
+
+  public void writeImpl(Event event) throws IOException {
     if (dataFileWriter == null) {
       initialize(event);
     }
@@ -118,9 +126,6 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
     eventReader = new GenericDatumReader<TrackerEvent>(schema, TrackerEvent.getClassSchema());
 
-    System.out.println(schema);
-    System.out.println(TrackerEvent.getClassSchema());
-    
     BinaryDecoder binaryDecoder =
         DecoderFactory.get().binaryDecoder(event.getBody(), null);
     
@@ -129,11 +134,22 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
    		dataFileWriter.append(trackerEvent);
        } catch (IOException e) {
          logger.error("Error reading avro event " + e.toString());
+         counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
          return;
        } catch (AvroRuntimeException e) {
          logger.error("Error parsing avro event " + e.toString());
+         counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
          return;
        }
+  }
+  
+  @Override
+  public void write(Event event) throws IOException {
+	  try{
+		  writeImpl(event);
+	  } catch (Exception e) {
+		  logger.error("Error while writing Avro Event");
+	  }
   }
 
   private void initialize(Event event) throws IOException {
@@ -208,14 +224,16 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
   @Override
   public void beforeClose() throws IOException {
-    // no-op
+	if (counters != null) {
+      counters.stop();
+    }
   }
 
   @Override
   public boolean supportsReopen() {
     return false;
   }
-
+  
   public static class Builder implements EventSerializer.Builder {
 
     @Override
