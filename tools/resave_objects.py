@@ -56,6 +56,7 @@ def resave_videos_and_thumbs(save_videos, save_thumbs):
             if save_videos:
                 videos = neondata.VideoMetadata.modify_many(cur_vids,
                                                             _update_time)
+                videos = videos.values()
             else:
                 videos = neondata.VideoMetadata.get_many(cur_vids)
 
