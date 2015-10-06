@@ -3759,7 +3759,7 @@ class NeonApiRequest(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_all_keys(cls):
-        base_keys = yield super(NeonApiRequest, cls).get_all_keys(aync=True)
+        base_keys = yield super(NeonApiRequest, cls).get_all_keys(async=True)
 
         raise tornado.gen.Return([x.split('_')[::-1] for x in base_keys])
 
