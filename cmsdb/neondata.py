@@ -1174,6 +1174,7 @@ class StoredObject(object):
                         cur_obj = None
                 else:
                     cur_obj = create_class._create(key, json.loads(item))
+                    key_sets[cur_obj._set_keyname()].append(key)
                     orig_objects[key] = create_class._create(key,
                                                              json.loads(item))
                 mappings[key] = cur_obj
