@@ -40,6 +40,8 @@ def resave_namespaced_objects(cls):
         cls.modify_many(keys[i:(i+BATCH_SIZE)], _update_time)
         if i % 1000 == 0:
             _log.info('Processed %i %s objects' % (i, cls.__name__))
+        # Don't hurt the database
+        time.sleep(0.1)
 
     _log.info('Done saving all objects of type %s' % cls.__name__)
 
@@ -67,6 +69,8 @@ def resave_videos_and_thumbs(save_videos, save_thumbs):
             if i % 1000 == 0:
                 _log.info('Processed %i videos for account %s and platform %s'
                           % (i, platform.neon_api_key, platform.integration_id))
+            # Don't hurt the database
+            time.sleep(0.1)
 
     _log.info('Done saving videos and thumbs')
 
