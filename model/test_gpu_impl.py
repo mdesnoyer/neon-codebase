@@ -5,7 +5,7 @@ Test cases for the gpu Video Client.
 %autoreload 2
 
 from glob import glob
-from _gpuPredictorLite import JobManager
+from _gpuPredictor import JobManager
 import numpy as np
 import threading
 from time import sleep 
@@ -46,7 +46,7 @@ Multiprocess version
 %autoreload 2
 
 from glob import glob
-from _gpuPredictorLite import JobManager
+from _gpuPredictor import JobManager
 import numpy as np
 import threading
 from time import sleep 
@@ -89,7 +89,7 @@ Searching Videos
 %load_ext autoreload
 %autoreload 2
 from glob import glob
-from _gpuPredictorLite import JobManager
+from _gpuPredictor import JobManager
 import numpy as np
 import threading
 from time import sleep, time 
@@ -154,7 +154,7 @@ Searching Multiple Videos with a Single Client
 %load_ext autoreload
 %autoreload 2
 from glob import glob
-from _gpuPredictorLite import JobManager
+from _gpuPredictor import JobManager
 import numpy as np
 import threading
 from time import sleep, time 
@@ -212,7 +212,7 @@ Searching Videos - Validate the obtained scores
 '''
 # this will attempt to search through videos 
 from glob import glob
-from _gpuPredictorLite import JobManager
+from _gpuPredictor import JobManager
 import numpy as np
 import threading
 from time import sleep, time 
