@@ -1028,6 +1028,23 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
         
+    def test_callback_url_built_correctly(self): 
+        video_meta = neondata.VideoMetadata(
+            'vid1',
+            tids = [],
+            duration=97.0,
+            model_version='old_model',
+            serving_enabled=False)
+        video_meta.save()
+        self.vprocessor.thumbnails = []
+        neondata.BrightcoveApiRequest('job1', self.api_key, 'vid1',
+                                      'some fun video',
+                                      'http://video.mp4', None, None, 'pubid',
+                                      'http://callback.com', 'int1',
+                                      '').save()
+        callback_url = self.vprocessor.build_callback_request()
+        request_json = json.loads(callback_url.body)
+        self.assertEquals(request_json['video_id'], "vid1"); 
 
     def test_callback_response_error(self):
         self.mock_sqs_manager().add_callback_response.side_effect = [
@@ -1364,7 +1381,6 @@ class SmokeTest(test_utils.neontest.TestCase):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state,
                           neondata.RequestState.SERVING)
-             
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
