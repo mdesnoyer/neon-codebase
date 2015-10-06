@@ -1175,7 +1175,8 @@ class StoredObject(object):
                 else:
                     cur_obj = create_class._create(key, json.loads(item))
                     # TODO(mdesnoyer): Remove this line once we have backfilled
-                    key_sets[cur_obj._set_keyname()].append(key)
+                    if cur_obj:
+                        key_sets[cur_obj._set_keyname()].append(key)
                     orig_objects[key] = create_class._create(key,
                                                              json.loads(item))
                 mappings[key] = cur_obj
