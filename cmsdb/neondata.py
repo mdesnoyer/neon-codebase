@@ -2503,6 +2503,8 @@ class AbstractPlatform(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_all_keys(cls):
+        db_connection = DBConnection.get(cls)
+        
         neon_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
            NeonPlatform._baseclass_name().lower() + '_*')
         bc_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
