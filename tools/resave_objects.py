@@ -30,7 +30,8 @@ _log = logging.getLogger(__name__)
 BATCH_SIZE = 100
 def _update_time(d):
     for x in d.itervalues():
-        x.updated = str(datetime.datetime.utcnow())
+        if x is not None:
+            x.updated = str(datetime.datetime.utcnow())
 
 def resave_namespaced_objects(cls):
     _log.info('Resave all objects of type %s' % cls.__name__)
