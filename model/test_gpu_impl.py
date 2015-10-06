@@ -192,7 +192,7 @@ def GVSWrapper(predictor, videos, waitt=5):
 jm = JobManager(
     model_file=MODEL_FILE,
     pretrained_file=PRETRAINED,
-    N=33)
+    N=1000)
 
 predictor = jm.register_client()
 
@@ -200,17 +200,69 @@ p1=(Process(target=GVSWrapper,
             name='video_search_wrapper_1',
             args=(predictor, videos,5)))
 p1.start()
-p1.join()
+predictor.stop()
+p1.join(70)
 
 jm.stop()
 
 '''
 ===============================================================================================
-Searching Videos - Ensuring depricated jobs are rejected
+Searching Videos - Validate the obtained scores
 ===============================================================================================
 '''
+# this will attempt to search through videos 
+from glob import glob
+from _gpuPredictorLite import JobManager
+import numpy as np
+import threading
+from time import sleep, time 
+from multiprocessing import Process
+from gpu_video_searcher import GPUVideoSearch, MonteCarloMetropolisHastings
+import logging
 
-# I need to ensure that rejected jobs are rejected appropriately, which I'm not sure they are
-# at the moment -- the thing runs too fast! 
-#
-# hmmm....
+MODEL_FILE = '/hdd/caffe/models/valence/deploy.prototxt'
+PRETRAINED = '/hdd/caffe/models/valence/snaps/resize_snaps/valence__iter_660000.caffemodel'
+
+logging.basicConfig(level=logging.DEBUG,
+                    format='[%(levelname)s][%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
+                    )
+videos = glob('/hdd/other/test_videos/*')
+videos = ['/hdd/other/test_videos/test2.mp4']
+
+def GVSWrapper(predictor, videos, waitt=5):
+    '''
+    Wraps the GPU Video Searcher and dispatches jobs.
+    '''
+    logging.debug('Starting GVS')
+    gvs = GPUVideoSearch(predictor, MonteCarloMetropolisHastings)
+    for video_file in videos[:2]:
+        logging.debug('Searching video %s'%video_file)
+        gvs.choose_thumbnails(video_file, 10)
+        logging.debug('Waiting for %i seconds'%waitt)
+        s = time()
+        while (time() - s) < waitt:
+            logging.debug('%.2f remaining'%(time() - s))
+            sleep(1)
+        logging.debug('Getting results')
+        res = gvs.get_result()
+        print res
+    gvs.stop()
+
+jm = JobManager(
+    model_file=MODEL_FILE,
+    pretrained_file=PRETRAINED,
+    N=1000)
+
+predictor = jm.register_client()
+
+# p1=(Process(target=GVSWrapper,
+#             name='video_search_wrapper_1',
+#             args=(predictor, videos,20)))
+# p1.start()
+# predictor.stop()
+# p1.join(70)
+
+# # let's try running it locally
+
+GVSWrapper(predictor, videos, 20)
+jm.stop()

@@ -1,22 +1,107 @@
 import heapq
 import logging
+import sys
 import threading
 from Queue import Queue
 from bisect import bisect_left as bidx
 from bisect import insort_left as bput
+import traceback
 
 import cv2
 import numpy as np
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='[%(levelname)s][%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
-                    )
+'''
+=======================================================================
+                            LOGGING
+=======================================================================
+'''
+
+class _AnsiColorizer(object):
+    """
+    A colorizer is an object that loosely wraps around a stream, allowing
+    callers to write text to the stream in a particular color.
+
+    Colorizer classes must implement C{supported()} and C{write(text, color)}.
+    """
+    _colors = dict(black=30, red=31, green=32, yellow=33,
+                   blue=34, magenta=35, cyan=36, white=37)
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    @classmethod
+    def supported(cls, stream=sys.stdout):
+        """
+        A class method that returns True if the current platform supports
+        coloring terminal output using this method. Returns False otherwise.
+        """
+        if not stream.isatty():
+            return False  # auto color only on TTYs
+        try:
+            import curses
+        except ImportError:
+            return False
+        else:
+            try:
+                try:
+                    return curses.tigetnum("colors") > 2
+                except curses.error:
+                    curses.setupterm()
+                    return curses.tigetnum("colors") > 2
+            except:
+                raise
+                # guess false in case of error
+                return False
+
+    def write(self, text, color):
+        """
+        Write the given text to the stream in the given color.
+
+        @param text: Text to be written to the stream.
+
+        @param color: A string label for a color. e.g. 'red', 'white'.
+        """
+        color = self._colors[color]
+        self.stream.write('\x1b[%s;1m%s\x1b[0m' % (color, text))
+
+
+class ColorHandler(logging.StreamHandler):
+    def __init__(self, stream=sys.stderr):
+        super(ColorHandler, self).__init__(_AnsiColorizer(stream))
+
+    def emit(self, record):
+        msg_colors = {
+            logging.DEBUG: "green",
+            logging.INFO: "blue",
+            logging.WARNING: "yellow",
+            logging.ERROR: "red"
+        }
+        # import ipdb
+        # ipdb.set_trace()
+        color = msg_colors.get(record.levelno, "blue")
+        msg = self.format(record)
+        self.stream.write(msg + "\n", color)
+
+#logging.getLogger().addHandler(ColorHandler())
+
+ch = ColorHandler()
+ch.setFormatter(logging.Formatter('[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s'))
+logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger().addHandler(ch)
+# logging.info('test info')
+# logging.debug('test debug')
+# logging.warning('test warning')
+# logging.error('test error')
+# logging.basicConfig(level=logging.INFO,
+#                     format='[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
+#                     handlers=[ColorHandler()])
 
 '''
 =======================================================================
                             UTILITY FUNCTIONS
 =======================================================================
 '''
+
 def seek_video(video, frame_no, cur_frame=None):
     '''Seeks an OpenCV video to a given frame number.
 
@@ -169,7 +254,7 @@ class GPUVideoSearch(object):
         video = cv2.VideoCapture(video_file)
         nframes = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
         self._cur_video_id = id(video)
-        logging.debug('Instantiating algo with %i frames'%(nframes))
+        logging.info('Instantiating algo with %i frames'%(nframes))
         self._cur_selector = self._algo(nframes)
 
         def get_frame(video, f):
@@ -191,16 +276,18 @@ class GPUVideoSearch(object):
         while True:
             if self._kill_switch.is_set():
                 logging.debug('Received termination request!')
+                logging.info('Searched %i frames'%len(self._cur_selector.results.keys()))
                 self.results = results
                 break
             if self._result_request.is_set():
                 logging.debug('Received result request, halting search.')
+                logging.info('Searched %i frames'%len(self._cur_selector.results.keys()))
                 self.results = results
                 self._finalized.set()
                 self._result_request.clear()
                 break
             # obtain a frame request from the selector
-            nframe = self._cur_selector()
+            nframe = self._cur_selector.get()
             if nframe == None:
                 # then you've completed searching the video
                 logging.debug('Video search is complete!')
@@ -210,13 +297,15 @@ class GPUVideoSearch(object):
             else:
                 # obtain that frame
                 bgr_img = get_frame(video, nframe)
+                if nframe == 54:
+                    cv2.imwrite('/home/nick/Desktop/gpu_vide_searcher.jpg', bgr_img)
                 # submit that frame request to the job manager
-                logging.debug('Requested score for frame %s'%(nframe))
+                logging.info('Requested score for frame %s'%(nframe))
                 self._predictor.predict(bgr_img, self._cur_video_id, nframe)
                 # obtain the extant results from the predictor
             logging.debug('Updating results')
             self._update_results(results, n)
-            logging.debug('Results is now %i elements'%(len(results)))
+            logging.info('Results is now %i elements'%(len(results)))
 
     def _update_results(self, results, n, fetchallrem=False):
         '''
@@ -225,10 +314,9 @@ class GPUVideoSearch(object):
         for result in self._predictor.results(fetchallrem):
             cvid, frame, score = result
             if not cvid == self._cur_video_id:
-                # TODO: turn this into a warning!
-                logging.debug('Returned VID is invalid')
-            logging.debug('Score for frame %s obtained'%result[1])
-            self._cur_selector((frame, score))
+                logging.warning('Returned VID is invalid')
+            logging.info('Score for frame %s obtained'%result[1])
+            self._cur_selector.update((frame, score))
             if len(results) < n:
                 heapq.heappush(results,
                                (score, frame))
@@ -270,24 +358,18 @@ class GPUVideoSearch(object):
             logging.debug('Inserting poison pill')
             self._video_queue.put(None)
         except:
-            logging.debug('Poison pill insertion has failed')
-            logging.debug('Failure could be due to irregular thread termination')
+            logging.warning('Poison pill insertion has failed')
+            logging.warning('Failure could be due to irregular thread termination')
         logging.debug('Stopping predictor')
         self._predictor.stop()
         try:
             logging.debug('Setting kill switch')
             self._kill_switch.set()
         except:
-            logging.debug('Kill Switch set has failed for unknown reasons.')
+            logging.warning('Kill Switch set has failed for unknown reasons.')
         if self._chooser_thread != None:
             logging.debug('Joining chooser')
             self._chooser_thread.join(5)
-        logging.debug('Joining video queue')
-        try:
-            self._video_queue.join(5)
-        except:
-            logging.debug('Failed to join video queue')
-            logging.debug('Failure could be due to irregular thread termination')
     
     def __del__(self):
         self.stop()
@@ -323,11 +405,11 @@ class MonteCarloMetropolisHastings(object):
         self.mean = 0.
         self.rejected = set()
 
-    def __call__(self, result=None):
-        if result:
-            self._update(result)
-        else:
-            return self._get()
+    def update(self, result):
+        self._update(result)
+
+    def get(self):
+        return self._get()
 
     def _update(self, update):
         '''
@@ -408,9 +490,6 @@ class MonteCarloMetropolisHastings(object):
         Returns true or false if the sample
         is to be accepted.
         '''
-        if not self.mean:
-            logging.debug('Mean is undefined! Accepting sample')
-            return True
         if sample in self.results:
             return False
         if sample in self.rejected:
@@ -420,6 +499,9 @@ class MonteCarloMetropolisHastings(object):
             if self.samples[v] == sample:
                 # do not resample!
                 return False
+        if not self.mean:
+            logging.debug('Mean is undefined! Accepting sample')
+            return True
         neighbs = self._bounds(sample)
         pred_score = self._predict_score(
                         neighbs, sample)
@@ -427,7 +509,7 @@ class MonteCarloMetropolisHastings(object):
         return np.random.rand() < criterion
 
     def _get(self):
-        '''b
+        '''
         Returns a sample
         '''
         while self.n_samples < self.N:
@@ -436,8 +518,11 @@ class MonteCarloMetropolisHastings(object):
                 # increment n_samples to indicate that another
                 # sample has been 'taken'
                 bput(self.samples, sample)
+                self.pending.add(sample)
                 self.n_samples += 1
+                logging.info('Selected frame %i'%(sample))
                 return sample
+        
 
     def _predict_score(self, neighbs, sample):
         '''

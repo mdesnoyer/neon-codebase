@@ -16,6 +16,8 @@ import threading
 from glob import glob
 from Queue import Queue
 from time import time
+import traceback
+import sys
 
 import cv2
 import numpy as np
@@ -33,13 +35,84 @@ if _unset_glog_level:
     del os.environ['GLOG_minloglevel']
 
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='[%(levelname)s][%(process)-10s][%(threadName)-10s]'\
-                    '[%(funcName)s] %(message)s',)
-# temporarily, since we're *only* using debug
-logging.basicConfig(level=logging.DEBUG,
-                    format='[%(process)-10s][%(threadName)-10s][%(funcName)s]' \
-                    ' %(message)s',)
+'''
+=======================================================================
+                            LOGGING
+=======================================================================
+'''
+
+class _AnsiColorizer(object):
+    """
+    A colorizer is an object that loosely wraps around a stream, allowing
+    callers to write text to the stream in a particular color.
+
+    Colorizer classes must implement C{supported()} and C{write(text, color)}.
+    """
+    _colors = dict(black=30, red=31, green=32, yellow=33,
+                   blue=34, magenta=35, cyan=36, white=37)
+
+    def __init__(self, stream):
+        self.stream = stream
+
+    @classmethod
+    def supported(cls, stream=sys.stdout):
+        """
+        A class method that returns True if the current platform supports
+        coloring terminal output using this method. Returns False otherwise.
+        """
+        if not stream.isatty():
+            return False  # auto color only on TTYs
+        try:
+            import curses
+        except ImportError:
+            return False
+        else:
+            try:
+                try:
+                    return curses.tigetnum("colors") > 2
+                except curses.error:
+                    curses.setupterm()
+                    return curses.tigetnum("colors") > 2
+            except:
+                raise
+                # guess false in case of error
+                return False
+
+    def write(self, text, color):
+        """
+        Write the given text to the stream in the given color.
+
+        @param text: Text to be written to the stream.
+
+        @param color: A string label for a color. e.g. 'red', 'white'.
+        """
+        color = self._colors[color]
+        self.stream.write('\x1b[%s;1m%s\x1b[0m' % (color, text))
+
+
+class ColorHandler(logging.StreamHandler):
+    def __init__(self, stream=sys.stderr):
+        super(ColorHandler, self).__init__(_AnsiColorizer(stream))
+
+    def emit(self, record):
+        msg_colors = {
+            logging.DEBUG: "green",
+            logging.INFO: "blue",
+            logging.WARNING: "yellow",
+            logging.ERROR: "red"
+        }
+
+        color = msg_colors.get(record.levelno, "blue")
+        self.stream.write(str(record.msg) + "\n", color)
+
+#logging.getLogger().addHandler(ColorHandler())
+# logging.basicConfig(level=logging.INFO,
+#                     format='[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
+#                     handlers=[ColorHandler()])
+
+'''
+=======================================================================
+'''
 
 caffe.set_mode_gpu()
 
@@ -142,7 +215,7 @@ class _Predictor(object):
     '''
     def __init__(self, putQ, getQ, cmax, prep,
                  clients, dead_clients, valid_videos,
-                 client_has_died, terminate):
+                 client_has_died):
         '''
         putQ = the MP queue to put jobs into
         getQ = the MP queue to get jobs from
@@ -154,19 +227,21 @@ class _Predictor(object):
         valid_videos = a list of valid videos
         client_has_died = a condition that incidates that
                           this client has died.
-        terminate = an event that terminates all child
-                    processes of the JobManager.
+
+        Note: Job manager handles the destructing
+        of any required queues and stuff.
         '''
         self._putQ = putQ
         self._getQ = getQ
         self._prep = prep
         self.max = cmax
         self.cid = id(self)
+        self._terminate = None
         self._clients = clients
         self._dead_clients = dead_clients
         self._valid_videos = valid_videos
         self._client_has_died = client_has_died
-        self._terminate = terminate
+        # self-destruct event
         self._cur_video = self.cid # initialize to the client ID
         self._results = []
         self._get_result_thread = None
@@ -174,10 +249,11 @@ class _Predictor(object):
         self._total_jobs = 0
         self._stopped = False
 
-    def _start_result(self):
+    def _initialize(self):
         '''
         Locally initialize the results thread
         '''
+        self._terminate = threading.Event()         
         logging.debug('Starting the threads locally')
         self._submit_allow = threading.Semaphore(self.max)
         self._get_result_thread = threading.Thread(
@@ -202,27 +278,27 @@ class _Predictor(object):
         '''
         if not self._fully_init:
             logging.debug('Locally starting threads')
-            self._start_result()
+            self._initialize()
         # acquire permission to submit job
         logging.debug('Awaiting permission to submit job')
         proceed = self._submit_allow.acquire(blocking=False)
         if not proceed:
-            logging.debug('TOO MANY JOBS SUBMITTED. WAITING.')
+            logging.info('TOO MANY JOBS SUBMITTED. WAITING.')
             self._submit_allow.acquire()
         logging.debug('Permission acquired')
         if vid == None:
-            logging.debug('video id is undefined, assigning it to %i' % (
+            logging.info('video id is undefined, assigning it to %i' % (
                 self._cur_video))
             vid = self._cur_video
         if jid == None:
-            logging.debug('job id is currently undefined, assigning to %i' % (
+            logging.info('job id is currently undefined, assigning to %i' % (
                 self._total_jobs))
             jid = self._total_jobs
         self._check_vid(vid)
         self._putQ.put(((self.cid, vid, jid),
                         self._prep(bgr_img)))
         self._total_jobs += 1
-        logging.debug('%ith job submitted' % (self._total_jobs))
+        logging.info('%ith job submitted [frame %i]' % (self._total_jobs, jid))
 
     def _check_vid(self, vid):
         '''
@@ -231,18 +307,18 @@ class _Predictor(object):
         changes
         '''
         if self._cur_video != vid:
-            logging.debug('New video seen: %i vs. %i' % (vid,
+            logging.info('New video seen: %i vs. %i' % (vid,
                 self._cur_video))
             try:
                 logging.debug('Attempting to remove from valid videos')
-                self._valid_videos.remove(self.cur_video)
+                self._valid_videos.remove(self._cur_video)
             except:
-                logging.debug('Invalid video id, although this may not be a ' \
+                logging.warning('Invalid video id, although this may not be a ' \
                     'problem')
             self._valid_videos.append(vid)
             self._cur_video = vid
             # remove pending results
-            logging.debug('Purging %i results awaiting integration' % (
+            logging.info('Purging %i results awaiting integration' % (
                 len(self._results)))
             self._results = []
 
@@ -270,7 +346,7 @@ class _Predictor(object):
                 (cid, vid, jid), score = item
                 # allow it to submit more jobs
                 self._submit_allow.release()
-                logging.debug('Job %i obtained, score: %.3f' % (
+                logging.info('Job %i obtained, score: %.3f' % (
                     jid, score))
                 if vid != self._cur_video:
                     logging.debug('Obtained result corresponds to finished ' \
@@ -293,10 +369,10 @@ class _Predictor(object):
             if self._terminate.is_set():
                 break
             (cid, vid, jid), score = item
-            logging.debug('Job %i obtained, score: %.3f' % (
+            logging.info('Job %i obtained, score: %.3f' % (
                 jid, score))
             if vid != self._cur_video:
-                logging.debug('Obtained result corresponds to finished ' \
+                logging.warning('Obtained result corresponds to finished ' \
                     'video')
                 continue
             self._results.append((vid, jid, score))
@@ -331,32 +407,45 @@ class _Predictor(object):
         '''
         if self._stopped:
             return
+        if not self._fully_init:
+            # if asked to destruct, then this is not
+            # the fully initialized predictor and has
+            # been instantiated in a different process
+            # altogether.
+            logging.debug('Origin process-local predictor terminating.')
+            self._stopped = True
+            return
         logging.debug('Stopping...')
+        logging.debug('Setting terminate event')
+        self._terminate.set()
         logging.debug('Enqueueing null result')
         try:
             self._getQ.put(None)
         except:
-            logging.debug('Input queue no longer exists, must be dead!')
+            logging.error('Input queue no longer exists, must be dead!')
+            logging.debug(traceback.format_exc())
+        logging.debug('Removing video from active videos')
         try:
-            if not self._terminate.is_set():
-                try:
-                    logging.debug('Removing video from active videos')
-                    self._valid_videos.remove(self.cur_video)
-                except:
-                    logging.debug('Failed to remove current video from active videos')
-                logging.debug('Removing self from active clients')
-                self._clients.remove(self.cid)
-                logging.debug('Adding self to dead clients list')
-                self._dead_clients.append(self.cid)
-                logging.debug('Notifying JobManager')
-                with self._client_has_died:
-                    self._client_has_died.notify_all()
-            else:
-                logging.debug('JobManager is already dead')
-            logging.debug('Joining results thread')
-            self._get_result_thread.join(5)
+            self._valid_videos.remove(self._cur_video)
         except:
-            logging.debug('JobManager is already dead.')
+            logging.error('Failed to remove current video from active videos')
+            logging.debug(traceback.format_exc())
+        logging.debug('Removing self from active clients')
+        try:
+            self._clients.remove(self.cid)
+            self._dead_clients.append(self.cid)
+        except:
+            logging.error('Failed to remove self from list of active clients')
+            logging.debug(traceback.format_exc())
+        logging.debug('Notifying JobManager of death')
+        try:
+            with self._client_has_died:
+                self._client_has_died.notify_all()
+        except:
+            logging.error('Failed to notify JobManager of self death')
+            logging.debug(traceback.format_exc())
+        logging.debug('Joining results thread')
+        self._get_result_thread.join(5)
         self._stopped = True
 
     def __del__(self):
@@ -391,7 +480,7 @@ class JobManager(object):
         self._clients = self._manager.list()
         self._dead_clients = self._manager.list()
         self._valid_videos = self._manager.list()
-        self._terminate = self._manager.Event()
+        self._terminate = threading.Event()
         # _client_has_died wakes up the garbage collector thread
         self._client_has_died = self._manager.Condition()
         self._output_queues = dict()  # client ID --> output pipeline (queue)
@@ -443,9 +532,9 @@ class JobManager(object):
         new_client = _Predictor(self._client2mgr, mgr2client,
             cmax, self._prep, self._clients,
             self._dead_clients, self._valid_videos,
-            self._client_has_died, self._terminate)
+            self._client_has_died)
         cid = id(new_client)
-        logging.debug('Predictor %i instantiated' % (cid))
+        logging.info('Predictor %i instantiated' % (cid))
         self._output_queues[cid] = mgr2client
         self._clients.append(cid)
         return new_client
@@ -465,14 +554,13 @@ class JobManager(object):
                     logging.debug('Received termination order!')
                     return
             except:
-                logging.debug('Irregular termination -- likely by ctrl+C')
-                logging.debug('Bailing out!')
+                logging.warning('Irregular termination -- likely by ctrl+C')
+                logging.warning('Bailing out!')
             while len(self._dead_clients):
                 dcq = self._dead_clients.pop()
                 logging.debug('Deregistering client %i' % (dcq))
-                dead_queue = self._output_queues.pop(dcq)
-                dead_queue.join(5)
-
+                self._output_queues.pop(dcq)
+                
     def _submit(self):
         '''
         Submits data to the GPU, and allocates
@@ -495,8 +583,8 @@ class JobManager(object):
                         logging.debug('Received termination order!')
                         return
                 except:
-                    logging.debug('Irregular termination -- likely by ctrl+C')
-                    logging.debug('Bailing out!')
+                    logging.warning('Irregular termination -- likely by ctrl+C')
+                    logging.warning('Bailing out!')
                 return item
             try:
                 item = self._client2mgr.get(timeout=1)
@@ -520,16 +608,16 @@ class JobManager(object):
                         logging.debug('Received termination order!')
                         return
                 except:
-                    logging.debug('Irregular termination -- likely by ctrl+C')
-                    logging.debug('Bailing out!')
+                    logging.warning('Irregular termination -- likely by ctrl+C')
+                    logging.warning('Bailing out!')
                     return
                 ID, bgr_img = item
                 client, video, jid = ID
                 if client not in self._clients:
-                    logging.debug('Job request from dead/invalid client')
+                    logging.error('Job request from dead/invalid client')
                     continue
                 if video not in self._valid_videos:
-                    logging.debug('Job request for invalid / completed video')
+                    logging.error('Job request for invalid / completed video')
                     continue
                 pending.append(ID)
                 gpuArray[len(pending)-1,:,:,:] = bgr_img
@@ -546,15 +634,15 @@ class JobManager(object):
                         logging.debug('Received termination order!')
                         return
                 except:
-                    logging.debug('Error occured, bailing out!')
+                    logging.warning('Error occured, bailing out!')
                 if item == None:
                     logging.debug('Reached end of waiting jobs')
                     break
                 if client not in self._clients:
-                    logging.debug('Job request from dead/invalid client')
+                    logging.error('Job request from dead/invalid client')
                     continue
                 if video not in self._valid_videos:
-                    logging.debug('Job request for invalid / completed video')
+                    logging.error('Job request for invalid / completed video')
                     continue
                 ID, bgr_img = item
                 pending.append(ID)
@@ -569,13 +657,17 @@ class JobManager(object):
                     logging.debug('Received termination order!')
                     return
             except:
-                logging.debug('Error occured, bailing out!')
+                logging.warning('Error occured, bailing out!')
             scores = self._gpu_mgr(gpuArray[:len(pending), :, :, :])
             for sid, score in zip(pending, scores):
                 cid, vid, jid = sid
-                logging.debug('Enqueueing job %i on video %i for client %i' % (
+                logging.info('Enqueueing result from job %i on video %i for client %i' % (
                     jid, vid, cid))
-                self._output_queues[cid].put((sid, score))
+                if self._output_queues.has_key(cid):
+                    try:
+                        self._output_queues[cid].put((sid, score))
+                    except:
+                        logging.warning('Queue no longer exists--client is probably dead')
 
     def stop(self):
         '''
@@ -589,11 +681,12 @@ class JobManager(object):
             logging.debug('Bringing down job server')
             self._terminate.set()
         except:
-            logging.debug('setting of _terminate failed')
+            logging.error('setting of _terminate failed')
         try:
             # terminate garbage collect
-            logging.debug('Notifying job collector')
+            logging.debug('Waiting for client death event availability')
             with self._client_has_died:
+                logging.debug('Notifying job collector')
                 self._client_has_died.notify_all()
         except:
             logging.debug('notify all on _client_has_died failed')
@@ -603,27 +696,18 @@ class JobManager(object):
             logging.debug('Notifying submittor / allocator')
             self._client2mgr.put(None)
         except:
-            logging.debug('client --> mgr poison pill enqueue has failed.')
+            logging.warning('client --> mgr poison pill enqueue has failed.')
         try:
             logging.debug('Joining garbage collector')
             self._garbage_collect_thread.join(5)
         except:
-            logging.debug('Joining garbage collector has failed.')
+            logging.warning('Joining garbage collector has failed.')
         try:
             logging.debug('Joining submittor / allocator')
             self._submit_thread.join(5)
         except:
-            logging.debug('Submission/allocation join has failed.')
-        try:
-            logging.debug('Shutting down threaded queue')
-            with self._gpu2mgr.all_tasks_done:
-                self._gpu2mgr.all_tasks_done.notify_all()
-            logging.debug('Joining threaded queue')
-            self._gpu2mgr.join(5)
-        except:
-            logging.debug('Joining gpu2mgr has failed.')
+            logging.warning('Submission/allocation join has failed.')
         self._stopped = True
 
     def __del__(self):
-        if not self._stopped:
-            self.stop()
+        self.stop()
