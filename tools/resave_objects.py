@@ -28,8 +28,9 @@ _log = logging.getLogger(__name__)
 
 
 BATCH_SIZE = 100
-def _update_time(x):
-    x.updated = str(datetime.datetime.utcnow())
+def _update_time(d):
+    for x in d.itervalues():
+        x.updated = str(datetime.datetime.utcnow())
 
 def resave_namespaced_objects(cls):
     _log.info('Resave all objects of type %s' % cls.__name__)
@@ -46,7 +47,7 @@ def resave_videos_and_thumbs(save_videos, save_thumbs):
     _log.info('Iterating through accounts to save videos and thumbs')
 
     for platform in neondata.AbstractPlatform.get_all():
-        _log.info('Processing platfor %s for account %s' % 
+        _log.info('Processing platform %s for account %s' % 
                   (platform.integration_id, platform.neon_api_key))
         
         video_ids = platform.get_internal_video_ids()  
