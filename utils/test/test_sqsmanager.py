@@ -126,7 +126,8 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
         request, kwargs = self.mock_http.send_request.call_args
         self.assertEqual(request[0].url, 'http://callback')
         self.assertEqual(request[0].body, '{"vid": 1}')
-        self.assertEqual(len(self.manager.callback_messages), 0)
+        self.assertEquals(len(self.manager.callback_messages), 0)
+        self.assertEquals(len(self.manager.messages), 0)
 
     @tornado.testing.gen_test
     def test_cannot_decode_message_in_sqs(self):
@@ -142,6 +143,9 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
                                   'Unable to decode sqs message'):
             yield self.manager.get_callback_messages()
 
+        self.assertEquals(len(self.manager.callback_messages), 0)
+        self.assertEquals(len(self.manager.messages), 0)
+
     @tornado.testing.gen_test
     def test_bad_message_in_sqs(self):
         msg = boto.sqs.message.Message()
@@ -151,10 +155,13 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.ERROR,
                                   'Bad message in SQS. removing'):
-            self.manager.schedule_all_callbacks(['v1', 'v2'])
+            yield self.manager.schedule_all_callbacks(['v1', 'v2'],
+                                                      async=True)
 
         self.assertEquals(self.manager.sq.count(), 0)
         self.assertEquals(self.mock_http.send_request.call_count, 0)
+        self.assertEquals(len(self.manager.callback_messages), 0)
+        self.assertEquals(len(self.manager.messages), 0)
 
     @tornado.testing.gen_test
     def test_schedule_all_callbacks(self):
@@ -171,6 +178,7 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
         self.assertEqual(requests[1][0][0].body, '{"vid": 2}')
         self.assertEqual(len(self.manager.messages), 0)
         self.assertEqual(self.manager.sq.count(), 0)
+        self.assertEquals(len(self.manager.callback_messages), 0)
         msgs = yield self.manager.get_callback_messages()
         self.assertEqual(len(msgs), 0)
 
@@ -193,6 +201,8 @@ class TestSQSCallbackManager(test_utils.neontest.AsyncTestCase):
                                   'Too many errors.* v1'):
             self.manager.schedule_all_callbacks(['v1'])
         self.assertEqual(self.manager.sq.count(), 0)
+        self.assertEquals(len(self.manager.callback_messages), 0)
+        self.assertEquals(len(self.manager.messages), 0)
 
     def _test_send_callback_response2(self):
         '''

@@ -206,7 +206,7 @@ class CustomerCallbackManager(SQSManager):
                     self.callback_messages.setdefault(ccm.video_id, ccm)
             except ValueError:
                 _log.error('Bad message in SQS. removing: %s' % msg.get_body())
-                self.sq.delete_message(msg)
+                yield self.remove_message(msg)
 
         raise tornado.gen.Return(self.callback_messages.values())
 

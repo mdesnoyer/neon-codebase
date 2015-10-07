@@ -143,7 +143,8 @@ class ThumbnailInfo(object):
         'base_imp',
         'incr_imp',
         'base_conv',
-        'incr_conv'
+        'incr_conv',
+        '__weakref__'
         ]
         
     def __init__(self, metadata, base_impressions=0, incremental_impressions=0,
