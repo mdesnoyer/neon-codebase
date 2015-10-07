@@ -39,4 +39,7 @@ ipdb==0.8
 nose-cov==1.6
 happybase==0.9
 pyhs2==0.6.0
+voluptuous==0.8.7
 scikit-learn==0.16.1
+PyJWT==1.4.0
+xlwt==1.0.0

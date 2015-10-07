@@ -533,42 +533,6 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(thumb.type, neondata.ThumbnailType.BRIGHTCOVE)
         self.assertEquals(thumb.rank, 0)
         self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
-
-    def test_ooyala_request(self):
-
-        i_id = "i125"
-        bp = neondata.OoyalaPlatform.modify(self.api_key, i_id,
-                                            lambda x: x,
-                                            create_missing=True)
-        vals = {"api_key": self.api_key, 
-                "video_url": "http://testurl/video.mp4", 
-                "video_id": "testid123", "topn":2, 
-                "callback_url": "http://callback_push_url", 
-                "video_title": "test_title",
-                "autosync" : False,
-                "topn" : 4,
-                "integration_id" : i_id,
-                "oo_api_key" : "ooyala_key",
-                "oo_secret_key" : "ooyala_secret",
-                "default_thumbnail": "http://prev_thumb"
-                }
-        url = self.get_url('/api/v1/submitvideo/ooyala')
-        resp = self.make_api_request(vals, url)
-        self.assertEqual(resp.code, 201)
-        
-        job_id = json.loads(resp.body)['job_id']
-        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
-        self.assertEqual(api_request.video_id, "testid123")
-
-        # Check that the default thumbnail is set
-        video = neondata.VideoMetadata.get('%s_testid123' % self.api_key)
-        self.assertIsNotNone(video)
-        self.assertEquals(len(video.thumbnail_ids), 1)
-        self.assertTrue(video.serving_enabled)
-        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
-        self.assertEquals(thumb.type, neondata.ThumbnailType.OOYALA)
-        self.assertEquals(thumb.rank, 0)
-        self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
         
     
     def test_brightcove_request_invalid(self):
@@ -605,6 +569,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
             self.assertEqual(resp.code, 200)
         
         self.assertEqual(resp.body,'{}')
+
+    @tornado.testing.gen_test
+    def test_jobs_handler(self):
+        req = neondata.NeonApiRequest('job21', self.api_key,
+                    'vid1', 't', 't', 'r', 'h')
+        req.save()
+        jdata = req.to_json()
+        resp = yield self.http_client.fetch(self.get_url('/job'),
+                                            method="POST", body=jdata)
+        self.assertEquals(resp.code, 200)
 
     @tornado.testing.gen_test
     def test_requeue_handler(self):

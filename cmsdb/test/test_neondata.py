@@ -805,14 +805,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         api_request.save_default_thumbnail()
         self.assertEquals(get_video_mock.call_count, 0)
 
-        
-        # Add an old url and there is no video data in the database yet
-        api_request.previous_thumbnail = 'old_thumbnail'
-        with self.assertLogExists(logging.ERROR, 
-                                 'VideoMetadata for job .* is missing'):
-            with self.assertRaises(neondata.DBStateError):
-                api_request.save_default_thumbnail()
-
         # Add the video data to the database
         video = VideoMetadata('acct1_vid1')
         add_thumb_mock = MagicMock()
@@ -821,15 +813,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         add_future.set_result(MagicMock())
         add_thumb_mock.return_value = add_future
         get_video_mock.side_effect = lambda x, callback: callback(video)
-        
-        api_request.save_default_thumbnail()
-        self.assertEquals(add_thumb_mock.call_count, 1)
-        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
-        self.assertEquals(url_seen, 'old_thumbnail')
-        self.assertEquals(thumbmeta.rank, 0)
-        self.assertEquals(thumbmeta.type, ThumbnailType.DEFAULT)
-        add_thumb_mock.reset_mock()
-
         # Use the default_thumbnail attribute
         api_request.default_thumbnail = 'new_thumbnail'
         api_request.save_default_thumbnail()
@@ -1010,13 +993,28 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
 
         with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db'))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db')
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
         with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db',
-                                                     log_missing=False))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db', log_missing=False)
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
     class ChangeTrap:
         '''Helper class to test subscribing to changes.'''
@@ -1792,7 +1790,6 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
         found_obj = self.wait()
-
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
     def test_sync_good_connection(self):
@@ -2324,7 +2321,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
             pil_mock.download_image.return_value = image_future
 
             yield video_info.download_and_add_thumbnail(
-                thumb_info, "http://my_image.jpg", [], async=True,
+                thumb_info, "http://my_image.jpg", cdn_metadata=[], async=True,
                 save_objects=True)
 
             # Check that the image was downloaded
