@@ -672,6 +672,7 @@ class SQSServer(object):
        
         self.q = None
         self.p = 0.0
+        self.max_p = num_queues - 1
         self.max_priority = 0.0
         self.cumulative_priorities = []
 
@@ -690,8 +691,11 @@ class SQSServer(object):
                 return index
 
     def _get_queue(self, priority):
-        self.p = priority
-        return self.conn.get_queue("Priority_" + str(priority))
+        if self.p != priority:
+            self.p = priority
+            return self.conn.get_queue("Priority_" + str(priority))
+        else:
+            return self.q
 
     def _add_priority_attribute(self, priority, message):
         message.message_attributes = {
@@ -702,9 +706,16 @@ class SQSServer(object):
         }
         return message
 
+    def _change_message_visibility(self, message):
+        timeout = 900
+        m_body = message.get_body()
+        if m_body['duration']:
+           timeout = m_body['duration']
+        self.conn.change_message_visibility(self.q, message.receipt_handle,
+                                            timeout)
+
     def write_message(self, priority, message):
-        if self.p != priority:
-            self.q = self._get_queue(priority)
+        self.q = self._get_queue(priority)
         message = self._add_priority_attribute(priority, message)
         self.q.write(message)
 
@@ -712,52 +723,25 @@ class SQSServer(object):
         #Picks a random queue to read from, using the fairweighted priority
         priority = self._get_priority_qindex()
         self.q = self._get_queue(priority)
-        return self.q.read(message_attributes=['priority'])
-
-    #def change_message_visibility(self, message, timeout)
-        
-
+        message = self.q.read(message_attributes=['priority'])
+        while self.p < self.max_p + 1 and message == None:
+            self.q = self._get_queue(self.p + 1)
+            message = self.q.read(message_attributes=['priority'])
+        self._change_message_visibility(message)
+        return message
+                 
     def message_count(self):
         return self.q.count()    
 
-    def delete_message(self, priority, message):
-        #str_p = message.message_attributes['priority']['string_value']
-        #priority = int(str_p)
-        if self.p != priority:
-           self.q = self._get_queue(priority) 
+    def delete_message(self, message):
+        priority = int(message.message_attributes['priority']['string_value'])
+        self.q = self._get_queue(priority) 
         self.q.delete_message(message)
 
     def dump(self, priority):
         if self.p != priority:
            self.q = self._get_queue(priority)
         self.q.dump('dump.txt', sep='\n----------------\n')
-
-class SQSRead(SQSServer):
-    def initialize(self, SQSServer):
-        super(SQSRead, self).initialize()
-        self.SQS = SQSServer
-
-    def read(self):
-        self.SQS.read_message()
-
-    #def change_message_visibility(self, message, timeout):
-    #    self.SQS.change_message_visibility(message, timeout)
-
-class SQSWrite(SQSServer):
-    def initialize(self, SQSServer):
-        super(SQSWRite, self).initialize()
-        self.SQS = SQSServer
-
-    def write(self, priority, message):
-        self.SQS.write_message(priority, message)
-
-class SQSDelete(SQSServer):
-    def initialize(Self, SQSServer):
-        super(SQSDelete, self).initialize()
-        self.SQS = SQSServer
-    
-    def delete(self, priority, message):
-        self.SQS.delete_message(priority, message)
 
 ## ===================== API ===========================================#
 # External Handlers

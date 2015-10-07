@@ -1013,9 +1013,7 @@ class TestSQSServer(test_utils.neontest.TestCase):
          secret_key = '8lfXdfcCl3d2BZLA9CtMkCveeF2eUgUMYjR3YOhe'
          
          serv = video_processor.server
-         self.SQSR = video_processor.server.SQSRead(region, aws_key, secret_key)
-         self.SQSW = serv.SQSWrite(region, aws_key, secret_key)
-         self.SQSD = serv.SQSDelete(region, aws_key, secret_key)
+         self.SQS = serv.SQSServer(region, aws_key, secret_key)
          self.m = None
 
      def tearDown(self):
@@ -1025,22 +1023,14 @@ class TestSQSServer(test_utils.neontest.TestCase):
          for i in range(1, 101):
              self.m = Message()
              self.m.set_body(str(i))
-             self.SQSW.write_message(i%3, self.m)
+             self.SQS.write_message(i%3, self.m)
 
-         #self.SQS.message_count()
-         
-         #self.SQS.dump(1)
-         #self.SQS.dump(0)
-         #self.SQS.dump(2)
-         
 	 count = 100
          while count > 0:
-             mes = self.SQSR.read_message()
+             mes = self.SQS.read_message()
 	     if mes != None:
-                  p = mes.message_attributes['priority']['string_value']
-                  self.SQSD.delete_message(int(p), mes)
+                  self.SQS.delete_message(mes)
                   count = count - 1
-             #self.SQS.message_count()
          
 if __name__ == '__main__':
     utils.neon.InitNeon()
