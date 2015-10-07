@@ -1393,8 +1393,9 @@ class NamespacedStoredObject(StoredObject):
         '''
         raise NotImplementedError()
 
-    def _set_keyname(self):
-        return 'objset:%s' % self._baseclass_name()
+    @classmethod
+    def _set_keyname(cls):
+        return 'objset:%s' % cls._baseclass_name()
 
     @classmethod
     def format_key(cls, key):
