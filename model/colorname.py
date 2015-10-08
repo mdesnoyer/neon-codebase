@@ -8,7 +8,7 @@ if sys.path[0] != __base_path__:
 w2c_data = np.load('w2c.dat')
 w2c_data = w2c_data[0:, 3:]
 w2c_max = np.argmax(w2c_data, axis=1)
-
+print w2c_max
 
 import cv2
 
@@ -23,18 +23,18 @@ class ColorName(object):
     def colorname_to_color(self):
         self._image_to_colorname()
         color_values = np.array(
-                        [[0, 0, 0], [1, 0, 0], [.4, .25, .5], [.5, .5, .5],
+                        [[0, 0, 0], [1, 0, 0], [.25, .4, .5], [.5, .5, .5],
                         [0, 1, 0], [0, .8, 1], [1, .5, 1], [1, 0, 1],
-                        [0, 0, 1] , [1, 1, 1], [0, 1, 0]])
-        new_color_image = color_values[self.colorname_image]
+                        [0, 0, 1] , [1, 1, 1], [0, 1, 1]])
+        new_color_image = color_values[self.colorname_image]*255
         cv2.imshow('win', new_color_image)
         ret = cv2.waitKey()
 
     def _image_to_colorname(self):
-        BB = self.image[0:, 0:, 0]
-        GG = self.image[0:, 0:, 1]
-        RR = self.image[0:, 0:, 2]
-        index_im = RR / 8 + 32 * GG / 8 + 32 * 32 * BB / 8
+        BB = self.image[0:, 0:, 0] / 8
+        GG = self.image[0:, 0:, 1] / 8
+        RR = self.image[0:, 0:, 2] / 8
+        index_im = RR + 32 * GG + 32 * 32 * BB
         self.colorname_image = w2c_max[index_im]
 
     def get_colorname_histogram(self):
