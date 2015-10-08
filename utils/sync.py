@@ -68,7 +68,10 @@ def optional_sync(func):
                 return func(*args, **kwargs)
 
         with bounded_io_loop() as io_loop:
-            return io_loop.run_sync(lambda : func(*args, **kwargs))
+            retval = io_loop.run_sync(lambda : func(*args, **kwargs))
+            if isinstance(retval, Exception):
+                raise retval
+            return retval
 
     return wrapper
 

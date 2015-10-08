@@ -252,7 +252,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
             try:
                 item = yield video_iter.next(async=True)
-                if item == StopIteration:
+                if isinstance(item, StopIteration):
                     break
             except brightcove_api.BrightcoveApiServerError as e:
                 statemon.state.increment('bc_apiserver_errors')

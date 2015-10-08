@@ -1113,7 +1113,7 @@ class BrightcoveFeedIterator(object):
 
     while True:
        item = yield iter.next(async=True)
-       if item == StopIteration:
+       if isinstance(item, StopIteration):
           break
 
     Note, in the asynchronous case, you have to catch the special
@@ -1149,7 +1149,7 @@ class BrightcoveFeedIterator(object):
         if (self.max_results is not None and 
             self.items_returned >= self.max_results):
             e = StopIteration()
-            e.value = StopIteration
+            e.value = StopIteration()
             raise e
         
         if len(self.page_data) == 0:
@@ -1161,7 +1161,7 @@ class BrightcoveFeedIterator(object):
         if len(self.page_data) == 0:
             # We've gotten all the data
             e = StopIteration()
-            e.value = StopIteration
+            e.value = StopIteration()
             raise e
 
         self.items_returned += 1
