@@ -38,8 +38,11 @@ import hashlib
 import itertools
 import simplejson as json
 import logging
+import momoko
 import multiprocessing
+import psycopg2
 from PIL import Image
+import queries 
 import random
 import re
 import redis as blockingRedis
@@ -49,6 +52,7 @@ import string
 from StringIO import StringIO
 import tornado.ioloop
 import tornado.gen
+import tornado.web
 import tornado.httpclient
 import threading
 import time
@@ -88,11 +92,17 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
+define("db_address", default="localhost", type=str, help="postgresql database address")
+define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_port", default=5432, type=int, help="postgresql port")
+define("db_name", default="cmsdb", type=str, help="postgresql database name")
+define("wants_postgres", default=0, type=int, help="should we use postgres")
+
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
 
 #constants 
-BCOVE_STILL_WIDTH = 480
+#BCOVE_STILL_WIDTH = 480
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -139,6 +149,20 @@ def _object_to_classname(otype=None):
     return cname
     
 
+class PGDBConnection(tornado.web.RequestHandler): 
+    '''Connection to the postgres database. Provides 
+       both blocking and async connections for use 
+       with Tornado. 
+    ''' 
+    def __init__(self):
+        host = options.get('cmsdb.neondata.db_address')
+        port = options.get('cmsdb.neondata.db_port')
+        name = options.get('cmsdb.neondata.db_name')
+        user = options.get('cmsdb.neondata.db_user')
+        #self.blocking_conn = queries.Session("postgresql://%s@%s:%s/%s" %  (user, host, port, name))
+        #self.conn = queries.TornadoSession("postgresql://%s@%s:%s/%s" %  (user, host, port, name), 
+        #                                    io_loop=tornado.ioloop.IOLoop.current())
+        self.db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (name, user, host, port), ioloop=tornado.ioloop.IOLoop.current(), size=3, cursor_factory=psycopg2.extras.RealDictCursor) 
 class DBConnection(object):
     '''Connection to the database.
 
@@ -310,7 +334,6 @@ class RedisRetryWrapper(object):
 
     def __getattr__(self, attr):
         '''Allows us to wrap all of the redis-py functions.'''
-        
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
@@ -872,34 +895,53 @@ class StoredObject(object):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.to_dict())
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def save(self, callback=None):
         '''Save the object to the database.'''
-        db_connection = DBConnection.get(self)
         if not hasattr(self, 'created'): 
             self.created = str(datetime.datetime.utcnow())
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
-         
-        def _save_and_add2set(pipe):
-            pipe.sadd(self._set_keyname(), self.key)
-            pipe.set(self.key, value)
-            return True
-            
-        if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.transaction(_save_and_add2set,
-                                           self._set_keyname(),
-                                           self.key,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _save_and_add2set,
-                self._set_keyname(),
-                self.key,
-                value_from_callable=True)
 
+        if options.get('cmsdb.neondata.wants_postgres'): 
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+           
+            query = "INSERT INTO %s (_data, _type) \
+                     VALUES('%s', '%s')" % (self.__class__.__name__.lower(), 
+                                            value, 
+                                            self.__class__.__name__)
+        
+            #results = yield db_connection.conn.query(query)
+            result = yield pool_conn.execute(query)
+            #result = results.result()
+            #results.free()
+            #TODO since upsert is not available until postgres 9.5 
+            # we need to do an update if a duplicate key exception is thrown here 
+            raise tornado.gen.Return(True)
+        else: 
+            db_connection = DBConnection.get(self)
+             
+            def _save_and_add2set(pipe):
+                pipe.sadd(self._set_keyname(), self.key)
+                pipe.set(self.key, value)
+                return True
+                
+            if self.key is None:
+                raise Exception("key not set")
+            if callback:
+                db_connection.conn.transaction(_save_and_add2set,
+                                               self._set_keyname(),
+                                               self.key,
+                                               value_from_callable=True,
+                                               callback=callback)
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.transaction(
+                    _save_and_add2set,
+                    self._set_keyname(),
+                    self.key,
+                    value_from_callable=True))
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -963,6 +1005,8 @@ class StoredObject(object):
         return self.key
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, key, create_default=False, log_missing=True,
             callback=None):
         '''Retrieve this object from the database.
@@ -975,32 +1019,51 @@ class StoredObject(object):
 
         Returns the object
         '''
-        db_connection = DBConnection.get(cls)
+        if options.get('cmsdb.neondata.wants_postgres'): 
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-        def cb(result):
+            cursor = yield pool_conn.execute(query)
+            result = cursor.fetchone()
             if result:
-                obj = cls._create(key, json.loads(result))
-                callback(obj)
+                obj = cls._create(key, result)
             else:
                 if log_missing:
-                    _log.warn('No %s for id %s in db' % (cls.__name__, key))
+                    _log.warn('No %s for id %s in db' % (cls.__name__.lower(), key))
                 if create_default:
-                    callback(cls(key))
+                    obj = cls(key) 
+                 
+            raise tornado.gen.Return(obj)
+        else: 
+            db_connection = DBConnection.get(cls)
+            def cb(result):
+                if result:
+                    obj = cls._create(key, json.loads(result))
+                    callback(obj)
                 else:
-                    callback(None)
-
-        if callback:
-            db_connection.conn.get(key, cb)
-        else:
-            jdata = db_connection.blocking_conn.get(key)
-            if jdata is None:
-                if log_missing:
-                    _log.warn('No %s for %s' % (cls.__name__, key))
-                if create_default:
-                    return cls(key)
-                else:
-                    return None
-            return cls._create(key, json.loads(jdata))
+                    if log_missing:
+                        _log.warn('No %s for id %s in db' % (cls.__name__, key))
+                    if create_default:
+                        callback(cls(key))
+                    else:
+                        callback(None)
+    
+            if callback:
+                db_connection.conn.get(key, cb)
+            else:
+                jdata = db_connection.blocking_conn.get(key)
+                if jdata is None:
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        raise tornado.gen.Return(cls(key))
+                    else:
+                        raise tornado.gen.Return(None)
+                raise tornado.gen.Return(cls._create(key, json.loads(jdata)))
 
     @classmethod
     def get_many(cls, keys, create_default=False, log_missing=True,
@@ -1405,6 +1468,8 @@ class NamespacedStoredObject(StoredObject):
             return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, key, create_default=False, log_missing=True, callback=None):
         '''Return the object for a given key.'''
         return super(NamespacedStoredObject, cls).get(

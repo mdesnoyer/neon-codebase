@@ -19,7 +19,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import signal
-import pg8000
+import psycopg2
 import tempfile
 import subprocess
 from glob import glob
@@ -29,6 +29,7 @@ from datetime import datetime
 from contextlib import closing
 from . import net
 from utils.options import define, options
+from subprocess import call
 
 __all__ = ['Postgresql', 'skipIfNotFound']
 
@@ -43,7 +44,7 @@ DEFAULT_SETTINGS = dict(auto_start=2,
                         postgres_args='-h 127.0.0.1 -F -c logging_collector=off',
                         pid=None,
                         port=None,
-                        copy_data_from=None)
+                        dump_file=None)
 
 class Postgresql(object):
     def __init__(self, **kwargs):
@@ -91,9 +92,11 @@ class Postgresql(object):
         # "database=test host=localhost user=postgres"
         params = dict(kwargs)
         params.setdefault('port', self.port)
+        #params.setdefault('host', '127.0.0.1')
         params.setdefault('host', '127.0.0.1')
         params.setdefault('user', 'postgres')
         params.setdefault('database', 'test')
+        #import pdb; pdb.set_trace()
 
         return params
 
@@ -106,15 +109,6 @@ class Postgresql(object):
         return url
 
     def setup(self):
-        # copy data files
-        if self.copy_data_from:
-            try:
-                copytree(self.copy_data_from, os.path.join(self.base_dir, 'data'))
-                os.chmod(os.path.join(self.base_dir, 'data'), 0o700)
-            except Exception as exc:
-                raise RuntimeError("could not copytree %s to %s: %r" %
-                                   (self.copy_data_from, os.path.join(self.base_dir, 'data'), exc))
-
         # (re)create directory structure
         for subdir in ['data', 'tmp']:
             path = os.path.join(self.base_dir, subdir)
@@ -161,6 +155,7 @@ class Postgresql(object):
 
             self.pid = pid
             exec_at = datetime.now()
+            sleep(0.1)
             while True:
                 if os.waitpid(pid, os.WNOHANG)[0] != 0:
                     raise RuntimeError("*** failed to launch postgres ***\n" + self.read_log())
@@ -174,18 +169,24 @@ class Postgresql(object):
                 sleep(0.1)
 
             # create test database
-            with closing(pg8000.connect(**self.dsn(database='postgres'))) as conn:
+            with closing(psycopg2.connect(**self.dsn(database='postgres'))) as conn:
                 conn.autocommit = True
                 with closing(conn.cursor()) as cursor:
                     cursor.execute("SELECT COUNT(*) FROM pg_database WHERE datname='test'")
                     if cursor.fetchone()[0] <= 0:
                         cursor.execute('CREATE DATABASE test')
+                    if self.dump_file:
+                        cmd = '/usr/bin/psql --quiet -p %d -h 127.0.0.1 --username=postgres test < %s' % (self.port, os.path.join(os.getcwd(), self.dump_file))
+                        call(cmd, shell=True)
 
-        self.old_port = options.get('cmsdb.neon_model.db_port')
-        options._set('cmsdb.neon_model.db_port', self.port)
+        self.old_port = options.get('cmsdb.neondata.db_port')
+        self.old_name = options.get('cmsdb.neondata.db_name')
+        options._set('cmsdb.neondata.db_port', self.port)
+        options._set('cmsdb.neondata.db_name', 'test')
 
     def stop(self, _signal=signal.SIGINT):
-        options._set('cmsdb.neon_model.db_port', self.old_port)
+        options._set('cmsdb.neondata.db_port', self.old_port)
+        options._set('cmsdb.neondata.db_name', self.old_name)
         self.terminate(_signal)
         self.cleanup()
 
@@ -227,7 +228,8 @@ class Postgresql(object):
 
     def is_connection_available(self):
         try:
-            with closing(pg8000.connect(**self.dsn(database='template1'))):
+            params = self.dsn(database='template1')
+            with closing(psycopg2.connect(**params)):
                 pass
         except pg8000.Error:
             return False

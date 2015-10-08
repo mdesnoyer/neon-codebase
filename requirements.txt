@@ -44,5 +44,4 @@ scikit-learn==0.16.1
 psycopg2==2.6.1
 queries==1.7.5
 PyJWT==1.4.0
-pg8000==1.10
-testing.postgresql==1.2.1
+momoko==2.2.0

@@ -27,6 +27,11 @@ import test_utils.neontest
 import test_utils.redis
 import time
 import threading
+import test_utils.postgresql
+import tornado.gen
+import tornado.ioloop
+import tornado.testing
+import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 import utils.neon
@@ -1798,7 +1803,8 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         found_obj = TrackerAccountIDMapper.get("tai1")
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
-
+    
+    @tornado.testing.gen_test
     def test_async_some_errors(self):
         self.mock_responses.side_effect = [
             redis.ConnectionError("Connection Error"),
@@ -1808,13 +1814,11 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.valid_obj.to_json()
             ]
 
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-
-        with self.assertLogExists(logging.ERROR, 'Connection Error'):
-            with self.assertLogExists(logging.WARN, 'Redis is busy'):
-                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
-                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
+        found_obj = yield TrackerAccountIDMapper.get("tai1", async=True)
+        self.assertLogExists(logging.ERROR, 'Connection Error')
+        self.assertLogExists(logging.WARN, 'Redis is busy')
+        self.assertLogExists(logging.ERROR, 'Socket Timeout')
+        self.assertLogExists(logging.ERROR, 'Socket Error')
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
@@ -1831,7 +1835,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj =  TrackerAccountIDMapper.get("tai1")
+                        found_obj = TrackerAccountIDMapper.get("tai1")
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
@@ -2398,7 +2402,36 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tmeta2.width, 640)
         self.assertEquals(tmeta2.height, 540)
         self.assertIsNotNone(tmeta2.phash)
+
+class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGNeonUserAccount, self).setUp()
     
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file='./cmsdb.sql')
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+        
+    @tornado.testing.gen_test 
+    def test_save_neon_user_account(self):
+        so = neondata.NeonUserAccount('new_key')
+        blah = yield so.save(async=True)
+
+    @tornado.testing.gen_test 
+    def test_save_duplicate_neon_user_accounts(self): 
+    
+
+    @tornado.testing.gen_test 
+    def test_get_neon_user_account(self):
+        so = neondata.NeonUserAccount('new_key')
+        blah = yield so.save(async=True)
+        get_me = yield so.get(so.key, async=True)
+
+      
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
