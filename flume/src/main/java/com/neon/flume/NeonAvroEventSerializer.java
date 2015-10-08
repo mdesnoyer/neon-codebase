@@ -18,21 +18,27 @@
  */
 package com.neon.flume;
 
+import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.COMPRESSION_CODEC;
+import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.DEFAULT_COMPRESSION_CODEC;
+import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.DEFAULT_SYNC_INTERVAL_BYTES;
+import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.SYNC_INTERVAL_BYTES;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
+
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.avro.io.DatumWriter;
 import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.BinaryDecoder;
+import org.apache.avro.io.DatumWriter;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
@@ -46,29 +52,27 @@ import org.apache.hadoop.fs.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.neon.Tracker.*;
-
-import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.*;
+import com.neon.Tracker.TrackerEvent;
 
 /**
  * <p>
- * This class serializes Flume {@linkplain Event events} into Avro data files. The
- * Flume event body is read as an Avro datum, and is then written to the
+ * This class serializes Flume {@linkplain Event events} into Avro data files.
+ * The Flume event body is read as an Avro datum, and is then written to the
  * {@link EventSerializer}'s output stream in Avro data file format.
  * </p>
  * <p>
- * The Avro schema is determined by reading a Flume event header. The schema may be
- * specified either as a literal, by setting {@link #AVRO_SCHEMA_LITERAL_HEADER} (not
- * recommended, since the full schema must be transmitted in every event),
- * or as a URL which the schema may be read from, by setting {@link
- * #AVRO_SCHEMA_URL_HEADER}. Schemas read from URLs are cached by instances of this
- * class so that the overhead of retrieval is minimized.
+ * The Avro schema is determined by reading a Flume event header. The schema may
+ * be specified either as a literal, by setting
+ * {@link #AVRO_SCHEMA_LITERAL_HEADER} (not recommended, since the full schema
+ * must be transmitted in every event), or as a URL which the schema may be read
+ * from, by setting {@link #AVRO_SCHEMA_URL_HEADER}. Schemas read from URLs are
+ * cached by instances of this class so that the overhead of retrieval is
+ * minimized.
  * </p>
  */
 public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
-  private static final Logger logger =
-      LoggerFactory.getLogger(NeonAvroEventSerializer.class);
+  private static final Logger logger = LoggerFactory.getLogger(NeonAvroEventSerializer.class);
 
   public static final String AVRO_SCHEMA_LITERAL_HEADER = "flume.avro.schema.literal";
   public static final String AVRO_SCHEMA_URL_HEADER = "flume.avro.schema.url";
@@ -83,23 +87,21 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
   private GenericRecord trackerEvent = null;
   private GenericDatumReader<TrackerEvent> eventReader = null;
-  
+
   // State counters
-  NeonHBaseSerializerCounter counters = null;
-  
+  NeonAvroSerializerCounter counters = null;
+
   private NeonAvroEventSerializer(OutputStream out) {
     this.out = out;
   }
 
   @Override
   public void configure(Context context) {
-    syncIntervalBytes =
-        context.getInteger(SYNC_INTERVAL_BYTES, DEFAULT_SYNC_INTERVAL_BYTES);
-    compressionCodec =
-        context.getString(COMPRESSION_CODEC, DEFAULT_COMPRESSION_CODEC);
-    
+    syncIntervalBytes = context.getInteger(SYNC_INTERVAL_BYTES, DEFAULT_SYNC_INTERVAL_BYTES);
+    compressionCodec = context.getString(COMPRESSION_CODEC, DEFAULT_COMPRESSION_CODEC);
+
     if (counters == null) {
-      counters = new NeonHBaseSerializerCounter("hbase_serializer");
+      counters = new NeonAvroSerializerCounter("avro_serializer");
       counters.start();
     }
   }
@@ -115,7 +117,6 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     throw new UnsupportedOperationException("Avro API doesn't support append");
   }
 
-
   public void writeImpl(Event event) throws IOException {
     if (dataFileWriter == null) {
       initialize(event);
@@ -126,34 +127,33 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
     eventReader = new GenericDatumReader<TrackerEvent>(schema, TrackerEvent.getClassSchema());
 
-    BinaryDecoder binaryDecoder =
-        DecoderFactory.get().binaryDecoder(event.getBody(), null);
-    
+    BinaryDecoder binaryDecoder = DecoderFactory.get().binaryDecoder(event.getBody(), null);
+
     try {
-    	trackerEvent = eventReader.read(null, binaryDecoder);
-   		dataFileWriter.append(trackerEvent);
-       } catch (IOException e) {
-         logger.error("Error reading avro event " + e.toString());
-         counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
-         return;
-       } catch (AvroRuntimeException e) {
-         logger.error("Error parsing avro event " + e.toString());
-         counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
-         return;
-       }
+      trackerEvent = eventReader.read(null, binaryDecoder);
+      dataFileWriter.append(trackerEvent);
+    } catch (IOException e) {
+      logger.error("Error reading avro event " + e.toString());
+      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      return;
+    } catch (AvroRuntimeException e) {
+      logger.error("Error parsing avro event " + e.toString());
+      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      return;
+    }
   }
-  
+
   @Override
   public void write(Event event) throws IOException {
-	  try{
-		  writeImpl(event);
-	  } catch (Exception e) {
-		  logger.error("Error while writing Avro Event");
-	  }
+    try {
+      writeImpl(event);
+    } catch (Exception e) {
+      logger.error("Error while writing Avro Event");
+    }
   }
 
   private void initialize(Event event) throws IOException {
-    Schema schema = TrackerEvent.getClassSchema();//getSchema(event);
+    Schema schema = TrackerEvent.getClassSchema();// getSchema(event);
     writer = new GenericDatumWriter<Object>(schema);
     dataFileWriter = new DataFileWriter<Object>(writer);
 
@@ -163,14 +163,14 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
       CodecFactory codecFactory = CodecFactory.fromString(compressionCodec);
       dataFileWriter.setCodec(codecFactory);
     } catch (AvroRuntimeException e) {
-      logger.warn("Unable to instantiate avro codec with name (" +
-          compressionCodec + "). Compression disabled. Exception follows.", e);
+      logger.warn("Unable to instantiate avro codec with name (" + compressionCodec
+          + "). Compression disabled. Exception follows.", e);
     }
 
     dataFileWriter.create(schema, out);
   }
 
-  private Schema getSchema(Event event) throws IOException{
+  private Schema getSchema(Event event) throws IOException {
     Schema schema = null;
     String schemaUrl = event.getHeaders().get(AVRO_SCHEMA_URL_HEADER);
     if (schemaUrl != null) {
@@ -216,7 +216,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
       }
     }
   }
-  
+
   @Override
   public void flush() throws IOException {
     dataFileWriter.flush();
@@ -224,7 +224,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
 
   @Override
   public void beforeClose() throws IOException {
-	if (counters != null) {
+    if (counters != null) {
       counters.stop();
     }
   }
@@ -233,7 +233,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
   public boolean supportsReopen() {
     return false;
   }
-  
+
   public static class Builder implements EventSerializer.Builder {
 
     @Override
