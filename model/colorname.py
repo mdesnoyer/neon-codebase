@@ -17,24 +17,27 @@ class ColorName(object):
     def __init__(self, image):
     	self.image = image
 
-    # order of color names: black, blue, brown, grey, green,
-    #                       orange, pink, purple, red, white, yellow
+    # order of color names: black, blue, brown, grey,
+    #                       green, orange, pink, purple,
+    #                       red, white, yellow
 
     def colorname_to_color(self):
         self._image_to_colorname()
         color_values = np.array(
-                        [[0, 0, 0], [1, 0, 0], [.25, .4, .5], [.5, .5, .5],
-                        [0, 1, 0], [0, .8, 1], [1, .5, 1], [1, 0, 1],
-                        [0, 0, 1] , [1, 1, 1], [0, 1, 1]])
-        new_color_image = color_values[self.colorname_image]*255
-        cv2.imshow('win', new_color_image)
+                        [[0., 0., 0.], [1., 0., 0.], [.25, .4, .5], [.5, .5, .5],
+                        [0., 1., 0.], [0., .8, 1.], [1., .5, 1.], [1., 0., 1.],
+                        [0., 0., 1.] , [1., 1., 1.], [0., 1., 1.]])
+        self.new_color_image = (color_values[self.colorname_image]*255)
+        self.new_color_image = np.uint8(self.new_color_image)
+        cv2.imshow('win', self.new_color_image)
+        # cv2.imshow('win', self.image)
         ret = cv2.waitKey()
 
     def _image_to_colorname(self):
-        BB = self.image[0:, 0:, 0] / 8
-        GG = self.image[0:, 0:, 1] / 8
-        RR = self.image[0:, 0:, 2] / 8
-        index_im = RR + 32 * GG + 32 * 32 * BB
+        BB = self.image[0:, 0:, 0].astype(int) / 8
+        GG = self.image[0:, 0:, 1].astype(int) / 8
+        RR = self.image[0:, 0:, 2].astype(int) / 8
+        index_im = RR + 32 * GG + 32 * 32 * BB 
         self.colorname_image = w2c_max[index_im]
 
     def get_colorname_histogram(self):
@@ -43,11 +46,20 @@ class ColorName(object):
         normalized_hist = hist_result.astype(float)/sum(hist_result)
         return normalized_hist
 
+    def get_single_pixel(self, pix_val):
+        index = pix_val[2]/8 + pix_val[1]/8*32 + pix_val[2]/8*32*32
+        return w2c_max[index]
+
 def main():
-    image_1 = cv2.imread('/home/wiley/Pictures/face.jpg')
-    image_2 = cv2.imread('/home/wiley/Downloads/ColorNaming/car.jpg')
+    image_1 = cv2.imread('/Users/wileywang/Downloads/furniture.jpg')
+    image_2 = cv2.imread('/Users/wileywang/Downloads/fish.jpg')
+    cn_1 = ColorName(image_1)
     cn_2 = ColorName(image_2)
+    cn_1.colorname_to_color()
     cn_2.colorname_to_color()
+    print cn_1.colorname_image[0,0]
+    print cn_1.image[0,0,0:]
+    print cn_1.new_color_image[0,0,0:]
 
 
 
