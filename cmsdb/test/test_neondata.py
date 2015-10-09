@@ -38,6 +38,7 @@ import utils.neon
 from utils.options import options
 from utils.imageutils import PILImageUtils
 import unittest
+import uuid
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis 
 from StringIO import StringIO
@@ -2418,20 +2419,39 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         
     @tornado.testing.gen_test 
     def test_save_neon_user_account(self):
-        so = neondata.NeonUserAccount('new_key')
-        blah = yield so.save(async=True)
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        rv = yield so.save(async=True)
+        self.assertTrue(rv)
 
     @tornado.testing.gen_test 
-    def test_save_duplicate_neon_user_accounts(self): 
-    
+    def test_get_api_key_successfully(self):
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        yield so.save(async=True)
+        so2 = neondata.NeonUserAccount(so.account_id)
+        self.assertEquals(so.neon_api_key, so2.neon_api_key) 
 
+    #@tornado.testing.gen_test 
+    #def test_save_duplicate_neon_user_accounts(self): 
+    
     @tornado.testing.gen_test 
     def test_get_neon_user_account(self):
-        so = neondata.NeonUserAccount('new_key')
-        blah = yield so.save(async=True)
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        yield so.save(async=True)
         get_me = yield so.get(so.key, async=True)
+        self.assertEquals(so.account_id, get_me.account_id)
 
-      
+    @tornado.testing.gen_test 
+    def test_mm_neon_user_account(self):
+        def _m_me(a): 
+            for obj in a.itervalues(): 
+                if obj is not None: 
+                    obj.neon_api_key = 'asdfaafds'
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        yield so.save(async=True)
+        neondata.NeonUserAccount.modify_many([so.key], _m_me) 
+        get_me = yield so.get(so.key, async=True)
+        self.assertEquals('asdfaafds', get_me.neon_api_key)
+        #import pdb; pdb.set_trace()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

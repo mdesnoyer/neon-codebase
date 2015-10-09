@@ -1189,6 +1189,8 @@ class StoredObject(object):
             return updated_d[key]
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False, create_class=None, 
                     callback=None):
         '''Allows you to modify objects in the database atomically.
@@ -1215,55 +1217,100 @@ class StoredObject(object):
         if create_class is None:
             create_class = cls
             
-        def _getandset(pipe):
-            # mget can't handle an empty list 
+        if options.get('cmsdb.neondata.wants_postgres'):
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
             if len(keys) == 0:
-                return {}
-
-            items = pipe.mget(keys)
-            pipe.multi()
-
+                raise tornado.gen.Return({})
+            # get the items, sql in a loop -- i would prefer 
+            # an IN here, but trying to maintain create_missing
             mappings = {}
             orig_objects = {}
             key_sets = collections.defaultdict(list)
-            for key, item in zip(keys, items):
+            for key in keys: 
+                query = "SELECT _data \
+                         FROM %s \
+                         WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+
+                cursor = yield pool_conn.execute(query)
+                item = cursor.fetchone()
                 if item is None:
                     if create_missing:
                         cur_obj = create_class(key)
                         if cur_obj is not None:
                             key_sets[cur_obj._set_keyname()].append(key)
                     else:
-                        _log.error('Could not get redis object: %s' % key)
+                        _log.error('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
-                    cur_obj = create_class._create(key, json.loads(item))
-                    orig_objects[key] = create_class._create(key,
-                                                             json.loads(item))
+                    cur_obj = create_class._create(key, item['_data'])
+                    orig_objects[key] = create_class._create(key, item['_data'])
                 mappings[key] = cur_obj
             try:
                 func(mappings)
             finally:
-                to_set = {}
+                #TODO add updated column
+                sql_statements = []
                 for key, obj in mappings.iteritems():
-                    if obj is not None and obj != orig_objects.get(key, None):
-                        to_set[key] = obj.to_json()
-
-                to_set['updated'] = str(datetime.datetime.utcnow()) 
-
-                if len(to_set) > 0:
-                    pipe.mset(to_set)
-                for set_key, cur_keys in key_sets.iteritems():
-                    pipe.sadd(set_key, *cur_keys)
-            return mappings
-
-        db_connection = DBConnection.get(create_class)
-        if callback:
-            return db_connection.conn.transaction(_getandset, *keys,
-                                                  callback=callback,
-                                                  value_from_callable=True)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _getandset, *keys, value_from_callable=True)
+                   if obj is not None and obj != orig_objects.get(key, None):
+                        query = "UPDATE %s \
+                                 SET _data = '%s' \
+                                 WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
+                                                                obj.to_json(), 
+                                                                key) 
+                        sql_statements.append(query) 
+    
+                cursor = yield pool_conn.transaction(sql_statements)
+        else:  
+            def _getandset(pipe):
+                # mget can't handle an empty list 
+                if len(keys) == 0:
+                    return {}
+    
+                items = pipe.mget(keys)
+                pipe.multi()
+    
+                mappings = {}
+                orig_objects = {}
+                key_sets = collections.defaultdict(list)
+                for key, item in zip(keys, items):
+                    if item is None:
+                        if create_missing:
+                            cur_obj = create_class(key)
+                            if cur_obj is not None:
+                                key_sets[cur_obj._set_keyname()].append(key)
+                        else:
+                            _log.error('Could not get redis object: %s' % key)
+                            cur_obj = None
+                    else:
+                        cur_obj = create_class._create(key, json.loads(item))
+                        orig_objects[key] = create_class._create(key,
+                                                                 json.loads(item))
+                    mappings[key] = cur_obj
+                try:
+                    func(mappings)
+                finally:
+                    to_set = {}
+                    for key, obj in mappings.iteritems():
+                        if obj is not None and obj != orig_objects.get(key, None):
+                            to_set[key] = obj.to_json()
+    
+                    to_set['updated'] = str(datetime.datetime.utcnow()) 
+    
+                    if len(to_set) > 0:
+                        pipe.mset(to_set)
+                    for set_key, cur_keys in key_sets.iteritems():
+                        pipe.sadd(set_key, *cur_keys)
+                return mappings
+    
+            db_connection = DBConnection.get(create_class)
+            if callback:
+                raise tornado.gen.Return(db_connection.conn.transaction(_getandset, *keys,
+                                                                        callback=callback,
+                                                                        value_from_callable=True))
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.transaction(
+                                       _getandset, *keys, value_from_callable=True))
             
     @classmethod
     def save_all(cls, objects, callback=None):
@@ -1616,12 +1663,13 @@ class NeonApiKey(NamespacedStoredObject):
 
         
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def generate(cls, a_id):
         ''' generate api key hash
             if present in DB, then return it
         
         #NOTE: Generate method directly saves the key
-        TODO(mdesnoyer): Make this asynchronous
         '''
         api_key = NeonApiKey.id_generator()
         obj = NeonApiKey(a_id, api_key)
@@ -1629,17 +1677,20 @@ class NeonApiKey(NamespacedStoredObject):
         # Check if the api_key for the account id exists in the DB
         _api_key = cls.get_api_key(a_id)
         if _api_key is not None:
-            return _api_key 
+            raise tornado.gen.Return(_api_key)
         else:
-            if obj.save():
-                return api_key
+            result = yield obj.save(async=True) 
+            if result:
+                raise tornado.gen.Return(api_key)
 
     def to_json(self):
         #NOTE: This is a misnomer. It is being overriden here since the save()
         # function uses to_json() and the NeonApiKey is saved as a plain string
         # in the database
-        
-        return self.api_key
+        if options.get('cmsdb.neondata.wants_postgres'):
+            return json.dumps(self.__dict__) 
+        else:  
+            return self.api_key
     
     @classmethod
     def _create(cls, key, obj_dict):
@@ -1656,14 +1707,31 @@ class NeonApiKey(NamespacedStoredObject):
         return api_key
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, a_id, callback=None):
-        #NOTE: parent get() method uses json.loads() hence overriden here 
-        db_connection = DBConnection.get(cls)
+        #NOTE: parent get() method uses json.loads() hence overriden here
         key = cls.format_key(a_id)
-        if callback:
-            db_connection.conn.get(key, callback) 
-        else:
-            return db_connection.blocking_conn.get(key) 
+        if options.get('cmsdb.neondata.wants_postgres'):
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            
+            query = "SELECT _data \
+                     FROM %s \
+                     WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+
+            cursor = yield pool_conn.execute(query)
+            result = cursor.fetchone()
+            if result:  
+                raise tornado.gen.Return(result['_data']['api_key']) 
+            else: 
+                raise tornado.gen.Return(None) 
+        else:  
+            db_connection = DBConnection.get(cls)
+            if callback:
+                db_connection.conn.get(key, callback) 
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.get(key))
    
     @classmethod
     def get_many(cls, keys, callback=None):
