@@ -163,8 +163,16 @@ def get_pair_scores(file_pairs):
         colorname_scores.append(colorname_dis)
     return (gist_scores, colorname_scores)
 
+def find_cut_out_limit(similar_values, random_values):
+    return
+
 def main():
-    print get_pair_scores(similar_pairs)
+    similar_values = get_pair_scores(similar_pairs)
+    random_pairs = get_random_pairs(get_file_list())
+    random_values = get_pair_scores(random_pairs)
+    print similar_values
+    print random_values
+    return (similar_values, random_values)
 
 
     # for pair in get_random_pairs(get_file_list()):
