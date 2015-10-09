@@ -5,6 +5,7 @@ from scipy.stats import entropy
 from numpy.linalg import norm
 import model.features
 import glob
+import urllib
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -17,6 +18,8 @@ print w2c_max
 
 import cv2
 
+# Jensen-Shannon divergence
+# https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence
 def JSD(P, Q):
     new_P = P[P + Q > 0]
     new_Q = Q[P + Q > 0]
@@ -164,7 +167,45 @@ def get_pair_scores(file_pairs):
     return (gist_scores, colorname_scores)
 
 def find_cut_out_limit(similar_values, random_values):
-    return
+    center_similar = np.mean(similar_values)
+    center_random = np.mean(random_values)
+    min_error_count = 0
+    error_count_array = []
+    cut_value_array = []
+    for mid in np.arange(center_similar,
+                         center_random,
+                         (center_random - center_similar)/100):
+        similar_error = sum(np.array(similar_values) >= mid)
+        random_error = sum(np.array(random_values) < mid)
+        error_count_array.append(similar_error + random_error)
+        cut_value_array.append(mid)
+    error_count_array = np.array(error_count_array)
+    cut_value_array = np.array(cut_value_array)
+    min_error = np.amin(error_count_array)
+    best_cut = np.mean(cut_value_array[error_count_array == min_error])    
+    return (min_error, best_cut)
+
+def image_from_url(url):
+    req = urllib.urlopen(url)
+    arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
+    img = cv2.imdecode(arr,-1) # 'load it as it is'
+    return img
+
+def get_scores_of_two_similar_images(url_1, url_2):
+    gist = model.features.MemCachedFeatures.create_shared_cache(
+                model.features.GistGenerator())
+    image_1 = resize_image(image_from_url(url_1))
+    image_2 = resize_image(image_from_url(url_2))
+
+    g_1 = gist.generate(image_1)
+    g_2 = gist.generate(image_2)
+    gist_dis = JSD(g_1, g_2)
+
+    cn_1 = ColorName(image_1)
+    cn_2 = ColorName(image_2)
+    colorname_dis = ColorName.get_distance(image_1, image_2)
+
+    return (gist_dis, colorname_dis)
 
 def main():
     similar_values = get_pair_scores(similar_pairs)
