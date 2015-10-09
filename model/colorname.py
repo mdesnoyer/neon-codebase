@@ -1,6 +1,11 @@
 import os.path
 import sys
 import numpy as np
+from scipy.stats import entropy
+from numpy.linalg import norm
+import model.features
+import glob
+
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
@@ -12,8 +17,22 @@ print w2c_max
 
 import cv2
 
+def JSD(P, Q):
+    new_P = P[P + Q > 0]
+    new_Q = Q[P + Q > 0]
+    _P = P / norm(new_P, ord=1)
+    _Q = Q / norm(new_Q, ord=1)
+    _M = 0.5 * (_P + _Q)
+    return 0.5 * (entropy(_P, _M) + entropy(_Q, _M))
+
+COLOR_VALUES = np.array(
+                [[0., 0., 0.], [1., 0., 0.], [.25, .4, .5], [.5, .5, .5],
+                [0., 1., 0.], [0., .8, 1.], [1., .5, 1.], [1., 0., 1.],
+                [0., 0., 1.] , [1., 1., 1.], [0., 1., 1.]])
+
 class ColorName(object):
     '''For a given image, returns the colorname histogram.'''    
+
     def __init__(self, image):
     	self.image = image
 
@@ -21,13 +40,9 @@ class ColorName(object):
     #                       green, orange, pink, purple,
     #                       red, white, yellow
 
-    def colorname_to_color(self):
+    def image_to_colorname_color(self):
         self._image_to_colorname()
-        color_values = np.array(
-                        [[0., 0., 0.], [1., 0., 0.], [.25, .4, .5], [.5, .5, .5],
-                        [0., 1., 0.], [0., .8, 1.], [1., .5, 1.], [1., 0., 1.],
-                        [0., 0., 1.] , [1., 1., 1.], [0., 1., 1.]])
-        self.new_color_image = (color_values[self.colorname_image]*255)
+        self.new_color_image = (COLOR_VALUES[self.colorname_image]*255)
         self.new_color_image = np.uint8(self.new_color_image)
         cv2.imshow('win', self.new_color_image)
         # cv2.imshow('win', self.image)
@@ -42,7 +57,7 @@ class ColorName(object):
 
     def get_colorname_histogram(self):
         self._image_to_colorname()
-        hist_result = np.histogram(self.colorname_image)[0]
+        hist_result = np.histogram(self.colorname_image, bins=11)[0]
         normalized_hist = hist_result.astype(float)/sum(hist_result)
         return normalized_hist
 
@@ -50,177 +65,133 @@ class ColorName(object):
         index = pix_val[2]/8 + pix_val[1]/8*32 + pix_val[2]/8*32*32
         return w2c_max[index]
 
+    @classmethod
+    def get_distance(cls, image_1, image_2):
+        cn_1 = cls(image_1)
+        cn_2 = cls(image_2)
+        hist_1 = cn_1.get_colorname_histogram()
+        hist_2 = cn_2.get_colorname_histogram()
+        return JSD(hist_1, hist_2)
+
+similar_pairs = [
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d1f22b8b7b317de3c7df67d8d17f232_86cc34d6b40c77d3b3df47a6ce4e7fd2.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d1f22b8b7b317de3c7df67d8d17f232_7625999a3d87eec82268ec48d513b9f1.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d9b30b7632ad3c91ccd58ecd6f9ff1d_2d67dd65db9d98386cd362730ad0cfa0.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d9b30b7632ad3c91ccd58ecd6f9ff1d_86c1101713876f9459a12ecdbc936969.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d020c3c936b22eb456e4ceafe9ae612_1cffc3046819dc43adbc425f14fda86b.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_3d020c3c936b22eb456e4ceafe9ae612_9747552b33ae8d3177af3562b6acd48b.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_4e1ac974a11589c71032cf4ab5b84c47_99c726ee2bce0c86d00186fd587d72b3.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_4e1ac974a11589c71032cf4ab5b84c47_921742a413813d453d9580e040a91ba5.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_8cb07dd4abec525d4459139734d571d8_1d53b780e2e23cfd12133012aac20f3d.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_8cb07dd4abec525d4459139734d571d8_300ec7987c2d0d7c3c09ef8b46f9c4d6.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_9d853b1762416503f45eb9f6e072f9e4_1c114e42f1001404c395fd5ee8b71484.jpg',
+     '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_9d853b1762416503f45eb9f6e072f9e4_46ea4bbada5daaab533fd1c8016b5233.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_9e11803a1131fabc0554c69d2f046702_06a8017084ba75adc3783fc328c614b4.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_9e11803a1131fabc0554c69d2f046702_76153890d8a500feba796f3a388e1155.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_13c5e73e774dbcb7059e84985ebabd5d_2d7af1d28998a3a452e12e9932e29676.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_13c5e73e774dbcb7059e84985ebabd5d_9aa899c1fb9169674a2b05c3389f8d14.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_91f96d771ab8261bc5cfbaa28bf0251d_7464474ddec079fad556eff751662e1b.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_91f96d771ab8261bc5cfbaa28bf0251d_ff44b280467982283eb57fbe42dfec08.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_826de24505722ee6b4e09eb01b3c234d_ab0997a4a093fd4ece08e53d7a259cb1.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_826de24505722ee6b4e09eb01b3c234d_bf1e0f66743522698acc80ba5add77b1.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_1470a314e580f7f313736f84a75c940d_0015f303823a8c613fafb450b0056754.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_1470a314e580f7f313736f84a75c940d_96b0b8c072c0e2b1aaace7f24e8066c0.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_7549ae3f6d7ff57192c93c30ccda6d9a_974b7865232a0a09abaa5aef0a1b1afc.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_7549ae3f6d7ff57192c93c30ccda6d9a_148cc24e2b5b04e36f08bfe6064c5c2e.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_369223f11243c86391f3d69e691354fe_98051c5c6dfca80acacdb03ea00a692e.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_369223f11243c86391f3d69e691354fe_bd32bbf649664c2d2eb962ce358332ca.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_920624bac489ffd8d55986959f9e25c6_1431df70428496b19d37a28320afeda6.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_920624bac489ffd8d55986959f9e25c6_d73f6a6705b54e89752c8ebea033a3a1.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_bccb2a89cc3763b80fb9f9e83b293576_ab9ff389a336e71e993e267a844e2ba2.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_bccb2a89cc3763b80fb9f9e83b293576_c45f6df1a56a164ca8a08269ef3ea3a0.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_c5aca0fafe6569529746e6a676f8ed6b_18874af05f4360657d80e95d23ad6d71.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_c5aca0fafe6569529746e6a676f8ed6b_fbce5e85ea3353c43f8986b27e02c23d.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_c5286f9ebab5a620bde20d24a6b33757_37061b984feb214687b7d9b8a65cb386.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_c5286f9ebab5a620bde20d24a6b33757_eb01889263a6a9a1bb7e9068d5259d14.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_ccd1ff6aa53033751f91419db795211a_a5e043ba3ac5be36618a55a38e298d20.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_ccd1ff6aa53033751f91419db795211a_f3099a56591ea257d360a63359b8dc06.jpg'),
+('/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_f2d818c4df0b48c18b2a300150cfe8fc_8a9de421c973abe00091d624e80163fc.jpg',
+    '/home/wiley/src/data/good_images/9xmw08l4ln1rk8uhv3txwbg1_f2d818c4df0b48c18b2a300150cfe8fc_b68bf1197e8b807bca051ff1424c5e6b.jpg')
+]
+
+def resize_image(image, max_height = 480):
+    '''Resizes the image according to max_height.'''
+    if ((max_height is not None) and 
+        (image.shape[0] > max_height)):
+        new_size = (int(2*round(float(image.shape[1]) * 
+                                max_height / image.shape[0] /2)),
+                                max_height)
+        return cv2.resize(image, new_size)
+    return image
+
+def get_file_list(dirname = '/home/wiley/src/data/good_images/'):
+    return glob.glob(dirname+"/*.jpg")
+
+def get_random_pairs(file_name_list, num_pair = 30):
+    first = np.random.random_integers(0, len(file_name_list) - 1, size=num_pair)
+    second = []
+    for f in first:
+        s = np.random.random_integers(0, len(file_name_list) - 1)
+        while np.abs(s - f) < 50:
+            s = np.random.random_integers(0, len(file_name_list) - 1)
+        second.append(s)
+    index_pair = zip(first, second)
+    return [(file_name_list[x[0]], file_name_list[x[1]]) for x in index_pair]
+
+def get_pair_scores(file_pairs):
+    gist = model.features.MemCachedFeatures.create_shared_cache(
+                model.features.GistGenerator())
+    gist_scores = []
+    colorname_scores = []
+    for pair in file_pairs:
+        im_1 = cv2.imread(pair[0])
+        im_2 = cv2.imread(pair[1])
+        image_1 = resize_image(im_1)
+        image_2 = resize_image(im_2)
+        # cv2.imshow('win1', image_1)
+        # cv2.imshow('win2', image_2)
+        # cv2.waitKey()
+        g_1 = gist.generate(image_1)
+        g_2 = gist.generate(image_2)
+        gist_dis = JSD(g_1, g_2)
+        gist_scores.append(gist_dis)
+
+
+        cn_1 = ColorName(image_1)
+        cn_2 = ColorName(image_2)
+        colorname_dis = ColorName.get_distance(image_1, image_2)
+        colorname_scores.append(colorname_dis)
+    return (gist_scores, colorname_scores)
+
 def main():
-    image_1 = cv2.imread('/Users/wileywang/Downloads/furniture.jpg')
-    image_2 = cv2.imread('/Users/wileywang/Downloads/fish.jpg')
-    cn_1 = ColorName(image_1)
-    cn_2 = ColorName(image_2)
-    cn_1.colorname_to_color()
-    cn_2.colorname_to_color()
-    print cn_1.colorname_image[0,0]
-    print cn_1.image[0,0,0:]
-    print cn_1.new_color_image[0,0,0:]
+    print get_pair_scores(similar_pairs)
 
 
+    # for pair in get_random_pairs(get_file_list()):
+    #     im_1 = cv2.imread(pair[0])
+    #     im_2 = cv2.imread(pair[1])
+    #     image_1 = resize_image(im_1)
+    #     image_2 = resize_image(im_2)
+    #     cv2.imshow('win1', image_1)
+    #     cv2.imshow('win2', image_2)
+    #     cv2.waitKey()
 
+
+    # image_1 = cv2.imread('/home/wiley/Pictures/face.jpg')
+    # image_2 = cv2.imread('/home/wiley/Downloads/ColorNaming/car.jpg')
+    # cn_1 = ColorName(image_1)
+    # cn_2 = ColorName(image_2)
+    # hist_1 = cn_1.get_colorname_histogram()
+    # hist_2 = cn_2.get_colorname_histogram()
+    # colorname_dis = ColorName.get_distance(image_1, image_2)
+
+    # gist = model.features.MemCachedFeatures.create_shared_cache(
+    #             model.features.GistGenerator())
+    # g_1 = gist.generate(image_1)
+    # g_2 = gist.generate(image_2)
+    # gist_dis = JSD(g_1, g_2)
+    # cn_1.image_to_colorname_color()
+    # cn_2.image_to_colorname_color()
 
 if __name__ == "__main__":
     main()
-
-# import atexit
-# import logging
-# import os
-# import os.path
-# import random
-# import signal
-# import socket
-# import subprocess
-# import sys
-# import urllib
-# from glob import glob
-# import boto.opsworks
-# import code
-# import cv2
-# import ipdb
-# import utils.logs as logs
-# import utils.neon
-# import utils.ps
-# from cmsdb.neondata import *
-# from model import add_filter_to_model
-# from model._model import load_model
-# from model.show_top_thumbnails import run_one_video
-# from utils import logs as logs
-# from utils.neon import EnableRunningDebugging
-# from utils.options import define, options
-# _log = logging.getLogger(__name__)
-# aws_region = "us-east-1"
-# layer_name = "dbslave"
-# stack_name = "Neon Serving Stack V2"
-# redis_port = 6379
-# forward_port = 1
-# def find_db_address():
-#     conn = boto.opsworks.connect_to_region(aws_region)
-#     # Find the stack
-#     stack_id = None
-#     for stack in conn.describe_stacks()['Stacks']:
-#         if stack['Name'] == stack_name:
-#             stack_id = stack['StackId']
-#             break
-#     if stack_id is None:
-#         raise Exception('Could not find stack %s' % stack_name)
-#     # Find the layer
-#     layer_id = None
-#     for layer in conn.describe_layers(stack_id = stack_id)['Layers']:
-#         if layer['Shortname'] == layer_name:
-#             layer_id = layer['LayerId']
-#             break
-#     if layer_id is None:
-#         raise Exception('Could not find layer %s in stack %s' %
-#                         (layer_name, stack_name))
-#     # Find the instance ip
-#     ip = None
-#     for instance in conn.describe_instances(layer_id=layer_id)['Instances']:
-#         try:
-#             ip = instance['PrivateIp']
-#             break
-#         except KeyError:
-#             pass
-#     _log.info('Found db at %s' % ip)
-#     return ip
-# def forward_port(local_port):
-#     cmd = ('ssh -L {local}:localhost:{rem} {db_addr}').format(
-#                local=local_port,
-#                rem=redis_port,
-#                db_addr=find_db_address())
-#     _log.info('Forwarding port %s to the database' % local_port)
-#     proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
-#                             stderr=subprocess.STDOUT,
-#                             stdin=subprocess.PIPE)
-#     # Wait until we can connect to the db
-#     for i in range(12):
-#         try:
-#             sock = socket.create_connection(('localhost', local_port), 3600)
-#         except socket.error:
-#             time.sleep(5)
-#     if sock is None:
-#         raise Exception('Could not connect to the database')
-    
-#     _log.info('Connection made to the database')
-#     sock.shutdown(socket.SHUT_RDWR)
-#     sock.close()
-    
-#     return proc
-# logs.AddConfiguredLogger()
-# EnableRunningDebugging()
-# atexit.register(utils.ps.shutdown_children)
-# signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-# random.seed()
-# proc = None
-# if forward_port:
-#     db_address = 'localhost'
-#     db_port = random.randint(10000, 12000)
-#     proc = forward_port(db_port)
-# else:
-#     db_address = find_db_address()
-#     db_port = redis_port
-# # Set the options for connecting to the db
-# options._set('cmsdb.neondata.dbPort', db_port)
-# options._set('cmsdb.neondata.accountDB', db_address)
-# options._set('cmsdb.neondata.thumbnailDB', db_address)
-# options._set('cmsdb.neondata.videoDB', db_address)
-# print 'Loading model'
-# model = load_model('/data/model_data/p_20150902_bigModel.model')
-# print 'Fetching all user accounts'
-# accounts = NeonUserAccount.get_all()
-# bdest = '/data/filtering_crisis/bad_images'
-# gdest = '/data/filtering_crisis/good_images'
-# def im_from_url(url):
-#     req = urllib.urlopen(url)
-#     arr = np.asarray(bytearray(req.read()), dtype=np.uint8)
-#     img = cv2.imdecode(arr,-1) # 'load it as it is'
-#     # resize so that it's not gigantic
-#     # let's do this by fixing the maximum size to 1000
-#     retv = 1000./np.max(img.shape)
-#     rimg = cv2.resize(img, (int(img.shape[1]*retv), int(img.shape[0]*retv)))
-#     cv2.imshow('win', rimg)
-#     ret = cv2.waitKey()
-#     if ret == ord('y'):
-#         cv2.imwrite(os.path.join(bdest, tmd.key + '.jpg'), img)
-#     if ret == ord('n'):
-#         cv2.imwrite(os.path.join(gdest, tmd.key + '.jpg'), img)
-#     return ret
-# cbreak = False
-# skipAcct = False
-# good = 0
-# bad = 0
-# for n, account in enumerate(accounts):
-#     print '%i/%i: %s'%(n, len(accounts), account.account_id)
-#     for video in account.iterate_all_videos():
-#         if video.model_version == 'p_20150902_bigModel':
-#             print '\t' + video.get_id()
-#             # then you can iterate through the thumbnails
-#             for thumb in video.thumbnail_ids:
-#                 tmd = ThumbnailMetadata.get(thumb)
-#                 print '\t\t' + tmd.get_id()
-#                 ret = im_from_url(tmd.urls[0])
-#                 if ret == ord('q'):
-#                     cv2.destroyAllWindows()
-#                     cbreak = True
-#                     break
-#                 elif ret == ord('s'):
-#                     skipAcct = True
-#                     break
-#                 elif ret == ord('y'):
-#                     bad += 1
-#                 elif ret == ord('n'):
-#                     good += 1
-#                 print '\t\t\tGood: %i, Bad: %i'%(good, bad)
-#         if cbreak:
-#             break
-#         if skipAcct:
-#             skipAcct = False
-#             break
-#     if cbreak:
-#         break
-# cv2.destroyAllWindows()
-
