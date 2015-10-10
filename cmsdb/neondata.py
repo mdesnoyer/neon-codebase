@@ -3361,7 +3361,8 @@ class NeonApiRequest(NamespacedStoredObject):
     def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
-            external_thumbnail_id=None, publish_date=None):
+            external_thumbnail_id=None, publish_date=None,
+            callback_sent=False):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3377,6 +3378,8 @@ class NeonApiRequest(NamespacedStoredObject):
         self.request_type = request_type
         # The url to send the callback response
         self.callback_url = http_callback
+        self.callback_sent = callback_sent
+        self.callback_attempts = callback_attempts
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
         
@@ -3386,7 +3389,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.external_thumbnail_id = external_thumbnail_id
 
         # Save the request response
-        self.response = {}  
+        self.response = {}
 
         # API Method
         self.api_method = None

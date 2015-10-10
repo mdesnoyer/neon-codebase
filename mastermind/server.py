@@ -45,7 +45,6 @@ import utils.neon
 import utils
 from utils.options import define, options
 import utils.ps
-import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -108,6 +107,7 @@ statemon.define('unexpected_video_handle_error', int) # Error when handling vide
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
 statemon.define('directive_file_size', int) # file size in bytes 
+statemon.define('callback_error', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 
@@ -1451,7 +1451,49 @@ class DirectivePublisher(threading.Thread):
                                     neondata.RequestState.FAILED,
                                     neondata.RequestState.INT_ERROR]:
                                 obj.state = new_state
-                neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+                requests = neondata.NeonApiRequest.modify_many(request_keys,
+                                                               _set_state)
+                if new_state == neondata.RequestState.SERVING:
+                    # Send any callbacks that need to be sent
+                    for cur_key, request in requests.iteritems():
+                        if (not request.callback_sucess and 
+                            request.callback_url and
+                            request.callback_attempts < 5):
+                            try:
+                                cb_body = request.response
+                                if isinstance(cb_body, dict):
+                                    cb_body = json.dumps(cb_body)
+                                cb_request = tornado.httpclient.HTTPRequest(
+                                    url=request.callback_url,
+                                    method="POST",
+                                    headers={'content-type' :
+                                             'applicaiton/json'},
+                                    body=cb_body,
+                                    request_timeout=20.0,
+                                    connect_timeout-10.0)
+                                cb_response = utils.http.send_request(
+                                    cb_request)
+                                if cb_response.error:
+                                    statemon.state.increment('callback_error')
+                                    _log.warn('Error when sending callback to '
+                                              '%s: %s' %
+                                              (request.callback_url,
+                                               cb_response.error))
+                                    continue
+                            except Exception as e:
+                                _log.warn(
+                                    'Unexpected error when sending a customer '
+                                    'callback: %s' % e)
+                                statemon.state.increment(
+                                    'unexpected_callback_error')
+                                continue
+
+                            # Update the database saying that the
+                            # callback was sent
+                            def _set_callback_sent(x):
+                                x.callback_sent = True
+                            neondata.NeonApiRequest.modify(cur_key,
+                                                           _set_callback_sent)
                 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
