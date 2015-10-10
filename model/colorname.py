@@ -11,7 +11,8 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-w2c_data = np.load('w2c.dat')
+w2c_data = np.load(os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                                'w2c.dat')))
 w2c_data = w2c_data[0:, 3:]
 w2c_max = np.argmax(w2c_data, axis=1)
 print w2c_max
@@ -21,8 +22,12 @@ import cv2
 # Jensen-Shannon divergence
 # https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence
 def JSD(P, Q):
+    P = np.array(P)
+    Q = np.array(Q)
     new_P = P[P + Q > 0]
     new_Q = Q[P + Q > 0]
+    if len(new_P) == 0 or len(new_Q) == 0:
+        return 0
     _P = P / norm(new_P, ord=1)
     _Q = Q / norm(new_Q, ord=1)
     _M = 0.5 * (_P + _Q)
