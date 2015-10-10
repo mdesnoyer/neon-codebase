@@ -2451,7 +2451,13 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         neondata.NeonUserAccount.modify_many([so.key], _m_me) 
         get_me = yield so.get(so.key, async=True)
         self.assertEquals('asdfaafds', get_me.neon_api_key)
-        #import pdb; pdb.set_trace()
+
+    @tornado.testing.gen_test 
+    def test_save_all_neon_user_account(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so3 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        neondata.NeonUserAccount.save_all([so1, so2, so3])
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

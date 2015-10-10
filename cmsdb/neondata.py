@@ -1249,7 +1249,7 @@ class StoredObject(object):
             try:
                 func(mappings)
             finally:
-                #TODO add updated column
+                #TODO add updated column, figure out rv
                 sql_statements = []
                 for key, obj in mappings.iteritems():
                    if obj is not None and obj != orig_objects.get(key, None):
@@ -1313,33 +1313,50 @@ class StoredObject(object):
                                        _getandset, *keys, value_from_callable=True))
             
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def save_all(cls, objects, callback=None):
         '''Save many objects simultaneously'''
-        db_connection = DBConnection.get(cls)
         data = {}
-        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-        for obj in objects:
-            obj.updated = str(datetime.datetime.utcnow())
-            data[obj.key] = obj.to_json()
-            key_sets[obj._set_keyname()].append(obj.key)
 
-        def _save_and_add2set(pipe):
-            for set_key, keys in key_sets.iteritems():
-                pipe.sadd(set_key, *keys)
-            pipe.mset(data)
-            return True            
-
-        lock_keys = key_sets.keys() + data.keys()
-        if callback:
-            db_connection.conn.transaction(_save_and_add2set,
-                                           *lock_keys,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _save_and_add2set,
-                value_from_callable=True,
-                *lock_keys)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            sql_statements = [] 
+            for obj in objects:
+                query = "INSERT INTO %s (_data, _type) \
+                         VALUES('%s', '%s')" % (cls.__name__.lower(), 
+                                                obj.to_json(), 
+                                                cls.__name__)
+                sql_statements.append(query)
+            #TODO figure out rv 
+            cursor = yield pool_conn.transaction(sql_statements)
+              
+        else: 
+            db_connection = DBConnection.get(cls)
+            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+            for obj in objects:
+                obj.updated = str(datetime.datetime.utcnow())
+                data[obj.key] = obj.to_json()
+                key_sets[obj._set_keyname()].append(obj.key)
+    
+            def _save_and_add2set(pipe):
+                for set_key, keys in key_sets.iteritems():
+                    pipe.sadd(set_key, *keys)
+                pipe.mset(data)
+                tornado.gen.Return(True)
+    
+            lock_keys = key_sets.keys() + data.keys()
+            if callback:
+                db_connection.conn.transaction(_save_and_add2set,
+                                               *lock_keys,
+                                               value_from_callable=True,
+                                               callback=callback)
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.transaction(
+                          _save_and_add2set,
+                          value_from_callable=True,
+                          *lock_keys))
 
     @classmethod
     def _erase_all_data(cls):
