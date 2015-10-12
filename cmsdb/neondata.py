@@ -487,6 +487,14 @@ def _erase_all_data():
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
+class PGPubSubConnection(threading.Thread): 
+    def __init__(self, class_name): 
+        super(PGPubSubConnection, self).__init__()
+        self.class_name = class_name
+        
+    def __del__(self): 
+        self.stop() 
+        
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
 
@@ -784,7 +792,6 @@ class PubSubConnection(threading.Thread):
 def id_generator(size=32, 
             chars=string.ascii_lowercase + string.digits):
     ''' Generate a random alpha numeric string to be used as 
-        unique ids
     '''
     retval = ''.join(random.choice(chars) for x in range(size))
 
@@ -913,10 +920,7 @@ class StoredObject(object):
                                             value, 
                                             self.__class__.__name__)
         
-            #results = yield db_connection.conn.query(query)
             result = yield pool_conn.execute(query)
-            #result = results.result()
-            #results.free()
             #TODO since upsert is not available until postgres 9.5 
             # we need to do an update if a duplicate key exception is thrown here 
             raise tornado.gen.Return(True)
@@ -1331,7 +1335,6 @@ class StoredObject(object):
                 sql_statements.append(query)
             #TODO figure out rv 
             cursor = yield pool_conn.transaction(sql_statements)
-              
         else: 
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -1385,31 +1388,38 @@ class StoredObject(object):
         return cls._delete_many_raw_keys(keys, callback)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _delete_many_raw_keys(cls, keys, callback=None):
         '''Deletes many objects by their raw keys'''
-        db_connection = DBConnection.get(cls)
-        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-        for key in keys:
-            obj = cls(key)
-            obj.key = key
-            key_sets[obj._set_keyname()].append(key)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            sql_statements = []
+        else:  
+            db_connection = DBConnection.get(cls)
+            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+            for key in keys:
+                obj = cls(key)
+                obj.key = key
+                key_sets[obj._set_keyname()].append(key)
 
-        def _del_and_remfromset(pipe):
-            for set_key, keys in key_sets.iteritems():
-                pipe.srem(set_key, *keys)
-            pipe.delete(*keys)
-            return True
+            def _del_and_remfromset(pipe):
+                for set_key, keys in key_sets.iteritems():
+                    pipe.srem(set_key, *keys)
+                pipe.delete(*keys)
+                return True
             
-        if callback:
-            db_connection.conn.transaction(_del_and_remfromset,
-                                           *keys,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _del_and_remfromset,
-                *keys,
-                value_from_callable=True)
+            if callback:
+                db_connection.conn.transaction(_del_and_remfromset,
+                                               *keys,
+                                               value_from_callable=True,
+                                               callback=callback)
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.transaction(
+                    _del_and_remfromset,
+                    *keys,
+                    value_from_callable=True))
         
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
