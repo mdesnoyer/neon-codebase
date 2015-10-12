@@ -1530,12 +1530,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
-        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
-        # self.assertAlmostEqual(run_frac['b1'], 1.0/4.8)
-        # self.assertAlmostEqual(run_frac['n1'], 2.2/4.8)
-        # self.assertAlmostEqual(run_frac['n2'], 1.6/4.8)
 
-      def test_frac_with_model_score_prior_but_half_bandit(self):
+    def test_frac_with_model_score_prior_but_half_bandit(self):
         # Try the similar setup but frac_adjust_rate = 0.5
         # The base_conversions/impressions are set the same.
         # The fractions will still be determined by the model scores.
@@ -1565,13 +1561,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
-        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
-        # base_sum = 1.0 ** 0.5 + 2.2 ** 0.5 + 1.6 ** 0.5
-        # self.assertAlmostEqual(run_frac['b1'], 1.0 ** 0.5 / base_sum, delta=0.05)
-        # self.assertAlmostEqual(run_frac['n1'], 2.2 ** 0.5 / base_sum, delta=0.05)
-        # self.assertAlmostEqual(run_frac['n2'], 1.6 ** 0.5 / base_sum, delta=0.05)
 
-      def test_frac_with_model_score_prior_but_full_bandit(self):
+    def test_frac_with_model_score_prior_but_full_bandit(self):
         # Try the similar setup but frac_adjust_rate = 1.0
         # When frac_adjust_rate is 0, the fractions are based on model scores.
         # When frac_adjust_rate is 1, the fractions are based on stats.
@@ -1580,7 +1571,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1',
             ExperimentStrategy('acct1', frac_adjust_rate=1.0,
                                exp_frac = '1.0'))
-        experiment_state, run_frac_1, value_left, winner_tid = \
+        experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
                 'acct1', True,
@@ -1603,7 +1594,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['n1', 'n2', 'b1'])
 
-      def test_frac_with_model_score_prior_with_non_1_exp_frac_and_t_test(self):
+    def test_frac_with_model_score_prior_with_non_1_exp_frac_and_t_test(self):
         # adding non_exp_thumb is not none case.
         self.mastermind.update_experiment_strategy(
             'acct1',
@@ -1637,9 +1628,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
-        # self.assertAlmostEqual(run_frac['b1'], 1.0/4.8*0.5)
-        # self.assertAlmostEqual(run_frac['n1'], 2.2/4.8*0.5)
-        # self.assertAlmostEqual(run_frac['n2'], 1.6/4.8*0.5)
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1869,7 +1857,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
                                                  ('acct1_vid1_tid2', 0.01)])
 
     def test_update_video_with_new_random_thumbnail(self):
-        #
+        # If we add a new random thumbnail. We don't change the
+        # experiment state nor the serving directives.
         self.mastermind.experiment_state['acct1_vid1'] = \
           neondata.ExperimentState.COMPLETE
 
@@ -1890,20 +1879,13 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
              ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
                                ttype='random', chosen=True)],
              testing_enabled=True)
-        updated_state = self.mastermind.experiment_state['acct1_vid1']
-        self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
         after_directives = [x for x in self.mastermind.get_directives()]
-        self.assertEqual(len(directives), 1)
-        self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
-        # directive changes since the experiement restarted, and
-        # the strategy is changed with exp_frac=1.0
-        after_directive_dict = dict((x, y) for x, y in directives[0][1])
+        self.assertEqual(len(after_directives), 1)
+        self.assertEqual(after_directives[0][0], ('acct1', 'acct1_vid1'))
+        after_directive_dict = dict((x, y) for x, y in after_directives[0][1])
         self.assertEquals(before_directive_dict, after_directive_dict)
         updated_state = self.mastermind.experiment_state['acct1_vid1']
         self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
-        # self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 1.0/3.05)
-        # self.assertAlmostEqual(directive_dict['acct1_vid1_tid2'], 1.0/3.05)
-        # self.assertAlmostEqual(directive_dict['acct1_vid1_tid3'], 1.05/3.05)
 
     def test_update_video_with_new_editor_thumbnail(self):
         #
