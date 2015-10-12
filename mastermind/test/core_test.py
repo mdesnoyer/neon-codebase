@@ -1920,9 +1920,10 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         # directive changes since the experiement restarted, and
         # the strategy is changed with exp_frac=1.0
         directive_dict = dict((x, y) for x, y in directives[0][1])
-        self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 1.0/3.05)
-        self.assertAlmostEqual(directive_dict['acct1_vid1_tid2'], 1.0/3.05)
-        self.assertAlmostEqual(directive_dict['acct1_vid1_tid3'], 1.05/3.05)
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 
+                               directive_dict['acct1_vid1_tid2'])
+        self.assertGreater(directive_dict['acct1_vid1_tid3'],
+                               directive_dict['acct1_vid1_tid2'])
 
         updated_state = self.mastermind.experiment_state['acct1_vid1']
         self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
