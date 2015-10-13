@@ -18,6 +18,7 @@ import logging
 import math
 import model.errors
 import model.features
+import model.colorname
 import numpy as np
 import time
 import utils.obj
@@ -103,9 +104,10 @@ class VideoSearcher(object):
 
         a and b are numpy images in BGR format.
         '''
-        dist = np.linalg.norm(self.gist.generate(a) -
-                              self.gist.generate(b))
-        return dist <= 0.6
+        gist_dis = model.colorname.JSD(self.gist.generate(a),
+                                       self.gist.generate(b))
+        colorname_dis = model.colorname.ColorName.get_distance(a, b)
+        return gist_dis < 0.01 or colorname_dis < 0.015 
 
     def filter_duplicates(self, image_list, n=None, tup_idx=0):
         '''Filters an image list of duplicates and returns at most n entries.
