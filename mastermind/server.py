@@ -42,8 +42,8 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
-import utils
 from utils.options import define, options
+import utils.http
 import utils.ps
 from utils import statemon
 import zlib
@@ -107,6 +107,7 @@ statemon.define('unexpected_video_handle_error', int) # Error when handling vide
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
 statemon.define('directive_file_size', int) # file size in bytes 
+statemon.define('pending_callbacks', int)
 statemon.define('callback_error', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
@@ -1058,9 +1059,6 @@ class DirectivePublisher(threading.Thread):
         # Set of last video ids in the directive file
         self.last_published_videos = set([])
 
-        self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
-        self._callback_thread = None
-
         # Counter for the number of pending modify calls to the database
         self.pending_modifies = multiprocessing.Value('i', 0)
         statemon.state.pending_modifies = 0
@@ -1255,14 +1253,6 @@ class DirectivePublisher(threading.Thread):
                     t.daemon = True
                     t.start()
 
-                # Send the callbacks for new videos after a delay
-                if self._callback_thread is None:
-                    self._callback_thread = threading.Timer(
-                        options.serving_update_delay,
-                        self._send_callbacks)
-                    self._callback_thread.daemon = True
-                    self._callback_thread.start()
-
                 self.last_publish_time = curtime
 
     def _write_directives(self, stream):
@@ -1456,49 +1446,20 @@ class DirectivePublisher(threading.Thread):
                 if new_state == neondata.RequestState.SERVING:
                     # Send any callbacks that need to be sent
                     for cur_key, request in requests.iteritems():
-                        if (not request.callback_sucess and 
-                            request.callback_url and
-                            request.callback_attempts < 5):
-                            try:
-                                cb_body = request.response
-                                if isinstance(cb_body, dict):
-                                    cb_body = json.dumps(cb_body)
-                                cb_request = tornado.httpclient.HTTPRequest(
-                                    url=request.callback_url,
-                                    method="POST",
-                                    headers={'content-type' :
-                                             'applicaiton/json'},
-                                    body=cb_body,
-                                    request_timeout=20.0,
-                                    connect_timeout-10.0)
-                                cb_response = utils.http.send_request(
-                                    cb_request)
-                                if cb_response.error:
-                                    statemon.state.increment('callback_error')
-                                    _log.warn('Error when sending callback to '
-                                              '%s: %s' %
-                                              (request.callback_url,
-                                               cb_response.error))
-                                    continue
-                            except Exception as e:
-                                _log.warn(
-                                    'Unexpected error when sending a customer '
-                                    'callback: %s' % e)
-                                statemon.state.increment(
-                                    'unexpected_callback_error')
-                                continue
-
-                            # Update the database saying that the
-                            # callback was sent
-                            def _set_callback_sent(x):
-                                x.callback_sent = True
-                            neondata.NeonApiRequest.modify(cur_key,
-                                                           _set_callback_sent)
+                        if (request.callback_state == 
+                            neondata.CallbackState.NOT_SENT and 
+                            request.callback_url):
+                            self._incr_pending_modify(1)
+                            statemon.state.increment('pending_callbacks')
+                            t = threading.Thread(target=self._send_callback,
+                                                 args=(request,))
+                            t.daemon = True
+                            t.start()
                 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
-                _log.exception('Unexpected error when updating serving state in '
-                               'database %s' % e)
+                _log.exception('Unexpected error when updating serving state '
+                               'in database %s' % e)
                 # We didn't update the database so don't say that the
                 # videos were published. This will trigger a retry next
                 # time the directives are pushed.
@@ -1508,17 +1469,42 @@ class DirectivePublisher(threading.Thread):
             finally:
                 self._incr_pending_modify(-len(cur_vid_ids))
 
-    def _send_callbacks(self):
+    def _send_callback(self, request):
+        '''Send the callback for a given video request.'''
+        had_error = False
         try:
-            if options.send_callbacks:
-                self.callback_manager.schedule_all_callbacks(
-                    self.last_published_videos)
+            cb_body = request.response
+            if isinstance(cb_body, dict):
+                cb_body = json.dumps(cb_body)
+            cb_request = tornado.httpclient.HTTPRequest(
+                url=request.callback_url,
+                method="POST",
+                headers={'content-type' : 'applicaiton/json'},
+                body=cb_body,
+                request_timeout=20.0,
+                connect_timeout=10.0)
+            # Do really slow retries on the callback request because
+            # often, the customer's system won't be ready for it.
+            cb_response = utils.http.send_request(cb_request, base_delay=120.0)
+            if cb_response.error:
+                statemon.state.increment('callback_error')
+                _log.warn('Error when sending callback to %s: %s' %
+                          (request.callback_url, cb_response.error))
+                had_error = True
+
+            # Update the database saying that the callback was sent
+            def _set_callback_state(x):
+                x.callback_state = (neondata.CallbackState.ERROR if had_error 
+                                    else neondata.CallbackState.SUCESS)
+            key = request.get_id()
+            neondata.NeonApiRequest.modify(key[0], key[1], _set_callback_state)
         except Exception as e:
-            _log.warn('Unexpected error when sending a customer '
-                      'callback: %s' % e)
+            _log.warn('Unexpected error when sending a customer callback: %s'
+                      % e)
             statemon.state.increment('unexpected_callback_error')
         finally:
-            self._callback_thread = None
+            statemon.state.decrement('pending_callbacks')
+            self._incr_pending_modify(-1)
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():

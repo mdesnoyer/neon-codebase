@@ -3351,6 +3351,12 @@ class RequestState(object):
     # SERVING_AND_ACTIVE return active state
     SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
 
+class CallbackState(object):
+    '''State enums for callbacks being sent.'''
+    NOT_SENT = 'not_sent' # Callback has not been sent
+    SUCESS = 'sucess' # Callback was sent sucessfully
+    ERROR = 'error' # Error sending the callback
+
 class NeonApiRequest(NamespacedStoredObject):
     '''
     Instance of this gets created during request creation
@@ -3362,7 +3368,7 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
-            callback_sent=False):
+            callback_state=CallbackState.NOT_SENT):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3378,8 +3384,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.request_type = request_type
         # The url to send the callback response
         self.callback_url = http_callback
-        self.callback_sent = callback_sent
-        self.callback_attempts = callback_attempts
+        self.callback_state = callback_state
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
         
