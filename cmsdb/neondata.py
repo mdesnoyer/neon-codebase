@@ -911,6 +911,9 @@ class StoredObject(object):
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
 
+        if self.key is None:
+            raise Exception("key not set")
+
         if options.get('cmsdb.neondata.wants_postgres'): 
             db_connection = PGDBConnection()
             pool_conn = yield db_connection.db.connect()
@@ -932,8 +935,6 @@ class StoredObject(object):
                 pipe.set(self.key, value)
                 return True
                 
-            if self.key is None:
-                raise Exception("key not set")
             if callback:
                 db_connection.conn.transaction(_save_and_add2set,
                                                self._set_keyname(),
@@ -1026,7 +1027,7 @@ class StoredObject(object):
         if options.get('cmsdb.neondata.wants_postgres'): 
             db_connection = PGDBConnection()
             pool_conn = yield db_connection.db.connect()
-            
+            obj = None 
             query = "SELECT _data, _type \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
@@ -1039,8 +1040,8 @@ class StoredObject(object):
                 if log_missing:
                     _log.warn('No %s for id %s in db' % (cls.__name__.lower(), key))
                 if create_default:
-                    obj = cls(key) 
-                 
+                    obj = cls(key)
+ 
             raise tornado.gen.Return(obj)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1070,6 +1071,8 @@ class StoredObject(object):
                 raise tornado.gen.Return(cls._create(key, json.loads(jdata)))
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_many(cls, keys, create_default=False, log_missing=True,
                  callback=None):
         ''' Get many objects of the same type simultaneously
@@ -1090,6 +1093,8 @@ class StoredObject(object):
                                            callback=callback)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_many_with_pattern(cls, pattern, callback=None):
         '''Returns many objects that match a pattern.
 
@@ -1100,23 +1105,39 @@ class StoredObject(object):
         A list of cls objects
         '''
         retval = []
-        db_connection = DBConnection.get(cls)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            results = [] 
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' ~ '%s'" % (cls.__name__.lower(), pattern)
 
-        def filtered_callback(data_list):
-            callback([x for x in data_list if x is not None])
-
-        def process_keylist(keys):
-            cls._get_many_with_raw_keys(keys, callback=filtered_callback)
-            
-        if callback:
-            db_connection.fetch_keys_from_db(pattern, callback=process_keylist)
-        else:
-            keys = db_connection.fetch_keys_from_db(pattern)
-            return  [x for x in 
-                     cls._get_many_with_raw_keys(keys)
-                     if x is not None]
+            cursor = yield pool_conn.execute(query)
+            for result in cursor:
+                obj = cls._create(result['_data']['key'], result)
+                results.append(obj) 
+            raise tornado.gen.Return(results)
+        else: 
+            db_connection = DBConnection.get(cls)
+    
+            def filtered_callback(data_list):
+                callback([x for x in data_list if x is not None])
+    
+            def process_keylist(keys):
+                cls._get_many_with_raw_keys(keys, callback=filtered_callback)
+                
+            if callback:
+                db_connection.fetch_keys_from_db(pattern, callback=process_keylist)
+            else:
+                keys = db_connection.fetch_keys_from_db(pattern)
+                raise tornado.gen.Return([x for x in 
+                                         cls._get_many_with_raw_keys(keys)
+                                         if x is not None])
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
                                 log_missing=True, callback=None):
         '''Gets many objects with raw keys instead of namespaced ones.
@@ -1127,35 +1148,53 @@ class StoredObject(object):
                 callback([])
                 return
             else:
-                return []
+                raise tornado.gen.Return([])
 
-        db_connection = DBConnection.get(cls)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            results = [] 
+            db_connection = PGDBConnection()
+            pool_conn = yield db_connection.db.connect()
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' IN(%s)" % (cls.__name__.lower(), 
+                                                    ",".join("'{0}'".format(k) for k in keys))
 
-        def _process(results):
-            mappings = [] 
-            for key, item in zip(keys, results):
-                if item:
-                    obj = cls._create(key, json.loads(item))
-                else:
-                    if log_missing:
-                        _log.warn('No %s for %s' % (cls.__name__, key))
-                    if create_default:
-                        obj = cls(key)
+            cursor = yield pool_conn.execute(query)
+            for result in cursor:
+                obj = cls._create(result['_data']['key'], result)
+                results.append(obj) 
+            
+            raise tornado.gen.Return(results)
+        else: 
+            db_connection = DBConnection.get(cls)
+    
+            def _process(results):
+                mappings = [] 
+                for key, item in zip(keys, results):
+                    if item:
+                        obj = cls._create(key, json.loads(item))
                     else:
-                        obj = None
-                mappings.append(obj)
-            return mappings
-
-        if callback:
-            db_connection.conn.mget(
-                keys,
-                callback=lambda items:callback(_process(items)))
-        else:
-            items = db_connection.blocking_conn.mget(keys)
-            return _process(items)
+                        if log_missing:
+                            _log.warn('No %s for %s' % (cls.__name__, key))
+                        if create_default:
+                            obj = cls(key)
+                        else:
+                            obj = None
+                    mappings.append(obj)
+                return mappings
+    
+            if callback:
+                db_connection.conn.mget(
+                    keys,
+                    callback=lambda items:callback(_process(items)))
+            else:
+                items = db_connection.blocking_conn.mget(keys)
+                raise tornado.gen.Return(_process(items))
 
     
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify(cls, key, func, create_missing=False, callback=None):
         '''Allows you to modify the object in the database atomically.
 
@@ -1181,16 +1220,16 @@ class StoredObject(object):
                 func(val)
 
         if callback:
-            return StoredObject.modify_many(
-                [key], _process_one, create_missing=create_missing,
-                create_class=cls,
-                callback=lambda d: callback(d[key]))
+            raise tornado.gen.Return(StoredObject.modify_many(
+                                    [key], _process_one, create_missing=create_missing,
+                                    create_class=cls,
+                                    callback=lambda d: callback(d[key])))
         else:
             updated_d = StoredObject.modify_many(
                 [key], _process_one,
                 create_missing=create_missing,
                 create_class=cls)
-            return updated_d[key]
+            raise tornado.gen.Return(updated_d[key])
 
     @classmethod
     @utils.sync.optional_sync
@@ -1253,7 +1292,7 @@ class StoredObject(object):
             try:
                 func(mappings)
             finally:
-                #TODO add updated column, figure out rv
+                #TODO add updated column, or to _data, figure out rv
                 sql_statements = []
                 for key, obj in mappings.iteritems():
                    if obj is not None and obj != orig_objects.get(key, None):
@@ -1368,14 +1407,18 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete(cls, key, callback=None):
         '''Delete an object from the database.
 
         Returns True if the object was successfully deleted
         '''
-        return cls._delete_many_raw_keys([key], callback)
+        raise tornado.gen.Return(cls._delete_many_raw_keys([key], callback))
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
         '''Deletes many objects simultaneously
 
@@ -1385,7 +1428,7 @@ class StoredObject(object):
         Returns:
         True if it was delete sucessfully
         '''
-        return cls._delete_many_raw_keys(keys, callback)
+        raise tornado.gen.Return(cls._delete_many_raw_keys(keys, callback))
 
     @classmethod
     @utils.sync.optional_sync
@@ -1396,6 +1439,13 @@ class StoredObject(object):
             db_connection = PGDBConnection()
             pool_conn = yield db_connection.db.connect()
             sql_statements = []
+            for key in keys:
+                query = "DELETE FROM %s \
+                         WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
+                                              key)
+                sql_statements.append(query) 
+            #TODO figure out rv 
+            cursor = yield pool_conn.transaction(sql_statements)
         else:  
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -1553,6 +1603,8 @@ class NamespacedStoredObject(StoredObject):
             callback=callback)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_many(cls, keys, create_default=False, log_missing=True,
                  callback=None):
         '''Returns the list of objects from a list of keys.
@@ -1609,32 +1661,40 @@ class NamespacedStoredObject(StoredObject):
             cur_idx += max_request_size
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify(cls, key, func, create_missing=False, callback=None):
-        return super(NamespacedStoredObject, cls).modify(
-            cls.format_key(key),
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        raise tornado.gen.Return(super(NamespacedStoredObject, cls).modify(
+                                 cls.format_key(key),
+                                 func,
+                                 create_missing=create_missing,
+                                 callback=callback))
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False, callback=None):
-        return super(NamespacedStoredObject, cls).modify_many(
-            [cls.format_key(x) for x in keys],
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        raise tornado.gen.Return(super(NamespacedStoredObject, cls).modify_many(
+                                 [cls.format_key(x) for x in keys],
+                                 func,
+                                 create_missing=create_missing,
+                                 callback=callback))
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete(cls, key, callback=None):
-        return super(NamespacedStoredObject, cls).delete(
-            cls.format_key(key),
-            callback=callback)
+        raise tornado.gen.Return(super(NamespacedStoredObject, cls).delete(
+                                 cls.format_key(key),
+                                 callback=callback))
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
-        return super(NamespacedStoredObject, cls).delete_many(
-            [cls.format_key(k) for k in keys],
-            callback=callback)
+        raise tornado.gen.Return(super(NamespacedStoredObject, cls).delete_many(
+                                 [cls.format_key(k) for k in keys],
+                                 callback=callback))
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.

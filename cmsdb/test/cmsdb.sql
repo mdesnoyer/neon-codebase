@@ -1,0 +1,332 @@
+--
+-- PostgreSQL database dump
+--
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET client_min_messages = warning;
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
+
+
+SET search_path = public, pg_catalog;
+
+SET default_tablespace = '';
+
+SET default_with_oids = false;
+
+--
+-- Name: brightcoveintegration; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE brightcoveintegration (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE brightcoveintegration OWNER TO postgres;
+
+--
+-- Name: cdnhostingmetadatalist; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE cdnhostingmetadatalist (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE cdnhostingmetadatalist OWNER TO postgres;
+
+--
+-- Name: experimentstrategy; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE experimentstrategy (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE experimentstrategy OWNER TO postgres;
+
+--
+-- Name: neonapikey; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE neonapikey (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE neonapikey OWNER TO postgres;
+
+--
+-- Name: neonapirequest; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE neonapirequest (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE neonapirequest OWNER TO postgres;
+
+--
+-- Name: neonplatform; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE neonplatform (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE neonplatform OWNER TO postgres;
+
+--
+-- Name: neonuseraccount; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE neonuseraccount (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE neonuseraccount OWNER TO postgres;
+
+--
+-- Name: ooyalaintegration; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE ooyalaintegration (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE ooyalaintegration OWNER TO postgres;
+
+--
+-- Name: thumbnailmetadata; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE thumbnailmetadata (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE thumbnailmetadata OWNER TO postgres;
+
+--
+-- Name: thumbnailservingurls; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE thumbnailservingurls (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE thumbnailservingurls OWNER TO postgres;
+
+--
+-- Name: thumbnailstatus; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE thumbnailstatus (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE thumbnailstatus OWNER TO postgres;
+
+--
+-- Name: thumbnailurlmapper; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE thumbnailurlmapper (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE thumbnailurlmapper OWNER TO postgres;
+
+--
+-- Name: videometadata; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE videometadata (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE videometadata OWNER TO postgres;
+
+--
+-- Name: videostatus; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE videostatus (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE videostatus OWNER TO postgres;
+
+--
+-- Data for Name: brightcoveintegration; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY brightcoveintegration (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: cdnhostingmetadatalist; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY cdnhostingmetadatalist (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: experimentstrategy; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY experimentstrategy (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: neonapikey; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY neonapikey (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: neonapirequest; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY neonapirequest (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: neonplatform; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY neonplatform (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: neonuseraccount; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY neonuseraccount (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: ooyalaintegration; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY ooyalaintegration (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: thumbnailmetadata; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY thumbnailmetadata (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: thumbnailservingurls; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY thumbnailservingurls (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: thumbnailstatus; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY thumbnailstatus (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: thumbnailurlmapper; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY thumbnailurlmapper (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: videometadata; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY videometadata (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Data for Name: videostatus; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY videostatus (_data, _type) FROM stdin;
+\.
+
+
+--
+-- Name: account_id; Type: INDEX; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE UNIQUE INDEX account_id ON neonuseraccount USING btree (((_data ->> 'account_id'::text)));
+
+
+--
+-- Name: public; Type: ACL; Schema: -; Owner: postgres
+--
+
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+REVOKE ALL ON SCHEMA public FROM postgres;
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO PUBLIC;
+
+
+--
+-- PostgreSQL database dump complete
+--
+

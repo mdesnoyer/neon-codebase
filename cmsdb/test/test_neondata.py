@@ -2458,6 +2458,56 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
         so3 = neondata.NeonUserAccount(uuid.uuid1().hex)
         neondata.NeonUserAccount.save_all([so1, so2, so3])
+        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
+        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
+        get3 = yield neondata.NeonUserAccount.get(so3.key, async=True)
+        self.assertEquals(so1.account_id, get1.account_id)
+        self.assertEquals(so2.account_id, get2.account_id)
+        self.assertEquals(so3.account_id, get3.account_id)
+
+    @tornado.testing.gen_test 
+    def test_delete_neon_user_account(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex) 
+        yield neondata.NeonUserAccount.delete(so1.key, async=True) 
+        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
+        self.assertEquals(None, get1)
+ 
+    @tornado.testing.gen_test 
+    def test_delete_many_neon_user_accounts(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        yield neondata.NeonUserAccount.delete_many([so1.key,so2.key], async=True) 
+        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
+        self.assertEquals(None, get1)
+        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
+        self.assertEquals(None, get2)
+
+    @tornado.testing.gen_test 
+    def test_delete_many_neon_user_accounts_key_dne(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        yield neondata.NeonUserAccount.delete_many([so1.key,so2.key,'dne'], async=True) 
+        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
+        self.assertEquals(None, get1)
+        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
+        self.assertEquals(None, get2)
+
+    @tornado.testing.gen_test 
+    def test_get_many_neon_user_accounts(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        neondata.NeonUserAccount.save_all([so1, so2])
+        results = yield neondata.NeonUserAccount.get_many([so1.key,so2.key], async=True)
+ 
+    @tornado.testing.gen_test 
+    def test_get_many_with_pattern_neon_user_accounts(self):
+        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        neondata.NeonUserAccount.save_all([so1, so2])
+        results = yield neondata.NeonUserAccount.get_many_with_pattern('neonuseraccount_*', async=True)
+        # Due to only wanting to load the database one time, we are going to end up with 
+        # a weird amount of results here. Just assume that the results array is not empty 
+        self.assertGreater(len(results), 0)      
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
