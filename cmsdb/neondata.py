@@ -90,6 +90,8 @@ define('async_pool_size', type=int, default=10,
 
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
+statemon.define('sucessful_callbacks', int)
+statemon.define('callback_error', int)
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -3393,7 +3395,8 @@ class NeonApiRequest(NamespacedStoredObject):
         self.default_thumbnail = default_thumbnail # URL of a default thumb
         self.external_thumbnail_id = external_thumbnail_id
 
-        # Save the request response
+        # The job response. Should be a dictionary defined by 
+        # VideoCallbackResponse
         self.response = {}
 
         # API Method
@@ -3474,14 +3477,6 @@ class NeonApiRequest(NamespacedStoredObject):
         thumbnail in the request.
         '''
         return ThumbnailType.DEFAULT
-
-    def add_response(self, frames, timecodes=None, urls=None, error=None):
-        ''' add response to the api request '''
-
-        self.response['frames'] = frames
-        self.response['timecodes'] = timecodes 
-        self.response['urls'] = urls 
-        self.response['error'] = error
   
     def set_api_method(self, method, param):
         ''' 'set api method and params ''' 
@@ -3608,6 +3603,49 @@ The video metadata for this request must be in the database already.
         raise tornado.gen.Return(thumb) 
         # Push a thumbnail serving directive to Kinesis so that it can
         # be served quickly.
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def send_callback(self, send_kwargs=None):
+        '''Sends the callback to the customer if necessary.
+
+        Inputs:
+        job_id - Job id string
+        api_key - Api key string
+        send_kwargs - Keyword arguments to utils.http.send_request for when
+                      sending the callback
+        '''
+        new_callback_state = CallbackState.NOT_SENT
+        if self.callback_url:
+            # Send the callback
+            cb_body = self.response
+            if isinstance(cb_body, dict):
+                cb_body = json.dumps(cb_body)
+            send_kwargs = send_kwargs or {}
+            send_kwargs['async'] = True
+            cb_request = tornado.httpclient.HTTPRequest(
+                url=self.callback_url,
+                method='POST',
+                headers={'content-type' : 'applicaiton/json'},
+                body=cb_body,
+                request_timeout=20.0,
+                connect_timeout=10.0)
+            cb_response = yield utils.http.send_request(cb_request,
+                                                        **send_kwargs)
+            if cb_response.error:
+                statemon.state.increment('callback_error')
+                _log.warn('Error when sending callback to %s: %s' %
+                          (self.callback_url, cb_response.error))
+                new_callback_state = CallbackState.ERROR
+            else:
+                statemon.state.increment('sucessful_callbacks')
+                new_callback_state = CallbackState.SUCESS
+
+            # Modify the database state
+            def _mod_obj(x):
+                x.callback_state = new_callback_state
+            yield tornado.gen.Task(self.modify, self.job_id, self.api_key,
+                                   _mod_obj)
 
 class BrightcoveApiRequest(NeonApiRequest):
     '''

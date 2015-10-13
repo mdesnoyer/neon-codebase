@@ -5,10 +5,6 @@ Video Processing client, no longer a multiprocessing client
 VideoClient class has a run loop which uses httpdownload object to
 download the video file after dequeueing job from video-server
 
-Sync and Async options are available to download the video file in httpdownload
-
-If Async, on the streaming_callback video processing is done partially.
-
 ProcessVideo class has all the methods to deal with video processing and
 post processing
 
@@ -70,7 +66,6 @@ statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('modify_request_error', int)
-statemon.define('customer_callback_schedule_error', int)
 statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
@@ -115,45 +110,11 @@ define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
 
-class VideoError(Exception):
-    '''
-    Exception class which ensures that the callback is
-    send to the client in case of video download or processing errors
-    '''
-    def __init__(self, msg, job_params):
-        self.msg = msg
-        self.vid = job_params['video_id'] 
-        self.job_id = job_params['job_id']
-        self.callback_url = job_params['callback_url']
-
-        #TODO(Sunil): Don't do this here. make a new function that is called
-        # when an error happens during video processing
-        self.send_callback()
-        
-    def send_callback(self):
-        cresp = neondata.VideoCallbackResponse(self.job_id, self.vid,
-                err=self.msg)
-        response_body = cresp.to_dict()
-
-        #CREATE POST REQUEST
-        body = tornado.escape.json_encode(response_body)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        
-        if self.callback_url is not None:
-            cb_response_request = tornado.httpclient.HTTPRequest(
-                                    url=self.callback_url,
-                                    method="POST",
-                                    headers=h, 
-                                    body=body, 
-                                    request_timeout=60.0, 
-                                    connect_timeout=10.0)
-            utils.http.send_request(cb_response_request) 
-
+class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
 class DefaultThumbError(VideoError): pass  
 class VideoDownloadError(VideoError, IOError): pass  
 class DBError(IOError): pass
-class CallbackError(IOError): pass
 
 # For when another worker completed the video
 class OtherWorkerCompleted(Exception): pass 
@@ -250,24 +211,35 @@ class VideoProcessor(object):
             return
 
         except VideoError as e:
-            # Flag that the job failed getting the data
+            # Flag that the job failed
             statemon.state.increment('processing_error')
+
+            cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
+                                                self.job_params['video_id'],
+                                                err=e.message)
 
             def _write_failure(request):
                 request.state = neondata.RequestState.FAILED
                 request.fail_count += 1
+                request.response = cb.to_dict()
             api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
                 self.job_params['api_key'],
                 _write_failure)
+            api_request.send_callback()
 
         except Exception as e:
             _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
             # Flag that the job failed for some internal reason
             statemon.state.increment('processing_error')
+
+            cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
+                                                self.job_params['video_id'],
+                                                err=e.message)
             
             def _write_failure(request):
                 request.state = neondata.RequestState.INT_ERROR
+                request.response = cb.to_dict()
                 request.fail_count += 1
             api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
@@ -337,33 +309,36 @@ class VideoProcessor(object):
 
             _log.info('Finished downloading video %s' % self.video_url)
         except urllib2.URLError as e:
-            _log.error("Error downloading video from %s: %s" % 
-                       (self.video_url, e))
+            msg = "Error downloading video from %s: %s" % (self.video_url, e)
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except boto.exception.BotoClientError as e:
-            _log.error("Client error downloading video %s from S3: %s" %
-                       (self.video_url, e))
+            msg = ("Client error downloading video %s from S3: %s" % 
+                   (self.video_url, e))
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except boto.exception.BotoServerError as e:
-            _log.error("Server error downloading video %s from S3: %s" %
-                       (self.video_url, e))
+            msg = ("Server error downloading video %s from S3: %s" %
+                   (self.video_url, e))
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except socket.error as e:
-            _log.error("Error downloading video from %s: %s" % 
-                       (self.video_url, e))
+            msg = "Error downloading video from %s: %s" % (self.video_url, e)
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
         except IOError as e:
-            _log.error("Error saving video to disk: %s" % e)
+            msg = "Error saving video to disk: %s" % e
+            _log.error(msg)
             statemon.state.increment('video_download_error')
-            raise VideoDownloadError(str(e), self.job_params)
+            raise VideoDownloadError(msg)
 
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
@@ -408,7 +383,7 @@ class VideoProcessor(object):
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
-            raise BadVideoError("Video has no length", self.job_params)
+            raise BadVideoError("Video has no length")
 
         #Log long videos
         if duration > 1800:
@@ -672,18 +647,11 @@ class VideoProcessor(object):
             api_request.state = neondata.RequestState.FINISHED
 
         except neondata.ThumbDownloadError, e:
+            api_request.state = neondata.RequestState.CUSTOMER_ERROR
             _log.warn("Default thumbnail download failed for vid %s" % video_id)
             statemon.state.increment('default_thumb_error')
             err_msg = "Failed to download default thumbnail error=%s" % e
-            api_request.state = neondata.RequestState.CUSTOMER_ERROR
-            api_request.set_message(err_msg)
-            
-            # build the callback response with error message here
-            # Its probably ok that its sent through SQS. Evaluate if this needs
-            # to be immediate to the customer
-            #cb_request = self.build_callback_request(error=err_msg)
-            
-            # TODO: write test to validate the states
+            raise DefaultThumbError(err_msg)
 
         finally:
 

@@ -57,7 +57,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.redis_patcher.start()
         
         # Mock out the callback sending
-        self.callback_patcher = patch('mastermind.server.utils.http')
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
         
         self.mastermind = mastermind.core.Mastermind()
@@ -515,7 +515,7 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
         self.redis.start()
         
         # Mock out the callback sending
-        self.callback_patcher = patch('mastermind.server.utils.http')
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
         
         self.mastermind = mastermind.core.Mastermind()
@@ -1247,7 +1247,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         super(TestDirectivePublisher, self).setUp()
 
         # Mock out the callback sending
-        self.callback_patcher = patch('mastermind.server.utils.http')
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
 
         # Mock out the connection to S3
@@ -1648,9 +1648,10 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         super(TestPublisherStatusUpdatesInDB, self).setUp()
 
         # Mock out the callback manager
-        self.callback_patcher = patch('mastermind.server.utils.http')
-        self.callback_mock = self.callback_patcher.start()
-        self.callback_mock.send_request.side_effect = \
+        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.callback_mock = self._future_wrap_mock(
+            self.callback_patcher.start())
+        self.callback_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
 
         # Mock out the connection to S3
@@ -1752,8 +1753,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # Check the callback was sent
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.SUCESS)
-        self.assertEquals(self.callback_mock.send_request.call_count, 1)
-        cb_request = self.callback_mock.send_request.call_args[0][0]
+        self.assertEquals(self.callback_mock.call_count, 1)
+        cb_request = self.callback_mock.call_args[0][0]
         self.assertEquals(json.loads(cb_request.body), {'video_id' : 'vid1'})
         self.assertEquals(cb_request.url, 'http://callback.com')
         
@@ -1786,7 +1787,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # Make sure the callback wasn't sent
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.NOT_SENT)
-        self.assertFalse(self.callback_mock.send_request.called)
+        self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
@@ -1813,7 +1814,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # Make sure the callback wasn't sent
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.NOT_SENT)
-        self.assertFalse(self.callback_mock.send_request.called)
+        self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
@@ -1834,10 +1835,10 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # Make sure the callback was not sent again
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.SUCESS)
-        self.assertFalse(self.callback_mock.send_request.called)
+        self.assertFalse(self.callback_mock.called)
 
     def test_callback_error(self):
-        self.callback_mock.send_request.side_effect = \
+        self.callback_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(x, 400)
 
         with self.assertLogExists(logging.WARNING,
@@ -1856,7 +1857,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
                           neondata.CallbackState.ERROR)
 
     def test_unexpected_callback_error(self):
-        self.callback_mock.send_request.side_effect = \
+        self.callback_mock.side_effect = \
           [Exception('Some bad exception')]
 
         with self.assertLogExists(logging.WARNING,
@@ -1889,9 +1890,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3conn.create_bucket('neon-image-serving-directives-test')
 
         # Mock out the callback manager
-        self.callback_patcher = patch('mastermind.server.utils.http')
-        self.callback_mock = self.callback_patcher.start()
-        self.callback_mock.send_request.side_effect = \
+        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.callback_mock = self._future_wrap_mock(
+            self.callback_patcher.start())
+        self.callback_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
 
         # Insert a fake filesystem
@@ -2110,7 +2112,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
             self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
 
             # Make sure a callback was sent
-            self.assertEqual(self.callback_mock.send_request.call_count, 1)
+            self.assertEqual(self.callback_mock.call_count, 1)
 
             # Trigger new videos with different states via a push
             # (finished, customer_error)

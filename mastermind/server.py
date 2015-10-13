@@ -108,7 +108,6 @@ statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size
 statemon.define('pending_modifies', int)
 statemon.define('directive_file_size', int) # file size in bytes 
 statemon.define('pending_callbacks', int)
-statemon.define('callback_error', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 
@@ -1471,33 +1470,10 @@ class DirectivePublisher(threading.Thread):
 
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
-        had_error = False
         try:
-            cb_body = request.response
-            if isinstance(cb_body, dict):
-                cb_body = json.dumps(cb_body)
-            cb_request = tornado.httpclient.HTTPRequest(
-                url=request.callback_url,
-                method="POST",
-                headers={'content-type' : 'applicaiton/json'},
-                body=cb_body,
-                request_timeout=20.0,
-                connect_timeout=10.0)
             # Do really slow retries on the callback request because
             # often, the customer's system won't be ready for it.
-            cb_response = utils.http.send_request(cb_request, base_delay=120.0)
-            if cb_response.error:
-                statemon.state.increment('callback_error')
-                _log.warn('Error when sending callback to %s: %s' %
-                          (request.callback_url, cb_response.error))
-                had_error = True
-
-            # Update the database saying that the callback was sent
-            def _set_callback_state(x):
-                x.callback_state = (neondata.CallbackState.ERROR if had_error 
-                                    else neondata.CallbackState.SUCESS)
-            key = request.get_id()
-            neondata.NeonApiRequest.modify(key[0], key[1], _set_callback_state)
+            request.send_callback(send_kwargs=dict(base_delay=120.0))
         except Exception as e:
             _log.warn('Unexpected error when sending a customer callback: %s'
                       % e)
