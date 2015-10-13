@@ -210,27 +210,13 @@ class VideoProcessor(object):
                       (self.job_params['job_id'], self.job_params['api_key']))
             return
 
-        except VideoError as e:
-            # Flag that the job failed
-            statemon.state.increment('processing_error')
-
-            cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
-                                                self.job_params['video_id'],
-                                                err=e.message)
-
-            def _write_failure(request):
-                request.state = neondata.RequestState.FAILED
-                request.fail_count += 1
-                request.response = cb.to_dict()
-            api_request = neondata.NeonApiRequest.modify(
-                self.job_params['job_id'],
-                self.job_params['api_key'],
-                _write_failure)
-            api_request.send_callback()
-
         except Exception as e:
-            _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
-            # Flag that the job failed for some internal reason
+            new_state = neondata.RequestState.CUSTOMER_ERROR
+            if not isinstance(e, VideoError):
+                new_state = neondata.RequestState.INT_ERROR
+                _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
+                
+            # Flag that the job failed
             statemon.state.increment('processing_error')
 
             cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
@@ -238,13 +224,18 @@ class VideoProcessor(object):
                                                 err=e.message)
             
             def _write_failure(request):
-                request.state = neondata.RequestState.INT_ERROR
+                request.state = new_state
                 request.response = cb.to_dict()
                 request.fail_count += 1
             api_request = neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
                 self.job_params['api_key'],
                 _write_failure)
+            
+            # Send the callback to let the client know there was an
+            # error that they might be able to fix
+            if isinstance(e, VideoError):
+                api_request.send_callback()
        
         finally:
             #Delete the temp video file which was downloaded
@@ -526,11 +517,9 @@ class VideoProcessor(object):
                              neondata.RequestState.REQUEUED,
                              neondata.RequestState.REPROCESS,
                              neondata.RequestState.FAILED,
-                             neondata.RequestState.INT_ERROR]:
+                             neondata.RequestState.INT_ERROR,
+                             neondata.RequestState.CUSTOMER_ERROR]:
                 req.state = neondata.RequestState.FINALIZING
-            elif req.state == neondata.RequestState.CUSTOMER_ERROR:
-                # Don't change the state
-                return
             else:
                 somebody_else_finished[0] = True
         try:
@@ -647,50 +636,44 @@ class VideoProcessor(object):
             api_request.state = neondata.RequestState.FINISHED
 
         except neondata.ThumbDownloadError, e:
-            api_request.state = neondata.RequestState.CUSTOMER_ERROR
-            _log.warn("Default thumbnail download failed for vid %s" % video_id)
+            _log.warn("Default thumbnail download failed for vid %s" %
+                      video_id)
             statemon.state.increment('default_thumb_error')
-            err_msg = "Failed to download default thumbnail error=%s" % e
+            err_msg = "Failed to download default thumbnail: %s" % e
             raise DefaultThumbError(err_msg)
 
-        finally:
+  
 
-            # Build the callback request
-            err_msg = None
-            if api_request.state == neondata.RequestState.CUSTOMER_ERROR:
-                err_msg = api_request.msg
-            cb_request = self.build_callback_request(err_msg)
+        # Build the callback response
+        cb_response = self.build_callback_response()
 
-            # Update the database that the request is done with the processing 
-            # Cleanly or with some acceptable errors (CUSTOMER_ERROR)
-            def _flag_request_done_in_db(request):
-                request.state = api_request.state
-                request.publish_date = time.time() *1000.0
-                request.response = tornado.escape.json_decode(cb_request.body)
-            try:
-                sucess = neondata.NeonApiRequest.modify(api_request.job_id,
-                                                        api_request.api_key,
-                                                        _flag_request_done_in_db)
-                if not sucess:
-                    raise DBError('Api Request finished failed. It was not there')
-            except Exception, e:
-                _log.error("Error writing request state to database: %s" % e)
-                statemon.state.increment('modify_request_error')
-                raise DBError("Error finishing api request")
+        # Update the database that the request is done with the processing 
+        def _flag_request_done_in_db(request):
+            request.state = api_request.state
+            request.publish_date = time.time() * 1000.0
+            request.response = cb_response
+            request.callback_state = neondata.CallbackState.NOT_SENT
+        try:
+            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
+                                                    api_request.api_key,
+                                                    _flag_request_done_in_db)
+            if not sucess:
+                raise DBError('Api Request finished failed. It was not there')
+        except Exception, e:
+            _log.error("Error writing request state to database: %s" % e)
+            statemon.state.increment('modify_request_error')
+            raise DBError("Error finishing api request")
 
-            # Send callbacks and notifications
-            
-            self.send_client_callback_response(new_video_metadata.key, cb_request)
-            self.send_notifiction_response(api_request)
+        # Send the notifications
+        self.send_notifiction_response(api_request)
 
-            _log.info('Sucessfully finalized video %s. Is has video id %s' % 
-                      (self.video_url, self.video_metadata.key))
+        _log.info('Sucessfully finalized video %s. Is has video id %s' % 
+                  (self.video_url, self.video_metadata.key))
         
 
-    def build_callback_request(self, err_msg=None):
+    def build_callback_response(self):
         '''
-        build callback request that will be sent to the callback url
-        which was specified when the request was created
+        build the dict that defines the callback response
 
         '''
 
@@ -705,48 +688,8 @@ class VideoProcessor(object):
                 neondata.InternalVideoID.to_external(self.video_metadata.key),
                 fnos,
                 thumbs,
-                self.video_metadata.get_serving_url(save=False),
-                err=err_msg)
-        response_body = cresp.to_dict()
-        
-        #CREATE POST REQUEST
-        body = tornado.escape.json_encode(response_body)
-        h = tornado.httputil.HTTPHeaders({"content-type": "application/json"})
-        cb_response_request = tornado.httpclient.HTTPRequest(
-                                url=self.job_params['callback_url'], 
-                                method="POST",
-                                headers=h, 
-                                body=body, 
-                                request_timeout=60.0, 
-                                connect_timeout=10.0)
-        return cb_response_request 
- 
-    def send_client_callback_response(self, video_id, request):
-        '''
-        Schedule client response to be sent to the client
-        '''
-        # Check if url in request object is empty, if so just return True
-
-        if request.url is None or request.url == "null":
-            return True
-
-        # Schedule the callback in SQS
-        try:
-            sqsmgr = utils.sqsmanager.CustomerCallbackManager()
-            r = sqsmgr.add_callback_response(video_id, request.url,
-                                             request.body)
-        except boto.exception.SQSError, e:
-            _log.error('SQS Error %s' % e)
-            statemon.state.increment('customer_callback_schedule_error')
-            _log.info('Tried to send response: %s' % request.body)
-            return False 
-
-        if not r:
-            statemon.state.increment('customer_callback_schedule_error')
-            _log.error("Callback schedule failed for video %s" % video_id)
-            return False
-
-        return True
+                self.video_metadata.get_serving_url(save=False))
+        return cresp.to_dict()
 
     def send_notifiction_response(self, api_request):
         '''
