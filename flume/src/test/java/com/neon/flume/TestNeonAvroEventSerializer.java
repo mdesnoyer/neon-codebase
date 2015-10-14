@@ -1,6 +1,8 @@
 package com.neon.flume;
 
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -37,12 +39,12 @@ import org.junit.Test;
 import com.neon.Tracker.GeoData;
 import com.neon.Tracker.ImagesVisible;
 import com.neon.Tracker.TrackerEvent;
+import com.neon.flume.NeonAvroEventSerializer.URLOpener;
 
 public class TestNeonAvroEventSerializer {
 
   private Schema[] schemaArray = new Schema[10];
-  private GenericRecord[] origRecord = new GenericRecord[10];
-  private byte[][] bits = new byte[10][];
+  private String testRecord;
 
   private static TestAppender testAppender;
   private static Logger logger;
@@ -54,6 +56,8 @@ public class TestNeonAvroEventSerializer {
     logger = Logger.getLogger(NeonAvroEventSerializer.class.getName());
     logger.addAppender(testAppender);
 
+    FileInputStream testFile = new FileInputStream(new File("src/test/java/com/neon/flume/TestRecord.avsc"));
+    testRecord = IOUtils.toString(testFile, "UTF-8");
   }
 
   @After
@@ -88,9 +92,7 @@ public class TestNeonAvroEventSerializer {
           schemaFile.toURI().toURL().toExternalForm());
 
       serializer.write(event);
-      bits[i] = event.getBody();
       schemaArray[i] = schema;
-      origRecord[i] = record;
     }
 
     shutDownAll(serializer, outStream);
@@ -115,7 +117,7 @@ public class TestNeonAvroEventSerializer {
 
     File schemaFile = null;
     for (int i = 0; i < 10; i++) {
-      if (i > 2 && i < 6) {
+      if (i < 3 || i > 8) {
         schemaJson = new JSONObject(TrackerEvent.getClassSchema().toString());
         schemaJson.getJSONArray("fields").put(
             new JSONObject("{\"name\": \"dummyField\", \"type\" : [ \"null\" , \"int\" ], \"default\" : \"null\"}"));
@@ -140,7 +142,8 @@ public class TestNeonAvroEventSerializer {
 
       serializer.write(event);
       schemaArray[i] = schema;
-      origRecord[i] = record;
+      serializer.flush();
+      outStream.flush();
     }
 
     shutDownAll(serializer, outStream);
@@ -187,7 +190,6 @@ public class TestNeonAvroEventSerializer {
           schemaFile.toURI().toURL().toExternalForm());
       serializer.write(event);
       schemaArray[i] = schema;
-      origRecord[i] = record;
     }
 
     shutDownAll(serializer, outStream);
@@ -199,24 +201,31 @@ public class TestNeonAvroEventSerializer {
     // Test to ensure that the serializer fails properly when no schema is given
     ByteArrayOutputStream outStream = new ByteArrayOutputStream();
 
-    EventSerializer serializer = createEventSerializer(outStream);
-    serializer.afterCreate();
-
     Schema schema = null;
     GenericRecord record = null;
 
-    String badSchema = "{\"type\":\"record\", \"name\":\"com.neon.Tracker.TrackerEvent\", \"fields\":[{\"name\":\"pageUrl\", \"type\":\"string\"}]}";
+    String badSchema = "{\"type\":\"record\", \"name\":\"com.neon.Tracker.TrackerEvent\", "
+        + "\"fields\":[{\"name\":\"pageUrl\", \"type\":\"string\"}]}";
+
+    File schemaFile = new File("src/test/java/com/neon/flume/BadEvent.avsc");
+    String header = schemaFile.toURI().toURL().toExternalForm();
+    NeonAvroEventSerializer.URLOpener mockUrl = mock(NeonAvroEventSerializer.URLOpener.class);
+    when(mockUrl.open(header)).thenReturn(new ByteArrayInputStream(badSchema.getBytes()));
+
+    EventSerializer serializer = createMockedEventSerializer(outStream, mockUrl);
+    serializer.afterCreate();
 
     schema = new Schema.Parser().parse(badSchema);
 
     record = new GenericRecordBuilder(schema).set("pageUrl", "Yes").build();
-    File schemaFile = new File("src/test/java/com/neon/flume/BadEvent.avsc");
     for (int i = 0; i < 10; i++) {
       Event event = EventBuilder.withBody(serializeAvro(record, schema));
-      event.getHeaders().put(NeonAvroEventSerializer.AVRO_SCHEMA_URL_HEADER,
-          schemaFile.toURI().toURL().toExternalForm());
+      event.getHeaders().put(NeonAvroEventSerializer.AVRO_SCHEMA_URL_HEADER, header);
       serializer.write(event);
-      assertLogExists(Level.ERROR, "Error while writing Avro Event");
+      assertLogExists(Level.ERROR,
+          "Error parsing avro event org.apache.avro.AvroTypeException: "
+              + "Found com.neon.Tracker.TrackerEvent, expecting com.neon.Tracker.TrackerEvent, "
+              + "missing required field pageId");
     }
     serializer.beforeClose();
   }
@@ -236,16 +245,22 @@ public class TestNeonAvroEventSerializer {
 
     record = buildDefaultGenericEvent(schema).set("eventType", "IMAGE_VISIBLE").set("eventData", visEvent).build();
 
-    EventSerializer serializer = createEventSerializer(outStream);
+    File schemaFile = new File("src/test/java/com/neon/flume/TrackerEvent.avsc");
+
+    NeonAvroEventSerializer.URLOpener mockUrl = mock(NeonAvroEventSerializer.URLOpener.class);
+    EventSerializer serializer = createMockedEventSerializer(outStream, mockUrl);
     serializer.afterCreate();
 
-    File schemaFile = new File("src/test/java/com/neon/flume/NonExistentEvent.avsc");
+    String headerData = schemaFile.toURI().toURL().toExternalForm();
+
+    when(mockUrl.open(headerData)).thenThrow(new IOException("Connection Error"));
+
     Event event = EventBuilder.withBody(serializeAvro(record, schema));
-    event.getHeaders().put(NeonAvroEventSerializer.AVRO_SCHEMA_URL_HEADER, schemaFile.toURI().toURL().toExternalForm());
+    event.getHeaders().put(NeonAvroEventSerializer.AVRO_SCHEMA_URL_HEADER, headerData);
 
     serializer.write(event);
 
-    assertLogExists(Level.ERROR, "Could not find the Avro URL file");
+    assertLogExists(Level.ERROR, "Connection Error");
     serializer.beforeClose();
   }
 
@@ -256,9 +271,15 @@ public class TestNeonAvroEventSerializer {
     return serializer;
   }
 
+  public EventSerializer createMockedEventSerializer(OutputStream out, URLOpener urlOpener) {
+    Context ctx = new Context();
+    EventSerializer serializer = new NeonAvroEventSerializer.Builder().build(ctx, out, urlOpener);
+    return serializer;
+  }
+
   public void shutDownAll(EventSerializer serializer, OutputStream out) throws IOException {
-    serializer.beforeClose();
     serializer.flush();
+    serializer.beforeClose();
     out.flush();
     out.close();
   }
@@ -290,7 +311,7 @@ public class TestNeonAvroEventSerializer {
     DataFileStream<GenericRecord> streamReader = new DataFileStream<GenericRecord>(recordReader, reader);
     while (streamReader.hasNext()) {
       GenericRecord record = new GenericData.Record(schemaArray[numEvents]);
-      Assert.assertTrue(streamReader.next(record).toString().startsWith(origRecord[numEvents].toString()));
+      Assert.assertTrue(streamReader.next(record).toString().startsWith(testRecord));
       numEvents++;
     }
     streamReader.close();

@@ -89,11 +89,21 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
   private GenericRecord trackerEvent = null;
   private GenericDatumReader<TrackerEvent> eventReader = null;
 
+  // This object is used for reading URLs. It's here so it can be mocked
+  private URLOpener urlOpener;
+
   // State counters
   NeonAvroSerializerCounter counters = null;
 
+  // Only use this constructor for unittesting
+  private NeonAvroEventSerializer(OutputStream out, URLOpener urlOpener) {
+    this.out = out;
+    this.urlOpener = urlOpener;
+  }
+
   private NeonAvroEventSerializer(OutputStream out) {
     this.out = out;
+    this.urlOpener = new URLOpener();
   }
 
   @Override
@@ -150,8 +160,13 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
       writeImpl(event);
     } catch (FileNotFoundException e) {
       logger.error("Could not find the Avro URL file");
+      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+    } catch (IOException e) {
+      logger.error("Connection Error");
+      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
     } catch (Exception e) {
       logger.error("Error while writing Avro Event");
+      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
     }
   }
 
@@ -211,7 +226,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     } else {
       InputStream is = null;
       try {
-        is = new URL(schemaUrl).openStream();
+        is = urlOpener.open(schemaUrl);// new URL(schemaUrl).openStream();
         return parser.parse(is);
       } finally {
         if (is != null) {
@@ -247,6 +262,26 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
       return writer;
     }
 
+    // This is used solely for unittesting with a mocked type
+    public EventSerializer build(Context context, OutputStream out, URLOpener urlOpener) {
+      NeonAvroEventSerializer writer = new NeonAvroEventSerializer(out, urlOpener);
+      writer.configure(context);
+      return writer;
+    }
+
+  }
+
+  /**
+   * Class used to open a url. This is needed for mocking purposes because URL
+   * is final and cannot be mocked.
+   * 
+   * @author mdesnoyer
+   * 
+   */
+  public class URLOpener {
+    public InputStream open(String url) throws IOException {
+      return new URL(url).openStream();
+    }
   }
 
 }
