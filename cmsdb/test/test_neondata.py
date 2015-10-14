@@ -2498,6 +2498,7 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
         neondata.NeonUserAccount.save_all([so1, so2])
         results = yield neondata.NeonUserAccount.get_many([so1.key,so2.key], async=True)
+        self.assertEquals(len(results), 2)
  
     @tornado.testing.gen_test 
     def test_get_many_with_pattern_neon_user_accounts(self):

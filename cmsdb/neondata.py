@@ -159,10 +159,10 @@ class PGDBConnection(tornado.web.RequestHandler):
         port = options.get('cmsdb.neondata.db_port')
         name = options.get('cmsdb.neondata.db_name')
         user = options.get('cmsdb.neondata.db_user')
-        #self.blocking_conn = queries.Session("postgresql://%s@%s:%s/%s" %  (user, host, port, name))
-        #self.conn = queries.TornadoSession("postgresql://%s@%s:%s/%s" %  (user, host, port, name), 
-        #                                    io_loop=tornado.ioloop.IOLoop.current())
-        self.db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (name, user, host, port), ioloop=tornado.ioloop.IOLoop.current(), size=3, cursor_factory=psycopg2.extras.RealDictCursor) 
+        self.db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (name, user, host, port), 
+                              ioloop=tornado.ioloop.IOLoop.current(), 
+                              size=3, 
+                              cursor_factory=psycopg2.extras.RealDictCursor) 
 class DBConnection(object):
     '''Connection to the database.
 
@@ -983,7 +983,6 @@ class StoredObject(object):
         
             return obj
 
-
     @classmethod
     def _deserialize_field(cls, key, value):
         '''Deserializes a field by creating a StoredObject as necessary.'''
@@ -1292,10 +1291,10 @@ class StoredObject(object):
             try:
                 func(mappings)
             finally:
-                #TODO add updated column, or to _data, figure out rv
                 sql_statements = []
                 for key, obj in mappings.iteritems():
                    if obj is not None and obj != orig_objects.get(key, None):
+                        obj.updated = str(datetime.datetime.utcnow()) 
                         query = "UPDATE %s \
                                  SET _data = '%s' \
                                  WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
@@ -1304,6 +1303,7 @@ class StoredObject(object):
                         sql_statements.append(query) 
     
                 cursor = yield pool_conn.transaction(sql_statements)
+                raise tornado.gen.Return(mappings) 
         else:  
             def _getandset(pipe):
                 # mget can't handle an empty list 
@@ -1386,7 +1386,7 @@ class StoredObject(object):
                 for set_key, keys in key_sets.iteritems():
                     pipe.sadd(set_key, *keys)
                 pipe.mset(data)
-                tornado.gen.Return(True)
+                return True
     
             lock_keys = key_sets.keys() + data.keys()
             if callback:
