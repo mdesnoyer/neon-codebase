@@ -1501,9 +1501,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(run_frac['n1'], 1.0/3.0)
         self.assertAlmostEqual(run_frac['n2'], 1.0/3.0)
 
-    def test_frac_with_model_score_prior(self):
-        # We will test frac calculation based on prior values.
-        # Two cases will be tested, with non_exp_thumb can be none or not none
+    def test_frac_with_high_model_score_low_conversion_high_frac(self):
+        # In this case, even though the CTR is lower, the higher model score
+        # leads to higher serving frac.
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', frac_adjust_rate=0.0,
@@ -1605,11 +1605,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             VideoInfo(
                 'acct1', True,
                 [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
-                                               ttype='brightcove',
-                                               chosen = True),
-                                               base_conversions=100,
-                                               base_impressions=2000),
-                 build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 5.0),
                                                base_conversions=100,
@@ -1626,8 +1621,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=2000)],
                 score_type = ScoreType.RANK_CENTRALITY))
         # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        # b1 is the default, and it will take 0.5 server frac.
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
-                         ['b1', 'n2', 'n1'])
+                         ['n2', 'n1', 'b1'])
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
