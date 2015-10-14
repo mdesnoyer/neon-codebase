@@ -2694,7 +2694,7 @@ class BrightcoveIntegration(AbstractIntegration):
     BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, i_id=None, a_id='', p_id=None, 
-                rtoken=None, wtoken=None, auto_update=False,
+                rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
@@ -2708,7 +2708,6 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
-        self.auto_update = auto_update 
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
@@ -2735,18 +2734,6 @@ class BrightcoveIntegration(AbstractIntegration):
         ''' return ovp name'''
         return "brightcove_integration"
 
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
-
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
@@ -2761,10 +2748,6 @@ class BrightcoveIntegration(AbstractIntegration):
         ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
-
-    @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
@@ -2979,8 +2962,7 @@ class OoyalaIntegration(AbstractIntegration):
                  a_id='', 
                  p_code=None, 
                  api_key=None, 
-                 api_secret=None, 
-                 auto_update=False): 
+                 api_secret=None): 
         '''
         Init ooyala platform 
         
@@ -2993,25 +2975,12 @@ class OoyalaIntegration(AbstractIntegration):
         self.partner_code = p_code
         self.api_key = api_key
         self.api_secret = api_secret 
-        self.auto_update = auto_update
  
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
         return "ooyala_integration"
 
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
-    
     @classmethod
     def generate_signature(cls, secret_key, http_method, 
                     request_path, query_params, request_body=''):
@@ -3041,9 +3010,6 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
  
