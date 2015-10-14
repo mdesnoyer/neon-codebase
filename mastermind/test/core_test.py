@@ -1154,8 +1154,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
+        # With the new serving calculation, model score is used to encourage
+        # high serving percentages for high score thumbnails.
+        # Chosen one gets 5% lift. 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['ctr', 'bc', 'n1', 'n2'])
+                         ['ctr', 'n2', 'bc', 'n1'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1498,6 +1501,130 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(run_frac['n1'], 1.0/3.0)
         self.assertAlmostEqual(run_frac['n2'], 1.0/3.0)
 
+    def test_frac_with_high_model_score_low_conversion_high_frac(self):
+        # In this case, even though the CTR is lower, the higher model score
+        # leads to higher serving frac.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
+                         ['b1', 'n2', 'n1'])
+
+    def test_frac_with_model_score_prior_but_half_bandit(self):
+        # Try the similar setup but frac_adjust_rate = 0.5
+        # The base_conversions/impressions are set the same.
+        # The fractions will still be determined by the model scores.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.5,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
+                         ['b1', 'n2', 'n1'])
+
+    def test_frac_with_model_score_prior_but_full_bandit(self):
+        # Try the similar setup but frac_adjust_rate = 1.0
+        # When frac_adjust_rate is 0, the fractions are based on model scores.
+        # When frac_adjust_rate is 1, the fractions are based on stats.
+        # The winner should be the higher conversion ones, not the higher score ones.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
+                               exp_frac = '1.0'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=105,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=115,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
+                         ['n1', 'n2', 'b1'])
+
+    def test_frac_with_model_score_prior_with_non_1_exp_frac_and_t_test(self):
+        # adding non_exp_thumb is not none case.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+                               exp_frac = '0.5'))
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 5.0),
+                                               base_conversions=100,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
+                                               ttype='neon',
+                                               model_score = 3.0),
+                                               base_conversions=110,
+                                               base_impressions=2000),
+                 build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
+                                               ttype='random',
+                                               model_score = 0.2),
+                                               base_conversions=110,
+                                               base_impressions=2000)],
+                score_type = ScoreType.RANK_CENTRALITY))
+        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
+        # b1 is the default, and it will take 0.5 server frac.
+        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
+                         ['n2', 'n1', 'b1'])
+
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
@@ -1692,6 +1819,111 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
+
+    def test_update_video_with_thumbnail_but_no_directive_changes(self):
+        #
+        self.mastermind.experiment_state['acct1_vid1'] = \
+          neondata.ExperimentState.COMPLETE
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+
+        directives = [x for x in self.mastermind.get_directives()]
+        # Directives doesn't change because the experiment has ened.
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
+        # First test a case with update video info, but the experiemnt
+        # state should stay COMPLETE.
+        
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon')],
+             testing_enabled=True)
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+        directives = [x for x in self.mastermind.get_directives()]
+        # Directives doesn't change because the experiment has ened.
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
+
+    def test_update_video_with_new_random_thumbnail(self):
+        # If we add a new random thumbnail. We don't change the
+        # experiment state nor the serving directives.
+        self.mastermind.experiment_state['acct1_vid1'] = \
+          neondata.ExperimentState.COMPLETE
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        before_directives = [x for x in self.mastermind.get_directives()]
+        before_directive_dict = dict((x, y) for x, y in before_directives[0][1])
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon'),
+             ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
+                               ttype='random', chosen=True)],
+             testing_enabled=True)
+        after_directives = [x for x in self.mastermind.get_directives()]
+        self.assertEqual(len(after_directives), 1)
+        self.assertEqual(after_directives[0][0], ('acct1', 'acct1_vid1'))
+        after_directive_dict = dict((x, y) for x, y in after_directives[0][1])
+        self.assertEquals(before_directive_dict, after_directive_dict)
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+
+    def test_update_video_with_new_editor_thumbnail(self):
+        #
+        self.mastermind.experiment_state['acct1_vid1'] = \
+          neondata.ExperimentState.COMPLETE
+
+        self.mastermind.update_experiment_strategy(
+            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
+
+        directives = [x for x in self.mastermind.get_directives()]
+        # Directives doesn't change because the experiment has ened.
+        self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
+                                                 ('acct1_vid1_tid2', 0.01)])
+
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_tid2', 'acct1_vid1',
+                               ttype='neon'),
+             ThumbnailMetadata('acct1_vid1_tid3', 'acct1_vid1',
+                               ttype='brightcove', chosen=True)],
+             testing_enabled=True)
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
+        directives = [x for x in self.mastermind.get_directives()]
+        self.assertEqual(len(directives), 1)
+        self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
+        # directive changes since the experiement restarted, and
+        # the strategy is changed with exp_frac=1.0
+        directive_dict = dict((x, y) for x, y in directives[0][1])
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 
+                               directive_dict['acct1_vid1_tid2'])
+        self.assertGreater(directive_dict['acct1_vid1_tid3'],
+                               directive_dict['acct1_vid1_tid2'])
+
+        updated_state = self.mastermind.experiment_state['acct1_vid1']
+        self.assertEqual(updated_state, neondata.ExperimentState.RUNNING)
+
 
 class TestStatUpdating(test_utils.neontest.TestCase):
     def setUp(self):
