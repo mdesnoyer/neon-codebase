@@ -128,10 +128,11 @@ class TestAccessLogger(test_utils.neontest.TestCase):
 class TestLogglyHandler(test_utils.neontest.TestCase):
     def setUp(self):
         self.url_patcher = patch('utils.http.RequestPool')
-        self.url_mock = self.url_patcher.start()
+        self.url_mock = self._future_wrap_mock(
+            self.url_patcher.start()().send_request)
 
-        self.url_mock().send_request.side_effect = \
-          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
+        self.url_mock.side_effect = \
+          lambda x, **kwargs: HTTPResponse(x, 200)
 
         
         self.handler = utils.logs.LogglyHandler('mytag')
@@ -139,15 +140,16 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
         self.logger.addHandler(self.handler)
 
     def tearDown(self):
-        self.url_patcher.stop()
         self.logger.removeHandler(self.handler)
+        del self.handler
+        self.url_patcher.stop()
 
     def test_loginfo(self):
         with self.assertLogExists(logging.INFO, 'I got a.* log'):
             _log.info('I got an %s log', 'INFO')
 
-        self.assertEqual(self.url_mock().send_request.call_count, 1)
-        request = self.url_mock().send_request.call_args[0][0]
+        self.assertWaitForEquals(lambda: self.url_mock.call_count, 1)
+        request = self.url_mock.call_args[0][0]
         self.assertRegexpMatches(request.url, 'https://.*/tag/mytag')
         self.assertDictContainsSubset(
             {'Content-type' : 'application/x-www-form-urlencoded'},
@@ -160,21 +162,24 @@ class TestLogglyHandler(test_utils.neontest.TestCase):
 
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
-        self.url_mock().send_request.side_effect = HTTPError(404)
+        self.url_mock.side_effect = \
+          lambda x, **kw: HTTPResponse(x, 404, error=HTTPError(404))
 
         with self.assertLogExists(logging.ERROR, 'I got a.* log'):
             _log.error('I got an %s log', 'ERROR')
 
-        self.assertRegexpMatches(mock_stderr.getvalue(),
-                                 'HTTPError: HTTP 404')
+        self.assertWaitForEquals(
+            lambda: re.compile('HTTPError: HTTP 404').search(
+                mock_stderr.getvalue()) is not None, True)
 
 class TestFlumeHandler(test_utils.neontest.TestCase):
     def setUp(self):
         self.url_patcher = patch('utils.http.RequestPool')
-        self.url_mock = self.url_patcher.start()
+        self.url_mock = self._future_wrap_mock(
+            self.url_patcher.start()().send_request)
 
-        self.url_mock().send_request.side_effect = \
-          lambda x, callback, do_logging: callback(HTTPResponse(x, 200))
+        self.url_mock.side_effect = \
+          lambda x, **kw: HTTPResponse(x, 200)
 
         
         self.handler = utils.logs.FlumeHandler('http://localhost:6366')
@@ -182,15 +187,16 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
         self.logger.addHandler(self.handler)
 
     def tearDown(self):
-        self.url_patcher.stop()
         self.logger.removeHandler(self.handler)
+        del self.handler
+        self.url_patcher.stop()
 
     def test_loginfo(self):
         with self.assertLogExists(logging.INFO, 'I got a.* log'):
             _log.info('I got an %s log', 'INFO')
 
-        self.assertEqual(self.url_mock().send_request.call_count, 1)
-        request = self.url_mock().send_request.call_args[0][0]
+        self.assertWaitForEquals(lambda: self.url_mock.call_count, 1)
+        request = self.url_mock.call_args[0][0]
         self.assertRegexpMatches(request.url, 'http://localhost:6366')
         self.assertDictContainsSubset(
             {'Content-type' : 'application/json'},
@@ -204,15 +210,15 @@ class TestFlumeHandler(test_utils.neontest.TestCase):
 
     @patch('sys.stderr', new_callable=StringIO)
     def test_bad_connection(self, mock_stderr):
-        self.url_mock().send_request.side_effect = \
-        lambda x, callback, do_logging: callback(
-            HTTPResponse(x, 404, error=HTTPError(404)))
+        self.url_mock.side_effect = \
+          lambda x, **kw: HTTPResponse(x, 404, error=HTTPError(404))
 
         with self.assertLogExists(logging.ERROR, 'I got a.* log'):
             _log.error('I got an %s log', 'ERROR')
 
-        self.assertRegexpMatches(mock_stderr.getvalue(),
-                                 'HTTPError: HTTP 404')
+        self.assertWaitForEquals(
+            lambda: re.compile('HTTPError: HTTP 404').search(
+                mock_stderr.getvalue()) is not None, True)
 
 
 if __name__ == '__main__':
