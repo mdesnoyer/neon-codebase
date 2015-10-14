@@ -11,7 +11,7 @@ import scipy.stats as spstats
 import itertools
 
 class Param(object):
-    BASE_PERCENT = 0.04
+    BASE_PERCENT = 0.004
     LIFT = 1.25
     EXP_RATE = 0.02
     EXP_STOP = 0.1
@@ -372,11 +372,15 @@ class StatsOptimizingSimulator(object):
             impression_array_binned_1 = self.bin_data(impression_array_1)
             impression_array_binned_2 = self.bin_data(impression_array_2)
 
-            combined_data_array = np.array([impression_array_binned_1, conversion_array_binned_1, impression_array_binned_2, conversion_array_binned_2])
-            combined_data_array = combined_data_array.T
-            relative_risk = self.calc_aggregate_ab_metrics(combined_data_array)
+            # Calculate relative risks. (Currently not needed anymore)
+            # combined_data_array = np.array([impression_array_binned_1, conversion_array_binned_1, impression_array_binned_2, conversion_array_binned_2])
+            # combined_data_array = combined_data_array.T
+            # relative_risk = self.calc_aggregate_ab_metrics(combined_data_array)
             # if conversion_counter_1 == 0:
             #     print conversion_counter_2, impression_counter_2, conversion_counter_1, impression_counter_1
+            # print "calc_aggregate_ab_metrics: ", relative_risk
+            # relative_risk_array.append(relative_risk)
+
             lift = (conversion_counter_2/impression_counter_2) / (conversion_counter_1/impression_counter_1)
             print "lift: ", lift
             if lift >= 1.1875 and lift <= 1.3125:
@@ -388,11 +392,9 @@ class StatsOptimizingSimulator(object):
 
             simple_lift = np.log((conversion_counter_2/impression_counter_2) / (conversion_counter_1/impression_counter_1))
 
-            # print "calc_aggregate_ab_metrics: ", relative_risk
             # print "simple: ", simple_lift
 
             simple_lift_array.append(simple_lift)
-            relative_risk_array.append(relative_risk)
 
             # If the condition is not reached then the inconclusive count adds one.
             if not is_bandit_reached:
@@ -423,19 +425,20 @@ class StatsOptimizingSimulator(object):
             plt.show()
 
         mean_log_ratio_star = np.mean(simple_lift_array)
-        print "mean simple: ", np.exp(np.mean(simple_lift_array))
+        mean_simple = np.exp(np.mean(simple_lift_array))
+        print "mean simple: ", mean_simple
         standard_error = np.std(simple_lift_array)
         bound_num = 1.0#1.96
         print "low simple bound: ", np.exp(mean_log_ratio_star - bound_num*standard_error)
         print "high simple bound: ", np.exp(mean_log_ratio_star + bound_num*standard_error)
         print "log std simple: ", np.exp(np.std(simple_lift_array))
-        print "mean relative risk: ", np.mean(np.array(relative_risk_array), 0)
-        print "std relative risk: ", np.std(np.array(relative_risk_array), 0)
+        # print "mean relative risk: ", np.mean(np.array(relative_risk_array), 0)
+        # print "std relative risk: ", np.std(np.array(relative_risk_array), 0)
         print "in_lift_range_count: ", in_lift_range_count
         print "off_lift_range_count: ", off_lift_range_count
 
 
-        return (bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)
+        return (bandit_avg, bandit_inconclusive_count, bandit_err_count, missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg, mean_simple)
 
 def random_walk(total_amount):
     ctr_start_pt = Param.BASE_PERCENT
@@ -691,7 +694,7 @@ def simulator():
     # min_conversion_to_error_exp_experiment()
     # return
     random_walk_array = random_walk(10000)
-    stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 100, is_display = False)
+    stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 500, is_display = False)
     # Start the testing.
     print "Sequencial Testing"
     print """(traditional_avg, new_avg, traditional_inconclusive_count,
@@ -711,7 +714,19 @@ def simulator():
               missed_bandit_conversion_avg, bandit_err_end_avg, optimal_bandit_conversion_avg)"""
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_simple_type1_err)
-    print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+    
+    real_lifts = np.arange(1.05, 2.01, 0.05)
+    measured_lifts = []
+    for Param.LIFT in real_lifts:
+        print "Param.LIFT", Param.LIFT
+        result = stat_simulator.run_bandit_experiment(simulator_function_bandit_constant)
+        print result
+        mean_lift = result[-1]
+        measured_lifts.append(mean_lift)
+    print "The lift matching pairs {real lift, measured mean lift} are:", real_lifts, measured_lifts
+    plt.plot(real_lifts, measured_lifts)
+    plt.show()
+
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_constant_type1_err)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp)
     # print stat_simulator.run_bandit_experiment(simulator_function_bandit_exp_type1_err)
@@ -720,3 +735,6 @@ def simulator():
 
 if __name__ == '__main__':
     simulator()
+# When base is 4%, and we run the experiment 5000 times.
+# b = np.array([1.1052947479478825, 1.2043200362768096, 1.274178766531594, 1.3374008580993271, 1.3963056527898916, 1.4483819628655583, 1.4941096554265896, 1.529144279601715, 1.5862067428096254, 1.6245142719756327, 1.6764926290428115, 1.7168702342585522, 1.7531015191701758, 1.7923951259716355, 1.8480024407553253, 1.8811541867942077, 1.9408913053133825, 1.9879546821951424, 2.0246224557519152, 2.0858043293425435])
+# When base is 0.4$, and we run the experiment 500 times.
