@@ -23,6 +23,7 @@ import static org.apache.flume.serialization.AvroEventSerializerConfigurationCon
 import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.DEFAULT_SYNC_INTERVAL_BYTES;
 import static org.apache.flume.serialization.AvroEventSerializerConfigurationConstants.SYNC_INTERVAL_BYTES;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -117,7 +118,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     throw new UnsupportedOperationException("Avro API doesn't support append");
   }
 
-  public void writeImpl(Event event) throws IOException {
+  private void writeImpl(Event event) throws IOException {
     if (dataFileWriter == null) {
       initialize(event);
     }
@@ -147,13 +148,16 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
   public void write(Event event) throws IOException {
     try {
       writeImpl(event);
+    } catch (FileNotFoundException e) {
+      logger.error("Could not find the Avro URL file");
     } catch (Exception e) {
       logger.error("Error while writing Avro Event");
     }
   }
 
   private void initialize(Event event) throws IOException {
-    Schema schema = TrackerEvent.getClassSchema();// getSchema(event);
+    Schema schema = TrackerEvent.getClassSchema(); // getSchema(event);
+
     writer = new GenericDatumWriter<Object>(schema);
     dataFileWriter = new DataFileWriter<Object>(writer);
 
