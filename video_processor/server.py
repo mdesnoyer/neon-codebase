@@ -723,6 +723,7 @@ class SQSServer(object):
             return self.q
 
     def _add_priority_attribute(self, priority, message):
+        #Attaches priority information to the message
         message.message_attributes = {
                   "priority": {
                         "data_type": "Number",
@@ -732,6 +733,9 @@ class SQSServer(object):
         return message
 
     def _change_message_visibility(self, message):
+        #Changes the visiblity of the message based on the information in 
+        #the body of the message. If not specified, set it to 15 minutes
+        #(900 seconds)
         timeout = 900
         m_body = message.get_body()
         if m_body['duration']:
@@ -740,6 +744,7 @@ class SQSServer(object):
                                             timeout)
 
     def write_message(self, priority, message):
+        #Writes a message to the specified priority queue
         self.q = self._get_queue(priority)
         message = self._add_priority_attribute(priority, message)
         self.q.write(message)
@@ -756,14 +761,18 @@ class SQSServer(object):
         return message
                  
     def message_count(self):
+        #Returns the number of messages in the queue.
+        #This is not guaranteed to be 100% accurate
         return self.q.count()    
 
     def delete_message(self, message):
+        #Deletes the specified message
         priority = int(message.message_attributes['priority']['string_value'])
         self.q = self._get_queue(priority) 
         self.q.delete_message(message)
 
     def dump(self, priority):
+        #Dumps all the messages to a text file to be read at a later date
         if self.p != priority:
            self.q = self._get_queue(priority)
         self.q.dump('dump.txt', sep='\n----------------\n')

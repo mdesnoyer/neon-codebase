@@ -855,9 +855,10 @@ class VideoClient(multiprocessing.Process):
                                             request_timeout=60.0,
                                             connect_timeout=10.0)
         '''
-        sqs_reader = server.SQSRead()
+        #TODO: SQS implementation
+        sqs_reader = server.SQSServer()
         response = Message()
-        response = sqs_reader.read() #utils.http.send_request(req)
+        response = sqs_reader.read_message() #utils.http.send_request(req)
    
         if not response.error:
             result = JSON.parse(response.get_body())
