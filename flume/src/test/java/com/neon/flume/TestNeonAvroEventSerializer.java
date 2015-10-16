@@ -265,6 +265,7 @@ public class TestNeonAvroEventSerializer {
   }
 
   public EventSerializer createEventSerializer(OutputStream out) {
+    // Create the evnet serializer
     Context ctx = new Context();
     EventSerializer.Builder builder = new NeonAvroEventSerializer.Builder();
     EventSerializer serializer = builder.build(ctx, out);
@@ -272,12 +273,15 @@ public class TestNeonAvroEventSerializer {
   }
 
   public EventSerializer createMockedEventSerializer(OutputStream out, URLOpener urlOpener) {
+    // Create the event serializer
+    // This calls a different constructor so that mocking can be done
     Context ctx = new Context();
     EventSerializer serializer = new NeonAvroEventSerializer.Builder().build(ctx, out, urlOpener);
     return serializer;
   }
 
   public void shutDownAll(EventSerializer serializer, OutputStream out) throws IOException {
+    // Close down the serializer and stream
     serializer.flush();
     serializer.beforeClose();
     out.flush();
@@ -285,6 +289,7 @@ public class TestNeonAvroEventSerializer {
   }
 
   private GenericRecordBuilder buildDefaultGenericEvent(Schema schema) {
+    // Build a generic record
     return new GenericRecordBuilder(schema).set("pageId", new Utf8("pageId_dummy"))
         .set("trackerAccountId", "trackerAccountId_dummy").set("trackerType", "IGN").set("pageURL", "pageUrl_dummy")
         .set("refURL", "refUrl_dummy").set("serverTime", 1416612478000L).set("clientTime", 1416612478000L)
@@ -294,6 +299,7 @@ public class TestNeonAvroEventSerializer {
   }
 
   private byte[] serializeAvro(Object datum, Schema schema) throws IOException {
+    // Serialize an Avro object
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     ReflectDatumWriter<Object> writer = new ReflectDatumWriter<Object>(schema);
     BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(out, null);
@@ -304,6 +310,9 @@ public class TestNeonAvroEventSerializer {
   }
 
   public void validateAvroEvents(ByteArrayOutputStream out) throws IOException {
+    // Reads the events from memory and checks them against a hardcoded record.
+    // The record is what the expected output is supposed to be.
+    // If they're the same, then it passes the test.
     byte buf[] = out.toByteArray();
     ByteArrayInputStream recordReader = new ByteArrayInputStream(buf);
     int numEvents = 0;
