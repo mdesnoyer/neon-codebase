@@ -658,29 +658,15 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         
         self.im_download_mock.side_effect = _image_exception
         for i in range(3):
-            self.vprocessor.finalize_response()
+            with self.assertRaises(api.client.DefaultThumbError):
+                self.vprocessor.finalize_response()
 
-            # Make sure that the api request is updated
-            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
-            self.assertEquals(api_request.state,
-                    neondata.RequestState.CUSTOMER_ERROR)
-
-            # check state variable
-            state_vars = video_processor.client.statemon.state.get_all_variables()
-            self.assertEqual(
-                    state_vars.get('video_processor.client.default_thumb_error').value,
-                    1)
-            video_processor.client.statemon.state._reset_values()
-
-            # check callback scheduled 
-            self.assertEqual(self.mock_sqs_manager().add_callback_response.call_count,
-                    1)
-
-            # Check the video metadata in the database
+            # Check the video metadata in the database. It is still
+            # serving, but we will be in an error state (checked in
+            # another test)
             video_data = neondata.VideoMetadata.get(self.video_id)
             self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
             self.assertTrue(video_data.serving_enabled)
-            self.mock_sqs_manager().add_callback_response.reset_mock()
 
     def test_reprocess(self):
         # Add the results from the previous run to the database
@@ -1113,11 +1099,11 @@ class SmokeTest(test_utils.neontest.TestCase):
         # Mock out the image download
         self.im_download_mocker = patch(
             'utils.imageutils.PILImageUtils.download_image')
-        im_download_mock = self.im_download_mocker.start()
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(),
+            require_async_kw=True)
         self.random_image = PILImageUtils.create_random_image(480, 640)
-        image_future = Future()
-        image_future.set_result(self.random_image)
-        im_download_mock.return_value = image_future
+        self.im_download_mock.side_effect = [self.random_image]
 
         # Mock out http requests.
         self.http_mocker = patch(
@@ -1364,6 +1350,9 @@ class SmokeTest(test_utils.neontest.TestCase):
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state,
                           neondata.RequestState.SERVING)
+
+    def test_download_default_thumb_error(self):
+        self.im_download_mock.side_effect = []
              
 
 if __name__ == '__main__':

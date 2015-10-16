@@ -188,7 +188,6 @@ class VideoProcessor(object):
                 self.download_video_file()
             finally:
                 statemon.state.decrement('workers_downloading')
-                
 
             #Process the video
             n_thumbs = max(self.n_thumbs, 5)
@@ -630,7 +629,6 @@ class VideoProcessor(object):
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
                 _set_serving_enabled)
-        
 
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
@@ -641,8 +639,6 @@ class VideoProcessor(object):
             statemon.state.increment('default_thumb_error')
             err_msg = "Failed to download default thumbnail: %s" % e
             raise DefaultThumbError(err_msg)
-
-  
 
         # Build the callback response
         cb_response = self.build_callback_response()
