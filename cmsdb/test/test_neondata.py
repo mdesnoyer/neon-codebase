@@ -123,6 +123,38 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         nu_a_ids = [nu.account_id for nu in nu_accounts]
         self.assertItemsEqual(a_ids, nu_a_ids)
 
+    @tornado.testing.gen_test
+    def test_iterate_all_videos_async(self):
+        na = NeonUserAccount('a1', 'key1')
+        na.save()
+
+        for i in range(5):
+            yield tornado.gen.Task(VideoMetadata('key1_v%d' % i).save)
+
+        found_videos = []
+        iterator = yield na.iterate_all_videos(async=True, max_request_size=2)
+        while True:
+            item = yield iterator.next(async=True)
+            if isinstance(item, StopIteration):
+                break
+            found_videos.append(item)
+
+        self.assertItemsEqual([x.key for x in found_videos],
+                              ['key1_v%d' % i for i in range(5)])
+
+
+    def test_iterate_all_videos_sync(self):
+        na = NeonUserAccount('a1', 'key1')
+        na.save()
+
+        for i in range(5):
+            VideoMetadata('key1_v%d' % i).save()
+
+        found_videos = list(na.iterate_all_videos(max_request_size=2))
+
+        self.assertItemsEqual([x.key for x in found_videos],
+                              ['key1_v%d' % i for i in range(5)])
+
     def test_get_all_trackerids(self):
         ''' test get all the tracker ids '''
         expected = []

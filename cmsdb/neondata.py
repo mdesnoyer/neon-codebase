@@ -2021,10 +2021,10 @@ class NeonUserAccount(NamespacedStoredObject):
     @tornado.gen.coroutine
     def get_internal_video_ids(self):
         '''Return the list of internal videos ids for this account.'''
-        db_connection = DBConnection.get(cls)
+        db_connection = DBConnection.get(self)
         vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
                                       set_name='objset:%s' % self.neon_api_key)
-        raise tornado.gen.Task(vids)
+        raise tornado.gen.Return(list(vids))
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2044,7 +2044,8 @@ class NeonUserAccount(NamespacedStoredObject):
         '''
         vids = yield self.get_internal_video_ids(async=True)
         raise tornado.gen.Return(
-            StoredObjectIterator(cls, vids, page_size=max_request_size))
+            StoredObjectIterator(VideoMetadata, vids,
+                                 page_size=max_request_size))
 
 
 class ExperimentStrategy(DefaultedStoredObject):
