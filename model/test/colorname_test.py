@@ -14,6 +14,7 @@ import sys
 import random
 from model.colorname import JSD
 from model.colorname import ColorName
+from model.video_searcher import VideoSearcher
 
 class TestColorName(unittest.TestCase):
     def setUp(self):
@@ -102,6 +103,15 @@ class TestColorName(unittest.TestCase):
     					 ]], dtype = np.uint8)
     	self.assertGreater(ColorName.get_distance(image_1, image_3), 0)
 
+class TestDedup(unittest.TestCase):
+    def test_dedup(self):
+        video_searcher = VideoSearcher([])
+        image_s1 = cv2.imread('test_similar_images/s1.jpg')
+        image_s2 = cv2.imread('test_similar_images/s2.jpg')
+        image_d1 = cv2.imread('test_similar_images/d1.jpg')
+        self.assertTrue(video_searcher.is_duplicate(image_s1, image_s2))
+        self.assertFalse(video_searcher.is_duplicate(image_s1, image_d1))
+        self.assertFalse(video_searcher.is_duplicate(image_s2, image_d1))
 
 if __name__ == '__main__':
     unittest.main()

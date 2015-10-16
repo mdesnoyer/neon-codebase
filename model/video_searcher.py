@@ -40,7 +40,9 @@ class VideoSearcher(object):
                  startend_buffer=0.1,
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
-                 max_thumb_min_dist=10.0):
+                 max_thumb_min_dist=10.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         '''
         Inputs:
         predictor - Predictor to use for a single frame
@@ -64,6 +66,8 @@ class VideoSearcher(object):
         self.thumb_min_dist=thumb_min_dist
         self.max_thumb_min_dist=max_thumb_min_dist
         self.filter_dups=filter_dups
+        self.gist_threshold = gist_threshold
+        self.colorname_threshold = colorname_threshold
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -107,7 +111,8 @@ class VideoSearcher(object):
         gist_dis = model.colorname.JSD(self.gist.generate(a),
                                        self.gist.generate(b))
         colorname_dis = model.colorname.ColorName.get_distance(a, b)
-        return gist_dis < 0.01 or colorname_dis < 0.015 
+        return (gist_dis < self.gist_threshold \
+                or colorname_dis < self.colorname_threshold)
 
     def filter_duplicates(self, image_list, n=None, tup_idx=0):
         '''Filters an image list of duplicates and returns at most n entries.
