@@ -17,6 +17,14 @@ from model.colorname import COLOR_VALUES
 from model.video_searcher import VideoSearcher
 import cv2
 
+# order of color names: black, blue, brown, grey,
+#                       green, orange, pink, purple,
+#                       red, white, yellow
+COLOR_VALUES = np.array(
+                [[0., 0., 0.], [1., 0., 0.], [.25, .4, .5], [.5, .5, .5],
+                [0., 1., 0.], [0., .8, 1.], [1., .5, 1.], [1., 0., 1.],
+                [0., 0., 1.] , [1., 1., 1.], [0., 1., 1.]])
+
 class ColorNameExtension(ColorName):
     '''For a given image, returns the colorname histogram.'''    
 

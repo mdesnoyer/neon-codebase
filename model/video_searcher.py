@@ -174,14 +174,18 @@ class BisectSearcher(VideoSearcher):
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
                  max_thumb_min_dist=10.0,
-                 processing_time_ratio=1.0):
+                 processing_time_ratio=1.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         super(BisectSearcher, self).__init__(predictor,
                                              filt,
                                              filter_dups,
                                              startend_buffer,
                                              max_startend_buffer,
                                              thumb_min_dist,
-                                             max_thumb_min_dist)
+                                             max_thumb_min_dist,
+                                             gist_threshold,
+                                             colorname_threshold)
         self.processing_time_ratio = processing_time_ratio
 
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
@@ -422,14 +426,18 @@ class UniformSamplingSearcher(VideoSearcher):
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
                  max_thumb_min_dist=10.0,
-                 sample_step=1.0):
+                 sample_step=1.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         super(UniformSamplingSearcher, self).__init__(predictor,
                                                       filt,
                                                       filter_dups,
                                                       startend_buffer,
                                                       max_startend_buffer,
                                                       thumb_min_dist,
-                                                      max_thumb_min_dist)
+                                                      max_thumb_min_dist,
+                                                      gist_threshold,
+                                                      colorname_threshold)
         
         self.sample_step = sample_step # Step in seconds within the video
 

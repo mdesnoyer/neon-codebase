@@ -43,7 +43,9 @@ if __name__ == '__main__':
         filter_dups=False,
         startend_buffer=0.0,
         max_thumb_min_dist=2.0,
-        processing_time_ratio=3.0)
+        processing_time_ratio=3.0,
+        gist_threshold = 0.01,
+        colorname_threshold = 0.015)
 
     mod = model.Model(predictor, filt, video_searcher)
 
