@@ -111,8 +111,10 @@ class VideoSearcher(object):
         gist_dis = model.colorname.JSD(self.gist.generate(a),
                                        self.gist.generate(b))
         colorname_dis = model.colorname.ColorName.get_distance(a, b)
-        return (gist_dis < self.gist_threshold \
-                or colorname_dis < self.colorname_threshold)
+        return ((gist_dis < self.gist_threshold and \
+                    colorname_dis < 2 * self.colorname_threshold)
+                or (colorname_dis < self.colorname_threshold and
+                    gist_dis < 2 * self.gist_threshold))
 
     def filter_duplicates(self, image_list, n=None, tup_idx=0):
         '''Filters an image list of duplicates and returns at most n entries.

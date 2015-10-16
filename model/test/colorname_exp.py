@@ -14,6 +14,7 @@ import model.features
 from model.colorname import JSD
 from model.colorname import ColorName
 from model.colorname import COLOR_VALUES
+from model.video_searcher import VideoSearcher
 import cv2
 
 class ColorNameExtension(ColorName):
@@ -164,8 +165,26 @@ def get_scores_of_two_similar_images(url_1, url_2):
     return (gist_dis, colorname_dis)
 
 def main():
-    (similar_gist, similar_colorname) = get_pair_scores(similar_pairs)
+
     random_pairs = get_random_pairs(get_file_list())
+    # Validate how it works.
+    video_searcher = VideoSearcher([])
+    for im1_f, im2_f in similar_pairs:
+        im1 = cv2.imread(im1_f)
+        im2 = cv2.imread(im2_f)
+        result = video_searcher.is_duplicate(im1, im2)
+        if not result:
+            print im1_f, im2_f, "are not the same."
+
+    for im1_f, im2_f in random_pairs:
+        im1 = cv2.imread(im1_f)
+        im2 = cv2.imread(im2_f)
+        result = video_searcher.is_duplicate(im1, im2)
+        if result:
+            print im1_f, im2_f, "are the same."
+    return
+
+    (similar_gist, similar_colorname) = get_pair_scores(similar_pairs)
     (random_gist, random_colorname) = get_pair_scores(random_pairs)
     (gist_error, gist_cut_off) = find_cut_out_limit(similar_gist, random_gist)
     (colorname_error, colorname_cut_off) = find_cut_out_limit(similar_colorname, random_colorname)
