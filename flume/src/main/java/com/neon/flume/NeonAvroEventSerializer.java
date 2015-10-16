@@ -143,13 +143,14 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     try {
       trackerEvent = eventReader.read(null, binaryDecoder);
       dataFileWriter.append(trackerEvent);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_VALID_EVENTS);
     } catch (IOException e) {
       logger.error("Error reading avro event " + e.toString());
-      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_INVALID_EVENTS);
       return;
     } catch (AvroRuntimeException e) {
       logger.error("Error parsing avro event " + e.toString());
-      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_INVALID_EVENTS);
       return;
     }
   }
@@ -160,18 +161,18 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
       writeImpl(event);
     } catch (FileNotFoundException e) {
       logger.error("Could not find the Avro URL file");
-      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_URL_NOT_FOUND);
     } catch (IOException e) {
       logger.error("Connection Error");
-      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_SCHEMA_CONNECTION_ERRORS);
     } catch (Exception e) {
       logger.error("Error while writing Avro Event");
-      counters.increment(NeonHBaseSerializerCounter.COUNTER_INVALID_EVENTS);
+      counters.increment(NeonAvroSerializerCounter.COUNTER_EVENT_WRITE_ERRORS);
     }
   }
 
   private void initialize(Event event) throws IOException {
-    Schema schema = TrackerEvent.getClassSchema(); // getSchema(event);
+    Schema schema = TrackerEvent.getClassSchema();
 
     writer = new GenericDatumWriter<Object>(schema);
     dataFileWriter = new DataFileWriter<Object>(writer);
@@ -226,7 +227,7 @@ public class NeonAvroEventSerializer implements EventSerializer, Configurable {
     } else {
       InputStream is = null;
       try {
-        is = urlOpener.open(schemaUrl);// new URL(schemaUrl).openStream();
+        is = urlOpener.open(schemaUrl);
         return parser.parse(is);
       } finally {
         if (is != null) {
