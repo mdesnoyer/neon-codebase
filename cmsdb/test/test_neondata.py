@@ -2411,7 +2411,10 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     @classmethod
     def setUpClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 1)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file='./cmsdb.sql')
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        #cls.postgresql = test_utils.postgresql.Postgresql(dump_file=os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql'))
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
     @classmethod
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)
@@ -2509,6 +2512,30 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         # Due to only wanting to load the database one time, we are going to end up with 
         # a weird amount of results here. Just assume that the results array is not empty 
         self.assertGreater(len(results), 0)      
+    '''
+    @tornado.testing.gen_test 
+    def test_normal_save(self):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        blah = yield so.save(async=True)
+        get1 = yield neondata.NeonUserAccount.get(so.key, async=True)
+        import pdb; pdb.set_trace()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+
+    @tornado.testing.gen_test 
+    def test_normal_bc_save(self):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        def _initialize_bc_plat(x):
+            x.account_id = '123'
+            x.publisher_id = '123'
+            x.read_token = 'abc'
+            x.write_token = 'def'
+            x.last_process_date = time.time()
+        bc = yield tornado.gen.Task(
+              neondata.BrightcovePlatform.modify,
+              '45', '82',
+              _initialize_bc_plat)
+     '''
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
