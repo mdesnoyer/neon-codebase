@@ -114,7 +114,6 @@ class VideoSearcher(object):
                                        self.gist.generate(b))
         colorname_dis = model.colorname.JSD(self.colorname.generate(a),
                                             self.colorname.generate(b))
-        print gist_dis, colorname_dis
         return ((gist_dis < self.gist_threshold and \
                     colorname_dis < 2 * self.colorname_threshold)
                 or (colorname_dis < self.colorname_threshold and
