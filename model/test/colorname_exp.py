@@ -13,7 +13,6 @@ if sys.path[0] != __base_path__:
 import model.features
 from model.colorname import JSD
 from model.colorname import ColorName
-from model.colorname import COLOR_VALUES
 from model.video_searcher import VideoSearcher
 import cv2
 

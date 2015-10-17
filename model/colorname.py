@@ -35,14 +35,6 @@ def JSD(P, Q):
     _M = 0.5 * (_P + _Q)
     return 0.5 * (entropy(_P, _M) + entropy(_Q, _M))
 
-# order of color names: black, blue, brown, grey,
-#                       green, orange, pink, purple,
-#                       red, white, yellow
-COLOR_VALUES = np.array(
-                [[0., 0., 0.], [1., 0., 0.], [.25, .4, .5], [.5, .5, .5],
-                [0., 1., 0.], [0., .8, 1.], [1., .5, 1.], [1., 0., 1.],
-                [0., 0., 1.] , [1., 1., 1.], [0., 1., 1.]])
-
 class ColorName(object):
     '''For a given image, returns the colorname histogram.'''    
 

@@ -61,6 +61,8 @@ class VideoSearcher(object):
         self.filt = filt
         self.gist = model.features.MemCachedFeatures.create_shared_cache(
             model.features.GistGenerator())
+        self.colorname = model.features.MemCachedFeatures.create_shared_cache(
+            model.features.ColorNameGenerator())
         self.startend_buffer=startend_buffer
         self.max_startend_buffer=max_startend_buffer
         self.thumb_min_dist=thumb_min_dist
@@ -110,7 +112,9 @@ class VideoSearcher(object):
         '''
         gist_dis = model.colorname.JSD(self.gist.generate(a),
                                        self.gist.generate(b))
-        colorname_dis = model.colorname.ColorName.get_distance(a, b)
+        colorname_dis = model.colorname.JSD(self.colorname.generate(a),
+                                            self.colorname.generate(b))
+        print gist_dis, colorname_dis
         return ((gist_dis < self.gist_threshold and \
                     colorname_dis < 2 * self.colorname_threshold)
                 or (colorname_dis < self.colorname_threshold and
