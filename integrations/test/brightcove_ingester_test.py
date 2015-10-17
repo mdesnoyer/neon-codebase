@@ -147,6 +147,7 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
             yield integrations.brightcove_ingester.process_one_account(
                 'acct1', 'i1', slow_limit=0.0)
 
+        self.assertEquals(self.process_mock.call_count, 1)
         cargs, kwargs = self.int_mock.call_args
         self.assertEquals(cargs[0], 'a1')
         self.assertEquals(cargs[1].neon_api_key, 'acct1')
@@ -155,6 +156,18 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             statemon.state.get('integrations.brightcove_ingester.slow_update'),
             1)
+
+    @tornado.testing.gen_test
+    def test_platform_missing(self):
+        with self.assertLogExists(logging.ERROR, 'Could not find platform'):
+            yield integrations.brightcove_ingester.process_one_account(
+                'acct1', 'i10')
+
+        self.assertEquals(
+            statemon.state.get('integrations.brightcove_ingester.platform_missing'),
+            1)
+
+        self.assertEquals(self.process_mock.call_count, 0)
 
     @tornado.testing.gen_test
     def test_known_error(self):
