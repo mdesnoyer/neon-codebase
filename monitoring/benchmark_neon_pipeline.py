@@ -26,24 +26,35 @@ define("cmsapi_host", default="services.neon-lab.com", help="cmsapi server", typ
 define("isp_host", default="i1.neon-images.com", help="host where the isp is")
 define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
-define("sleep", default=1800, help="sleep time", type=int)
-define("attempts_threshold", default=50, help="attempts", type=int)
+define("sleep", default=1800, type=float,
+       help="sleep time between inserting new jobs in seconds")
+define("serving_timeout", default=2000.0, type=float,
+       help="Timeout to get to serving state in seconds")
+define("isp_timeout", default=500.0, type=float,
+       help='Timeout to see the video being served by isp in seconds')
 define("test_video", default="https://neon-test.s3.amazonaws.com/output.mp4",
        help='Video to test with')
 
 # counters
-statemon.define('total_time_to_isp', int)
-statemon.define('time_to_serving', int)
-statemon.define('mastermind_to_isp', int)
+statemon.define('total_time_to_isp', float)
+statemon.define('time_to_serving', float)
+statemon.define('time_to_finished', float)
+statemon.define('mastermind_to_isp', float)
+statemon.define('job_submission_error', int)
 statemon.define('job_not_serving', int)
-statemon.define('exception_thrown', int)
-statemon.define('not_available_in_isp', int)
+statemon.define('job_failed', int)
 statemon.define('request_not_in_db', int)
+statemon.define('not_available_in_isp', int)
+statemon.define('unexpected_exception_thrown', int)
+statemon.define('jobs_created', int)
 
 import logging
 _log = logging.getLogger(__name__)
 
-class RunningTooLongError(Exception): pass
+class JobError(Exception): pass
+class SubmissionError(JobError): pass
+class RunningTooLongError(JobError): pass
+class JobFailed(JobError): pass
 
 
 class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
@@ -54,20 +65,20 @@ class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
     to get the intermediate 302 response
     '''
     
-    redirect_response = None
+    redirect_headers = None
     
     def http_error_302(self, req, fp, code, msg, headers):
-        MyHTTPRedirectHandler.redirect_response = headers
+        MyHTTPRedirectHandler.redirect_headers = headers
         return urllib2.HTTPRedirectHandler.http_error_302(self, 
                                     req, fp, code, msg, headers)
 
     http_error_301 = http_error_303 = http_error_307 = http_error_302
 
     @classmethod
-    def get_last_redirect_response(cls):
-        return cls.redirect_response
+    def get_last_redirect_headers(cls):
+        return cls.redirect_headers
 
-def create_neon_api_request(account_id, api_key):
+def create_neon_api_request(account_id, api_key, video_id=None):
     '''
     create random video processing request to Neon
     '''
@@ -76,7 +87,7 @@ def create_neon_api_request(account_id, api_key):
     headers = {"X-Neon-API-Key" : api_key, "Content-Type" : "application/json"}
     request_url = video_api_formater % (options.cmsapi_host, account_id)
     v = int(time.time())
-    video_id = "test%d" % v
+    video_id = video_id or "test%d" % v
     video_title = "monitoring"
     video_url = "%s?x=%s" % (options.test_video, video_id)
 
@@ -86,17 +97,15 @@ def create_neon_api_request(account_id, api_key):
         "video_title": video_title,
         "callback_url": None
     }
-
+    req = urllib2.Request(request_url, headers=headers)
     try:
-        req = urllib2.Request(request_url, headers=headers)
         res = urllib2.urlopen(req, json.dumps(data))
-        api_resp = json.loads(res.read())
-        return (video_id, api_resp["job_id"])
-    except urllib2.URLError, e: 
-        print "video error" , e
-    except:
-        # any exception
-        pass
+    except urllib2.URLError as e:
+        _log.error('Error submitting job: %s' % e)
+        statemon.state.job_submission_error = 1
+        raise SubmissionError
+    api_resp = json.loads(res.read())
+    return (video_id, api_resp["job_id"])
 
 def image_available_in_isp(pub, vid):
     url = "http://%s/v1/client/%s/neonvid_%s" % (options.isp_host, pub, vid)
@@ -108,97 +117,109 @@ def image_available_in_isp(pub, vid):
         res = opener.open(req)
 
         # check for the headers and the final image
-        redirect_response = MyHTTPRedirectHandler.get_last_redirect_response()
-        headers = redirect_response.headers
+        headers = MyHTTPRedirectHandler.get_last_redirect_headers()
         
-        im_url = None
-        for header in headers:
-            if "Location" in header:
-                im_url = header.split("Location: ")[-1].rstrip("\r\n")
-                if "NO_VIDEO" in im_url:
-                    return False
-                return True
-    except urllib2.URLError, e: 
+        im_url = headers['Location']
+        if neondata.InternalVideoID.NOVIDEO in im_url:
+            # It is the account level default
+            return False
+        return True
+    except urllib2.URLError as e: 
         pass
-    except:
+    except KeyError as e:
         pass
+    except Exception as e:
+        _log.exception('Unexpected exception when querying isp')
+        raise
 
     return False
 
-def monitor_neon_pipeline():
-    
-    # reset all the counters
-    #statemon.state.time_to_serving = 0 
-    #statemon.state.mastermind_to_isp = 0 
-    #statemon.state.total_time_to_isp = 0
-    
+def monitor_neon_pipeline(video_id=None):    
     start_request = time.time()
 
     # Create a video request for test account
+    statemon.state.increment('jobs_created')
+    video_id, job_id = create_neon_api_request(options.account,
+                                               options.api_key,
+                                               video_id=video_id)
+    _log.info('created video request vid %s job %s' % (video_id, job_id))
     try:
-        video_id, job_id = create_neon_api_request(options.account, options.api_key)
-        _log.info('created video request vid %s job %s' % (video_id, job_id))
 
         # Poll the API for job request completion
         job_serving = False
-        attempts = 0 
+        job_finished = False
         while not job_serving:
-            attempts += 1
             request = neondata.NeonApiRequest.get(job_id, options.api_key)
             if request:
                 _log.info_n("current request state is %s" % request.state,
                             10)
-                if request.state == "serving":
+                if (not job_finished and 
+                    request.state == neondata.RequestState.FINISHED):
+                    statemon.state.time_to_finished = \
+                      time.time() - start_request
+                    job_finished = True
+                elif request.state == neondata.RequestState.SERVING:
                     job_serving = True
-                    continue
+                    break
+                elif request.state in [
+                    neondata.RequestState.FAILED,
+                    neondata.RequestState.INT_ERROR,
+                    neondata.RequestState.CUSTOMER_ERROR]:
+                    statemon.state.job_failed = 1
+                    _log.error('Job failed with response: %s' %
+                               request.response)
+                    raise JobFailed
             else:
                 _log.warn("request data not found in db")
-                statemon.state.increment('request_not_in_db')
+                statemon.state.request_not_in_db = 1
                 # Should we attempt to cleanup in this case ?
 
-            time.sleep(30)
-            if attempts > options.attempts_threshold:
-                statemon.state.increment('job_not_serving')
+            if time.time() > (start_request + options.serving_timeout):
+                statemon.state.job_not_serving = 1
+                _log.error('Job took too long to reach serving state')
                 raise RunningTooLongError
+            time.sleep(5.0)
 
+        if not job_finished:
+            statemon.state.time_to_finished = time.time() - start_request
         # time to video serving
         video_serving = time.time() - start_request
-        statemon.state.time_to_serving = int(video_serving)
+        statemon.state.time_to_serving = video_serving
         _log.info("video is in serving state, took %s" % video_serving)
-
-        # TODO(Sunil): track the image creation times as well
-        # IF Serving.....
-        # Poll the DB for Thumbnail serving generation
-        #vm = neondata.VideoMetadata.get(i_vid)
-        #if vm:
-        #    thumbs = neondata.ThumbnailMetadata.get_many(vm.thumbnail_ids)
-        #    if thumbs[0]:
-        #        thumbs[0].created
 
         # Query ISP to get the IMG
         isp_start = time.time()
         isp_ready = False
-        attempts = 0
         acct = neondata.NeonUserAccount.get(options.api_key)
         while not isp_ready:
-            attempts += 1
-            isp_ready = image_available_in_isp(acct.tracker_account_id, video_id)
-            if not isp_ready:
-                time.sleep(15)
-            if attempts > 20: 
-                statemon.state.increment('not_available_in_isp')
+            if image_available_in_isp(acct.tracker_account_id, video_id):
+                isp_ready = True
+                break
+
+            if time.time() > (isp_start + options.isp_timeout):
+                _log.error('Too long for image to appear in ISP')
+                statemon.state.not_available_in_isp = 1
                 raise RunningTooLongError
+            time.sleep(5.0)
         
         isp_serving = time.time() - isp_start 
-        statemon.state.mastermind_to_isp = int(isp_serving)
-        _log.info("video is in ISP, took %s s from mastermind to ISP" % isp_serving)
+        statemon.state.mastermind_to_isp = isp_serving
+        _log.info("video is in ISP, took %s s from mastermind to ISP" %
+                  isp_serving)
         
         # Now you can delete the video from the database; Write an Internal API
         # delete video; request; thumbnails; serving thumbs
         
         total_time = time.time() - start_request
-        statemon.state.total_time_to_isp = int(total_time)
+        statemon.state.total_time_to_isp = total_time
         _log.info("total pipeline time %s" % total_time)
+
+        # Clear the error states
+        statemon.state.job_submission_error = 0
+        statemon.state.job_failed = 0
+        statemon.state.request_not_in_db = 0
+        statemon.state.job_not_serving = 0
+        statemon.state.not_available_in_isp = 0
 
     finally:
         # cleanup
@@ -214,9 +235,13 @@ def main():
     while True:
         try:
             monitor_neon_pipeline()
+            statemon.state.unexpected_exception_thrown = 0
+        except JobError as e:
+            # Logging already done
+            pass
         except Exception as e:
             _log.exception('Exception when monitoring')
-            statemon.state.increment('exception_thrown')
+            statemon.state.unexpected_exception_thrown = 1
         time.sleep(options.sleep)
 
 if __name__ == "__main__":

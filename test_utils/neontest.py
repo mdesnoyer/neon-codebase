@@ -12,6 +12,7 @@ import logging
 from mock import MagicMock
 import re
 import time
+import tornado.ioloop
 import tornado.testing
 import unittest
 
@@ -130,10 +131,13 @@ class TestCase(unittest.TestCase):
                 return inner_mock(*args, **kwargs)
                 
             future = concurrent.futures.Future()
-            try:
-                future.set_result(inner_mock(*args, **kwargs))
-            except Exception as e:
-                future.set_exception(e)
+            io_loop = tornado.ioloop.IOLoop.current()
+            def _set_result():
+                try:
+                    future.set_result(inner_mock(*args, **kwargs))
+                except Exception as e:
+                    future.set_exception(e)
+            io_loop.add_callback(_set_result)
             return future
         outer_mock.side_effect = _build_future
         return inner_mock

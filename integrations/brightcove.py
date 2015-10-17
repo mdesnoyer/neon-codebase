@@ -193,6 +193,15 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
+    def set_thumbnail(self, ovp_id, thumb_metadata):
+        '''Sets the Brightcove thumbnail that is returned from their apis.'''
+        # Not implemented for now because it's not needed
+        raise NotImplementedError()
+    
+        # This will use update_thumbnail_and_videostill in brightcove
+        # api and make changes to our database as necessary.
+
+    @tornado.gen.coroutine
     def submit_playlist_videos(self):
         '''Submits any playlist videos for this account.
 

@@ -805,14 +805,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         api_request.save_default_thumbnail()
         self.assertEquals(get_video_mock.call_count, 0)
 
-        
-        # Add an old url and there is no video data in the database yet
-        api_request.previous_thumbnail = 'old_thumbnail'
-        with self.assertLogExists(logging.ERROR, 
-                                 'VideoMetadata for job .* is missing'):
-            with self.assertRaises(neondata.DBStateError):
-                api_request.save_default_thumbnail()
-
         # Add the video data to the database
         video = VideoMetadata('acct1_vid1')
         add_thumb_mock = MagicMock()
@@ -821,15 +813,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         add_future.set_result(MagicMock())
         add_thumb_mock.return_value = add_future
         get_video_mock.side_effect = lambda x, callback: callback(video)
-        
-        api_request.save_default_thumbnail()
-        self.assertEquals(add_thumb_mock.call_count, 1)
-        thumbmeta, url_seen, cdn = add_thumb_mock.call_args[0]
-        self.assertEquals(url_seen, 'old_thumbnail')
-        self.assertEquals(thumbmeta.rank, 0)
-        self.assertEquals(thumbmeta.type, ThumbnailType.DEFAULT)
-        add_thumb_mock.reset_mock()
-
         # Use the default_thumbnail attribute
         api_request.default_thumbnail = 'new_thumbnail'
         api_request.save_default_thumbnail()
@@ -1010,13 +993,28 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             self.assertEquals(strategy, ExperimentStrategy.get('in_db'))
 
         with self.assertLogExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db'))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db')
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
         with self.assertLogNotExists(logging.WARN, 'No ExperimentStrategy'):
-            self.assertEquals(ExperimentStrategy('not_in_db'),
-                              ExperimentStrategy.get('not_in_db',
-                                                     log_missing=False))
+            es_non_get = ExperimentStrategy('not_in_db')
+            es_get = ExperimentStrategy.get('not_in_db', log_missing=False)
+            for (key, value), (key_two, value_two) in zip(es_non_get.__dict__.iteritems(), 
+                                                          es_get.__dict__.iteritems()):
+                if key is 'created': 
+                    self.assertLess(value, value_two) 
+                elif key is 'updated':  
+                    self.assertLess(value, value_two) 
+                else: 
+                    self.assertEquals(value, value_two) 
 
     class ChangeTrap:
         '''Helper class to test subscribing to changes.'''
@@ -1093,6 +1091,31 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(thumb_events), 1)
         self.assertEquals(thumb_events[0],
                           ('acct1_vid1_t1', thumb_meta, 'set'))
+
+    def test_subscribe_twice(self):
+        vid_trap = TestNeondata.ChangeTrap()
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                 tids=['acct1_vid1_t1'])
+        vid_meta.save()
+        vid_events = vid_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+
+        # Subscribe a second time with the same thing
+        vid_trap.reset()
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        vid_meta = VideoMetadata('acct1_vid2', request_id='req2',
+                                 tids=['acct1_vid2_t1'])
+        vid_meta.save()
+        vid_events = vid_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid2', vid_meta, 'set'))
+        
 
     def test_subscribe_to_changes_with_modifies(self):
         trap = TestNeondata.ChangeTrap()
@@ -1760,12 +1783,16 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         # Speed up the retry delays to make the test faster
         self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
         options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
+        self.old_retries = options.get('cmsdb.neondata.maxRedisRetries')
+        options._set('cmsdb.neondata.maxRedisRetries', 5)
 
     def tearDown(self):
         self.connection_patcher.stop()
         DBConnection.clear_singleton_instance()
+        neondata.PubSubConnection.clear_singleton_instance()
         options._set('cmsdb.neondata.baseRedisRetryWait',
                      self.old_delay)
+        options._set('cmsdb.neondata.maxRedisRetries', self.old_retries)
         super(TestDbConnectionHandling, self).tearDown()
 
     def _mocked_get_func(self, key, callback=None):
@@ -1775,9 +1802,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             return self.mock_responses(key)
 
     def test_subscribe_connection_error(self):
-        self.mock_redis().pubsub().psubscribe.side_effect = [
-            redis.exceptions.ConnectionError(),
-            socket.gaierror()]
+        self.mock_redis().pubsub().psubscribe.side_effect = (
+            [redis.exceptions.ConnectionError()] * 5 +
+            [socket.gaierror()] * 5)
         
         with self.assertLogExists(logging.ERROR, 'Error subscribing'):
             with self.assertRaises(neondata.DBConnectionError):
@@ -1787,12 +1814,26 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(neondata.DBConnectionError):
                 NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
 
+    
+    def test_unsubscribe_connection_error(self):
+        self.mock_redis().pubsub().punsubscribe.side_effect = (
+            [redis.exceptions.ConnectionError()] * 5 +
+            [socket.gaierror()] * 5)
+
+        with self.assertLogExists(logging.ERROR, 'Error unsubscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.unsubscribe_from_changes('*')
+
+        with self.assertLogExists(logging.ERROR, 'Socket error unsubscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.unsubscribe_from_changes('*')
+        
+
     def test_async_good_connection(self):
         self.mock_responses.side_effect = [self.valid_obj.to_json()]
         
         TrackerAccountIDMapper.get("tai1", callback=self.stop)
         found_obj = self.wait()
-
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
     def test_sync_good_connection(self):
@@ -1802,6 +1843,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
+    @tornado.testing.gen_test
     def test_async_some_errors(self):
         self.mock_responses.side_effect = [
             redis.ConnectionError("Connection Error"),
@@ -1811,13 +1853,13 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.valid_obj.to_json()
             ]
 
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
             with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
+                        found_obj = yield tornado.gen.Task(
+                            TrackerAccountIDMapper.get,
+                            'tai1')
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
@@ -2324,7 +2366,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
             pil_mock.download_image.return_value = image_future
 
             yield video_info.download_and_add_thumbnail(
-                thumb_info, "http://my_image.jpg", [], async=True,
+                thumb_info, "http://my_image.jpg", cdn_metadata=[], async=True,
                 save_objects=True)
 
             # Check that the image was downloaded

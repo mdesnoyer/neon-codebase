@@ -285,8 +285,10 @@ def build_impala_tables(input_path, cluster, timeout=None):
           datetime.timedelta(seconds=timeout)
 
     threads = [] 
-    for event in ['ImageLoad', 'ImageVisible',
-                  'ImageClick', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
+    # TODO(mdesnoyer): Add ImageVisible and ImageClick back in. Disabling for
+    # now because the job gets killed by a mysterious force.
+
+    for event in ['ImageLoad', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
                   'EventSequence']:
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()

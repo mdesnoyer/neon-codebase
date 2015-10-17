@@ -66,6 +66,7 @@ import utils.http
 import urllib
 import urlparse
 import warnings
+import uuid
 
 
 _log = logging.getLogger(__name__)
@@ -194,7 +195,7 @@ class DBConnection(object):
                 if len(data) < (keys_per_call /2):
                     cnt *= 2
                 keys.update(data)
-            return keys
+            return list(keys)
 
     def clear_db(self):
         '''Erases all the keys in the database.
@@ -296,8 +297,9 @@ class RedisRetryWrapper(object):
                     busy_count += 1
                     time.sleep(delay)
                 except Exception as e:
-                    _log.error('Error talking to redis on attempt %i: %s' % 
-                               (cur_try, e))
+                    _log.error('Error talking to sync redis on attempt %i'
+                               ' for function %s: %s' % 
+                               (cur_try, attr, e))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
                         raise
@@ -414,8 +416,9 @@ class RedisAsyncWrapper(object):
                     delay = (1 << busy_count) * 0.2
                     busy_count += 1
                 else:
-                    _log.error('Error talking to redis on attempt %i: %s' % 
-                               (cur_try, future.exception()))
+                    _log.error('Error talking to async redis on attempt %i for'
+                               ' call %s: %s' % 
+                               (cur_try, attr, future.exception()))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
                         raise future.exception()
@@ -478,7 +481,8 @@ class PubSubConnection(threading.Thread):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        super(PubSubConnection, self).__init__()
+        super(PubSubConnection, self).__init__(name='PubSubConnection[%s]' 
+                                               % class_name)
         self.class_name = class_name
         self._client = None
         self._pubsub = None
@@ -497,9 +501,9 @@ class PubSubConnection(threading.Thread):
         # The channels subscribed to. pattern => function
         self._channels = {}
 
-        self.connect()
-
         self.daemon = True
+
+        self.connect()
 
     def __del__(self):
         self.close()
@@ -516,14 +520,37 @@ class PubSubConnection(threading.Thread):
                                                      address[1])
             self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
 
-            # Re-subscribe to channels
-            for pattern, func in self._channels.items():
-                self._subscribe_impl(func, pattern)
-
             self.connected = True
             self._address = address
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _resubscribe(self):
+        '''Resubscribes to channels.'''
+        
+        # Re-subscribe to channels
+        error = None
+        for pattern, func in self._channels.items():
+            self._running.set()
+            if not self.is_alive():
+                self.start()
+            for i in range(options.maxRedisRetries):
+                try:
+                    if self._pubsub is None:
+                        return
+                    yield self._subscribe_impl(func, pattern)
+                    break
+                except DBConnectionError as e:
+                    _log.error('Error subscribing to channel %s: %s' %
+                               (pattern, e))
+                    error = e
+                    delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                    yield tornado.gen.sleep(delay)
+            if error is not None:
+                raise error
+
     def reconnect(self):
+        '''Reconnects to the database.'''
         self.close()
         self.connect()
 
@@ -543,18 +570,25 @@ class PubSubConnection(threading.Thread):
 
                     if self._address != _get_db_address(self.class_name):
                         self.reconnect()
-                
-                    # This will cause any callbacks that aren't
-                    # subscribe/unsubscribe messages to be called.
-                    msg = self._pubsub.get_message()
+                        # Resubscribe asynchronously because this
+                        # thread has to handle the subscription acks
+                        thread = threading.Thread(target=self._resubscribe,
+                                                  name='resubscribe')
+                        thread.daemon = True
+                        thread.start()
 
-                    self._handle_sub_unsub_messages(msg)
+                    if self._pubsub.connection is not None:
+                        # This will cause any callbacks that aren't
+                        # subscribe/unsubscribe messages to be called.
+                        msg = self._pubsub.get_message()
 
-                    # Look for any subscription or unsubscription timeouts
-                    self._handle_timedout_futures(self._unsub_futures)
-                    self._handle_timedout_futures(self._sub_futures)
+                        self._handle_sub_unsub_messages(msg)
 
-                    error_count = 0
+                        # Look for any subscription or unsubscription timeouts
+                        self._handle_timedout_futures(self._unsub_futures)
+                        self._handle_timedout_futures(self._sub_futures)
+
+                        error_count = 0
                 
             except Exception as e:
                 _log.exception('Error in thread listening to objects %s. '
@@ -567,6 +601,13 @@ class PubSubConnection(threading.Thread):
 
                 # Force reconnection
                 self.reconnect()
+                # Resubscribe asynchronously because this
+                # thread has to handle the subscription acks
+                thread = threading.Thread(target=self._resubscribe,
+                                          name='resubscribe')
+                thread.daemon = True
+                thread.start()
+                        
             time.sleep(0.05)
 
     def close(self):
@@ -636,17 +677,37 @@ class PubSubConnection(threading.Thread):
         '''
         with self._publock:
             self._channels[pattern] = func
-        
-        pool = concurrent.futures.ThreadPoolExecutor(1)
-        sub_future = yield pool.submit(
-            lambda: self._subscribe_impl(func, pattern, timeout=timeout))
 
-        # Start the thread so that we can receive and service messages
-        self._running.set()
-        if not self.is_alive():
-            self.start()
+        error = None
+        for i in range(options.maxRedisRetries):
+            try:
+                pool = concurrent.futures.ThreadPoolExecutor(1)
+                sub_future = yield pool.submit(
+                    lambda: self._subscribe_impl(func, pattern,
+                                                 timeout=timeout))
 
-        yield sub_future
+                # Start the thread so that we can receive and service messages
+                self._running.set()
+                if not self.is_alive():
+                    self.start()
+
+                yield sub_future
+                return
+            except DBConnectionError as e:
+                error = e
+                _log.error('Error subscribing to %s on try %d: %s' %
+                           (pattern, i, e))
+                delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                yield tornado.gen.sleep(delay)
+
+        with self._publock:
+            try:
+                del self._channels[pattern]
+            except KeyError:
+                pass
+
+        raise error
+                
 
     def _subscribe_impl(self, func, pattern='*', timeout=10.0):
         try:
@@ -657,9 +718,9 @@ class PubSubConnection(threading.Thread):
                     self._pubsub.subscribe(**{pattern: func})
 
                 if pattern in self._sub_futures:
-                    return self._sub_futures[pattern]
+                    return self._sub_futures[pattern][0]
                 future = concurrent.futures.Future()
-                self._sub_futures[pattern] = (future, time.time()+timeout)
+                self._sub_futures[pattern] = (future, time.time() + timeout)
                 return future
                 
         except redis.exceptions.RedisError as e:
@@ -675,26 +736,41 @@ class PubSubConnection(threading.Thread):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=20.0):
+    def unsubscribe(self, channel=None, timeout=10.0):
         '''Unsubscribe from channel.
 
         channel - Channel to unsubscribe from
         '''
-        with self._publock:
-            try:
-                if channel is None:
-                    self._channels = {}
-                else:
-                    del self._channels[channel]
-            except KeyError:
-                return
-            
-        pool = concurrent.futures.ThreadPoolExecutor(1)
-        unsub_future = yield pool.submit(
-            lambda: self._unsubscribe_impl(channel, timeout))
-        yield unsub_future
+        def _remove_channel():
+            with self._publock:
+                try:
+                    if channel is None:
+                        self._channels = {}
+                    else:
+                        del self._channels[channel]
+                except KeyError:
+                    return
+        
 
-    def _unsubscribe_impl(self, channel=None, timeout=20.0):
+        error = None
+        for i in range(options.maxRedisRetries):
+            try:
+                pool = concurrent.futures.ThreadPoolExecutor(1)
+                unsub_future = yield pool.submit(
+                    lambda: self._unsubscribe_impl(channel, timeout))
+                yield unsub_future
+                return
+
+            except DBConnectionError as e:
+                error = e
+                _log.error('Error unsubscribing from %s on try %d: %s' %
+                           (channel, i, e))
+                delay = (1 << i) * options.baseRedisRetryWait # in seconds
+                yield tornado.gen.sleep(delay)
+
+        raise error
+
+    def _unsubscribe_impl(self, channel=None, timeout=10.0):
         try:
             with self._publock:
                 if channel is None:
@@ -706,9 +782,9 @@ class PubSubConnection(threading.Thread):
                     self._pubsub.unsubscribe([channel])
                 self._running.set()
                 if channel in self._unsub_futures:
-                    return self._unsub_futures[channel]
+                    return self._unsub_futures[channel][0]
                 future = concurrent.futures.Future()
-                self._unsub_futures[channel] = (future, time.time()+timeout)
+                self._unsub_futures[channel] = (future, time.time() + timeout)
                 return future
         except redis.exceptions.RedisError as e:
             msg = 'Error unsubscribing to channel %s: %s' % (channel, e)
@@ -796,6 +872,18 @@ class MetricType:
     CLICKS = 'clicks'
     PLAYS = 'plays'
 
+class IntegrationType(object): 
+    BRIGHTCOVE = 'brightcove'
+    OOYALA = 'ooyala'
+    OPTIMIZELY = 'optimizely'
+
+class DefaultSizes(object): 
+    WIDTH = 160 
+    HEIGHT = 90 
+
+class ServingControllerType(object): 
+    IMAGEPLATFORM = 'imageplatform' 
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -807,6 +895,7 @@ class StoredObject(object):
     ''' 
     def __init__(self, key):
         self.key = str(key)
+        self.created = self.updated = str(datetime.datetime.utcnow()) 
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -815,9 +904,17 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
-        classcmp = cmp(self.__class__, other.__class__)
+        classcmp = cmp(self.__class__, other.__class__) 
         if classcmp:
             return classcmp
+
+        obj_one = set(self.__dict__).difference(('created', 'updated'))
+        obj_two = set(other.__dict__).difference(('created', 'updated')) 
+        classcmp = obj_one == obj_two and all(self.__dict__[k] == other.__dict__[k] for k in obj_one)
+
+        if classcmp: 
+            return 0
+ 
         return cmp(self.__dict__, other.__dict__)
 
     @classmethod
@@ -852,14 +949,17 @@ class StoredObject(object):
 
     def save(self, callback=None):
         '''Save the object to the database.'''
-        
+        db_connection = DBConnection.get(self)
+        if not hasattr(self, 'created'): 
+            self.created = str(datetime.datetime.utcnow())
+        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
+         
         def _save_and_add2set(pipe):
             pipe.sadd(self._set_keyname(), self.key)
             pipe.set(self.key, value)
             return True
             
-        db_connection = DBConnection.get(self)
         if self.key is None:
             raise Exception("key not set")
         if callback:
@@ -1145,7 +1245,7 @@ class StoredObject(object):
                         if cur_obj is not None:
                             key_sets[cur_obj._set_keyname()].append(key)
                     else:
-                        _log.error('Could not get redis object: %s' % key)
+                        _log.warn_n('Could not get redis object: %s' % key)
                         cur_obj = None
                 else:
                     cur_obj = create_class._create(key, json.loads(item))
@@ -1159,6 +1259,8 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                     if obj is not None and obj != orig_objects.get(key, None):
                         to_set[key] = obj.to_json()
+
+                to_set['updated'] = str(datetime.datetime.utcnow()) 
 
                 if len(to_set) > 0:
                     pipe.mset(to_set)
@@ -1182,6 +1284,7 @@ class StoredObject(object):
         data = {}
         key_sets = collections.defaultdict(list) # set_keyname -> [keys]
         for obj in objects:
+            obj.updated = str(datetime.datetime.utcnow())
             data[obj.key] = obj.to_json()
             key_sets[obj._set_keyname()].append(obj.key)
 
@@ -1413,7 +1516,7 @@ class NamespacedStoredObject(StoredObject):
             callback=callback)
 
     @classmethod
-    def iterate_all(cls, max_request_size=100):
+    def iterate_all(cls, max_request_size=100, cur_idx=0):
         '''A synchronous function that returns an iterator across all the
         objects in the database.
 
@@ -1427,11 +1530,12 @@ class NamespacedStoredObject(StoredObject):
         Inputs:
         max_request_size - Maximum number of objects to request from
         the database at a time.
+        cur_idx - what index to start from 
         '''
         db_connection = DBConnection.get(cls)
         keys = db_connection.fetch_keys_from_db(
             cls._baseclass_name().lower() + '_*')
-        cur_idx = 0
+        #cur_idx = 0
         while cur_idx < len(keys):
             cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
             for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
@@ -1678,11 +1782,20 @@ class NeonUserAccount(NamespacedStoredObject):
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self, a_id, api_key=None, default_size=(160,90)):
+    def __init__(self, 
+                 a_id, 
+                 api_key=None, 
+                 default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
+                 name=None, 
+                 abtest=True, 
+                 serving_enabled=True, 
+                 serving_controller=ServingControllerType.IMAGEPLATFORM):
+
+        # Account id chosen/or generated by the api when account is created 
+        self.account_id = a_id 
         splits = '_'.split(a_id)
         if api_key is None and len(splits) == 2:
             api_key = splits[1]
-        self.account_id = a_id # Account id chosen when account is created
         self.neon_api_key = self.get_api_key() if api_key is None else api_key
         super(NeonUserAccount, self).__init__(self.neon_api_key)
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
@@ -1691,6 +1804,9 @@ class NeonUserAccount(NamespacedStoredObject):
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
+        # name of the individual who owns the account, mainly for internal use 
+        # so we know who it is 
+        self.name = name
 
         # The default thumbnail (w, h) to serve for this account
         self.default_size = default_size
@@ -1701,6 +1817,18 @@ class NeonUserAccount(NamespacedStoredObject):
         # Default thumbnail to show if we don't have one for a video
         # under this account.
         self.default_thumbnail_id = None
+         
+        # create on account creation this gives access to the API, passed via header
+        self.api_v2_key = NeonApiKey.id_generator()
+        
+        # Boolean on wether AB tests can run
+        self.abtest = abtest
+
+        # Will thumbnails be served by our system?
+        self.serving_enabled = serving_enabled
+
+        # What controller is used to serve the image? Default to imageplatform
+        self.serving_controller = serving_controller
     
     @classmethod
     def _baseclass_name(cls):
@@ -1733,7 +1861,6 @@ class NeonUserAccount(NamespacedStoredObject):
         '''Adds a platform object to the account.'''
         if len(self.integrations) == 0:
             self.integrations = {}
-
         self.integrations[platform.integration_id] = platform.get_ovp()
 
     @utils.sync.optional_sync
@@ -1743,8 +1870,9 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-        for plat in [NeonPlatform, BrightcovePlatform, OoyalaPlatform,
-                     YoutubePlatform]:
+         
+        for plat in [NeonPlatform, BrightcovePlatform, 
+                     YoutubePlatform, BrightcoveIntegration, OoyalaIntegration]:
             ovp_map[plat.get_ovp()] = plat
 
         calls = []
@@ -1821,7 +1949,7 @@ class NeonUserAccount(NamespacedStoredObject):
             InternalVideoID.generate(self.neon_api_key, None),
             ttype=ThumbnailType.DEFAULT,
             rank=cur_rank)
-        yield tmeta.add_image_data(image, cdn_metadata, async=True)
+        yield tmeta.add_image_data(image, cdn_metadata=cdn_metadata, async=True)
         self.default_thumbnail_id = tmeta.key
         
         success = yield tornado.gen.Task(tmeta.save)
@@ -2018,6 +2146,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
                  rendition_sizes=None):
+
         self.key = key
 
         # List of url prefixes to put in front of the path. If there
@@ -2049,6 +2178,9 @@ class CDNHostingMetadata(NamespacedStoredObject):
             [640, 360],
             [640, 480],
             [1280, 720]]
+
+        # the created and updated on these objects
+        # self.created = self.updated = str(datetime.datetime.utcnow())
 
     # TODO(sunil or mdesnoyer): Write a function to add a new
     # rendition size to the list and upload the requisite images to
@@ -2238,11 +2370,29 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
         
         return obj
 
+class AbstractIntegration(NamespacedStoredObject):
+    ''' Abstract Integration class '''
+
+    def __init__(self, enabled=True):
+        
+        integration_id = uuid.uuid1().hex
+        super(AbstractIntegration, self).__init__(integration_id)
+        self.integration_id = integration_id
+        
+        # should this integration be used 
+        self.enabled = enabled
+
+    @classmethod
+    def _baseclass_name(cls):
+        return cls.__name__.lower()
+
+
+# DEPRECATED use AbstractIntegration instead
 class AbstractPlatform(NamespacedStoredObject):
     ''' Abstract Platform/ Integration class '''
 
     def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
-                serving_enabled=True, serving_controller="imageplatform"):
+                serving_enabled=True, serving_controller=ServingControllerType.IMAGEPLATFORM):
         
         super(AbstractPlatform, self).__init__(
             self._generate_subkey(api_key, i_id))
@@ -2486,20 +2636,22 @@ class AbstractPlatform(NamespacedStoredObject):
                                self.neon_api_key, '0',
                                _del_video)
 
-        # delete the video object
-        yield tornado.gen.Task(VideoMetadata.delete, i_vid)
-
         # delete the request object
-        yield tornado.gen.Task(NeonApiRequest.delete, vm.job_id,
+        yield tornado.gen.Task(NeonApiRequest.delete,
+                               self.videos[platform_vid],
                                self.neon_api_key)
 
-        # delete the thumbnails
-        yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                               vm.thumbnail_ids)
+        if vm is not None:
+            # delete the video object
+            yield tornado.gen.Task(VideoMetadata.delete, i_vid)
 
-        # delete the serving urls
-        yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
-                               vm.thumbnail_ids)
+            # delete the thumbnails
+            yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                                   vm.thumbnail_ids)
+
+            # delete the serving urls
+            yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
+                                   vm.thumbnail_ids)
         
 class NeonPlatform(AbstractPlatform):
     '''
@@ -2535,13 +2687,13 @@ class NeonPlatform(AbstractPlatform):
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
 
-class BrightcovePlatform(AbstractPlatform):
-    ''' Brightcove Platform/ Integration class '''
+class BrightcoveIntegration(AbstractIntegration):
+    ''' Brightcove Integration class '''
 
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
     
-    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
+    def __init__(self, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
@@ -2550,8 +2702,8 @@ class BrightcovePlatform(AbstractPlatform):
                 serving_enabled=True):
 
         ''' On every request, the job id is saved '''
-        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest,
-                                                 enabled, serving_enabled)
+
+        super(BrightcoveIntegration, self).__init__(enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -2581,22 +2733,10 @@ class BrightcovePlatform(AbstractPlatform):
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
-        return "brightcove"
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
+        return "brightcove_integration"
 
     def get_api(self, video_server_uri=None):
-        '''Return the Brightcove API object for this platform integration.'''
+        '''Return the Brightcove API object for this integration.'''
         return api.brightcove_api.BrightcoveApi(
             self.neon_api_key, self.publisher_id,
             self.read_token, self.write_token, self.auto_update,
@@ -2613,7 +2753,7 @@ class BrightcovePlatform(AbstractPlatform):
         bc = self.get_api()
 
         #Get video metadata
-        platform_vid = InternalVideoID.to_external(i_vid)
+        integration_vid = InternalVideoID.to_external(i_vid)
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         if not vmdata:
             _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
@@ -2648,10 +2788,10 @@ class BrightcovePlatform(AbstractPlatform):
 
         # Update the new_tid as the thumbnail for the video
         try:
-            image = yield utils.imageutils.PILImageUtils.download_image(
-                t_url, async=True)
+            image = utils.imageutils.PILImageUtils.download_image(
+                t_url)
             update_response = yield bc.update_thumbnail_and_videostill(
-                platform_vid,
+                integration_vid,
                 new_tid,
                 image=image,
                 still_size=(self.video_still_width, None))
@@ -2775,6 +2915,82 @@ class BrightcovePlatform(AbstractPlatform):
         req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
                 request_timeout=60.0, connect_timeout=10.0)
         http_client.fetch(req, callback)
+
+# DEPRECATED use BrightcoveIntegration instead 
+class BrightcovePlatform(AbstractPlatform):
+    ''' Brightcove Platform/ Integration class '''
+    REFERENCE_ID = '_reference_id'
+    BRIGHTCOVE_ID = '_bc_id'
+    
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
+                rtoken=None, wtoken=None, auto_update=False,
+                last_process_date=None, abtest=False, callback_url=None,
+                uses_batch_provisioning=False,
+                id_field=BRIGHTCOVE_ID,
+                enabled=True,
+                serving_enabled=True):
+
+        ''' On every request, the job id is saved '''
+
+        super(BrightcovePlatform, self).__init__(api_key, i_id, abtest,
+                                                 enabled, serving_enabled)
+        self.account_id = a_id
+        self.publisher_id = p_id
+        self.read_token = rtoken
+        self.write_token = wtoken
+        self.auto_update = auto_update 
+        #The publish date of the last processed video - UTC timestamp 
+        self.last_process_date = last_process_date 
+        self.linked_youtube_account = False
+        self.account_created = time.time() #UTC timestamp of account creation
+        self.rendition_frame_width = None #Resolution of video to process
+        self.video_still_width = 480 #default brightcove still width
+        # the ids of playlist to create video requests from
+        self.playlist_feed_ids = []
+        # the url that will be called when a video is finished processing 
+        self.callback_url = callback_url
+
+        # Does the customer use batch provisioning (i.e. FTP
+        # uploads). If so, we cannot rely on the last modified date of
+        # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
+        self.uses_batch_provisioning = uses_batch_provisioning
+
+        # Which custom field to use for the video id. If it is
+        # BrightcovePlatform.REFERENCE_ID, then the reference_id field
+        # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
+        self.id_field = id_field
+
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "brightcove"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
+
+    def get_api(self, video_server_uri=None):
+        '''Return the Brightcove API object for this platform integration.'''
+        return api.brightcove_api.BrightcoveApi(
+            self.neon_api_key, self.publisher_id,
+            self.read_token, self.write_token)
+
+    def set_rendition_frame_width(self, f_width):
+        ''' Set framewidth of the video resolution to process '''
+        self.rendition_frame_width = f_width
+
+    def set_video_still_width(self, width):
+        ''' Set framewidth of the video still to be used 
+            when the still is updated in the brightcove account '''
+        self.video_still_width = width
 
     @classmethod
     def get_all(cls, callback=None):
@@ -2904,12 +3120,17 @@ class YoutubePlatform(AbstractPlatform):
     def get_all(cls, callback=None):
         return cls._get_all_impl(callback)
 
-class OoyalaPlatform(AbstractPlatform):
+class OoyalaIntegration(AbstractIntegration):
     '''
-    OOYALA Platform
+    OOYALA Integration
     '''
-    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
-                 o_api_key=None, api_secret=None, auto_update=False): 
+    def __init__(self, 
+                 i_id=None, 
+                 a_id='', 
+                 p_code=None, 
+                 api_key=None, 
+                 api_secret=None, 
+                 auto_update=False): 
         '''
         Init ooyala platform 
         
@@ -2917,30 +3138,20 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-        super(OoyalaPlatform, self).__init__(api_key, i_id)
+
+        super(OoyalaIntegration, self).__init__()
+ 
         self.account_id = a_id
         self.partner_code = p_code
-        self.ooyala_api_key = o_api_key
+        self.api_key = api_key
         self.api_secret = api_secret 
         self.auto_update = auto_update 
     
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
-        return "ooyala"
+        return "ooyala_integration"
 
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
-        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe_from_changes(cls, channel):
-        yield cls._unsubscribe_from_changes_impl(channel)
-    
     @classmethod
     def generate_signature(cls, secret_key, http_method, 
                     request_path, query_params, request_body=''):
@@ -2982,7 +3193,7 @@ class OoyalaPlatform(AbstractPlatform):
 
         '''
         #Get video metadata
-        platform_vid = InternalVideoID.to_external(i_vid)
+        integration_vid = InternalVideoID.to_external(i_vid)
         
         vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         if not vmdata:
@@ -3013,7 +3224,7 @@ class OoyalaPlatform(AbstractPlatform):
         # Update the new_tid as the thumbnail for the video
         oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
         update_result = yield tornado.gen.Task(oo.update_thumbnail,
-                                               platform_vid,
+                                               integration_vid,
                                                t_url,
                                                new_tid,
                                                fsize)
@@ -3056,6 +3267,60 @@ class OoyalaPlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=%s state not updated to active"
                         %vid_request.key)
         raise tornado.gen.Return(True)
+    
+# DEPRECATED use OoyalaIntegration instead 
+class OoyalaPlatform(AbstractPlatform):
+    '''
+    OOYALA Platform
+    '''
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
+                 o_api_key=None, api_secret=None, auto_update=False): 
+        '''
+        Init ooyala platform 
+        
+        Partner code, o_api_key & api_secret are essential 
+        for api calls to ooyala 
+
+        '''
+
+        #if i_id is None: 
+        #    i_id = uuid.uuid1().hex
+
+        super(OoyalaPlatform, self).__init__(api_key, i_id)
+ 
+        self.account_id = a_id
+        self.partner_code = p_code
+        self.ooyala_api_key = o_api_key
+        self.api_secret = api_secret 
+        self.auto_update = auto_update 
+    
+    @classmethod
+    def get_ovp(cls):
+        ''' return ovp name'''
+        return "ooyala"
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def subscribe_to_changes(cls, func, pattern='*', get_object=True):
+        yield cls._subscribe_to_changes_impl(func, pattern, get_object)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def unsubscribe_from_changes(cls, channel):
+        yield cls._unsubscribe_from_changes_impl(channel)
+    
+    @classmethod
+    def generate_signature(cls, secret_key, http_method, 
+                    request_path, query_params, request_body=''):
+        ''' Generate signature for ooyala requests'''
+        signature = secret_key + http_method.upper() + request_path
+        for key, value in query_params.iteritems():
+            signature += key + '=' + value
+            signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
+            signature = urllib.quote_plus(signature)
+            return signature 
     
     @classmethod
     def get_all(cls, callback=None):
@@ -3272,13 +3537,12 @@ class NeonApiRequest(NamespacedStoredObject):
             [cls._generate_subkey(job_id, api_key) for 
              job_id, api_key in keys],
             callback=callback)
-
+    
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
         '''Save the default thumbnail by attaching it to a video.
-
-        The video metadata for this request must be in the database already.
+The video metadata for this request must be in the database already.
 
         Inputs:
         cdn_metadata - If known, the metadata to save to the cdn.
@@ -3289,16 +3553,6 @@ class NeonApiRequest(NamespacedStoredObject):
         except AttributeError:
             thumb_url = None
 
-        if thumb_url is None:
-            # Fallback to the old previous_thumbnail
-            
-            # TODO(sunil): remove this once the video api server only
-            # handles default thumbnail.
-            try:
-                thumb_url = self.previous_thumbnail
-            except AttributeError:
-                thumb_url = None
-
         if not thumb_url:
             # No default thumb to upload
             return
@@ -3307,6 +3561,7 @@ class NeonApiRequest(NamespacedStoredObject):
 
         # Check to see if there is already a thumbnail that the system
         # knows about (and thus was already uploaded)
+        
         video = yield tornado.gen.Task(
             VideoMetadata.get,
             InternalVideoID.generate(self.api_key,
@@ -3337,12 +3592,12 @@ class NeonApiRequest(NamespacedStoredObject):
             ttype=thumb_type,
             rank=cur_rank,
             external_id=self.external_thumbnail_id)
-        yield video.download_and_add_thumbnail(meta,
+        thumb = yield video.download_and_add_thumbnail(meta,
                                                thumb_url,
                                                cdn_metadata,
                                                save_objects=True,
                                                async=True)
-
+        raise tornado.gen.Return(thumb) 
         # Push a thumbnail serving directive to Kinesis so that it can
         # be served quickly.
 
@@ -3719,7 +3974,7 @@ class ThumbnailMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def add_image_data(self, image, cdn_metadata=None):
+    def add_image_data(self, image, video_info=None, cdn_metadata=None):
         '''Incorporates image data to the ThumbnailMetadata object.
 
         Also uploads the image to the CDNs and S3.
@@ -3731,7 +3986,6 @@ class ThumbnailMetadata(StoredObject):
         
         '''        
         image = PILImageUtils.convert_to_rgb(image)
-        
         # Update the image metadata
         self.width = image.size[0]
         self.height = image.size[1]
@@ -3762,8 +4016,9 @@ class ThumbnailMetadata(StoredObject):
         # Host the image on the CDN
         if cdn_metadata is None:
             # Lookup the cdn metadata
-            video_info = yield tornado.gen.Task(VideoMetadata.get,
-                                                self.video_id)
+            if video_info is None: 
+                video_info = yield tornado.gen.Task(VideoMetadata.get,
+                                                    self.video_id)
 
             cdn_key = CDNHostingMetadataList.create_key(
                 video_info.get_account_id(), video_info.integration_id)
@@ -3958,7 +4213,7 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_thumbnail(self, thumb, image, cdn_metadata=None,
-                      save_objects=False):
+                      save_objects=False, video=None):
         '''Add thumbnail to the video.
 
         Saves the thumbnail object, and the video object if
@@ -3978,8 +4233,7 @@ class VideoMetadata(StoredObject):
                        object.
         '''
         thumb.video_id = self.key
-
-        yield thumb.add_image_data(image, cdn_metadata, async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
@@ -4007,10 +4261,33 @@ class VideoMetadata(StoredObject):
         raise tornado.gen.Return(thumb)
 
     
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def download_image_from_url(self, image_url): 
+        try:
+            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+                    async=True)
+        except IOError, e:
+            msg = "IOError while downloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+        except tornado.httpclient.HTTPError as e:
+            msg = "HTTP Error while dowloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+
+        raise tornado.gen.Return(image)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_and_add_thumbnail(self, thumb, image_url, cdn_metadata=None,
+    def download_and_add_thumbnail(self, 
+                                   thumb=None, 
+                                   image_url=None,
+                                   cdn_metadata=None,
+                                   image=None, 
+                                   external_thumbnail_id=None, 
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata
@@ -4027,21 +4304,12 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        try:
-            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
-                    async=True)
-            
-        except IOError, e:
-            msg = "IOError while downloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-        except tornado.httpclient.HTTPError as e:
-            msg = "HTTP Error while dowloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-
+        if image is None: 
+            image = yield self.download_image_from_url(image_url, async=True) 
+        if thumb is None: 
+            thumb = ThumbnailMetadata(None,
+                          ttype=ThumbnailType.DEFAULT,
+                          external_id=external_thumbnail_id)
         thumb.urls.append(image_url)
         thumb = yield self.add_thumbnail(thumb, image, cdn_metadata,
                                          save_objects, async=True)
