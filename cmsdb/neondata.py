@@ -1397,7 +1397,8 @@ class StoredObjectIterator():
         if isinstance(item, StopIteration):
           break
     '''
-    def __init__(self, obj_class, keys, page_size=100, max_results=None):
+    def __init__(self, obj_class, keys, page_size=100, max_results=None,
+                 skip_missing=False):
         '''Create the iterator
 
         Inputs:
@@ -1405,6 +1406,7 @@ class StoredObjectIterator():
         keys - List of keys to iterate through
         page_size - Number of entries to grab from the db at once
         max_results - Maximum number of entries to return
+        skip_missing - Should missing entries be skipped on the iteration
         '''
         self.obj_class = obj_class
         self.keys = keys
@@ -1413,6 +1415,7 @@ class StoredObjectIterator():
         self.curidx = 0
         self.items_returned = 0
         self.cur_objs = []
+        self.skip_missing = skip_missing
 
     def __iter__(self):
         self.curidx = 0
@@ -1429,7 +1432,7 @@ class StoredObjectIterator():
             e.value = StopIteration()
             raise e
 
-        if len(self.cur_objs) == 0:
+        while len(self.cur_objs) == 0:
             if self.curidx >= len(self.keys):
                 # Got all the entries
                 e = StopIteration()
@@ -1440,6 +1443,8 @@ class StoredObjectIterator():
             self.cur_objs = yield tornado.gen.Task(
                 self.obj_class.get_many,
                 self.keys[self.curidx:(self.curidx+self.page_size)])
+            if self.skip_missing:
+                self.cur_objs = [x for x in self.cur_objs if x is not None]
             self.curidx += self.page_size
 
         self.items_returned += 1
@@ -1553,7 +1558,7 @@ class NamespacedStoredObject(StoredObject):
         keys = yield cls.get_all_keys(async=True)
         raise tornado.gen.Return(
             StoredObjectIterator(cls, keys, page_size=max_request_size,
-                                 max_results=max_results))
+                                 max_results=max_results, skip_missing=True))
 
     @classmethod
     @utils.sync.optional_sync
@@ -2045,8 +2050,42 @@ class NeonUserAccount(NamespacedStoredObject):
         vids = yield self.get_internal_video_ids(async=True)
         raise tornado.gen.Return(
             StoredObjectIterator(VideoMetadata, vids,
-                                 page_size=max_request_size))
+                                 page_size=max_request_size,
+                                 skip_missing=True))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_job_keys(self):
+        '''Return a list of (job_id, api_key) of all the jobs for this account.
+        '''
+        db_connection = DBConnection.get(self)
+        base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                           set_name='objset:request:%s' % 
+                                           self.neon_api_key)
+
+        raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def iterate_all_jobs(self, max_request_size=100):
+        '''Returns an iterator across all the jobs for this account in the
+        database.
+
+        The iterator can be used asynchronously. See StoredObjectIterator
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
+
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        keys = yield self.get_all_job_keys(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(NeonApiRequest, keys,
+                                 page_size=max_request_size,
+                                 skip_missing=True))
 
 class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
@@ -2419,11 +2458,12 @@ class AbstractIntegration(NamespacedStoredObject):
 
 
 # DEPRECATED use AbstractIntegration instead
-class AbstractPlatform(NamespacedStoredObject):
+class AbstractPlatform(StoredObject):
     ''' Abstract Platform/ Integration class '''
 
     def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
-                serving_enabled=True, serving_controller=ServingControllerType.IMAGEPLATFORM):
+                serving_enabled=True,
+                serving_controller=ServingControllerType.IMAGEPLATFORM):
         
         super(AbstractPlatform, self).__init__(
             self._generate_subkey(api_key, i_id))
@@ -2440,16 +2480,19 @@ class AbstractPlatform(NamespacedStoredObject):
         self.serving_controller = serving_controller 
     
     @classmethod
-    def _generate_subkey(cls, api_key, i_id=None):
+    def _generate_subkey(cls, api_key, i_id=None, typ=None):
+        if typ is not None:
+            return '_'.join([typ, api_key, i_id])
         if i_id is None or api_key.endswith('_%s' % i_id):
             key_split = api_key.split('_')
-            if len(key_split) == 2:
+            if len(key_split) == 3:
                 # It's already the correct key
                 return api_key
-            elif len(key_split) == 3:
-                # It's prefixed with the plaform type so remove that
-                return '_'.join(key_split[1:])
-        return '_'.join([api_key, i_id])
+            elif len(key_split) == 2:
+                # Add the platform back
+                return '_'.join([cls._baseclass_name(), key_split[0],
+                                 key_split[1]])
+        return '_'.join([cls._baseclass_name(), api_key, i_id])
 
     @classmethod
     def key2id(cls, key):
@@ -2457,9 +2500,17 @@ class AbstractPlatform(NamespacedStoredObject):
         splits = key.split('_')
         return (splits[1], splits[2])
 
+    def get_id(self):
+        '''Return the non-namespaced id for the object.'''
+        return self.key2id(self.key)
+
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower() 
+        return cls.__name__.lower()
+
+    @classmethod
+    def _set_keyname(cls):
+        return 'objset:%s' % cls._baseclass_name()
    
     @classmethod
     def _create(cls, key, obj_dict):
@@ -2580,7 +2631,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_all(cls):
+    def _get_all(cls):
         '''Returns a list of all the platform instances from the db.'''
         instances = []
         for typ in [NeonPlatform, BrightcovePlatform, OoyalaPlatform,
@@ -2618,7 +2669,8 @@ class AbstractPlatform(NamespacedStoredObject):
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
 
-        raise tornado.gen.Return([x.split('_') for x in keys])
+        raise tornado.gen.Return([x.split('_') + [cls._baseclass_name()]
+                                  for x in keys])
 
     @classmethod
     @utils.sync.optional_sync
@@ -3874,6 +3926,10 @@ class NeonApiRequest(NamespacedStoredObject):
             callback=callback)
 
     @classmethod
+    def get_all(cls):
+        raise NotImplementedError()
+
+    @classmethod
     def modify(cls, job_id, api_key, func, create_missing=False, 
                callback=None):
         return super(NeonApiRequest, cls).modify(
@@ -3893,14 +3949,6 @@ class NeonApiRequest(NamespacedStoredObject):
             func,
             create_missing=create_missing,
             callback=callback)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all_keys(cls):
-        base_keys = yield super(NeonApiRequest, cls).get_all_keys(async=True)
-
-        raise tornado.gen.Return([x.split('_')[::-1] for x in base_keys])
 
     @classmethod
     def delete(cls, job_id, api_key, callback=None):

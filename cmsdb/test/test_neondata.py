@@ -123,6 +123,56 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         nu_a_ids = [nu.account_id for nu in nu_accounts]
         self.assertItemsEqual(a_ids, nu_a_ids)
 
+    def test_get_all_requests(self):
+        na1 = NeonUserAccount('a1', 'acct1')
+        na1.save()
+        na3 = NeonUserAccount('a3', 'acct3')
+        na3.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+
+        requests3 = [neondata.OoyalaApiRequest('joboo', 'acct3')]
+        NeonApiRequest.save_all(requests1)
+        NeonApiRequest.save_all(requests3)
+
+        requests_found = NeonApiRequest.get_many(na1.get_all_job_keys())
+        self.assertEqual(sorted(requests_found), sorted(requests1))
+
+        requests_found = NeonApiRequest.get_many(na3.get_all_job_keys())
+        self.assertEqual(requests_found, requests3)
+
+    @tornado.testing.gen_test
+    def test_get_all_requests_async(self):
+        na1 = NeonUserAccount('a1', 'acct1')
+        na1.save()
+        na3 = NeonUserAccount('a3', 'acct3')
+        na3.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+
+        requests3 = [neondata.OoyalaApiRequest('joboo', 'acct3')]
+        NeonApiRequest.save_all(requests1)
+        NeonApiRequest.save_all(requests3)
+
+        keys = yield na1.get_all_job_keys(async=True)
+        requests_found = yield tornado.gen.Task(NeonApiRequest.get_many, keys)
+        self.assertEqual(sorted(requests_found), sorted(requests1))
+
+        keys = yield na3.get_all_job_keys(async=True)
+        requests_found = yield tornado.gen.Task(NeonApiRequest.get_many, keys)
+        self.assertEqual(requests_found, requests3)
+
+    def test_iterate_all_jobs_sync(self):
+        na = NeonUserAccount('a1', 'acct1')
+        na.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+        NeonApiRequest.save_all(requests1)
+
+        found_jobs = list(na.iterate_all_jobs(max_request_size=1))
+        self.assertEqual(sorted(found_jobs), sorted(requests1))
+        
+
     @tornado.testing.gen_test
     def test_iterate_all_videos_async(self):
         na = NeonUserAccount('a1', 'key1')

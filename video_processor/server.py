@@ -555,18 +555,24 @@ class JobManager(object):
         This should only be called at the beginning of the program.
         '''
         _log.info('Requeuing pending jobs from db')
-        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_all)
-        for request in requests:
-            if (request.fail_count < options.max_retries and
-                request.state in [neondata.RequestState.SUBMIT,
-                                  neondata.RequestState.PROCESSING,
-                                  neondata.RequestState.FINALIZING,
-                                  neondata.RequestState.REQUEUED,
-                                  neondata.RequestState.REPROCESS,
-                                  neondata.RequestState.FAILED,
-                                  neondata.RequestState.INT_ERROR,
-                                  neondata.RequestState.CUSTOMER_ERROR]):
-                yield self.requeue_job(request.job_id, request.api_key)
+        accounts = yield neondata.NeonUserAccount.get_all(async=True)
+        for account in accounts:
+            request_iter = yield account.iterate_all_jobs(async=True)
+            while True:
+                request = yield request_iter.next(async=True)
+                if isinstance(request, StopIteration):
+                    break
+                
+                if (request.fail_count < options.max_retries and
+                    request.state in [neondata.RequestState.SUBMIT,
+                                      neondata.RequestState.PROCESSING,
+                                      neondata.RequestState.FINALIZING,
+                                      neondata.RequestState.REQUEUED,
+                                      neondata.RequestState.REPROCESS,
+                                      neondata.RequestState.FAILED,
+                                      neondata.RequestState.INT_ERROR,
+                                      neondata.RequestState.CUSTOMER_ERROR]):
+                    yield self.requeue_job(request.job_id, request.api_key)
 
 class StatsHandler(tornado.web.RequestHandler):
     """ Q Stats """ 

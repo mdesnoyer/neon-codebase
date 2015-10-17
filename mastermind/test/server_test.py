@@ -110,7 +110,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         noVidPlatform = neondata.BrightcovePlatform(api_key, 'i4', 
                                                     abtest=True) 
         
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [bcPlatform, testPlatform, apiPlatform, noVidPlatform]
 
         # Define the video meta data
@@ -197,7 +197,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
                                         't', 't', 'r', 'h')
 
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [bcPlatform]
         vid_meta = {
             api_key + '_0': neondata.VideoMetadata(api_key + '_0',
@@ -239,7 +239,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.directive_publisher.serving_urls)
 
     def test_tracker_id_update(self, datamock):
-        datamock.TrackerAccountIDMapper.get_all.return_value = [
+        datamock.TrackerAccountIDMapper.iterate_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
@@ -259,7 +259,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         a1 = neondata.NeonUserAccount('a1', 'acct1')
         a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
         a2 = neondata.NeonUserAccount('a2', 'acct2')
-        datamock.NeonUserAccount.get_all_accounts.return_value = [
+        datamock.NeonUserAccount.iterate_all.return_value = [
             a1, a2]
 
         # Process the data
@@ -276,7 +276,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertNotIn('acct1', self.directive_publisher.default_thumbs)
 
     def test_default_size_update(self, datamock):
-        datamock.NeonUserAccount.get_all_accounts.return_value = [
+        datamock.NeonUserAccount.iterate_all.return_value = [
             neondata.NeonUserAccount('a1', 'acct1', default_size=(160, 90)),
             neondata.NeonUserAccount('a2', 'acct2'),
             neondata.NeonUserAccount('a3', 'acct3', default_size=(640, 480))]
@@ -293,7 +293,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                          (640, 480))
 
     def test_connection_error(self, datamock):
-        datamock.AbstractPlatform.get_all.side_effect = \
+        datamock.AbstractPlatform.iterate_all.side_effect = \
           [redis.ConnectionError]
 
         with self.assertRaises(redis.ConnectionError):
@@ -309,7 +309,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
         
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [bcPlatform]
         datamock.VideoMetadata.get_many.return_value = [None, None] 
 
@@ -333,7 +333,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 1)
         
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [bcPlatform]
 
         vid_meta = {
@@ -388,7 +388,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         bcPlatform.add_video(1, 'job12')
         job12 = neondata.NeonApiRequest('job11', api_key, '1')
 
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [bcPlatform]
 
         vid_meta = {
@@ -459,7 +459,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         platform2.add_video('vid1', 'job21')
         platform2.add_video('vid2', 'job22')
         
-        datamock.AbstractPlatform.get_all.return_value = \
+        datamock.AbstractPlatform.iterate_all.return_value = \
           [platform1, platform2]
 
         # Define the video meta data
@@ -823,7 +823,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         # Patch neondata and fill with some basic entries
         self.neondata_patcher = patch('mastermind.server.neondata')
         self.datamock = self.neondata_patcher.start()
-        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
+        self.datamock.TrackerAccountIDMapper.iterate_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', PROD)]
         self.datamock.TrackerAccountIDMapper.PRODUCTION = PROD
         self.datamock.TrackerAccountIDMapper.STAGING = STAGING
@@ -898,7 +898,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def test_working_db(self):
         # Mock out the calls to the video database
-        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
+        self.datamock.TrackerAccountIDMapper.iterate_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
@@ -992,7 +992,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
 
     def test_stats_db_batch_count_plays(self):
         # Mock out the calls to the video database
-        self.datamock.TrackerAccountIDMapper.get_all.return_value = [
+        self.datamock.TrackerAccountIDMapper.iterate_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
