@@ -46,6 +46,7 @@ statemon.define('job_failed', int)
 statemon.define('request_not_in_db', int)
 statemon.define('not_available_in_isp', int)
 statemon.define('unexpected_exception_thrown', int)
+statemon.define('jobs_created', int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -137,6 +138,7 @@ def monitor_neon_pipeline(video_id=None):
     start_request = time.time()
 
     # Create a video request for test account
+    statemon.state.increment('jobs_created')
     video_id, job_id = create_neon_api_request(options.account,
                                                options.api_key,
                                                video_id=video_id)
