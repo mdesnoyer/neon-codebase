@@ -24,12 +24,15 @@ import unittest
 from utils.imageutils import PILImageUtils
 from utils.options import define, options
 import utils.neon
+from utils import statemon
 
 
 class SmokeTesting(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+
+        statemon.state._reset_values()
 
         # Mock brightcove integration
         self.int_mocker = patch(
@@ -48,12 +51,15 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         self.old_poll_cycle = options.get(
             'integrations.brightcove_ingester.poll_period')
-        options._set('integrations.brightcove_ingester.poll_period', 0)
+        options._set('integrations.brightcove_ingester.poll_period', 0.1)
         
 
         super(SmokeTesting, self).setUp()
 
+        self.manager = integrations.brightcove_ingester.Manager()
+
     def tearDown(self):
+        self.manager.stop()
         options._set('integrations.brightcove_ingester.poll_period',
                      self.old_poll_cycle)
         self.int_mocker.stop()
@@ -61,22 +67,14 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         super(SmokeTesting, self).tearDown()
 
-    @tornado.gen.coroutine
-    def _run_one_loop(self):
-        # Run the cycle. Clearing the flag after getting back the
-        # future will cause the loop to stop after the first iteration.
-        run_flag = multiprocessing.Event()
-        run_flag.set()
-        main_future = integrations.brightcove_ingester.main(run_flag)
-        run_flag.clear()
-        yield main_future
-
     @tornado.testing.gen_test
     def test_correct_platform(self):
-        yield self._run_one_loop()
+        self.manager.start()
 
         # Make sure we processed the publisher stream
-        self.assertEquals(self.process_mock.call_count, 1)
+        yield self.assertWaitForEquals(lambda: self.process_mock.call_count,
+                                       1,
+                                       async=True)
         cargs, kwargs = self.int_mock.call_args
         self.assertEquals(cargs[0], 'a1')
         self.assertEquals(cargs[1].neon_api_key, 'acct1')
@@ -89,11 +87,30 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         neondata.BrightcovePlatform.modify('acct1', 'i1', 
                                            _set_platform)
 
-        with self.assertLogNotExists(logging.DEBUG,
-                                     'Processing Brightcove platform'):
-                yield self._run_one_loop()
+        with self.assertLogNotExists(logging.INFO, 'Turning on integration'):
+            yield self.manager.check_integration_list()
 
-        self.assertEquals(self.process_mock.call_count, 0)
+        self.assertEquals(len(self.manager._timers), 0)
+
+    @tornado.testing.gen_test
+    def test_turn_off_platform(self):
+        with self.assertLogExists(logging.INFO, 'Turning on integration'):
+            yield self.manager.check_integration_list()
+
+        self.assertEquals(len(self.manager._timers), 1)
+        timer = self.manager._timers.values()[0]
+        self.assertTrue(timer.is_running())
+
+        def _set_platform(x):
+            x.enabled = False
+        neondata.BrightcovePlatform.modify('acct1', 'i1', 
+                                           _set_platform)
+
+        with self.assertLogExists(logging.INFO, 'Turning off integration'):
+            yield self.manager.check_integration_list()
+
+        self.assertEquals(len(self.manager._timers), 0)
+        self.assertFalse(timer.is_running())
 
     @tornado.testing.gen_test
     def test_lookup_accountid(self):
@@ -103,7 +120,8 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
                                            _set_platform)
         neondata.NeonUserAccount('a1', 'acct1').save()
 
-        yield self._run_one_loop()
+        yield integrations.brightcove_ingester.process_one_account(
+            'acct1', 'i1')
 
         # Make sure we processed the publisher stream
         self.assertEquals(self.process_mock.call_count, 1)
@@ -119,7 +137,24 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR, 
                                   ('Unexpected exception when processing '
                                    'publisher stream')):
-            yield self._run_one_loop()
+            yield integrations.brightcove_ingester.process_one_account(
+                'acct1', 'i1')
+
+    @tornado.testing.gen_test
+    def test_slow_update(self):
+        with self.assertLogExists(logging.WARNING, 
+                                  ('Finished processing.*Time was')):
+            yield integrations.brightcove_ingester.process_one_account(
+                'acct1', 'i1', slow_limit=0.0)
+
+        cargs, kwargs = self.int_mock.call_args
+        self.assertEquals(cargs[0], 'a1')
+        self.assertEquals(cargs[1].neon_api_key, 'acct1')
+        self.assertEquals(cargs[1].integration_id, 'i1')
+
+        self.assertEquals(
+            statemon.state.get('integrations.brightcove_ingester.slow_update'),
+            1)
 
     @tornado.testing.gen_test
     def test_known_error(self):
@@ -131,14 +166,16 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogNotExists(logging.ERROR, 
                                      ('Unexpected exception when processing '
                                       'publisher stream')):
-            yield self._run_one_loop()
+            yield integrations.brightcove_ingester.process_one_account(
+                'acct1', 'i1')
 
         self.assertEquals(self.process_mock.call_count, 1)
 
         with self.assertLogNotExists(logging.ERROR, 
                                      ('Unexpected exception when processing '
                                       'publisher stream')):
-            yield self._run_one_loop()
+            yield integrations.brightcove_ingester.process_one_account(
+                'acct1', 'i1')
 
         self.assertEquals(self.process_mock.call_count, 2)
 
