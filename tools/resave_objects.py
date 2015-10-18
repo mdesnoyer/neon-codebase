@@ -36,7 +36,10 @@ def _update_time(d):
 def resave_namespaced_objects(cls):
     _log.info('Resave all objects of type %s' % cls.__name__)
 
-    keys = cls.get_all_keys()
+    conn = neondata.DBConnection.get(cls)
+    keys = conn.fetch_keys_from_db(pattern='%s_*' % cls._baseclass_name().lower())
+    keys = [cls.key2id(x) for x in keys]
+    #keys = cls.get_all_keys()
     for i in range(0, len(keys), BATCH_SIZE):
         cls.modify_many(keys[i:(i+BATCH_SIZE)], _update_time)
         if i % 1000 == 0:

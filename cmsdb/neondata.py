@@ -2536,7 +2536,7 @@ class AbstractIntegration(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower()
+        return cls.__name__
 
 
 # DEPRECATED use AbstractIntegration instead
@@ -2575,7 +2575,7 @@ class AbstractPlatform(NamespacedStoredObject):
         else:
             typ, api_key, i_id = key
         if typ is None:
-            typ = cls._baseclass_name()
+            typ = cls._baseclass_name().lower()
         api_splits = api_key.split('_')
         if len(api_splits) > 1:
             api_key, i_id = api_splits[1:]
@@ -2588,7 +2588,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower()
+        return cls.__name__
 
     @classmethod
     def _set_keyname(cls):
@@ -2721,7 +2721,7 @@ class AbstractPlatform(NamespacedStoredObject):
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
 
-        raise tornado.gen.Return([[cls._baseclass_name()] + x.split('_') 
+        raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_') 
                                   for x in keys])
 
     @classmethod
@@ -2762,7 +2762,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     @classmethod
     def format_subscribe_pattern(cls, pattern):
-        return '%s_%s' % (cls._baseclass_name(), pattern)
+        return '%s_%s' % (cls._baseclass_name().lower(), pattern)
     
 
     @classmethod
@@ -4102,7 +4102,7 @@ class ThumbnailURLMapper(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return ThumbnailURLMapper.__name__.lower()
+        return ThumbnailURLMapper.__name__
 
     @classmethod
     def get_id(cls, key, callback=None):
