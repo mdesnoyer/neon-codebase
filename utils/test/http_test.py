@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0,os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 from mock import patch, MagicMock
 import Queue
@@ -258,11 +258,18 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
         self.patcher.stop()
         super(TestRequestPool, self).tearDown()
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _send_request(self, *args, **kwargs):
+        kwargs['async'] = True
+        val = yield self.pool.send_request(*args, **kwargs)
+        raise tornado.gen.Return(val)
+
     def test_single_blocking_request(self):
         request, response = create_valid_ack()
         self.mock_client.side_effect = [response]
 
-        got_response = self.pool.send_request(request)
+        got_response = self._send_request(request)
 
         self.assertEqual(got_response, response)
 
@@ -278,9 +285,9 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
             ]
 
         with self.assertLogExists(logging.WARNING, 'Error sending.*600'):
-            response = yield self.pool.send_request(request,
-                                                    base_delay=0.02,
-                                                    async=True)
+            response = yield self._send_request(request,
+                                                base_delay=0.02,
+                                                async=True)
 
         self.assertEqual(response, valid_response)
 
@@ -297,7 +304,7 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.WARNING,
                                   'Too many errors connecting'):
-            found_response = yield self.pool.send_request(request,
+            found_response = yield self._send_request(request,
                                                           base_delay=0.02,
                                                           ntries=3,
                                                           async=True)
@@ -317,7 +324,7 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
             ]
 
         with self.assertLogNotExists(logging.WARNING, 'Too many errors'):
-            found_response = yield self.pool.send_request(request,
+            found_response = yield self._send_request(request,
                                                           base_delay=0.02,
                                                           ntries=3,
                                                           async=True,
@@ -338,7 +345,7 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.WARNING,
                                   'Error sending request.*599'):
-            found_response = yield self.pool.send_request(
+            found_response = yield self._send_request(
                 request, base_delay=0.02, async=True)
 
         self.assertEqual(found_response, valid_response)
@@ -356,7 +363,7 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.WARNING,
                                   'Error sending request.*500'):
-            found_response = yield self.pool.send_request(request, 
+            found_response = yield self._send_request(request, 
                                                           base_delay=0.05,
                                                           async=True)
 
@@ -369,7 +376,7 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
                                 buffer=StringIO('hello'))
         self.mock_client.side_effect = [response]
 
-        got_response = yield self.pool.send_request(request, 
+        got_response = yield self._send_request(request, 
                                                     base_delay=0.05,
                                                     async=True)
 
@@ -382,16 +389,15 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
                                 buffer=StringIO('{"hello": 3}'))
         self.mock_client.side_effect = [response]
 
-        got_response = yield self.pool.send_request(request, 
+        got_response = yield self._send_request(request, 
                                                     base_delay=0.05,
                                                     async=True)
 
         self.assertEqual(got_response, response)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=10)
     def test_lots_of_requests(self):
         random.seed(1659843)
-        self.pool = utils.http.RequestPool(5)
         request, valid_response = create_valid_ack()
         invalid_response = HTTPError(599)
 
@@ -403,10 +409,10 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
         
         self.mock_client.side_effect = responses
 
-        responses = yield [self.pool.send_request(request, 
-                                                  base_delay=0.05,
-                                                  ntries=12,
-                                                  async=True) 
+        responses = yield [self._send_request(request, 
+                                              base_delay=0.05,
+                                              ntries=12,
+                                              async=True) 
                            for x in range(n_queries)]
 
         self.assertEqual(len(responses), n_queries)
@@ -416,9 +422,31 @@ class TestRequestPool(test_utils.neontest.AsyncTestCase):
         request, response = create_valid_ack()
         self.mock_client.side_effect = [response]
 
-        found_response = yield self.pool.send_request(request, async=True)
+        found_response = yield self._send_request(request, async=True)
 
         self.assertEqual(found_response, response)
+
+class TestRequestPoolInThread(TestRequestPool):
+    def setUp(self):
+        super(TestRequestPoolInThread, self).setUp()
+        self.pool = utils.http.RequestPool(5, thread_safe=True)
+        self.n_sent = 0
+        
+    def tearDown(self):
+        super(TestRequestPoolInThread, self).tearDown()
+
+    def _thread_submit(self, *args, **kwargs):
+        self.n_sent += 1
+        val = self.pool.send_request(*args, **kwargs)
+        self.n_sent -= 1
+        return val
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _send_request(self, *args, **kwargs):
+        pool = ThreadPoolExecutor(1)
+        val = yield pool.submit(self._thread_submit, *args, **kwargs)
+        raise tornado.gen.Return(val)
         
 
 class TestRequestPoolInSubprocess(test_utils.neontest.AsyncTestCase):

@@ -1144,6 +1144,31 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(thumb_events[0],
                           ('acct1_vid1_t1', thumb_meta, 'set'))
 
+    def test_subscribe_twice(self):
+        vid_trap = TestNeondata.ChangeTrap()
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        vid_meta = VideoMetadata('acct1_vid1', request_id='req1',
+                                 tids=['acct1_vid1_t1'])
+        vid_meta.save()
+        vid_events = vid_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid1', vid_meta, 'set'))
+
+        # Subscribe a second time with the same thing
+        vid_trap.reset()
+        vid_trap.subscribe(VideoMetadata, 'acct1_*')
+
+        vid_meta = VideoMetadata('acct1_vid2', request_id='req2',
+                                 tids=['acct1_vid2_t1'])
+        vid_meta.save()
+        vid_events = vid_trap.wait()
+
+        self.assertEquals(len(vid_events), 1)
+        self.assertEquals(vid_events[0], ('acct1_vid2', vid_meta, 'set'))
+        
+
     def test_subscribe_to_changes_with_modifies(self):
         trap = TestNeondata.ChangeTrap()
         
@@ -1810,12 +1835,16 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         # Speed up the retry delays to make the test faster
         self.old_delay = options.get('cmsdb.neondata.baseRedisRetryWait')
         options._set('cmsdb.neondata.baseRedisRetryWait', 0.01)
+        self.old_retries = options.get('cmsdb.neondata.maxRedisRetries')
+        options._set('cmsdb.neondata.maxRedisRetries', 5)
 
     def tearDown(self):
         self.connection_patcher.stop()
         DBConnection.clear_singleton_instance()
+        neondata.PubSubConnection.clear_singleton_instance()
         options._set('cmsdb.neondata.baseRedisRetryWait',
                      self.old_delay)
+        options._set('cmsdb.neondata.maxRedisRetries', self.old_retries)
         super(TestDbConnectionHandling, self).tearDown()
 
     def _mocked_get_func(self, key, callback=None):
@@ -1825,9 +1854,9 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             return self.mock_responses(key)
 
     def test_subscribe_connection_error(self):
-        self.mock_redis().pubsub().psubscribe.side_effect = [
-            redis.exceptions.ConnectionError(),
-            socket.gaierror()]
+        self.mock_redis().pubsub().psubscribe.side_effect = (
+            [redis.exceptions.ConnectionError()] * 5 +
+            [socket.gaierror()] * 5)
         
         with self.assertLogExists(logging.ERROR, 'Error subscribing'):
             with self.assertRaises(neondata.DBConnectionError):
@@ -1836,6 +1865,21 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR, 'Socket error subscribing'):
             with self.assertRaises(neondata.DBConnectionError):
                 NeonUserAccount.subscribe_to_changes(lambda x,y,z: x)
+
+    
+    def test_unsubscribe_connection_error(self):
+        self.mock_redis().pubsub().punsubscribe.side_effect = (
+            [redis.exceptions.ConnectionError()] * 5 +
+            [socket.gaierror()] * 5)
+
+        with self.assertLogExists(logging.ERROR, 'Error unsubscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.unsubscribe_from_changes('*')
+
+        with self.assertLogExists(logging.ERROR, 'Socket error unsubscribing'):
+            with self.assertRaises(neondata.DBConnectionError):
+                NeonUserAccount.unsubscribe_from_changes('*')
+        
 
     def test_async_good_connection(self):
         self.mock_responses.side_effect = [self.valid_obj.to_json()]
@@ -1851,6 +1895,7 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
+    @tornado.testing.gen_test
     def test_async_some_errors(self):
         self.mock_responses.side_effect = [
             redis.ConnectionError("Connection Error"),
@@ -1860,13 +1905,13 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.valid_obj.to_json()
             ]
 
-        TrackerAccountIDMapper.get("tai1", callback=self.stop)
-
         with self.assertLogExists(logging.ERROR, 'Connection Error'):
             with self.assertLogExists(logging.WARN, 'Redis is busy'):
                 with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
                     with self.assertLogExists(logging.ERROR, 'Socket Error'):
-                        found_obj = self.wait()
+                        found_obj = yield tornado.gen.Task(
+                            TrackerAccountIDMapper.get,
+                            'tai1')
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
