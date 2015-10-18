@@ -56,12 +56,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_patcher.start()
         
-        # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = \
-          self.callback_mock
+        # Mock out the callback sending
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
+        self.callback_patcher.start()
         
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -517,12 +514,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         
-        # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = \
-          self.callback_mock
+        # Mock out the callback sending
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
+        self.callback_patcher.start()
         
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
@@ -1252,12 +1246,9 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
 
-        # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = \
-          self.callback_mock
+        # Mock out the callback sending
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
+        self.callback_patcher.start()
 
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
@@ -1278,6 +1269,7 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.datamock = self.neondata_patcher.start()
         self.datamock.RequestState = neondata.RequestState
         self.datamock.ThumbnailServingURLs = neondata.ThumbnailServingURLs
+        self.datamock.CallbackState = neondata.CallbackState
 
         self.old_serving_update_delay = options.get(
             'mastermind.server.serving_update_delay')
@@ -1296,11 +1288,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.s3_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
-        cb_thread = self.publisher._callback_thread
         del self.mastermind
         super(TestDirectivePublisher, self).tearDown()
-        if cb_thread is not None:
-            cb_thread.join(5)
 
     def _parse_directive_file(self, file_data):
         '''Returns expiry, {tracker_id -> account_id},
@@ -1507,12 +1496,6 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
             dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
             date.datetime.now(dateutil.tz.tzutc()))
 
-        # Verify that the callbacks were sent
-        if self.publisher._callback_thread:
-            self.publisher._callback_thread.join(5)
-        self.callback_mock.schedule_all_callbacks.assert_called_with(
-            set(['acct1_vid1', 'acct1_vid2']))
-
     def test_different_default_urls(self):
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
@@ -1659,86 +1642,17 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
           self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
-    def test_error_when_sending_callback(self):
-        self.callback_mock.schedule_all_callbacks.side_effect = [
-            Exception('Some kind of exception')
-            ]
-        
-        # We will fill the data structures in the mastermind core
-        # directly because it's too complicated to insert them using
-        # the update* functions and mocking out all the db calls.
-        self.mastermind.serving_directive = {
-            'acct1_vid1': (('acct1', 'acct1_vid1'), 
-                           [('tid11', 0.1),
-                            ('tid12', 0.2),
-                            ('tid13', 0.8)]),
-            'acct1_vid2': (('acct1', 'acct1_vid2'), 
-                           [('tid21', 0.0),
-                            ('tid22', 1.0)])}
-        self.mastermind.video_info = self.mastermind.serving_directive
-        
-        self.publisher.update_tracker_id_map({
-            'tai1' : 'acct1',
-            'tai1s' : 'acct1',
-            'tai2p' : 'acct2'})
-        self.publisher.update_default_thumbs({
-            'acct1' : 'acct1_vid1_tid11'}
-            )
-        self.publisher.add_serving_urls(
-            'acct1_vid1_tid11',
-            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
-                                          base_url = 'http://first_tids.com',
-                                          sizes=[(640, 480), (160,90)]))
-        self.publisher.add_serving_urls(
-            'acct1_vid1_tid12',
-            neondata.ThumbnailServingURLs(
-                'acct1_vid1_tid12',
-                size_map = { (800, 600): 't12_800.jpg',
-                             (160, 90): 't12_160.jpg'}))
-        self.publisher.add_serving_urls(
-            'acct1_vid1_tid13',
-            neondata.ThumbnailServingURLs('acct1_vid1_tid13',
-                                          base_url = 'http://third_tids.com',
-                                          sizes=[(160, 90)]))
-        self.publisher.add_serving_urls(
-            'acct1_vid2_tid21',
-            neondata.ThumbnailServingURLs('acct1_vid2_tid21',
-                                          base_url = 'http://two_one.com',
-                                          sizes=[(1920,720), (160, 90)]))
-        self.publisher.add_serving_urls(
-            'acct1_vid2_tid22',
-            neondata.ThumbnailServingURLs('acct1_vid2_tid22',
-                                          base_url = 'http://two_two.com',
-                                          sizes=[(500,500), (160, 90)]))
-
-        with self.assertLogExists(logging.WARNING,
-                                  'Unexpected error when sending a customer'):
-            self.publisher._publish_directives()
-            if self.publisher._callback_thread:
-                self.publisher._callback_thread.join(5)
-
-        # Make sure that there are two directive files, one is the
-        # REST endpoint and the second is a timestamped one.
-        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-        keys = [x for x in bucket.get_all_keys()]
-        key_names = [x.name for x in keys]
-        self.assertEquals(len(key_names), 2)
-        self.assertEquals(keys[0].size,keys[1].size)
-        self.assertIn('mastermind', key_names)
-        key_names.remove('mastermind')
-        self.assertRegexpMatches(key_names[0], '[0-9]+\.mastermind')
-
 class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
     '''Tests for updates to the database when directives are published.'''
     def setUp(self):
         super(TestPublisherStatusUpdatesInDB, self).setUp()
 
         # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = \
-          self.callback_mock
+        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.callback_mock = self._future_wrap_mock(
+            self.callback_patcher.start())
+        self.callback_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
 
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
@@ -1769,8 +1683,11 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
             request_id='job1',
             i_id='int1').save()
 
-        request = neondata.BrightcoveApiRequest('job1', 'acct1', 'vid1')
+        request = neondata.BrightcoveApiRequest(
+            'job1', 'acct1', 'vid1',
+            http_callback='http://callback.com')
         request.state = neondata.RequestState.FINISHED
+        request.response = { 'video_id' : 'vid1' }
         request.save()
 
         self.old_serving_update_delay = options.get(
@@ -1812,11 +1729,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
         self._wait_for_db_updates()
-        cb_thread = self.publisher._callback_thread
         self.redis.stop()
         super(TestPublisherStatusUpdatesInDB, self).tearDown()
-        if cb_thread is not None:
-            cb_thread.join(5)
 
     def _wait_for_db_updates(self):
         self.publisher.wait_for_pending_modifies()
@@ -1832,8 +1746,18 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
 
         # Make sure that vid1 was changed in the database to serving
         # because it was just added.
-        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
                           neondata.RequestState.SERVING)
+
+        # Check the callback was sent
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.SUCESS)
+        self.assertEquals(self.callback_mock.call_count, 1)
+        cb_request = self.callback_mock.call_args[0][0]
+        self.assertEquals(json.loads(cb_request.body), {'video_id' : 'vid1'})
+        self.assertEquals(cb_request.url, 'http://callback.com')
+        
 
         # Make sure that the serving URL was added to the video
         serving_url = neondata.VideoMetadata.get('acct1_vid1').serving_url
@@ -1856,8 +1780,14 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self._wait_for_db_updates()
 
         # The video shouldn't serve because there are not valid serving urls
-        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
                           neondata.RequestState.FINISHED)
+
+        # Make sure the callback wasn't sent
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
+        self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
@@ -1877,13 +1807,74 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
 
         # The video shouldn't be in a serving state because there is only
         # the default thumb
-        self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
                           neondata.RequestState.FINISHED)
+
+        # Make sure the callback wasn't sent
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
+        self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
 
+    def test_no_callback_if_already_sent(self):
+        def _mod_request(x):
+            x.callback_state = neondata.CallbackState.SUCESS
+        neondata.NeonApiRequest.modify('job1', 'acct1', _mod_request)
 
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
 
+        # Make sure that vid1 was changed in the database to serving
+        # because it was just added.
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
+                          neondata.RequestState.SERVING)
+
+        # Make sure the callback was not sent again
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.SUCESS)
+        self.assertFalse(self.callback_mock.called)
+
+    def test_callback_error(self):
+        self.callback_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 400)
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Error when sending callback'):
+            self.publisher._publish_directives()
+            self._wait_for_db_updates()
+
+        # Make sure that vid1 was changed in the database to serving
+        # because it was just added.
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
+                          neondata.RequestState.SERVING)
+
+        # Make sure the callback was flagged as error
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.ERROR)
+
+    def test_unexpected_callback_error(self):
+        self.callback_mock.side_effect = \
+          [Exception('Some bad exception')]
+
+        with self.assertLogExists(logging.WARNING,
+                                  'Unexpected error when sending'):
+            self.publisher._publish_directives()
+            self._wait_for_db_updates()
+
+        # Make sure that vid1 was changed in the database to serving
+        # because it was just added.
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
+                          neondata.RequestState.SERVING)
+
+        # Make sure the callback was flagged as error
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
+        
 class SmokeTesting(test_utils.neontest.TestCase):
 
     def setUp(self):
@@ -1899,10 +1890,11 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3conn.create_bucket('neon-image-serving-directives-test')
 
         # Mock out the callback manager
-        self.callback_patcher = patch(
-            'mastermind.server.utils.sqsmanager.CustomerCallbackManager')
-        self.callback_mock = MagicMock()
-        self.callback_patcher.start().return_value = self.callback_mock
+        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.callback_mock = self._future_wrap_mock(
+            self.callback_patcher.start())
+        self.callback_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -2038,8 +2030,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
         acct.default_thumbnail_id = default_acct_thumb.key
 
         # Setup api request and update the state to processed
-        job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
-        job.state = neondata.RequestState.FINISHED 
+        job = neondata.NeonApiRequest('job1', 'key1', 'vid1',
+                                      http_callback='http://some_callback.com')
+        job.state = neondata.RequestState.FINISHED
         job.save()
         
         # Create a video with a couple of thumbs in the database
@@ -2116,6 +2109,10 @@ class SmokeTesting(test_utils.neontest.TestCase):
             # check the DB to ensure it has changed
             req = neondata.VideoMetadata.get_video_request('key1_vid1')
             self.assertEqual(req.state, neondata.RequestState.SERVING)
+            self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
+
+            # Make sure a callback was sent
+            self.assertEqual(self.callback_mock.call_count, 1)
 
             # Trigger new videos with different states via a push
             # (finished, customer_error)
