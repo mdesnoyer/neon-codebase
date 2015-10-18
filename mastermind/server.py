@@ -42,10 +42,9 @@ import thrift.Thrift
 import threading
 import tornado.ioloop
 import utils.neon
-import utils
 from utils.options import define, options
+import utils.http
 import utils.ps
-import utils.sqsmanager
 from utils import statemon
 import zlib
 
@@ -108,6 +107,7 @@ statemon.define('unexpected_video_handle_error', int) # Error when handling vide
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
 statemon.define('directive_file_size', int) # file size in bytes 
+statemon.define('pending_callbacks', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 
@@ -288,7 +288,7 @@ class VideoDBWatcher(threading.Thread):
         '''
         _log.info('Loading current experiment info and updating in mastermind')
 
-        for platform in neondata.AbstractPlatform.get_all():
+        for platform in neondata.AbstractPlatform.iterate_all():
             if not platform.serving_enabled:
                 continue
             for video_id in platform.get_internal_video_ids():
@@ -318,12 +318,12 @@ class VideoDBWatcher(threading.Thread):
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
             dict(((str(x.get_tai()), str(x.value)) for x in
-                  neondata.TrackerAccountIDMapper.get_all())))
+                  neondata.TrackerAccountIDMapper.iterate_all())))
 
         # Get an update for the default widths and thumbnail ids
         account_tups = [(str(x.neon_api_key), x.default_size,
                          x.default_thumbnail_id) for x in
-                         neondata.NeonUserAccount.get_all_accounts()]
+                         neondata.NeonUserAccount.iterate_all()]
         self.directive_pusher.update_default_sizes(
             dict((x[0], x[1]) for x in account_tups))
         self.directive_pusher.update_default_thumbs(
@@ -339,7 +339,7 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
 
         # Update the platform, which updates the video data
-        for platform in neondata.AbstractPlatform.get_all():
+        for platform in neondata.AbstractPlatform.iterate_all():
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
                 platform.neon_api_key,
@@ -452,7 +452,7 @@ class VideoDBWatcher(threading.Thread):
 
         # If there are new settings, then trigger a bunch of updates 
         new_options = (platform.abtest, platform.serving_enabled)
-        plat_tup = tuple(key.split('_'))
+        plat_tup = tuple(key[1:])
         with self._platform_options_lock:
             old_options = self._platform_options.get(plat_tup, None)
             if new_options != old_options:
@@ -675,7 +675,7 @@ class StatsDBWatcher(threading.Thread):
                 # We are going to walk through the db by tracker id
                 # because it is partitioned that way and it makes the
                 # calls faster
-                for tai_info in neondata.TrackerAccountIDMapper.get_all():
+                for tai_info in neondata.TrackerAccountIDMapper.iterate_all():
                     if (tai_info.itype != 
                         neondata.TrackerAccountIDMapper.PRODUCTION):
                         continue
@@ -1058,9 +1058,6 @@ class DirectivePublisher(threading.Thread):
         # Set of last video ids in the directive file
         self.last_published_videos = set([])
 
-        self.callback_manager = utils.sqsmanager.CustomerCallbackManager()
-        self._callback_thread = None
-
         # Counter for the number of pending modify calls to the database
         self.pending_modifies = multiprocessing.Value('i', 0)
         statemon.state.pending_modifies = 0
@@ -1255,14 +1252,6 @@ class DirectivePublisher(threading.Thread):
                     t.daemon = True
                     t.start()
 
-                # Send the callbacks for new videos after a delay
-                if self._callback_thread is None:
-                    self._callback_thread = threading.Timer(
-                        options.serving_update_delay,
-                        self._send_callbacks)
-                    self._callback_thread.daemon = True
-                    self._callback_thread.start()
-
                 self.last_publish_time = curtime
 
     def _write_directives(self, stream):
@@ -1451,12 +1440,25 @@ class DirectivePublisher(threading.Thread):
                                     neondata.RequestState.FAILED,
                                     neondata.RequestState.INT_ERROR]:
                                 obj.state = new_state
-                neondata.NeonApiRequest.modify_many(request_keys, _set_state)
+                requests = neondata.NeonApiRequest.modify_many(request_keys,
+                                                               _set_state)
+                if new_state == neondata.RequestState.SERVING:
+                    # Send any callbacks that need to be sent
+                    for cur_key, request in requests.iteritems():
+                        if (request.callback_state == 
+                            neondata.CallbackState.NOT_SENT and 
+                            request.callback_url):
+                            self._incr_pending_modify(1)
+                            statemon.state.increment('pending_callbacks')
+                            t = threading.Thread(target=self._send_callback,
+                                                 args=(request,))
+                            t.daemon = True
+                            t.start()
                 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
-                _log.exception('Unexpected error when updating serving state in '
-                               'database %s' % e)
+                _log.exception('Unexpected error when updating serving state '
+                               'in database %s' % e)
                 # We didn't update the database so don't say that the
                 # videos were published. This will trigger a retry next
                 # time the directives are pushed.
@@ -1466,17 +1468,19 @@ class DirectivePublisher(threading.Thread):
             finally:
                 self._incr_pending_modify(-len(cur_vid_ids))
 
-    def _send_callbacks(self):
+    def _send_callback(self, request):
+        '''Send the callback for a given video request.'''
         try:
-            if options.send_callbacks:
-                self.callback_manager.schedule_all_callbacks(
-                    self.last_published_videos)
+            # Do really slow retries on the callback request because
+            # often, the customer's system won't be ready for it.
+            request.send_callback(send_kwargs=dict(base_delay=120.0))
         except Exception as e:
-            _log.warn('Unexpected error when sending a customer '
-                      'callback: %s' % e)
+            _log.warn('Unexpected error when sending a customer callback: %s'
+                      % e)
             statemon.state.increment('unexpected_callback_error')
         finally:
-            self._callback_thread = None
+            statemon.state.decrement('pending_callbacks')
+            self._incr_pending_modify(-1)
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():

@@ -49,7 +49,7 @@ def run_one_video(mod, video_file, n, output_file, batch):
         frame.axes.get_xaxis().set_ticks([])
         frame.axes.get_yaxis().set_visible(False)
         plt.imshow(image[:,:,::-1])
-        plt.xlabel('s: %3.2f' % score)
+        plt.xlabel('s: %3.2f. f: %i' % (score, frame_no))
         curThumb += 1
 
     if not batch:
