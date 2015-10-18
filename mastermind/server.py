@@ -451,7 +451,7 @@ class VideoDBWatcher(threading.Thread):
 
         # If there are new settings, then trigger a bunch of updates 
         new_options = (platform.abtest, platform.serving_enabled)
-        plat_tup = tuple(key)
+        plat_tup = tuple(key[1:])
         with self._platform_options_lock:
             old_options = self._platform_options.get(plat_tup, None)
             if new_options != old_options:

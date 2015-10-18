@@ -1339,6 +1339,7 @@ class StoredObject(object):
         keys, ops = filtered
 
         if get_object:
+            _log.error(str(keys))
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
@@ -1372,7 +1373,7 @@ class StoredObject(object):
         
         yield conn.subscribe(
             lambda x: cls._handle_all_changes(x, func, conn, get_object),
-            '__keyspace@0__:%s' % cls.format_key(pattern),
+            '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
             async=True)
 
     @classmethod
@@ -1382,8 +1383,12 @@ class StoredObject(object):
         conn = PubSubConnection.get(cls)
         
         yield conn.unsubscribe(
-            '__keyspace@0__:%s' % cls.format_key(channel),
+            '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
             async=True)
+
+    @classmethod
+    def format_subscribe_pattern(cls, pattern):
+        return cls.format_key(pattern)
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -2458,15 +2463,17 @@ class AbstractIntegration(NamespacedStoredObject):
 
 
 # DEPRECATED use AbstractIntegration instead
-class AbstractPlatform(StoredObject):
-    ''' Abstract Platform/ Integration class '''
+class AbstractPlatform(NamespacedStoredObject):
+    ''' Abstract Platform/ Integration class
+
+    The ids for these objects are tuples of (type, api_key, i_id)
+    type can be None, in which case it becomes cls._baseclass_name()
+    '''
 
     def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True,
                 serving_controller=ServingControllerType.IMAGEPLATFORM):
-        
-        super(AbstractPlatform, self).__init__(
-            self._generate_subkey(api_key, i_id))
+        super(AbstractPlatform, self).__init__((None, api_key, i_id))
         self.neon_api_key = api_key 
         self.integration_id = i_id 
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -2478,31 +2485,29 @@ class AbstractPlatform(StoredObject):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
-    
+
     @classmethod
-    def _generate_subkey(cls, api_key, i_id=None, typ=None):
-        if typ is not None:
-            return '_'.join([typ, api_key, i_id])
-        if i_id is None or api_key.endswith('_%s' % i_id):
-            key_split = api_key.split('_')
-            if len(key_split) == 3:
-                # It's already the correct key
-                return api_key
-            elif len(key_split) == 2:
-                # Add the platform back
-                return '_'.join([cls._baseclass_name(), key_split[0],
-                                 key_split[1]])
-        return '_'.join([cls._baseclass_name(), api_key, i_id])
+    def format_key(cls, key):
+        if isinstance(key, basestring):
+            # It's already the proper key
+            return key
+
+        if len(key) == 2:
+            typ = None
+            api_key, i_id = key
+        else:
+            typ, api_key, i_id = key
+        if typ is None:
+            typ = cls._baseclass_name()
+        api_splits = api_key.split('_')
+        if len(api_splits) > 1:
+            api_key, i_id = api_splits[1:]
+        return '_'.join([typ, api_key, i_id])
 
     @classmethod
     def key2id(cls, key):
         '''Converts a key to an id'''
-        splits = key.split('_')
-        return (splits[1], splits[2])
-
-    def get_id(self):
-        '''Return the non-namespaced id for the object.'''
-        return self.key2id(self.key)
+        return key.split('_')
 
     @classmethod
     def _baseclass_name(cls):
@@ -2539,7 +2544,8 @@ class AbstractPlatform(StoredObject):
                     '_data': copy.deepcopy(obj_dict)
                 }
             
-            return super(AbstractPlatform, cls)._create(key, obj_dict)
+            return super(AbstractPlatform, cls)._create(cls.format_key(key),
+                                                        obj_dict)
 
     def save(self, callback=None):
         raise NotImplementedError("To save this object use modify()")
@@ -2556,51 +2562,41 @@ class AbstractPlatform(StoredObject):
     def get(cls, api_key, i_id, callback=None):
         ''' get instance '''
         return super(AbstractPlatform, cls).get(
-            cls._generate_subkey(api_key, i_id), callback=callback)
-
-    @classmethod
-    def get_many(cls, keys, callback=None):
-        return super(AbstractPlatform, cls).get_many(
-            [cls._generate_subkey(*k) for k in keys],
-            callback=callback)
+            (None, api_key, i_id), callback=callback)
     
     @classmethod
     def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
         def _set_parameters(x):
-            api_key, i_id = x.get_id()
+            typ, api_key, i_id = x.get_id()
             x.neon_api_key = api_key
             x.integration_id = i_id
             func(x)
             
         return super(AbstractPlatform, cls).modify(
-            cls._generate_subkey(api_key, i_id),
+            (None, api_key, i_id),
             _set_parameters,
             create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, create_missing=False, callback=None):
-        '''Modify many keys.
+    def modify_many(cls, keys, func, create_missing=True, callback=None):
+        def _set_parameters(objs):
+            for x in objs.iteritems():
+                typ, api_key, i_id = x.get_id()
+                x.neon_api_key = api_key
+                x.integration_id = i_id
+            func(objs)
 
-        Each key must be a tuple of (api_key, i_id)
-        '''
         return super(AbstractPlatform, cls).modify_many(
-            [cls._generate_subkey(*k) for k in keys],
-            func,
+            keys,
+            _set_parameters,
             create_missing=create_missing,
             callback=callback)
 
     @classmethod
     def delete(cls, api_key, i_id, callback=None):
         return super(AbstractPlatform, cls).delete(
-            cls._generate_subkey(api_key, i_id),
-            callback=callback)
-
-    @classmethod
-    def delete_many(cls, keys, callback=None):
-        return super(AbstractPlatform, cls).delete_many(
-            [cls._generate_subkey(api_key, i_id) for 
-             api_key, i_id in keys],
+            (None, api_key, i_id),
             callback=callback)
 
     def to_json(self):
@@ -2627,32 +2623,11 @@ class AbstractPlatform(StoredObject):
         ''' ovp string '''
         raise NotImplementedError
 
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _get_all(cls):
-        '''Returns a list of all the platform instances from the db.'''
-        instances = []
-        for typ in [NeonPlatform, BrightcovePlatform, OoyalaPlatform,
-                    YoutubePlatform]:
-            plats = yield typ.get_all(async=True)
-            instances.extend(plats)
-        raise tornado.gen.Return(instances)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _get_all_impl(cls):
-        '''Implements get_all_instances for a single platform type.'''
-        
-        vals = yield super(AbstractPlatform, cls).get_all(async=True)
-        raise tornado.gen.Return(vals)
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_all_keys(cls):
+        '''The keys will be of the form (type, api_key, integration_id).'''
         
         neon_keys = yield NeonPlatform._get_all_keys_impl(async=True)
         bc_keys = yield BrightcovePlatform._get_all_keys_impl(async=True)
@@ -2669,7 +2644,7 @@ class AbstractPlatform(StoredObject):
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
 
-        raise tornado.gen.Return([x.split('_') + [cls._baseclass_name()]
+        raise tornado.gen.Return([[cls._baseclass_name()] + x.split('_') 
                                   for x in keys])
 
     @classmethod
@@ -2707,6 +2682,10 @@ class AbstractPlatform(StoredObject):
     def _unsubscribe_from_changes_impl(cls, channel):
         yield super(AbstractPlatform, cls).unsubscribe_from_changes(
             channel, async=True)
+
+    @classmethod
+    def format_subscribe_pattern(cls, pattern):
+        return '%s_%s' % (cls._baseclass_name(), pattern)
     
 
     @classmethod
@@ -2781,14 +2760,6 @@ class NeonPlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp string '''
         return "neon"
-    
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all(cls):
-        ''' get all neonplatform instances'''
-        vals = yield cls._get_all_impl(async=True)
-        raise tornado.gen.Return(vals)
 
     @classmethod
     @utils.sync.optional_sync
@@ -3283,13 +3254,6 @@ class BrightcovePlatform(AbstractPlatform):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_all(cls):
-        vals = yield cls._get_all_impl(async=True)
-        raise tornado.gen.Return(vals)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
     def get_all_keys(cls):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
@@ -3413,13 +3377,6 @@ class YoutubePlatform(AbstractPlatform):
         Create youtube api request
         '''
         pass
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all(cls):
-        vals = yield cls._get_all_impl(async=True)
-        raise tornado.gen.Return(vals)
 
     @classmethod
     @utils.sync.optional_sync
@@ -3734,13 +3691,6 @@ class OoyalaPlatform(AbstractPlatform):
             _log.error("key=update_thumbnail msg=%s state not updated to active"
                         %vid_request.key)
         raise tornado.gen.Return(True)
-    
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all(cls):
-        vals = yield cls._get_all_impl(async=True)
-        raise tornado.gen.Return(vals)
 
     @classmethod
     @utils.sync.optional_sync
