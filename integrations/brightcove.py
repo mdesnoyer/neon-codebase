@@ -13,6 +13,7 @@ if sys.path[0] != __base_path__:
 from api import brightcove_api
 from cmsdb import neondata
 import datetime
+import dateutil.parser
 import integrations.ovp
 import logging
 import re
@@ -32,6 +33,7 @@ statemon.define('cant_get_image', int)
 statemon.define('cant_get_refid', int)
 statemon.define('cant_get_custom_id', int)
 statemon.define('video_not_found', int)
+statemon.define('old_videos_skipped', int)
 
 _log = logging.getLogger(__name__)
 
@@ -282,7 +284,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 # No new videos
                 break
 
-            yield self.submit_one_video_object(item)
+            yield self.submit_one_video_object(item, skip_old_video=True)
 
             count += 1
             last_mod_date = max(last_mod_date,
@@ -335,7 +337,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
-    def submit_one_video_object(self, vid_obj, grab_new_thumb=True):
+    def submit_one_video_object(self, vid_obj, grab_new_thumb=True,
+                                skip_old_video=False):
         '''Submits one video object
 
         Inputs:
@@ -347,7 +350,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''
         try:
             retval = yield self._submit_one_video_object_impl(vid_obj,
-                                                              grab_new_thumb)
+                                                              grab_new_thumb,
+                                                              skip_old_video)
         except integrations.ovp.CMSAPIError as e:
             # Error is already logged
             raise
@@ -360,7 +364,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
-    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True):
+    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True,
+                                      skip_old_video=False):
         # Get the video url to process
         video_url = self._get_video_url_to_download(vid_obj)
         if (video_url is None or 
@@ -416,9 +421,20 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         publish_date = vid_obj.get('publishedDate', None)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(
-                int(publish_date) / 1000.0).isoformat()
+                int(publish_date) / 1000.0)
 
         if not video_id in self.platform.videos:
+            # See if the video should be skipped because it is too old
+            if (skip_old_video and 
+                publish_date is not None and 
+                self.platform.oldest_video_allowed is not None and
+                publish_date < 
+                dateutil.parser.parse(self.platform.oldest_video_allowed)):
+                _log.info('Skipped video %s from account %s because it is too'
+                          ' old' % (video_id, self.platform.neon_api_key))
+                statemon.state.increment('old_videos_skipped')
+                raise tornado.gen.Return(None)
+        
             # The video hasn't been submitted before
             job_id = None
             try:
@@ -431,7 +447,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     callback_url=self.platform.callback_url,
                     custom_data = custom_data,
                     duration=float(vid_obj['length']) / 1000.0,
-                    publish_date=publish_date)
+                    publish_date=(publish_date.isoformat() if 
+                                  publish_date is not None else None))
                 job_id = response['job_id']
 
             except Exception as e:
