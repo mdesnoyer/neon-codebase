@@ -157,6 +157,7 @@ class VideoProcessor(object):
 
         self.n_thumbs = int(self.job_params.get('topn', None) or
                             self.job_params.get('api_param', None) or 5)
+        self.n_thumbs = max(self.n_thumbs, 1)
 
         self.cv_semaphore = cv_semaphore
 
@@ -679,11 +680,12 @@ class VideoProcessor(object):
             if x[0].type == neondata.ThumbnailType.NEON]
         thumbs = thumbs[:self.n_thumbs]
 
-        cresp = neondata.VideoCallbackResponse(self.video_metadata.job_id,
-                neondata.InternalVideoID.to_external(self.video_metadata.key),
-                fnos,
-                thumbs,
-                self.video_metadata.get_serving_url(save=False))
+        cresp = neondata.VideoCallbackResponse(
+            self.video_metadata.job_id,
+            neondata.InternalVideoID.to_external(self.video_metadata.key),
+            fnos,
+            thumbs,
+            self.video_metadata.get_serving_url(save=False))
         return cresp.to_dict()
 
     def send_notifiction_response(self, api_request):
