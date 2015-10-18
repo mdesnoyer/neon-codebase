@@ -503,8 +503,8 @@ class VideoDBWatcher(threading.Thread):
                  str(video_metadata.integration_id))]
         except KeyError:
             statemon.state.increment('no_platform')
-            _log.error('Could not find platform information for video %s' %
-                       video_id)
+            _log.error_n('Could not find platform information for video %s' %
+                         video_id)
             return
 
         if serving_enabled and video_metadata.serving_enabled:
