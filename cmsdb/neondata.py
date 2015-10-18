@@ -2537,7 +2537,7 @@ class AbstractIntegration(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__
+        return AbstractIntegration.__name__
 
 
 # DEPRECATED use AbstractIntegration instead
