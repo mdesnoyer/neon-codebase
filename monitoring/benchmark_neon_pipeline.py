@@ -94,8 +94,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
     data =     { 
         "video_id": video_id,
         "video_url": video_url, 
-        "video_title": video_title,
-        "callback_url": None
+        "video_title": video_title
     }
     req = urllib2.Request(request_url, headers=headers)
     try:
