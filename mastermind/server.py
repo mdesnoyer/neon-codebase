@@ -1447,7 +1447,8 @@ class DirectivePublisher(threading.Thread):
                     for cur_key, request in requests.iteritems():
                         if (request.callback_state == 
                             neondata.CallbackState.NOT_SENT and 
-                            request.callback_url):
+                            request.callback_url and
+                            options.send_callbacks):
                             self._incr_pending_modify(1)
                             statemon.state.increment('pending_callbacks')
                             t = threading.Thread(target=self._send_callback,
