@@ -3800,7 +3800,7 @@ The video metadata for this request must be in the database already.
             cb_request = tornado.httpclient.HTTPRequest(
                 url=self.callback_url,
                 method='POST',
-                headers={'content-type' : 'applicaiton/json'},
+                headers={'content-type' : 'application/json'},
                 body=cb_body,
                 request_timeout=20.0,
                 connect_timeout=10.0)
