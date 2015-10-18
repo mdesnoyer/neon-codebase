@@ -157,7 +157,6 @@ class VideoProcessor(object):
 
         self.n_thumbs = int(self.job_params.get('topn', None) or
                             self.job_params.get('api_param', None) or 5)
-        self.n_thumbs = max(self.n_thumbs, 1)
 
         self.cv_semaphore = cv_semaphore
 
