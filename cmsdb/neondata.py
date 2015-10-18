@@ -2658,7 +2658,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def modify_many(cls, keys, func, create_missing=True, callback=None):
         def _set_parameters(objs):
-            for x in objs.iteritems():
+            for x in objs.itervalues():
                 typ, api_key, i_id = x.get_id()
                 x.neon_api_key = api_key
                 x.integration_id = i_id
