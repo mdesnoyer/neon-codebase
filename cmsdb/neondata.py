@@ -2869,7 +2869,8 @@ class BrightcoveIntegration(AbstractIntegration):
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
-                serving_enabled=True):
+                serving_enabled=True,
+                oldest_video_allowed=None):
 
         ''' On every request, the job id is saved '''
 
@@ -2899,6 +2900,10 @@ class BrightcoveIntegration(AbstractIntegration):
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
         # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
         self.id_field = id_field
+
+        # A ISO date string of the oldest video publication date to
+        # ingest even if is updated in Brightcove.
+        self.oldest_video_allowed = oldest_video_allowed
 
     @classmethod
     def get_ovp(cls):
@@ -3098,7 +3103,8 @@ class BrightcovePlatform(AbstractPlatform):
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
-                serving_enabled=True):
+                serving_enabled=True,
+                oldest_video_allowed=None):
 
         ''' On every request, the job id is saved '''
 
@@ -3129,6 +3135,10 @@ class BrightcovePlatform(AbstractPlatform):
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
         # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
         self.id_field = id_field
+
+        # A ISO date string of the oldest video publication date to
+        # ingest even if is updated in Brightcove.
+        self.oldest_video_allowed = oldest_video_allowed
 
     @classmethod
     def get_ovp(cls):
