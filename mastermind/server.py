@@ -1454,7 +1454,8 @@ class DirectivePublisher(threading.Thread):
                 if new_state == neondata.RequestState.SERVING:
                     # Send any callbacks that need to be sent
                     for cur_key, request in requests.iteritems():
-                        if (request.callback_state == 
+                        if (request is not None and
+                            request.callback_state == 
                             neondata.CallbackState.NOT_SENT and 
                             request.callback_url and
                             options.send_callbacks):

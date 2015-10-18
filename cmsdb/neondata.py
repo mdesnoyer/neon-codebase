@@ -98,6 +98,7 @@ statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
 statemon.define('sucessful_callbacks', int)
 statemon.define('callback_error', int)
+statemon.define('invalid_callback_url', int)
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -3791,29 +3792,38 @@ The video metadata for this request must be in the database already.
         '''
         new_callback_state = CallbackState.NOT_SENT
         if self.callback_url:
-            # Send the callback
-            cb_body = self.response
-            if isinstance(cb_body, dict):
-                cb_body = json.dumps(cb_body)
-            send_kwargs = send_kwargs or {}
-            send_kwargs['async'] = True
-            cb_request = tornado.httpclient.HTTPRequest(
-                url=self.callback_url,
-                method='POST',
-                headers={'content-type' : 'application/json'},
-                body=cb_body,
-                request_timeout=20.0,
-                connect_timeout=10.0)
-            cb_response = yield utils.http.send_request(cb_request,
-                                                        **send_kwargs)
-            if cb_response.error:
-                statemon.state.increment('callback_error')
-                _log.warn('Error when sending callback to %s: %s' %
-                          (self.callback_url, cb_response.error))
+            # Check the callback url format
+            parsed = urlparse.urlsplit(self.callback_url)
+            if parsed.scheme not in ('http', 'https'):
+                _log.error_n('Invalid callback url job %s acct %s: %s'
+                             % (self.job_id, self.api_key, self.callback_url))
+                statemon.state.increment('invalid_callback_url')
                 new_callback_state = CallbackState.ERROR
             else:
-                statemon.state.increment('sucessful_callbacks')
-                new_callback_state = CallbackState.SUCESS
+            
+                # Send the callback
+                cb_body = self.response
+                if isinstance(cb_body, dict):
+                    cb_body = json.dumps(cb_body)
+                send_kwargs = send_kwargs or {}
+                send_kwargs['async'] = True
+                cb_request = tornado.httpclient.HTTPRequest(
+                    url=self.callback_url,
+                    method='POST',
+                    headers={'content-type' : 'application/json'},
+                    body=cb_body,
+                    request_timeout=20.0,
+                    connect_timeout=10.0)
+                cb_response = yield utils.http.send_request(cb_request,
+                                                            **send_kwargs)
+                if cb_response.error:
+                    statemon.state.increment('callback_error')
+                    _log.warn('Error when sending callback to %s: %s' %
+                              (self.callback_url, cb_response.error))
+                    new_callback_state = CallbackState.ERROR
+                else:
+                    statemon.state.increment('sucessful_callbacks')
+                    new_callback_state = CallbackState.SUCESS
 
             # Modify the database state
             def _mod_obj(x):

@@ -1816,8 +1816,18 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       self.assertItemsEqual(conn.blocking_conn.smembers(
         NeonUserAccount('a1')._set_keyname()),
         [objs[0].key, objs[3].key])
-      
-      
+
+    @tornado.testing.gen_test
+    def test_send_invalid_callback(self):
+      request = NeonApiRequest('j1', 'key1', http_callback='null')
+      request.save()
+
+      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
+        yield request.send_callback(async=True)
+
+      # Make sure the state is correct now
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.ERROR)
             
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
