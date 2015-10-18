@@ -3408,12 +3408,6 @@ class NeonApiRequest(NamespacedStoredObject):
         # additional information about the request
         self.msg = None
 
-    def set_message(self, msg):
-        ''' set message string 
-            @msg: string
-        '''
-        self.msg = msg
-
     @classmethod
     def key2id(cls, key):
         '''Converts a key to an id'''

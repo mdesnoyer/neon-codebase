@@ -53,7 +53,6 @@ from utils.imageutils import PILImageUtils
 import utils.neon
 import utils.pycvutils
 import utils.http
-import utils.sqsmanager
 from utils import statemon
 
 import logging
@@ -517,7 +516,8 @@ class VideoProcessor(object):
                              neondata.RequestState.REPROCESS,
                              neondata.RequestState.FAILED,
                              neondata.RequestState.INT_ERROR,
-                             neondata.RequestState.CUSTOMER_ERROR]:
+                             neondata.RequestState.CUSTOMER_ERROR,
+                             neondata.RequestState.FINALIZING]:
                 req.state = neondata.RequestState.FINALIZING
             else:
                 somebody_else_finished[0] = True

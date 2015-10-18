@@ -877,16 +877,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         except neondata.ThumbDownloadError, e:
             _log.warn("Default thumbnail download failed for vid %s" % vid)
             statemon.state.increment('default_thumb_error')
-            # Should the state be updated here too?
-            def _update_request_message(req):
-                req.set_message("failed to download default thumbnail %s" % e)
-            
-            result = yield tornado.gen.Task(
-                          neondata.NeonApiRequest.modify, api_request.job_id, 
-                          api_request.api_key,
-                          _update_request_message)
-            # Even if the request state is not updated, its ok. since we'll try
-            # to handle the upload on the video client again. Hence best effort 
+            # Even if the request state is not updated, its ok. since
+            # we'll try to handle the upload on the video client
+            # again. Hence best effort
             self.set_status(201)
             self.write(response_data)
             self.finish()
