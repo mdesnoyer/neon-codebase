@@ -288,7 +288,7 @@ class VideoDBWatcher(threading.Thread):
         '''
         _log.info('Loading current experiment info and updating in mastermind')
 
-        for platform in neondata.AbstractPlatform.get_all():
+        for platform in neondata.AbstractPlatform.iterate_all():
             if not platform.serving_enabled:
                 continue
             for video_id in platform.get_internal_video_ids():
@@ -318,12 +318,12 @@ class VideoDBWatcher(threading.Thread):
         # Get an update for the tracker id map
         self.directive_pusher.update_tracker_id_map(
             dict(((str(x.get_tai()), str(x.value)) for x in
-                  neondata.TrackerAccountIDMapper.get_all())))
+                  neondata.TrackerAccountIDMapper.iterate_all())))
 
         # Get an update for the default widths and thumbnail ids
         account_tups = [(str(x.neon_api_key), x.default_size,
                          x.default_thumbnail_id) for x in
-                         neondata.NeonUserAccount.get_all_accounts()]
+                         neondata.NeonUserAccount.iterate_all()]
         self.directive_pusher.update_default_sizes(
             dict((x[0], x[1]) for x in account_tups))
         self.directive_pusher.update_default_thumbs(
@@ -339,7 +339,7 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
 
         # Update the platform, which updates the video data
-        for platform in neondata.AbstractPlatform.get_all():
+        for platform in neondata.AbstractPlatform.iterate_all():
             # Update the experimental strategy for the account
             self.mastermind.update_experiment_strategy(
                 platform.neon_api_key,
@@ -452,7 +452,7 @@ class VideoDBWatcher(threading.Thread):
 
         # If there are new settings, then trigger a bunch of updates 
         new_options = (platform.abtest, platform.serving_enabled)
-        plat_tup = tuple(key.split('_'))
+        plat_tup = tuple(key[1:])
         with self._platform_options_lock:
             old_options = self._platform_options.get(plat_tup, None)
             if new_options != old_options:
@@ -675,7 +675,7 @@ class StatsDBWatcher(threading.Thread):
                 # We are going to walk through the db by tracker id
                 # because it is partitioned that way and it makes the
                 # calls faster
-                for tai_info in neondata.TrackerAccountIDMapper.get_all():
+                for tai_info in neondata.TrackerAccountIDMapper.iterate_all():
                     if (tai_info.itype != 
                         neondata.TrackerAccountIDMapper.PRODUCTION):
                         continue

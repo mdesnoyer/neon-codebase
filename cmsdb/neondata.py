@@ -26,12 +26,12 @@ from api import ooyala_api
 import base64
 import binascii
 import cmsdb.cdnhosting
-import cmsdb.url2thumbnail
 import code
 import collections
 import concurrent.futures
 import contextlib
 import copy
+import cv.imhash_index
 import datetime
 import errno
 import hashlib
@@ -87,6 +87,12 @@ define("baseRedisRetryWait", default=0.1, type=float,
 define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
+
+## Parameters for thumbnail perceptual hashing
+define("hash_type", default="dhash", type=str,
+       help="Type of perceptual hash function to use. ahash, phash or dhash")
+define("hash_size", default=64, type=int,
+       help="Size of the perceptual hash in bits")
 
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
@@ -161,13 +167,24 @@ class DBConnection(object):
         self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
         self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
-    def fetch_keys_from_db(self, pattern, keys_per_call=10000,
-                           callback=None):
+    def fetch_keys_from_db(self, pattern='*', keys_per_call=1000,
+                           set_name=None, callback=None):
         '''Gets a list of keys that match a pattern.
 
         Uses SCAN to do it and not block the database
+
+        Inputs:
+        pattern - wildcard pattern of key to look for
+        keys_per_call - Max number of keys to return per scan call
+        set_name - If fetching from a set, what is that set's name
+        callback - Optional callback to get an asynchronous call
         '''
 
+        conn = self.conn if callback else self.blocking_conn
+        scan_func = conn.scan
+        if set_name:
+            scan_func = lambda **kw: conn.sscan(set_name, **kw)
+            
         keys = set([])
         cursor = '0'
         cnt = keys_per_call
@@ -181,19 +198,19 @@ class DBConnection(object):
                 # We're done
                 callback(keys)
             else:
-                self.conn.scan(cursor=cursor, match=pattern,
-                               count=cnt,
-                               callback=lambda x:_handle_scan_result(x, cnt))
+                scan_func(cursor=cursor, match=pattern,
+                          count=cnt,
+                          callback=lambda x:_handle_scan_result(x, cnt))
 
         if callback:
-            self.conn.scan(cursor=cursor, match=pattern,
-                           count=cnt,
-                           callback=_handle_scan_result)
+            scan_func(cursor=cursor, match=pattern,
+                      count=cnt,
+                      callback=_handle_scan_result)
         else:
             while cursor != 0:
-                cursor, data = self.blocking_conn.scan(cursor=cursor,
-                                                       match=pattern,
-                                                       count=cnt)
+                cursor, data = scan_func(cursor=cursor,
+                                         match=pattern,
+                                         count=cnt)
                 if len(data) < (keys_per_call /2):
                     cnt *= 2
                 keys.update(data)
@@ -1103,6 +1120,8 @@ class StoredObject(object):
     def get_many_with_pattern(cls, pattern, callback=None):
         '''Returns many objects that match a pattern.
 
+        Note, this can be a slow call because getting the keys is slow
+
         Inputs:
         pattern - A pattern, usually with a * to match keys
 
@@ -1119,9 +1138,11 @@ class StoredObject(object):
             cls._get_many_with_raw_keys(keys, callback=filtered_callback)
             
         if callback:
-            db_connection.fetch_keys_from_db(pattern, callback=process_keylist)
+            db_connection.fetch_keys_from_db(pattern, keys_per_call=10000,
+                                             callback=process_keylist)
         else:
-            keys = db_connection.fetch_keys_from_db(pattern)
+            keys = db_connection.fetch_keys_from_db(pattern,
+                                                    keys_per_call=10000)
             return  [x for x in 
                      cls._get_many_with_raw_keys(keys)
                      if x is not None]
@@ -1395,6 +1416,7 @@ class StoredObject(object):
         keys, ops = filtered
 
         if get_object:
+            _log.error(str(keys))
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
@@ -1428,7 +1450,7 @@ class StoredObject(object):
         
         yield conn.subscribe(
             lambda x: cls._handle_all_changes(x, func, conn, get_object),
-            '__keyspace@0__:%s' % cls.format_key(pattern),
+            '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
             async=True)
 
     @classmethod
@@ -1438,8 +1460,78 @@ class StoredObject(object):
         conn = PubSubConnection.get(cls)
         
         yield conn.unsubscribe(
-            '__keyspace@0__:%s' % cls.format_key(channel),
+            '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
             async=True)
+
+    @classmethod
+    def format_subscribe_pattern(cls, pattern):
+        return cls.format_key(pattern)
+
+class StoredObjectIterator():
+    '''An iterator that generates objects of a specific type.
+
+    It needs a list of keys to iterate through. Also, can be used
+    synchronously in the normal way, or asynchronously by:
+
+    iter = StoredObjectIterator(cls, keys)
+    while True:
+        item = yield iter.next(async=True)
+        if isinstance(item, StopIteration):
+          break
+    '''
+    def __init__(self, obj_class, keys, page_size=100, max_results=None,
+                 skip_missing=False):
+        '''Create the iterator
+
+        Inputs:
+        cls - Type of object to return
+        keys - List of keys to iterate through
+        page_size - Number of entries to grab from the db at once
+        max_results - Maximum number of entries to return
+        skip_missing - Should missing entries be skipped on the iteration
+        '''
+        self.obj_class = obj_class
+        self.keys = keys
+        self.page_size = page_size
+        self.max_results = max_results
+        self.curidx = 0
+        self.items_returned = 0
+        self.cur_objs = []
+        self.skip_missing = skip_missing
+
+    def __iter__(self):
+        self.curidx = 0
+        self.items_returned = 0
+        self.cur_objs = []
+        return self
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def next(self):
+        if (self.max_results is not None and
+            self.items_returned >= self.max_results):
+            e = StopIteration()
+            e.value = StopIteration()
+            raise e
+
+        while len(self.cur_objs) == 0:
+            if self.curidx >= len(self.keys):
+                # Got all the entries
+                e = StopIteration()
+                e.value = StopIteration()
+                raise e
+            
+            # Get more objects
+            self.cur_objs = yield tornado.gen.Task(
+                self.obj_class.get_many,
+                self.keys[self.curidx:(self.curidx+self.page_size)])
+            if self.skip_missing:
+                self.cur_objs = [x for x in self.cur_objs if x is not None]
+            self.curidx += self.page_size
+
+        self.items_returned += 1
+        raise tornado.gen.Return(self.cur_objs.pop())
+        
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
@@ -1470,8 +1562,9 @@ class NamespacedStoredObject(StoredObject):
         '''
         raise NotImplementedError()
 
-    def _set_keyname(self):
-        return 'objset:%s' % self._baseclass_name()
+    @classmethod
+    def _set_keyname(cls):
+        return 'objset:%s' % cls._baseclass_name()
 
     @classmethod
     def format_key(cls, key):
@@ -1504,7 +1597,9 @@ class NamespacedStoredObject(StoredObject):
             callback=callback)
 
     @classmethod
-    def get_all(cls, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all(cls):
         ''' Get all the objects in the database of this type
 
         Inputs:
@@ -1513,38 +1608,51 @@ class NamespacedStoredObject(StoredObject):
         Returns:
         A list of cls objects.
         '''
-        return super(NamespacedStoredObject, cls).get_many_with_pattern(
-            cls._baseclass_name().lower() + "_*",
-            callback=callback)
+        retval = []
+        i = cls.iterate_all()
+        while True:
+            item = yield i.next(async=True)
+            if isinstance(item, StopIteration):
+                break
+            retval.append(item)
+
+        raise tornado.gen.Return(retval)
 
     @classmethod
-    def iterate_all(cls, max_request_size=100, cur_idx=0):
-        '''A synchronous function that returns an iterator across all the
-        objects in the database.
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def iterate_all(cls, max_request_size=100, max_results=None):
+        '''Return an iterator for all the ojects of this type.
 
         The set of keys to grab happens once so if the db changes while
         the iteration is going, so neither new or deleted objects will
         be returned.
 
-        #TODO(mdesnoyer): Figure out a way to make this
-        asynchronous. It ain't going to be easy.
+        You can use it asynchronously like:
+        iter = cls.get_iterator()
+        while True:
+          item = yield iter.next(async=True)
+          if isinstance(item, StopIteration):
+            break
 
-        Inputs:
-        max_request_size - Maximum number of objects to request from
-        the database at a time.
-        cur_idx - what index to start from 
+        or just use it synchronously like a normal iterator.
         '''
-        db_connection = DBConnection.get(cls)
-        keys = db_connection.fetch_keys_from_db(
-            cls._baseclass_name().lower() + '_*')
-        #cur_idx = 0
-        while cur_idx < len(keys):
-            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
-            for obj in super(NamespacedStoredObject, cls).get_many(cur_keys):
-                if obj is not None:
-                    yield obj
+        keys = yield cls.get_all_keys(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(cls, keys, page_size=max_request_size,
+                                 max_results=max_results, skip_missing=True))
 
-            cur_idx += max_request_size
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        '''Return all the keys in the database for this object type.'''
+        db_connection = DBConnection.get(cls)
+        raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+            set_name=cls._set_keyname())
+
+        raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
+                                  x is not None])
 
     @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
@@ -1682,6 +1790,8 @@ class NeonApiKey(NamespacedStoredObject):
         raise NotImplementedError()
     
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_all(cls, keys, callback=None):
         raise NotImplementedError()
 
@@ -1977,10 +2087,13 @@ class NeonUserAccount(NamespacedStoredObject):
         
         return na
    
-    @classmethod 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_all_accounts(cls):
         ''' Get all NeonUserAccount instances '''
-        return cls.get_all()
+        retval = yield tornado.gen.Task(cls.get_all)
+        raise tornado.gen.Return(retval)
     
     @classmethod
     def get_neon_publisher_id(cls, api_key):
@@ -1991,33 +2104,70 @@ class NeonUserAccount(NamespacedStoredObject):
         if nc:
             return na.tracker_account_id
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_internal_video_ids(self):
+        '''Return the list of internal videos ids for this account.'''
+        db_connection = DBConnection.get(self)
+        vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                      set_name='objset:%s' % self.neon_api_key)
+        raise tornado.gen.Return(list(vids))
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def iterate_all_videos(self, max_request_size=100):
-        '''A synchronous function that returns an iterator across all the
-        videos for this account in the database.
+        '''Returns an iterator across all the videos for this account in the
+        database.
+
+        The iterator can be used asynchronously. See StoredObjectIterator
 
         The set of keys to grab happens once so if the db changes while
         the iteration is going, so neither new or deleted objects will
         be returned.
 
-        #TODO(mdesnoyer): Figure out a way to make this
-        asynchronous. It ain't going to be easy.
+        Inputs:
+        max_request_size - Maximum number of objects to request from
+        the database at a time.
+        '''
+        vids = yield self.get_internal_video_ids(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(VideoMetadata, vids,
+                                 page_size=max_request_size,
+                                 skip_missing=True))
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_job_keys(self):
+        '''Return a list of (job_id, api_key) of all the jobs for this account.
+        '''
+        db_connection = DBConnection.get(self)
+        base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                           set_name='objset:request:%s' % 
+                                           self.neon_api_key)
+
+        raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def iterate_all_jobs(self, max_request_size=100):
+        '''Returns an iterator across all the jobs for this account in the
+        database.
+
+        The iterator can be used asynchronously. See StoredObjectIterator
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+        be returned.
 
         Inputs:
         max_request_size - Maximum number of objects to request from
         the database at a time.
         '''
-        db_connection = DBConnection.get(VideoMetadata)
-        keys = db_connection.fetch_keys_from_db(self.neon_api_key + '_*')
-        keys = [x for x in keys if len(x.split('_')) == 2]
-        cur_idx = 0
-        while cur_idx < len(keys):
-            cur_keys = keys[cur_idx:(cur_idx+max_request_size)]
-            for obj in VideoMetadata.get_many(cur_keys):
-                if obj is not None and isinstance(obj, VideoMetadata):
-                    yield obj
-
-            cur_idx += max_request_size
-
+        keys = yield self.get_all_job_keys(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(NeonApiRequest, keys,
+                                 page_size=max_request_size,
+                                 skip_missing=True))
 
 class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
@@ -2391,13 +2541,16 @@ class AbstractIntegration(NamespacedStoredObject):
 
 # DEPRECATED use AbstractIntegration instead
 class AbstractPlatform(NamespacedStoredObject):
-    ''' Abstract Platform/ Integration class '''
+    ''' Abstract Platform/ Integration class
+
+    The ids for these objects are tuples of (type, api_key, i_id)
+    type can be None, in which case it becomes cls._baseclass_name()
+    '''
 
     def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
-                serving_enabled=True, serving_controller=ServingControllerType.IMAGEPLATFORM):
-        
-        super(AbstractPlatform, self).__init__(
-            self._generate_subkey(api_key, i_id))
+                serving_enabled=True,
+                serving_controller=ServingControllerType.IMAGEPLATFORM):
+        super(AbstractPlatform, self).__init__((None, api_key, i_id))
         self.neon_api_key = api_key 
         self.integration_id = i_id 
         self.videos = {} # External video id (Original Platform VID) => Job ID
@@ -2409,17 +2562,37 @@ class AbstractPlatform(NamespacedStoredObject):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller 
-    
+
     @classmethod
-    def _generate_subkey(cls, api_key, i_id):
-        if i_id is None or api_key.endswith('_%s' % i_id):
-            # It's already the correct key
-            return api_key
-        return '_'.join([api_key, i_id])
+    def format_key(cls, key):
+        if isinstance(key, basestring):
+            # It's already the proper key
+            return key
+
+        if len(key) == 2:
+            typ = None
+            api_key, i_id = key
+        else:
+            typ, api_key, i_id = key
+        if typ is None:
+            typ = cls._baseclass_name()
+        api_splits = api_key.split('_')
+        if len(api_splits) > 1:
+            api_key, i_id = api_splits[1:]
+        return '_'.join([typ, api_key, i_id])
+
+    @classmethod
+    def key2id(cls, key):
+        '''Converts a key to an id'''
+        return key.split('_')
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower() 
+        return cls.__name__.lower()
+
+    @classmethod
+    def _set_keyname(cls):
+        return 'objset:%s' % cls._baseclass_name()
    
     @classmethod
     def _create(cls, key, obj_dict):
@@ -2448,7 +2621,8 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_data': copy.deepcopy(obj_dict)
                 }
             
-            return super(AbstractPlatform, cls)._create(key, obj_dict)
+            return super(AbstractPlatform, cls)._create(cls.format_key(key),
+                                                        obj_dict)
 
     def save(self, callback=None):
         raise NotImplementedError("To save this object use modify()")
@@ -2465,46 +2639,41 @@ class AbstractPlatform(NamespacedStoredObject):
     def get(cls, api_key, i_id, callback=None):
         ''' get instance '''
         return super(AbstractPlatform, cls).get(
-            cls._generate_subkey(api_key, i_id), callback=callback)
+            (None, api_key, i_id), callback=callback)
     
     @classmethod
     def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
         def _set_parameters(x):
-            api_key, i_id = x.get_id().split('_')
+            typ, api_key, i_id = x.get_id()
             x.neon_api_key = api_key
             x.integration_id = i_id
             func(x)
             
         return super(AbstractPlatform, cls).modify(
-            cls._generate_subkey(api_key, i_id),
+            (None, api_key, i_id),
             _set_parameters,
             create_missing=create_missing,
             callback=callback)
 
     @classmethod
-    def modify_many(cls, keys, func, create_missing=False, callback=None):
-        '''Modify many keys.
+    def modify_many(cls, keys, func, create_missing=True, callback=None):
+        def _set_parameters(objs):
+            for x in objs.iteritems():
+                typ, api_key, i_id = x.get_id()
+                x.neon_api_key = api_key
+                x.integration_id = i_id
+            func(objs)
 
-        Each key must be a tuple of (api_key, i_id)
-        '''
         return super(AbstractPlatform, cls).modify_many(
-            [cls._generate_subkey(api_key, i_id) for 
-             api_key, i_id in keys],
-            func,
+            keys,
+            _set_parameters,
             create_missing=create_missing,
             callback=callback)
 
     @classmethod
     def delete(cls, api_key, i_id, callback=None):
         return super(AbstractPlatform, cls).delete(
-            cls._generate_subkey(api_key, i_id),
-            callback=callback)
-
-    @classmethod
-    def delete_many(cls, keys, callback=None):
-        return super(AbstractPlatform, cls).delete_many(
-            [cls._generate_subkey(api_key, i_id) for 
-             api_key, i_id in keys],
+            (None, api_key, i_id),
             callback=callback)
 
     def to_json(self):
@@ -2531,36 +2700,29 @@ class AbstractPlatform(NamespacedStoredObject):
         ''' ovp string '''
         raise NotImplementedError
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        '''The keys will be of the form (type, api_key, integration_id).'''
+        
+        neon_keys = yield NeonPlatform._get_all_keys_impl(async=True)
+        bc_keys = yield BrightcovePlatform._get_all_keys_impl(async=True)
+        oo_keys = yield OoyalaPlatform._get_all_keys_impl(async=True)
+        yt_keys = yield YoutubePlatform._get_all_keys_impl(async=True)
+
+        keys = neon_keys + bc_keys + oo_keys + yt_keys
+
+        raise tornado.gen.Return(keys)
 
     @classmethod
-    def get_all(cls, callback=None):
-        '''Returns a list of all the platform instances from the db.'''
-        instances = []
-        if callback:
-            lock = threading.RLock()
-            call_counter = [4]
-            def _process_instances(x):
-                instances.extend(x)
-                with lock:
-                    call_counter[0] -= 1
-                    if call_counter[0] == 0:
-                        callback(instances)
-            NeonPlatform.get_all(_process_instances)
-            BrightcovePlatform.get_all(_process_instances)
-            OoyalaPlatform.get_all(_process_instances)
-            YoutubePlatform.get_all(_process_instances)
-            return
-        else:
-            instances.extend(NeonPlatform.get_all())
-            instances.extend(BrightcovePlatform.get_all())
-            instances.extend(OoyalaPlatform.get_all())
-            instances.extend(YoutubePlatform.get_all())
-        return instances
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _get_all_keys_impl(cls):
+        keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
 
-    @classmethod
-    def _get_all_impl(cls, callback=None):
-        '''Implements get_all_instances for a single platform type.'''
-        return super(AbstractPlatform, cls).get_all(callback=callback)
+        raise tornado.gen.Return([[cls._baseclass_name()] + x.split('_') 
+                                  for x in keys])
 
     @classmethod
     @utils.sync.optional_sync
@@ -2597,6 +2759,10 @@ class AbstractPlatform(NamespacedStoredObject):
     def _unsubscribe_from_changes_impl(cls, channel):
         yield super(AbstractPlatform, cls).unsubscribe_from_changes(
             channel, async=True)
+
+    @classmethod
+    def format_subscribe_pattern(cls, pattern):
+        return '%s_%s' % (cls._baseclass_name(), pattern)
     
 
     @classmethod
@@ -2671,11 +2837,13 @@ class NeonPlatform(AbstractPlatform):
     def get_ovp(cls):
         ''' ovp string '''
         return "neon"
-    
+
     @classmethod
-    def get_all(cls, callback=None):
-        ''' get all neonplatform instances'''
-        return cls._get_all_impl(callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        keys = yield cls._get_all_keys_impl(async=True)
+        raise tornado.gen.Return(keys)
 
     @classmethod
     @utils.sync.optional_sync
@@ -2995,8 +3163,11 @@ class BrightcovePlatform(AbstractPlatform):
         self.video_still_width = width
 
     @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        keys = yield cls._get_all_keys_impl(async=True)
+        raise tornado.gen.Return(keys)
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -3117,10 +3288,13 @@ class YoutubePlatform(AbstractPlatform):
         Create youtube api request
         '''
         pass
-    
+
     @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        keys = yield cls._get_all_keys_impl(async=True)
+        raise tornado.gen.Return(keys)
 
 class OoyalaIntegration(AbstractIntegration):
     '''
@@ -3324,9 +3498,13 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature 
     
+
     @classmethod
-    def get_all(cls, callback=None):
-        return cls._get_all_impl(callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        keys = yield cls._get_all_keys_impl(async=True)
+        raise tornado.gen.Return(keys)
 
 #######################
 # Request Blobs 
@@ -3415,12 +3593,12 @@ class NeonApiRequest(NamespacedStoredObject):
         return (splits[2], splits[1])
 
     @classmethod
-    def _generate_subkey(cls, job_id, api_key):
-        if job_id is None or api_key is None:
-            return None
+    def _generate_subkey(cls, job_id, api_key=None):
         if job_id.startswith('request'):
             # Is is really the full key, so just return the subportion
             return job_id.partition('_')[2]
+        if job_id is None or api_key is None:
+            return None
         return '_'.join([api_key, job_id])
 
     def _set_keyname(self):
@@ -3495,10 +3673,13 @@ class NeonApiRequest(NamespacedStoredObject):
         Each key must be a tuple of (job_id, api_key)
         '''
         return super(NeonApiRequest, cls).get_many(
-            [cls._generate_subkey(job_id, api_key) for 
-             job_id, api_key in keys],
+            [cls._generate_subkey(*k) for k in keys],
             log_missing=log_missing,
             callback=callback)
+
+    @classmethod
+    def get_all(cls):
+        raise NotImplementedError()
 
     @classmethod
     def modify(cls, job_id, api_key, func, create_missing=False, 
@@ -3516,8 +3697,7 @@ class NeonApiRequest(NamespacedStoredObject):
         Each key must be a tuple of (job_id, api_key)
         '''
         return super(NeonApiRequest, cls).modify_many(
-            [cls._generate_subkey(job_id, api_key) for 
-             job_id, api_key in keys],
+            [cls._generate_subkey(*k) for k in keys],
             func,
             create_missing=create_missing,
             callback=callback)
@@ -3991,7 +4171,10 @@ class ThumbnailMetadata(StoredObject):
 
     def update_phash(self, image):
         '''Update the phash from a PIL image.'''
-        self.phash = cmsdb.url2thumbnail.hash_pil_image(image)
+        self.phash = cv.imhash_index.hash_pil_image(
+            image,
+            hash_type=options.hash_type,
+            hash_size=options.hash_size)
 
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
@@ -4109,32 +4292,6 @@ class ThumbnailMetadata(StoredObject):
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
 
-    @classmethod
-    def iterate_all_thumbnails(cls):
-        '''Iterates through all of the thumbnails in the system.
-
-        ***WARNING*** This function is a best effort iteration. There
-           is a good chance that the database changes while the
-           iteration occurs. Given that we only ever add thumbnails to
-           the system, this means that it is likely that some
-           thumbnails will be missing.
-
-        Returns - A generator that does the iteration and produces 
-                  ThumbnailMetadata objects.
-        '''
-
-        for platform in AbstractPlatform.get_all():
-            for video_id in platform.get_internal_video_ids():
-                video_metadata = VideoMetadata.get(video_id)
-                if video_metadata is None:
-                    _log.error('Could not find information about video %s' %
-                               video_id)
-                    continue
-
-                for thumb in ThumbnailMetadata.get_many(
-                        video_metadata.thumbnail_ids):
-                    yield thumb
-
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
@@ -4221,25 +4378,6 @@ class VideoMetadata(StoredObject):
         ''' framesize of the video '''
         if self.__dict__.has_key('frame_size'):
             return self.frame_size
-
-    
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_videos_in_account(cls, api_key):
-        '''Returns all the VideoMetadata objects for a given account.'''
-        retval = []
-        db_connection = DBConnection.get(cls)
-        keys = yield tornado.gen.Task(
-            db_connection.fetch_keys_from_db,
-            '%s_*' % api_key)
-
-        # The above command will also get the thumbnail keys, so
-        # filter them out
-        keys = [x for x in keys if len(x.split('_')) == 2]
-
-        objs = yield tornado.gen.Task(cls.get_many, keys)
-        raise tornado.gen.Return(objs)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
