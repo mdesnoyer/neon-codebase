@@ -58,20 +58,18 @@ class RunningTooLongError(JobError): pass
 class JobFailed(JobError): pass
 
 
-class MyHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
+class MyHTTPRedirectHandler(tornado.httpclient.HTTPResponse):
     '''
-    A redirect handler for urllib2 requests 
-    opener = urllib2.build_opener(MyHTTPRedirectHandler, cookieprocessor)
+    A redirect handler for tornado requests
     in a single threaded process, you can use get_last_redirect_response()
     to get the intermediate 302 response
     '''
     
     redirect_headers = None
     
-    def http_error_302(self, req, fp, code, msg, headers):
+    def http_error_302(self, headers):
         MyHTTPRedirectHandler.redirect_headers = headers
-        return urllib2.HTTPRedirectHandler.http_error_302(self, 
-                                    req, fp, code, msg, headers)
+        return tornado.httpclient.HTTPError(302)
 
     http_error_301 = http_error_303 = http_error_307 = http_error_302
 
@@ -122,6 +120,11 @@ def image_available_in_isp(api_key, video_id):
         res = yield http_client.fetch(req)
 
         if res.code != 200:
+
+            if res.code == 302:
+                red = MyHTTPRedirectHandler(res)
+                red.http_error_302(res.headers)
+
             _log.warn('Image not available in ISP yet. Code %s' %
                       res.getcode())
             return False
@@ -134,7 +137,7 @@ def image_available_in_isp(api_key, video_id):
             # It is the account level default
             return False
         return True
-    except urllib2.URLError as e: 
+    except tornado.httpclient.HTTPError as e: 
         pass
     except KeyError as e:
         pass
