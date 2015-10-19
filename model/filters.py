@@ -69,6 +69,15 @@ class Filter(object):
         '''Returns the score of an image related to the filter.'''
         raise NotImplementedError()
 
+    def accept_score(self, image, frameno=None, video=None):
+        '''Returns (accept, score) simultaneously'''
+        raise NotImplementedError()
+
+    def _accept_from_score(self, score, image=None, frameno=None, video=None):
+        '''Computes acceptance criteria based on the score (i.e., without
+            re-invoking the scoring function.'''
+        raise NotImplementedError()
+
     def __setstate__(self, state):
         if not 'max_height' in state:
             state['max_height'] = None
@@ -129,6 +138,36 @@ class CascadeFilter(Filter):
         for filt in self.filters:
             filt.restore_additional_data(filename)
 
+class CachedCascadeFilter(CascadeFilter):
+    '''Wraps CascadeFilter, but stores the image values such that
+    they can be accessed later. If initialized with force, it will
+    always run through all the filters.'''
+    def __init__(self, filters, max_height=None, force=False):
+        super(CascadeFilter, self).__init__(max_height)
+        self.last_scores = None
+        
+    def _accept_impl(self, image, frameno, video):
+        self.last_failed = None
+        self.last_scores = []
+        for filt in self.filters:
+            accepted, score = filt.accept_score(image, frameno, video)
+            self.last_scores.append((accepted, score))
+            if (not accepted) and (self.last_failed == None):
+                self.last_failed = filt
+                if not force:
+                    return False
+
+        return True
+
+    def short_description(self):
+        if self.last_failed is None:
+            return ''
+        return self.last_failed.short_description()
+
+    def restore_additional_data(self, filename):
+        for filt in self.filters:
+            filt.restore_additional_data(filename)
+
 class UniformColorFilter(Filter):
     '''Filters an image that is too uniform a color.'''
 
@@ -174,6 +213,11 @@ class UniformColorFilter(Filter):
 
         return frac_same
 
+     def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score < self.frac_pixels
+        return (accepted, score)
+
     def short_description(self):
         return 'ucolor'
 
@@ -205,7 +249,11 @@ class BlurryFilter(Filter):
         # Do a robust max
         sort_im = np.sort(laplace_im, axis=None)
         return sort_im[int(self.percentile * len(sort_im))-1]
-        
+
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score > self.thresh
+        return (accepted, score)
 
     def short_description(self):
         return 'blur'
@@ -246,6 +294,11 @@ class InterlaceFilter(Filter):
         return (float(np.count_nonzero(is_comb)) /
                 (image.shape[0] * image.shape[1]))
 
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score < self.count_thresh
+        return (accepted, score)
+
     def short_description(self):
         return 'interlace'
 
@@ -269,6 +322,11 @@ class TextFilter(Filter):
 
         return (float(np.count_nonzero(text_image)) /
                 (text_image.shape[0] * text_image.shape[1]))
+
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        accepted = score < self.frac_thresh
+        return (accepted, score)
 
     def short_description(self):
         return 'text'
@@ -316,6 +374,11 @@ class DeltaStdDevFilter(VideoFilter):
         should_accept = self.d2_std >= self.lower and self.d2_std <= self.upper
 
         return should_accept  
+
+    def accept_score(self, image, frameno, video):
+        accepted = self._accept_impl(image, frameno, video)
+        score = self.d2_std
+        return (accepted, score)
     
     def score(self):
         return self.d2_std
@@ -391,6 +454,13 @@ class CrossFadeFilter(VideoFilter):
         
         return (np.sqrt(residuals[0] / image.size),
                 np.abs(std_devs[1] - std_devs[0]))
+
+    def accept_score(self, image, frameno, video):
+        residual, delta_stddev = self.score(image, frameno, video)
+        accepted = ((delta_stddev < self.stddev_thresh) or 
+                    (residual > self.residual_thresh))
+        score = [residual, delta_stddev]
+        return (accepted, score)
 
     def short_description(self):
         return 'cross_fade'
@@ -509,7 +579,7 @@ class ClosedEyesFilter(Filter):
         else:
             return 1./np.sum(areas) * np.dot(areas, labels)
 
-    def _accept_impl(self, image, frameno, video):
+    def _accept_impl(self, image, frameno=None, video=None):
         score = self.score(image)
         if not self.nFaces:
             return True
@@ -519,6 +589,18 @@ class ClosedEyesFilter(Filter):
             return self.openEyeFaces >= self.f + (1-self.f)/self.nFaces
         elif self.accCrit == 3:
             return score >= self.f + (1-self.f)/self.nFaces
+
+    def accept_score(self, image, frameno=None, video=None):
+        score = self.score(image)
+        if not self.nFaces:
+            accepted = True
+        if self.accCrit == 1:
+            accepted = score > self.alpha
+        elif self.accCrit == 2:
+            accepted = self.openEyeFaces >= self.f + (1-self.f)/self.nFaces
+        elif self.accCrit == 3:
+            accepted = score >= self.f + (1-self.f)/self.nFaces
+        return (accepted, score)
 
     def __getstate__(self):
         # the openCV functions cannot be pickled directly, so as in
