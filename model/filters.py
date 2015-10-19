@@ -180,7 +180,7 @@ class UniformColorFilter(Filter):
 class BlurryFilter(Filter):
     '''Filters on an image that is too blurry.'''
 
-    def __init__(self, blur_threshold = 60, percentile=0.999, max_height=480):
+    def __init__(self, blur_threshold = 60, percentile=0.99, max_height=480):
         super(BlurryFilter, self).__init__(max_height)
         self.thresh = blur_threshold
         self.percentile = percentile
@@ -189,8 +189,8 @@ class BlurryFilter(Filter):
         return self.score(image) > self.thresh
 
     def score(self, image):
-        scale_factor = 256.0 / image.shape[1]
-        new_size = (256, int(round(image.shape[0] * scale_factor)))
+        scale_factor = 512.0 / image.shape[1]
+        new_size = (512, int(round(image.shape[0] * scale_factor)))
         thumb = cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
                            new_size)
 
