@@ -33,6 +33,7 @@ import urllib
 from utils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import statemon
 import video_processor.server
 
 _log = logging.getLogger(__name__)
@@ -237,6 +238,8 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.server = video_processor.server.Server()
         super(TestVideoServer, self).setUp()
+        
+        statemon.state._reset_values()
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
@@ -401,15 +404,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
             # Check request state and message
             resp = json.loads(response.body)
-            api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+            api_request = neondata.NeonApiRequest.get(resp['job_id'],
+                                                      self.api_key)
             self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
-            self.assertIsNotNone(api_request.msg)
             
-            state_vars = video_processor.server.statemon.state.get_all_variables()
+
             self.assertEqual(
-                    state_vars.get('video_processor.server.default_thumb_error').value,
-                    1)
-            video_processor.server.statemon.state._reset_values()
+                statemon.state.get('video_processor.server.default_thumb_error'),
+                1)
+            
+            statemon.state._reset_values()
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
@@ -529,42 +533,6 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
         self.assertTrue(video.serving_enabled)
         thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
         self.assertEquals(thumb.type, neondata.ThumbnailType.BRIGHTCOVE)
-        self.assertEquals(thumb.rank, 0)
-        self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
-
-    def test_ooyala_request(self):
-
-        i_id = "i125"
-        bp = neondata.OoyalaPlatform.modify(self.api_key, i_id,
-                                            lambda x: x,
-                                            create_missing=True)
-        vals = {"api_key": self.api_key, 
-                "video_url": "http://testurl/video.mp4", 
-                "video_id": "testid123", "topn":2, 
-                "callback_url": "http://callback_push_url", 
-                "video_title": "test_title",
-                "autosync" : False,
-                "topn" : 4,
-                "integration_id" : i_id,
-                "oo_api_key" : "ooyala_key",
-                "oo_secret_key" : "ooyala_secret",
-                "default_thumbnail": "http://prev_thumb"
-                }
-        url = self.get_url('/api/v1/submitvideo/ooyala')
-        resp = self.make_api_request(vals, url)
-        self.assertEqual(resp.code, 201)
-        
-        job_id = json.loads(resp.body)['job_id']
-        api_request = neondata.NeonApiRequest.get(job_id, self.api_key)
-        self.assertEqual(api_request.video_id, "testid123")
-
-        # Check that the default thumbnail is set
-        video = neondata.VideoMetadata.get('%s_testid123' % self.api_key)
-        self.assertIsNotNone(video)
-        self.assertEquals(len(video.thumbnail_ids), 1)
-        self.assertTrue(video.serving_enabled)
-        thumb = neondata.ThumbnailMetadata.get(video.thumbnail_ids[0])
-        self.assertEquals(thumb.type, neondata.ThumbnailType.OOYALA)
         self.assertEquals(thumb.rank, 0)
         self.assertEquals(thumb.urls[-1], 'http://prev_thumb')
         

@@ -113,3 +113,16 @@ class OVPIntegration(object):
         them if necessary.
         '''
         raise NotImplementedError()
+
+    @tornado.gen.coroutine
+    def set_thumbnail(self, internal_video_id, thumb_metadata):
+        '''Sets the thumbnail that is returned from the OVP's apis.
+
+        TODO: Scope this function better once it is used. For now,
+        it's a placeholder.
+
+        Inputs:
+        internal_video_id - The internal video id of the video to modify
+        thumb_metadata - The thumbnail metadata of the thumbnail to show
+        '''
+        raise NotImplementedError()

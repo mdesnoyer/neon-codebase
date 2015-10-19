@@ -1492,6 +1492,214 @@ class TestHealthCheckHandler(TestControllersBase):
         response = self.wait()
         self.assertEquals(response.code, 500) 
 
+class TestVideoStatsHandler(TestControllersBase): 
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testbciid' 
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
+        super(TestVideoStatsHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+        self.verify_account_mocker.stop()
+    
+    @tornado.testing.gen_test
+    def test_one_video_id(self): 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+                                    tids=[])
+        vm.save()
+        vid_status = neondata.VideoStatus(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
+                                          experiment_state=neondata.ExperimentState.COMPLETE)
+        vid_status.winner_tid = '%s_t2' % neondata.InternalVideoID.generate(self.account_id_api_key,'vid1')
+        vid_status.save()
+
+        url = '/api/v2/%s/stats/videos?video_id=vid1' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['count'], 1)
+        statistic_one = rjson['statistics'][0] 
+        self.assertEquals(statistic_one['experiment_state'], neondata.ExperimentState.COMPLETE) 
+ 
+    @tornado.testing.gen_test
+    def test_two_video_ids(self): 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+                                    tids=[])
+        vm.save()
+        vid_status = neondata.VideoStatus(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
+                                          experiment_state=neondata.ExperimentState.COMPLETE)
+        vid_status.winner_tid = '%s_t2' % neondata.InternalVideoID.generate(self.account_id_api_key,'vid1')
+        vid_status.save()
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'), 
+                                    tids=[])
+        vm.save()
+        vid_status = neondata.VideoStatus(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'),
+                                          experiment_value_remaining=50, 
+                                          experiment_state=neondata.ExperimentState.RUNNING)
+        vid_status.winner_tid = '%s_t2' % neondata.InternalVideoID.generate(self.account_id_api_key,'vid2')
+        vid_status.save()
+
+        url = '/api/v2/%s/stats/videos?video_id=vid1,vid2' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['count'], 2)
+        statistic_one = rjson['statistics'][0] 
+        self.assertEquals(statistic_one['experiment_state'], neondata.ExperimentState.COMPLETE)  
+        statistic_two = rjson['statistics'][1] 
+        self.assertEquals(statistic_two['experiment_state'], neondata.ExperimentState.RUNNING)  
+        self.assertEquals(statistic_two['experiment_value_remaining'], 50)  
+
+    @tornado.testing.gen_test
+    def test_one_video_id_dne(self): 
+        url = '/api/v2/%s/stats/videos?video_id=does_not_exist' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+
+    def test_no_video_id(self): 
+        url = '/api/v2/%s/stats/videos' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+ 
+class TestThumbnailStatsHandler(TestControllersBase): 
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testbciid' 
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.verify_account_mocker = patch(
+            'cmsapiv2.controllers.APIV2Handler.verify_account')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.side_effect = True
+        neondata.ThumbnailMetadata('testingtid', width=800).save()
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        super(TestThumbnailStatsHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+        self.verify_account_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_account_id_video_id(self): 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+                                    tids=['testingtid','testing_vtid_one'])
+        vm.save()
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?video_id=vid1,vid2' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+
+    @tornado.testing.gen_test
+    def test_account_id_video_id_dne(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=does_not_exist' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200) 
+        self.assertEquals(rjson['count'], 0) 
+        self.assertEquals(len(rjson['statistics']), 0) 
+
+    @tornado.testing.gen_test
+    def test_account_id_thumbnail_id(self): 
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 1)
+        status_one = rjson['statistics'][0] 
+        self.assertEquals(status_one['ctr'], 0.23)
+
+    @tornado.testing.gen_test
+    def test_account_id_multiple_thumbnail_ids(self): 
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid,testing_vtid_one' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+        
+        # test url encoded 
+        encoded_params = urllib.urlencode({ 'thumbnail_id' : 'testingtid,testing_vtid_one' })
+        self.assertEquals('thumbnail_id=testingtid%2Ctesting_vtid_one', encoded_params) 
+        url = '/api/v2/%s/stats/thumbnails?%s' % (self.account_id_api_key, encoded_params) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+
+    def test_video_id_limit(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+
+    def test_video_id_and_thumbnail_id(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=1&thumbnail_id=abc' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+
+    def test_no_video_id_or_thumbnail_id(self): 
+        url = '/api/v2/%s/stats/thumbnails' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+
 class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()

@@ -743,7 +743,11 @@ neon_service_client_api(ngx_http_request_t *request,
                       image_url);
 
     if (image_url.size() == 0) { 
-        neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
+        if (neon_stats[NEON_CLIENT_API_URL_NOT_FOUND]++ % 5 == 0) { 
+            ngx_log_error(NGX_LOG_ERR, request->connection->log, 0,
+                "video id %s for account %s not found", 
+                 video_id, account_id);
+        } 
         neon_service_set_no_content_headers(request);
         return NEON_CLIENT_API_FAIL;
     }

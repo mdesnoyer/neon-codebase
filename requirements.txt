@@ -45,3 +45,4 @@ psycopg2==2.6.1
 queries==1.7.5
 PyJWT==1.4.0
 momoko==2.2.0
+xlwt==1.0.0

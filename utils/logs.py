@@ -22,6 +22,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import atexit
 import copy
 import datetime
 import json
@@ -31,9 +32,12 @@ import platform
 import SocketServer
 import sys
 import threading
+import tornado.gen
 import tornado.httpclient
 import urllib
 import urllib2
+from utils import statemon
+import utils.sync
 
 from utils.options import define, options
 ### Options to define the root logger when AddConfiguredLogger is called ###
@@ -42,7 +46,8 @@ define('file', default=None, type=str,
 define('level', default='info', type=str,
        help=('Default logging level. '
        '"debug", "info", "warn", "error" or "critical"'))
-define('format', default='%(asctime)s %(levelname)s:%(name)s %(message)s',
+define('format', default=('%(asctime)s %(levelname)s:%(name)s[%(threadName)s]'
+                          ' %(message)s'),
        help='Default log format')
 define('do_stderr', default=1, type=int,
        help=('1 if we will generate a stderr output, 0 otherwise. '
@@ -65,6 +70,10 @@ define('access_log_file', default=None, type=str,
 define('loggly_base_url',
        default='https://logs-01.loggly.com/inputs/520b9697-b7f3-4970-a059-710c28a8188a',
        help='Base url for the loggly endpoint')
+
+# State variables
+statemon.define('http_log_errors', int)
+_http_log_error_ref = statemon.state.get_ref('http_log_errors')
 
 # grabbed from logging.py
 #
@@ -219,6 +228,14 @@ class TornadoHTTPHandler(logging.Handler):
         import utils.http
         self.request_pool = utils.http.RequestPool(5)
 
+        self.logging_thread = utils.sync.IOLoopThread(
+            name='logs{%s}' % self.__class__)
+        self.logging_thread.daemon = True
+        self.logging_thread.start()
+
+    def __del__(self):
+        self.logging_thread.stop()
+
     def get_verbose_dict(self, record):
         '''Returns a verbose dictionary of the record.'''
         retval = copy.copy(record.__dict__)
@@ -238,24 +255,34 @@ class TornadoHTTPHandler(logging.Handler):
                      'Content-length' : len(data) },
             body=data)
 
-    def emit(self, record):
-        # Define the callback function so that we don't block here
-        def handle_response(response):
-            if response.error:
-                try:
-                    raise response.error
-                except:
-                    curtime = datetime.datetime.utcnow()
-                    if (self.last_emit_error is None or 
-                        (curtime - self.last_emit_error).total_seconds() >
-                        self.emit_error_sampling_period):
-                        self.last_emit_error = curtime
-                        self.handleError(record)
+    @tornado.gen.coroutine
+    def _emit_in_thread(self, record):
+        '''Emits a log event in the logging_thread.'''
+        response = yield self.request_pool.send_request(
+            self.generate_request(record),
+            do_logging=False,
+            ntries=1,
+            async=True)
+        if response.error:
+            try:
+                raise response.error
+            except:
+                curtime = datetime.datetime.utcnow()
+                statemon.state.increment(ref=_http_log_error_ref,
+                                         safe=False)
+                if (self.last_emit_error is None or 
+                    (curtime - self.last_emit_error).total_seconds() >
+                    self.emit_error_sampling_period):
+                    self.last_emit_error = curtime
+                    self.handleError(record)
+        else:
+            raise tornado.gen.Return(response)
 
+    def emit(self, record):
         try:
-            self.request_pool.send_request(self.generate_request(record),
-                                           callback=handle_response,
-                                           do_logging=False)
+            # Send it off to the logging thread so that we don't block here
+            self.logging_thread.io_loop.add_callback(self._emit_in_thread,
+                                                     record)
         except:
             curtime = datetime.datetime.utcnow()
             if (self.last_emit_error is None or 

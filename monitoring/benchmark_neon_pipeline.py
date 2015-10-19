@@ -46,6 +46,7 @@ statemon.define('job_failed', int)
 statemon.define('request_not_in_db', int)
 statemon.define('not_available_in_isp', int)
 statemon.define('unexpected_exception_thrown', int)
+statemon.define('jobs_created', int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -93,8 +94,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
     data =     { 
         "video_id": video_id,
         "video_url": video_url, 
-        "video_title": video_title,
-        "callback_url": None
+        "video_title": video_title
     }
     req = urllib2.Request(request_url, headers=headers)
     try:
@@ -106,14 +106,23 @@ def create_neon_api_request(account_id, api_key, video_id=None):
     api_resp = json.loads(res.read())
     return (video_id, api_resp["job_id"])
 
-def image_available_in_isp(pub, vid):
-    url = "http://%s/v1/client/%s/neonvid_%s" % (options.isp_host, pub, vid)
- 
+def image_available_in_isp(api_key, video_id):
     try:
+        video = neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(api_key, video_id))
+        url = video.serving_url
+        if url is None:
+            _log.error('No serving url specified for video %s' % video_id)
+            return False
+        
         cookieprocessor = urllib2.HTTPCookieProcessor()
         opener = urllib2.build_opener(MyHTTPRedirectHandler, cookieprocessor)
         req = urllib2.Request(url)
         res = opener.open(req)
+        if res.getcode() != 200:
+            _log.warn('Image not available in ISP yet. Code %s' %
+                      res.getcode())
+            return False
 
         # check for the headers and the final image
         headers = MyHTTPRedirectHandler.get_last_redirect_headers()
@@ -137,6 +146,7 @@ def monitor_neon_pipeline(video_id=None):
     start_request = time.time()
 
     # Create a video request for test account
+    statemon.state.increment('jobs_created')
     video_id, job_id = create_neon_api_request(options.account,
                                                options.api_key,
                                                video_id=video_id)
@@ -188,9 +198,8 @@ def monitor_neon_pipeline(video_id=None):
         # Query ISP to get the IMG
         isp_start = time.time()
         isp_ready = False
-        acct = neondata.NeonUserAccount.get(options.api_key)
         while not isp_ready:
-            if image_available_in_isp(acct.tracker_account_id, video_id):
+            if image_available_in_isp(options.api_key, video_id):
                 isp_ready = True
                 break
 
