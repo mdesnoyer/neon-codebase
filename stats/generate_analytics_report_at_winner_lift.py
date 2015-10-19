@@ -391,7 +391,8 @@ def calculate_cmsdb_stats():
     api_key, typ = neondata.TrackerAccountIDMapper.get_neon_account_id(
         options.pub_id)
 
-    videos = neondata.VideoMetadata.get_videos_in_account(api_key)
+    videos = list(neondata.NeonUserAccount(
+        None, api_key=api_key).iterate_all_videos())
 
     # Get the published time if we don't know it
     requests = neondata.VideoMetadata.get_video_requests(
