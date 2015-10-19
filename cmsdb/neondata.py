@@ -1417,7 +1417,6 @@ class StoredObject(object):
         keys, ops = filtered
 
         if get_object:
-            _log.error(str(keys))
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
