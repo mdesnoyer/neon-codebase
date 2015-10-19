@@ -117,10 +117,9 @@ def image_available_in_isp(api_key, video_id):
 
         req = tornado.httpclient.HTTPRequest(url, follow_redirects = True)
         http_client = tornado.httpclient.AsyncHTTPClient()
-        res = yield http_client.fetch(req)
+        res = http_client.fetch(req)
 
         if res.code != 200:
-
             if res.code == 302:
                 red = MyHTTPRedirectHandler(res)
                 red.http_error_302(res.headers)
