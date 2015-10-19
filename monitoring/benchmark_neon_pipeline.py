@@ -15,6 +15,7 @@ import json
 import redis
 import signal
 import time
+import tornado
 import urllib2
 import utils.http
 import utils.neon
@@ -106,6 +107,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
     api_resp = json.loads(res.read())
     return (video_id, api_resp["job_id"])
 
+@tornado.gen.coroutine
 def image_available_in_isp(api_key, video_id):
     try:
         video = neondata.VideoMetadata.get(
@@ -114,12 +116,12 @@ def image_available_in_isp(api_key, video_id):
         if url is None:
             _log.error('No serving url specified for video %s' % video_id)
             return False
-        
-        cookieprocessor = urllib2.HTTPCookieProcessor()
-        opener = urllib2.build_opener(MyHTTPRedirectHandler, cookieprocessor)
-        req = urllib2.Request(url)
-        res = opener.open(req)
-        if res.getcode() != 200:
+
+        req = tornado.httpclient.HTTPRequest(url, follow_redirects = True)
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        res = yield http_client.fetch(req)
+
+        if res.code != 200:
             _log.warn('Image not available in ISP yet. Code %s' %
                       res.getcode())
             return False
