@@ -1369,7 +1369,7 @@ class StoredObject(object):
         def _del_and_remfromset(pipe):
             for set_key, ks in key_sets.iteritems():
                 pipe.srem(set_key, *ks)
-            pipe.delete(*ks)
+                pipe.delete(*ks)
             return True
             
         if callback:
