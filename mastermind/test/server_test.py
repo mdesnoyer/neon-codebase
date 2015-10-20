@@ -161,7 +161,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
           neondata.ExperimentStrategy(api_key)
 
         # Process the data
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Check the resulting directives
         directives = dict((x[0], dict(x[1]))
@@ -227,7 +227,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.ThumbnailServingURLs.get_many.return_value = serving_urls
 
         # Process the data
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Make sure that the serving urls were sent to the directive pusher
         self.assertEqual(dict([(x.get_id(),
@@ -243,7 +243,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             ]
         
         # Process the data
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Make sure we have the tracker account id mapping
         self.assertEqual(self.directive_publisher.tracker_id_map,
@@ -260,7 +260,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             a1, a2]
 
         # Process the data
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Check the data
         self.assertEqual(self.directive_publisher.default_thumbs['acct1'],
@@ -269,7 +269,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Check if we remove the default thumb, it is removed from the map
         a1.default_thumbnail_id = None
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
         self.assertNotIn('acct1', self.directive_publisher.default_thumbs)
 
     def test_default_size_update(self, datamock):
@@ -279,7 +279,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             neondata.NeonUserAccount('a3', 'acct3', default_size=(640, 480))]
 
         # Process the data
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Check the data
         self.assertEqual(self.directive_publisher.default_sizes['acct1'],
@@ -294,7 +294,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
           [redis.ConnectionError]
 
         with self.assertRaises(redis.ConnectionError):
-            self.watcher._process_db_data()
+            self.watcher._process_db_data(True)
 
     def test_video_metadata_missing(self, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -316,7 +316,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             with self.assertLogExists(logging.ERROR,
                                       'Could not find information about '
                                       'video apikey_10'):
-                self.watcher._process_db_data()
+                self.watcher._process_db_data(True)
         
         self.assertTrue(self.watcher.is_loaded.is_set())
 
@@ -360,7 +360,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                 lambda tids: [tid_meta[tid] for tid in tids]
         with self.assertLogExists(logging.ERROR,
                                   'Could not find metadata for thumb .+t03'):
-            self.watcher._process_db_data()
+            self.watcher._process_db_data(True)
 
         # Make sure that there is a directive about the other
         # video in the account.
@@ -413,7 +413,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.ThumbnailMetadata.get_many.side_effect = \
                 lambda tids: [tid_meta[tid] for tid in tids]
 
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(False)
 
         # Make sure that there is a directive for both videos
         directives = dict((x[0], dict(x[1]))
@@ -426,7 +426,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Now disable one of the videos
         vid_meta[api_key+'_0'].serving_enabled = False
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
 
         # Make sure that only one directive is left
         directives = dict((x[0], dict(x[1]))
@@ -438,7 +438,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Finally, disable the account and make sure that there are no
         # directives
         bcPlatform.serving_enabled = False
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(True)
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
 
@@ -561,7 +561,7 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
         neondata.ExperimentStrategy('key1').save()
 
         # Run a process cycle and then turn on the subscriptions
-        self.watcher._process_db_data()
+        self.watcher._process_db_data(False)
         self.watcher.subscribe_to_db_changes()
 
     def tearDown(self):

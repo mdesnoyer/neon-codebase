@@ -610,6 +610,35 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.integration.platform.videos['v1'], job_id)
 
     @tornado.testing.gen_test
+    def test_submit_old_video(self):
+        self.platform.oldest_video_allowed = '2015-01-01'
+
+        with self.assertLogExists(logging.INFO, 'Skipped video.*old'):
+            job_id = yield self.integration.submit_one_video_object(
+                { 'id' : 'v1',
+                'referenceId': None,
+                'name' : 'Some video',
+                'length' : 100,
+                'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+                },
+                'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                'thumbnail' : {
+                  'id' : 123456,
+                  'referenceId' : None,
+                  'remoteUrl' : None
+                },
+                'FLVURL' : 'http://video.mp4',
+                'publishedDate' : "1413657557000"
+                },
+                skip_old_video=True)
+
+        self.assertIsNone(job_id)
+
+    @tornado.testing.gen_test
     def test_submit_typical_bc_video(self):
         job_id = yield self.integration.submit_one_video_object(
             { 'id' : 123456789,

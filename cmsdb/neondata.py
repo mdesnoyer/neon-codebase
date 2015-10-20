@@ -98,6 +98,7 @@ statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
 statemon.define('sucessful_callbacks', int)
 statemon.define('callback_error', int)
+statemon.define('invalid_callback_url', int)
 
 #constants 
 BCOVE_STILL_WIDTH = 480
@@ -1366,9 +1367,9 @@ class StoredObject(object):
             key_sets[obj._set_keyname()].append(key)
 
         def _del_and_remfromset(pipe):
-            for set_key, keys in key_sets.iteritems():
-                pipe.srem(set_key, *keys)
-            pipe.delete(*keys)
+            for set_key, ks in key_sets.iteritems():
+                pipe.srem(set_key, *ks)
+                pipe.delete(*ks)
             return True
             
         if callback:
@@ -1416,7 +1417,6 @@ class StoredObject(object):
         keys, ops = filtered
 
         if get_object:
-            _log.error(str(keys))
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
@@ -2536,7 +2536,7 @@ class AbstractIntegration(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower()
+        return AbstractIntegration.__name__
 
 
 # DEPRECATED use AbstractIntegration instead
@@ -2575,7 +2575,7 @@ class AbstractPlatform(NamespacedStoredObject):
         else:
             typ, api_key, i_id = key
         if typ is None:
-            typ = cls._baseclass_name()
+            typ = cls._baseclass_name().lower()
         api_splits = api_key.split('_')
         if len(api_splits) > 1:
             api_key, i_id = api_splits[1:]
@@ -2588,7 +2588,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__.lower()
+        return cls.__name__
 
     @classmethod
     def _set_keyname(cls):
@@ -2658,7 +2658,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def modify_many(cls, keys, func, create_missing=True, callback=None):
         def _set_parameters(objs):
-            for x in objs.iteritems():
+            for x in objs.itervalues():
                 typ, api_key, i_id = x.get_id()
                 x.neon_api_key = api_key
                 x.integration_id = i_id
@@ -2721,7 +2721,7 @@ class AbstractPlatform(NamespacedStoredObject):
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
 
-        raise tornado.gen.Return([[cls._baseclass_name()] + x.split('_') 
+        raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_') 
                                   for x in keys])
 
     @classmethod
@@ -2762,7 +2762,7 @@ class AbstractPlatform(NamespacedStoredObject):
 
     @classmethod
     def format_subscribe_pattern(cls, pattern):
-        return '%s_%s' % (cls._baseclass_name(), pattern)
+        return '%s_%s' % (cls._baseclass_name().lower(), pattern)
     
 
     @classmethod
@@ -2869,7 +2869,8 @@ class BrightcoveIntegration(AbstractIntegration):
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
-                serving_enabled=True):
+                serving_enabled=True,
+                oldest_video_allowed=None):
 
         ''' On every request, the job id is saved '''
 
@@ -2899,6 +2900,10 @@ class BrightcoveIntegration(AbstractIntegration):
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
         # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
         self.id_field = id_field
+
+        # A ISO date string of the oldest video publication date to
+        # ingest even if is updated in Brightcove.
+        self.oldest_video_allowed = oldest_video_allowed
 
     @classmethod
     def get_ovp(cls):
@@ -3098,7 +3103,8 @@ class BrightcovePlatform(AbstractPlatform):
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
-                serving_enabled=True):
+                serving_enabled=True,
+                oldest_video_allowed=None):
 
         ''' On every request, the job id is saved '''
 
@@ -3129,6 +3135,10 @@ class BrightcovePlatform(AbstractPlatform):
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
         # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
         self.id_field = id_field
+
+        # A ISO date string of the oldest video publication date to
+        # ingest even if is updated in Brightcove.
+        self.oldest_video_allowed = oldest_video_allowed
 
     @classmethod
     def get_ovp(cls):
@@ -3791,29 +3801,38 @@ The video metadata for this request must be in the database already.
         '''
         new_callback_state = CallbackState.NOT_SENT
         if self.callback_url:
-            # Send the callback
-            cb_body = self.response
-            if isinstance(cb_body, dict):
-                cb_body = json.dumps(cb_body)
-            send_kwargs = send_kwargs or {}
-            send_kwargs['async'] = True
-            cb_request = tornado.httpclient.HTTPRequest(
-                url=self.callback_url,
-                method='POST',
-                headers={'content-type' : 'applicaiton/json'},
-                body=cb_body,
-                request_timeout=20.0,
-                connect_timeout=10.0)
-            cb_response = yield utils.http.send_request(cb_request,
-                                                        **send_kwargs)
-            if cb_response.error:
-                statemon.state.increment('callback_error')
-                _log.warn('Error when sending callback to %s: %s' %
-                          (self.callback_url, cb_response.error))
+            # Check the callback url format
+            parsed = urlparse.urlsplit(self.callback_url)
+            if parsed.scheme not in ('http', 'https'):
+                _log.error_n('Invalid callback url job %s acct %s: %s'
+                             % (self.job_id, self.api_key, self.callback_url))
+                statemon.state.increment('invalid_callback_url')
                 new_callback_state = CallbackState.ERROR
             else:
-                statemon.state.increment('sucessful_callbacks')
-                new_callback_state = CallbackState.SUCESS
+            
+                # Send the callback
+                cb_body = self.response
+                if isinstance(cb_body, dict):
+                    cb_body = json.dumps(cb_body)
+                send_kwargs = send_kwargs or {}
+                send_kwargs['async'] = True
+                cb_request = tornado.httpclient.HTTPRequest(
+                    url=self.callback_url,
+                    method='POST',
+                    headers={'content-type' : 'application/json'},
+                    body=cb_body,
+                    request_timeout=20.0,
+                    connect_timeout=10.0)
+                cb_response = yield utils.http.send_request(cb_request,
+                                                            **send_kwargs)
+                if cb_response.error:
+                    statemon.state.increment('callback_error')
+                    _log.warn('Error when sending callback to %s: %s' %
+                              (self.callback_url, cb_response.error))
+                    new_callback_state = CallbackState.ERROR
+                else:
+                    statemon.state.increment('sucessful_callbacks')
+                    new_callback_state = CallbackState.SUCESS
 
             # Modify the database state
             def _mod_obj(x):
@@ -4102,7 +4121,7 @@ class ThumbnailURLMapper(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return ThumbnailURLMapper.__name__.lower()
+        return ThumbnailURLMapper.__name__
 
     @classmethod
     def get_id(cls, key, callback=None):

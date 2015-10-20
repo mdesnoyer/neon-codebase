@@ -254,9 +254,10 @@ class VideoDBWatcher(threading.Thread):
                 with self.activity_watcher.activate():
                     if not is_initialized:
                         self._initialize_serving_directives()
-                        is_initialized = True
-                        statemon.state.initialized_directives = 1
-                    self._process_db_data()
+                    self._process_db_data(is_initialized)
+                    
+                    is_initialized = True
+                    statemon.state.initialized_directives = 1
 
                     if not self._video_updater.is_alive():
                         self._video_updater.start()
@@ -291,6 +292,13 @@ class VideoDBWatcher(threading.Thread):
         for platform in neondata.AbstractPlatform.iterate_all():
             if not platform.serving_enabled:
                 continue
+
+            # Add the platform to the options list
+            with self._platform_options_lock:
+                self._platform_options[(platform.neon_api_key,
+                                        str(platform.integration_id))] = \
+                  (platform.abtest, platform.serving_enabled)
+            
             for video_id in platform.get_internal_video_ids():
                 video_metadata = neondata.VideoMetadata.get(video_id)
                 account_id = video_metadata.get_account_id()
@@ -312,7 +320,7 @@ class VideoDBWatcher(threading.Thread):
                     video_status,
                     thumbnail_status_list)
 
-    def _process_db_data(self):
+    def _process_db_data(self, is_initialized):
         _log.info('Polling the video database for a full batch update')
 
         # Get an update for the tracker id map
@@ -346,7 +354,8 @@ class VideoDBWatcher(threading.Thread):
                 neondata.ExperimentStrategy.get(platform.neon_api_key))
             
             self._handle_platform_change(platform.get_id(), platform, 'set',
-                                         update_videos=False)
+                                         update_videos=False,
+                force_subscribe=(not is_initialized))
 
             # Force the videos to update
             for internal_video_id in platform.get_internal_video_ids():
@@ -444,7 +453,7 @@ class VideoDBWatcher(threading.Thread):
             statemon.state.increment('video_push_updates_received')
 
     def _handle_platform_change(self, key, platform, operation,
-                                update_videos=True):
+                                update_videos=True, force_subscribe=False):
         '''Handler for when a platform object changes in the database'''
         # TODO: Handle deletion
         if operation != 'set' or platform is None:
@@ -457,7 +466,7 @@ class VideoDBWatcher(threading.Thread):
             old_options = self._platform_options.get(plat_tup, None)
             if new_options != old_options:
                 self._platform_options[plat_tup] = new_options
-            else:
+            elif not force_subscribe:
                 return
 
         if platform.serving_enabled:
@@ -503,8 +512,8 @@ class VideoDBWatcher(threading.Thread):
                  str(video_metadata.integration_id))]
         except KeyError:
             statemon.state.increment('no_platform')
-            _log.error('Could not find platform information for video %s' %
-                       video_id)
+            _log.error_n('Could not find platform information for video %s' %
+                         video_id)
             return
 
         if serving_enabled and video_metadata.serving_enabled:
@@ -1445,9 +1454,11 @@ class DirectivePublisher(threading.Thread):
                 if new_state == neondata.RequestState.SERVING:
                     # Send any callbacks that need to be sent
                     for cur_key, request in requests.iteritems():
-                        if (request.callback_state == 
+                        if (request is not None and
+                            request.callback_state == 
                             neondata.CallbackState.NOT_SENT and 
-                            request.callback_url):
+                            request.callback_url and
+                            options.send_callbacks):
                             self._incr_pending_modify(1)
                             statemon.state.increment('pending_callbacks')
                             t = threading.Thread(target=self._send_callback,
