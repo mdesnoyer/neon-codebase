@@ -30,6 +30,7 @@ import logging
 from mastermind.core import VideoInfo, ThumbnailInfo, Mastermind
 import multiprocessing
 import os
+import random
 import signal
 import socket
 import stats.cluster
@@ -75,8 +76,10 @@ define('publishing_period', type=int, default=300,
        help='Time in seconds between when the directive file is published.')
 define('expiry_buffer', type=int, default=30,
        help='Buffer in seconds for the expiry of the directives file')
-define('serving_update_delay', type=int, default=240,
+define('serving_update_delay', type=int, default=30,
        help='delay in seconds to update new videos to serving state')
+define('isp_wait_timeout', type=float, default=1800.0,
+       help='Timeout when waiting for the ISP to serve a new video')
 
 # Callback options
 define('send_callbacks', default=1, help='If 1, callbacks are sent')
@@ -110,6 +113,7 @@ statemon.define('directive_file_size', int) # file size in bytes
 statemon.define('pending_callbacks', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
+statemon.define('timeout_waiting_for_isp', int)
 
 statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
@@ -1073,6 +1077,8 @@ class DirectivePublisher(threading.Thread):
         self._lock = multiprocessing.RLock()
         self.modify_waiter = multiprocessing.Condition()
 
+        self._enable_video_lock = threading.BoundedSemaphore(20)
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
@@ -1244,20 +1250,17 @@ class DirectivePublisher(threading.Thread):
                 self.last_published_videos = written_video_ids
                 if len(new_serving_videos) > 0:
                     self._incr_pending_modify(len(new_serving_videos))
-                    t = threading.Timer(
-                        options.serving_update_delay,
-                        self._update_video_serving_state,
-                        (new_serving_videos,
-                         neondata.RequestState.SERVING))
-                    t.daemon = True
-                    t.start()
+                    for new_serving_video in new_serving_videos
+                        t = threading.Thread(
+                            target=self._enabled_video_in_database,
+                            args=(new_serving_video,))
+                        t.daemon = True
+                        t.start()
                 if len(just_stopped_videos) > 0:
                     self._incr_pending_modify(len(just_stopped_videos))
-                    t = threading.Timer(
-                        options.serving_update_delay,
-                        self._update_video_serving_state,
-                        (just_stopped_videos,
-                         neondata.RequestState.FINISHED))
+                    t = threading.Thread(
+                        target=self._disable_videos_in_database,
+                        args=(just_stopped_videos,))
                     t.daemon = True
                     t.start()
 
@@ -1420,24 +1423,22 @@ class DirectivePublisher(threading.Thread):
                 'img_sizes' : [ { 'h': h, 'w': w} for w, h in urls.sizes]
                 }
 
-    def _update_video_serving_state(self, video_ids, new_state):
-        '''Updates a list of video ids with a new serving state.'''
+    def _disable_videos_in_database(self, video_ids):
+        '''Disables a number of videos in the database to say that
+        they are not serving anymore.
+        '''
         MAX_VIDS_PER_CALL = 100
         video_ids = list(video_ids)
         for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
             cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
             try:
-                def _set_serving_url(videos_dict):
+                def _remove_serving_url(videos_dict):
                     for vidobj in videos_dict.itervalues():
                         if vidobj is not None:
-                            if new_state == neondata.RequestState.SERVING:
-                                vidobj.serving_url = vidobj.get_serving_url(
-                                    save=False)
-                            else:
-                                vidobj.serving_url = None
-                videos = neondata.VideoMetadata.modify_many(cur_vid_ids,
-                                                            _set_serving_url)
-                
+                            vidobj.serving_url = None
+                videos = neondata.VideoMetadata.modify_many(
+                    cur_vid_ids, _remove_serving_url)
+
                 request_keys = [(video.job_id, video.get_account_id()) for
                                 video in videos.itervalues()
                                 if video is not None]
@@ -1448,36 +1449,84 @@ class DirectivePublisher(threading.Thread):
                                     neondata.RequestState.CUSTOMER_ERROR,
                                     neondata.RequestState.FAILED,
                                     neondata.RequestState.INT_ERROR]:
-                                obj.state = new_state
+                                obj.state = neondata.RequestState.FINISHED
                 requests = neondata.NeonApiRequest.modify_many(request_keys,
                                                                _set_state)
-                if new_state == neondata.RequestState.SERVING:
-                    # Send any callbacks that need to be sent
-                    for cur_key, request in requests.iteritems():
-                        if (request is not None and
-                            request.callback_state == 
-                            neondata.CallbackState.NOT_SENT and 
-                            request.callback_url and
-                            options.send_callbacks):
-                            self._incr_pending_modify(1)
-                            statemon.state.increment('pending_callbacks')
-                            t = threading.Thread(target=self._send_callback,
-                                                 args=(request,))
-                            t.daemon = True
-                            t.start()
-                
+
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
-                _log.exception('Unexpected error when updating serving state '
+                _log.exception('Unexpected error when disabling videos '
                                'in database %s' % e)
                 # We didn't update the database so don't say that the
                 # videos were published. This will trigger a retry next
                 # time the directives are pushed.
                 with self.lock:
                     self.last_published_videos = \
-                      self.last_published_videos - set(cur_vid_ids)
+                      self.last_published_videos + set(cur_vid_ids)
             finally:
                 self._incr_pending_modify(-len(cur_vid_ids))
+
+    def _enable_video_in_database(self, video_id):
+        '''Flags a video as being updated in the database and sends a
+        callback if necessary.
+        '''
+        try:
+            with self._enable_video_lock:
+                # First see if the video is already serving in the
+                # database. If is, we're done.
+                video = neondata.VideoMetadata.get(video_id)
+                if video is None:
+                    return
+                request = neondata.NeonApiRequest.get(video.job_id,
+                                                      video.get_account_id())
+                if (request is None or 
+                    request.state == neondata.RequestState.SERVING):
+                    return
+
+            # Now we wait until the video is serving on the isp
+            start_time = time.time()
+            while not self._image_available_in_isp(video):
+                if (time.time() - start_time) > options.isp_wait_timeout:
+                    statemon.state.increment('timeout_waiting_for_isp')
+                    _log.error('Timed out waiting for ISP for video %s' %
+                               video.key)
+                    return
+                time.sleep(5.0 * random.random())
+
+            # Wait a bit so that it gets to all the ISPs
+            time.sleep(options.serving_update_delay)
+
+            # Now do the database updates
+            with self._enable_video_lock:
+                def _set_serving_url(x):
+                    x.serving_url = x.get_serving_url(save=False)
+                neondata.VideoMetadata.modify(video_id, _set_serving_url)
+                def _set_serving(x):
+                    x.state = neondata.RequestState.SERVING
+                request = neondata.NeonApiRequest.modify(
+                    video.job_id,
+                    video.get_account_id(),
+                    _set_serving)
+
+            # And send the callback
+            if (request is not None and 
+                request.callback_state == 
+                neondata.CallbackState.NOT_SENT and 
+                request.callback_url and
+                options.send_callbacks):
+
+                statemon.state.increment('pending_callbacks')
+                self._send_callback(request)
+            
+        except Exception as e:
+            statemon.state.increment('unexpected_db_update_error')
+            _log.exception('Unexpected error when enabling video '
+                           'in database %s' % e)
+            with self.lock:
+                self.last_published_videos.discard(video_id)
+                  
+        finally:
+            self._incr_pending_modify(-1)
 
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
@@ -1491,7 +1540,6 @@ class DirectivePublisher(threading.Thread):
             statemon.state.increment('unexpected_callback_error')
         finally:
             statemon.state.decrement('pending_callbacks')
-            self._incr_pending_modify(-1)
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
     with activity_watcher.activate():
