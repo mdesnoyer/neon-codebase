@@ -16,6 +16,7 @@ from monitoring import benchmark_neon_pipeline
 from StringIO import StringIO
 import test_utils.neontest
 import test_utils.redis
+import tornado
 import unittest
 import urllib2
 import utils.neon
