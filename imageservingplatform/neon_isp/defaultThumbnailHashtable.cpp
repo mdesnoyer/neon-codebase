@@ -1,8 +1,6 @@
 #include <iostream>
 #include "defaultThumbnailHashtable.h"
 #include "neon_stats.h"
-#include "neonHash.h"
-
 
 /*
  *   Directive Table
@@ -13,12 +11,10 @@ DefaultThumbnailHashtable::DefaultThumbnailHashtable(){
     initialized = false;
 }
 
-
 DefaultThumbnailHashtable::~DefaultThumbnailHashtable(){
     table = 0;
     initialized = false;
 }
-
 
 void
 DefaultThumbnailHashtable::Init(unsigned numOfBuckets){
@@ -31,7 +27,6 @@ DefaultThumbnailHashtable::Init(unsigned numOfBuckets){
     table = new DefaultThumbnailTable(numOfBuckets);
     initialized = true;
 }
-
 
 void
 DefaultThumbnailHashtable::Shutdown(){
@@ -66,12 +61,10 @@ DefaultThumbnailHashtable::Shutdown(){
     initialized = false;
 }
 
-
 unsigned
 DefaultThumbnailHashtable::GetSize(){
     return table->size();
 }
-
 
 void
 DefaultThumbnailHashtable::Add(rapidjson::Document & defaultThumb){
@@ -90,7 +83,6 @@ DefaultThumbnailHashtable::Add(rapidjson::Document & defaultThumb){
     (*table)[d->GetAccountId()] = d;
 }
 
-
 const DefaultThumbnail *
 DefaultThumbnailHashtable::Find(std::string & accountId) const {
 
@@ -98,12 +90,3 @@ DefaultThumbnailHashtable::Find(std::string & accountId) const {
     def = (*table)[accountId];
     return def;
 }
-
-
-size_t
-DefaultThumbnailHashtable::hash_directive::operator()(const std::string & key)  const {
-    uint32_t result = 0;
-    result = NeonHash::Hash(key.c_str(), 1);
-    return result;
-}
-

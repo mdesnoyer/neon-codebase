@@ -20,7 +20,6 @@ add_library(NeonISP STATIC
  neon_utils.c
  neon_utc.c
  neon_log.c
- neonHash.cpp
  mastermind.cpp
  publisherHashtable.cpp
  neon_log.c 
