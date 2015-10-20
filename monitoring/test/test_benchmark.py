@@ -18,7 +18,6 @@ import test_utils.neontest
 import test_utils.redis
 import tornado
 import unittest
-import urllib2
 import utils.neon
 from utils.options import define, options
 from utils import statemon
@@ -30,14 +29,18 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(BenchmarkTest, self).setUp()
 
-        self.http_patcher = patch('monitoring.benchmark_neon_pipeline.urllib2')
-        self.http_mock = self.http_patcher.start()
-        self.http_mock.URLError = urllib2.URLError
+        self.http_patcher = patch('tornado.httpclient.AsyncHTTPClient.fetch')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start())
+        #self.http_mock.HTTPError = tornado.httpclient.HTTPError
+        self.headers = {"X-Neon-API-Key" : 'apikey', "Content-Type" : "application/json"}
+        self.mock_request = tornado.httpclient.HTTPRequest('http://nope.com',
+                                                            headers=self.headers)
 
-        self.neon_request_mock = self.http_mock.urlopen
+        self.neon_request_mock = self.http_mock
         self.neon_request_mock.reset_mock()
         self.neon_request_mock.side_effect = [
-            StringIO(json.dumps({'job_id' : 'myjobid'}))]
+            tornado.httpclient.HTTPResponse(self.mock_request, 200,
+                                            buffer='{"job_id": "myjobid", "Location": "location"}')]
 
         self.isp_patcher = patch(
             'monitoring.benchmark_neon_pipeline.MyHTTPRedirectHandler')
@@ -67,6 +70,9 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
 
         self.request = neondata.NeonApiRequest('myjobid', self.api_key, 'vid1')
         self.request.save()
+
+        self.vim = neondata.VideoMetadata('apikey_vid1')
+        self.vim.save()
         
     def tearDown(self):
         self.http_patcher.stop()
@@ -154,8 +160,8 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             'monitoring.benchmark_neon_pipeline.job_failed'), 1)
 
     def test_error_submitting_job(self):
-        self.http_mock.urlopen.side_effect = [
-            urllib2.URLError('Cannot submit')]
+        self.http_mock.side_effect = [
+            tornado.httpclient.HTTPError(400, 'Cannot submit')]
 
         with self.assertLogExists(logging.ERROR, 'Error submitting job'):
             with self.assertRaises(benchmark_neon_pipeline.SubmissionError):
@@ -216,7 +222,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.request.state = neondata.RequestState.SERVING
         self.request.save()
         self.isp_mock.get_last_redirect_headers.side_effect = [
-            urllib2.URLError('Cannot find ISP'),
+            tornado.httpclient.HTTPError(404, 'Cannot find ISP'),
             {'Location': 'http://somewhere.com'}
         ]
 

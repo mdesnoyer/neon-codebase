@@ -16,11 +16,11 @@ import redis
 import signal
 import time
 import tornado
-import urllib2
 import utils.http
 import utils.neon
 import utils.ps
 from utils import statemon
+import utils.sync
 
 from utils.options import define, options
 define("cmsapi_host", default="services.neon-lab.com", help="cmsapi server", type=str)
@@ -66,7 +66,9 @@ class MyHTTPRedirectHandler(tornado.httpclient.HTTPResponse):
     '''
     
     redirect_headers = None
-    
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def http_error_302(self, headers):
         MyHTTPRedirectHandler.redirect_headers = headers
         return tornado.httpclient.HTTPError(302)
@@ -77,6 +79,8 @@ class MyHTTPRedirectHandler(tornado.httpclient.HTTPResponse):
     def get_last_redirect_headers(cls):
         return cls.redirect_headers
 
+@utils.sync.optional_sync
+@tornado.gen.coroutine
 def create_neon_api_request(account_id, api_key, video_id=None):
     '''
     create random video processing request to Neon
@@ -95,38 +99,48 @@ def create_neon_api_request(account_id, api_key, video_id=None):
         "video_url": video_url, 
         "video_title": video_title
     }
-    req = urllib2.Request(request_url, headers=headers)
+    req = tornado.httpclient.HTTPRequest(request_url, method='HEAD', 
+                                         headers=headers,
+                                         body=json.dumps(data))
     try:
-        res = urllib2.urlopen(req, json.dumps(data))
-    except urllib2.URLError as e:
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        res = yield http_client.fetch(req)
+    except tornado.httpclient.HTTPError as e:
         _log.error('Error submitting job: %s' % e)
         statemon.state.job_submission_error = 1
         raise SubmissionError
-    api_resp = json.loads(res.read())
-    return (video_id, api_resp["job_id"])
+    api_resp = json.loads(res.buffer)
+    raise tornado.gen.Return((video_id, api_resp["job_id"]))
 
+@utils.sync.optional_sync
 @tornado.gen.coroutine
 def image_available_in_isp(api_key, video_id):
     try:
         video = neondata.VideoMetadata.get(
             neondata.InternalVideoID.generate(api_key, video_id))
+        if video is None:
+            _log.error('No VideoMetadata for video %s with api_key %s' 
+                % (video_id, api_key))
+            raise tornado.gen.Return(False)
+            
         url = video.serving_url
         if url is None:
             _log.error('No serving url specified for video %s' % video_id)
-            return False
+            raise tornado.gen.Return(False)
 
-        req = tornado.httpclient.HTTPRequest(url, follow_redirects = True)
+        req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
+                                             follow_redirects = True)
         http_client = tornado.httpclient.AsyncHTTPClient()
-        res = http_client.fetch(req)
+        res = yield http_client.fetch(req)
 
         if res.code != 200:
             if res.code == 302:
                 red = MyHTTPRedirectHandler(res)
-                red.http_error_302(res.headers)
+                yield red.http_error_302(res.headers, async=True)
 
             _log.warn('Image not available in ISP yet. Code %s' %
                       res.getcode())
-            return False
+            raise tornado.gen.Return(False)
 
         # check for the headers and the final image
         headers = MyHTTPRedirectHandler.get_last_redirect_headers()
@@ -134,8 +148,8 @@ def image_available_in_isp(api_key, video_id):
         im_url = headers['Location']
         if neondata.InternalVideoID.NOVIDEO in im_url:
             # It is the account level default
-            return False
-        return True
+            raise tornado.gen.Return(False)
+        raise tornado.gen.Return(True)
     except tornado.httpclient.HTTPError as e: 
         pass
     except KeyError as e:
@@ -144,17 +158,22 @@ def image_available_in_isp(api_key, video_id):
         _log.exception('Unexpected exception when querying isp')
         raise
 
-    return False
+    raise tornado.gen.Return(False)
 
+@utils.sync.optional_sync
+@tornado.gen.coroutine
 def monitor_neon_pipeline(video_id=None):    
     start_request = time.time()
 
     # Create a video request for test account
     statemon.state.increment('jobs_created')
-    video_id, job_id = create_neon_api_request(options.account,
-                                               options.api_key,
-                                               video_id=video_id)
-    _log.info('created video request vid %s job %s' % (video_id, job_id))
+    video_id, job_id = yield create_neon_api_request(options.account,
+                                                     options.api_key,
+                                                     video_id=video_id, 
+                                                     async=True)
+
+    _log.info('created video request vid %s job %s api %s' % (video_id, job_id, 
+                                                              options.api_key))
     try:
 
         # Poll the API for job request completion
@@ -203,7 +222,9 @@ def monitor_neon_pipeline(video_id=None):
         isp_start = time.time()
         isp_ready = False
         while not isp_ready:
-            if image_available_in_isp(options.api_key, video_id):
+            ready = yield image_available_in_isp(options.api_key, video_id, 
+                                                 async=True)
+            if ready:    
                 isp_ready = True
                 break
 
@@ -245,7 +266,7 @@ def main():
     
     while True:
         try:
-            monitor_neon_pipeline()
+            yield monitor_neon_pipeline(async=True)
             statemon.state.unexpected_exception_thrown = 0
         except JobError as e:
             # Logging already done
