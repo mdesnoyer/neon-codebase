@@ -207,7 +207,7 @@ def monitor_neon_pipeline(video_id=None):
                 _log.error('Too long for image to appear in ISP')
                 statemon.state.not_available_in_isp = 1
                 raise RunningTooLongError
-            time.sleep(5.0)
+            time.sleep(1.0)
         
         isp_serving = time.time() - isp_start 
         statemon.state.mastermind_to_isp = isp_serving
