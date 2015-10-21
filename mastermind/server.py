@@ -114,6 +114,7 @@ statemon.define('pending_callbacks', int)
 statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 statemon.define('timeout_waiting_for_isp', int)
+statemon.define('isp_ready_delay', float)
 
 statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
@@ -1485,13 +1486,14 @@ class DirectivePublisher(threading.Thread):
 
             # Now we wait until the video is serving on the isp
             start_time = time.time()
-            while not self._image_available_in_isp(video):
+            while not video.image_available_in_isp():
                 if (time.time() - start_time) > options.isp_wait_timeout:
                     statemon.state.increment('timeout_waiting_for_isp')
                     _log.error('Timed out waiting for ISP for video %s' %
                                video.key)
                     return
                 time.sleep(5.0 * random.random())
+            statemon.state.isp_ready_delay = time.time() - start_time
 
             # Wait a bit so that it gets to all the ISPs
             time.sleep(options.serving_update_delay)

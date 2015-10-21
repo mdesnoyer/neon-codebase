@@ -4592,48 +4592,39 @@ class VideoMetadata(StoredObject):
         
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def image_available_in_isp(self, api_key, video_id):
-        try:
-            video = VideoMetadata.get(
-                InternalVideoID.generate(api_key, video_id))
-            if video is None:
-                _log.error('No VideoMetadata for video %s with api_key %s' 
-                    % (video_id, api_key))
-                raise tornado.gen.Return(False)
-                
-            url = video.serving_url
+    def image_available_in_isp(self):
+        try:               
+            url = yield self.get_serving_url(save=False, async=True)
             if url is None:
                 _log.error('No serving url specified for video %s' % video_id)
                 raise tornado.gen.Return(False)
 
             req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
-                                                 follow_redirects = True)
+                                                 follow_redirects=True)
             http_client = tornado.httpclient.AsyncHTTPClient()
-            res = yield http_client.fetch(req)
+            res = yield utils.http.send_request(req, async=True)
 
             if res.code != 200:
-                if res.code == 204:
-                    _log.error("Cannot find ISP")
-                    raise tornado.gen.Return(False)
-
-                _log.warn('Image not available in ISP yet. Code %s' %
-                          res.code)
+                _log.debug('Image not available in ISP yet. Code %s' %
+                           res.code)
                 raise tornado.gen.Return(False)
      
             effective_url = res.effective_url
-            regex_url = re.sub(r'neontn(.*).jpe?g', "", effective_url)
-            neon_user_account = NeonUserAccount(video_id)
-            default_thumbnail_id = neon_user_account.default_thumbnail_id
-            if regex_url == default_thumbnail_id:
+            urlRegex = re.compile('neontn(.*)\.jpe?g')
+            urlSearch = urlRegex.search(res.effective_url)
+            if urlSearch is None:
+                _log.warn('Invalid effective url found for video %s: %s' %
+                          (self.key, res.effective_url))
+                raise tornado.gen.Return(False)
+
+            neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
+                                                       self.get_account_id())
+            if urlSearch.group(1) == neon_user_account.default_thumbnail_id:
+                _log.debug('Still redirecting to the account default url')
                 raise tornado.gen.Return(False)
             raise tornado.gen.Return(True)
         except tornado.httpclient.HTTPError as e: 
             pass
-        except KeyError as e:
-            pass
-        except Exception as e:
-            _log.exception('Unexpected exception when querying isp: %s' %e)
-            raise
 
         raise tornado.gen.Return(False)
     
