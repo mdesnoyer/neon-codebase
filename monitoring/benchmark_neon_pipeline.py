@@ -12,6 +12,7 @@ if sys.path[0] != __base_path__:
 import atexit
 from cmsdb import neondata
 import json
+import re
 import redis
 import signal
 import time
@@ -139,9 +140,8 @@ def image_available_in_isp(api_key, video_id):
                 yield red.http_error_302(res.headers, async=True)
 
             _log.warn('Image not available in ISP yet. Code %s' %
-                      res.getcode())
+                      res.code)
             raise tornado.gen.Return(False)
-
         # check for the headers and the final image
         headers = MyHTTPRedirectHandler.get_last_redirect_headers()
         
@@ -149,13 +149,20 @@ def image_available_in_isp(api_key, video_id):
         if neondata.InternalVideoID.NOVIDEO in im_url:
             # It is the account level default
             raise tornado.gen.Return(False)
+
+        effective_url = res.effective_url
+        regex_url = re.sub(r'neontn(.*).jpeg', "", effective_url)
+        neon_user_account = neondata.NeonUserAccount(video_id)
+        default_thumbnail_id = neon_user_account.default_thumbnail_id
+        if regex_url == default_thumbnail_id:
+            raise tornado.gen.Return(False)
         raise tornado.gen.Return(True)
     except tornado.httpclient.HTTPError as e: 
         pass
     except KeyError as e:
         pass
     except Exception as e:
-        _log.exception('Unexpected exception when querying isp')
+        _log.exception('Unexpected exception when querying isp: %s' %e)
         raise
 
     raise tornado.gen.Return(False)

@@ -37,18 +37,18 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.mock_request = tornado.httpclient.HTTPRequest('http://nope.com',
                                                             headers=self.headers)
 
-        '''self.http_patcher = patch('monitoring.benchmark_neon_pipeline.urllib2')
-        self.http_mock = self.http_patcher.start()
-        self.http_mock.URLError = urllib2.URLError
-        self.isp_response_mock = self.http_mock.build_opener().open()
-        self.isp_response_mock.getcode.side_effect = [200]
-        '''
-
         self.neon_request_mock = self.http_mock
         self.neon_request_mock.reset_mock()
         self.neon_request_mock.side_effect = [
             tornado.httpclient.HTTPResponse(self.mock_request, 200,
-                                            buffer='{"job_id": "myjobid", "Location": "location"}')]
+                                            buffer='{"job_id": "myjobid", '\
+                                            '"Location": "location"}'),
+            tornado.httpclient.HTTPResponse(self.mock_request, 200,
+                                            buffer='{"job_id": "myjobid", '\
+                                            '"Location": "location"}'),
+            tornado.httpclient.HTTPResponse(self.mock_request, 204,
+                                            buffer='{"job_id": "myjobid", '\
+                                            '"Location": "location"}')]
 
         self.isp_patcher = patch(
             'monitoring.benchmark_neon_pipeline.MyHTTPRedirectHandler')
@@ -232,13 +232,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.request.state = neondata.RequestState.SERVING
         self.request.save()
         self.isp_mock.get_last_redirect_headers.side_effect = [
-            tornado.httpclient.HTTPError(404, 'Cannot find ISP'),
-            {'Location': 'http://somewhere.com'}
-        '''self.isp_response_mock.getcode.side_effect = [
-            urllib2.URLError('Cannot find ISP'),
-            204,
-            204
-        ]'''
+            tornado.httpclient.HTTPError(204, 'Cannot find ISP')]
 
         with self.assertLogExists(logging.WARNING, 'Code 204'):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
