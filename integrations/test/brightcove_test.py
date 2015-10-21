@@ -449,6 +449,62 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         self.assertGreater(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
+    def test_brightcove_discovery_error(self):
+        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
+                          ['http://bc.com/some_old_thumb.jpg'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=1,
+                          refid=None,
+                          external_id='4562077467001').save()
+        ThumbnailMetadata('acct1_v1_bc2', 'acct1_v1',
+                          ['http://bc.com/some_newer_thumb.jpg'],
+                          ttype=ThumbnailType.DEFAULT,
+                          rank=0,
+                          external_id='4562077467001').save()
+        VideoMetadata('acct1_v1',
+                      ['acct1_v1_n1', 'acct1_v1_bc1', 'acct1_v1_bc2'],
+                      i_id='i1').save()
+
+        yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'videoStillURL' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg',
+              'videoStill' : {
+                  'id' : '4562077467001',
+                  'referenceId' : None,
+                  'remoteUrl' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'
+              },
+              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+              'thumbnail' : {
+                  'id' : '4562076241001',
+                  'referenceId' : None,
+                  'remoteUrl' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'
+              }
+            }
+            )
+
+
+        # Make sure a new image was added to the database
+        video_meta = VideoMetadata.get('acct1_v1')
+        self.assertEquals(len(video_meta.thumbnail_ids), 3)
+        thumbs = ThumbnailMetadata.get_many(video_meta.thumbnail_ids)
+        # for thumb in thumbs:
+        #     if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
+        #                          'acct1_v1_bc2']:
+        #         self.assertEquals(thumb.rank, -1)
+        #         self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
+        #         self.assertEquals(thumb.urls, [
+        #             'some_cdn_url.jpg',
+        #             'http://bc.com/new_still.jpg?x=8'])
+        #         self.assertEquals(thumb.external_id, '1234568')
+
+        # # Make sure the new image was uploaded
+        # self.im_download_mock.assert_called_with(
+        #     'http://bc.com/new_still.jpg?x=8', async=True)
+        # self.assertGreater(self.cdn_mock.call_count, 0)
+
+    @tornado.testing.gen_test
     def test_error_downloading_image(self):
         self.im_download_mock.side_effect = [IOError('Image Download Error')]
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
