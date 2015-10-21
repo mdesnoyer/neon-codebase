@@ -153,10 +153,11 @@ def monitor_neon_pipeline(video_id=None):
         # Query ISP to get the IMG
         isp_start = time.time()
         isp_ready = False
-        vid_obj = neondata.VideoMetadata(video_id)
+        vid_obj = yield tornado.gen.Task(
+            neondata.VideoMetadata.get,
+            neondata.InternalVideoID.generate(options.api_key, video_id))
         while not isp_ready:
-            ready = yield vid_obj.image_available_in_isp(options.api_key, 
-                                                         video_id, async=True)
+            ready = yield vid_obj.image_available_in_isp(async=True)
             if ready:    
                 isp_ready = True
                 break
@@ -188,8 +189,11 @@ def monitor_neon_pipeline(video_id=None):
 
     finally:
         # cleanup
-        np = neondata.NeonPlatform.get(options.api_key, '0')
-        np.delete_all_video_related_data(video_id, really_delete_keys=True)
+        np = yield tornado.gen.Task(neondata.NeonPlatform.get,
+                                    options.api_key, '0')
+        yield np.delete_all_video_related_data(video_id,
+                                               really_delete_keys=True,
+                                               async=True)
 
 def main():
     utils.neon.InitNeon()

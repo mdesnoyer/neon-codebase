@@ -1841,9 +1841,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       video = VideoMetadata('acct1_v1')
 
       # Check when isp returns a 204 because it doesn't have the video
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=204, effective_url="http://www.where.com/neontntid.jpg")
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
       is_avail = yield video.image_available_in_isp(async=True)
       self.assertFalse(is_avail)
       cargs, kwargs = fetch_mock.call_args
