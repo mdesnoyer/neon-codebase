@@ -556,18 +556,24 @@ class JobManager(object):
         This should only be called at the beginning of the program.
         '''
         _log.info('Requeuing pending jobs from db')
-        requests = yield tornado.gen.Task(neondata.NeonApiRequest.get_all)
-        for request in requests:
-            if (request.fail_count < options.max_retries and
-                request.state in [neondata.RequestState.SUBMIT,
-                                  neondata.RequestState.PROCESSING,
-                                  neondata.RequestState.FINALIZING,
-                                  neondata.RequestState.REQUEUED,
-                                  neondata.RequestState.REPROCESS,
-                                  neondata.RequestState.FAILED,
-                                  neondata.RequestState.INT_ERROR,
-                                  neondata.RequestState.CUSTOMER_ERROR]):
-                yield self.requeue_job(request.job_id, request.api_key)
+        accounts = yield neondata.NeonUserAccount.get_all(async=True)
+        for account in accounts:
+            request_iter = yield account.iterate_all_jobs(async=True)
+            while True:
+                request = yield request_iter.next(async=True)
+                if isinstance(request, StopIteration):
+                    break
+                
+                if (request.fail_count < options.max_retries and
+                    request.state in [neondata.RequestState.SUBMIT,
+                                      neondata.RequestState.PROCESSING,
+                                      neondata.RequestState.FINALIZING,
+                                      neondata.RequestState.REQUEUED,
+                                      neondata.RequestState.REPROCESS,
+                                      neondata.RequestState.FAILED,
+                                      neondata.RequestState.INT_ERROR,
+                                      neondata.RequestState.CUSTOMER_ERROR]):
+                    yield self.requeue_job(request.job_id, request.api_key)
 
 class StatsHandler(tornado.web.RequestHandler):
     """ Q Stats """ 
@@ -969,16 +975,9 @@ class GetThumbnailsHandler(tornado.web.RequestHandler):
         except neondata.ThumbDownloadError, e:
             _log.warn("Default thumbnail download failed for vid %s" % vid)
             statemon.state.increment('default_thumb_error')
-            # Should the state be updated here too?
-            def _update_request_message(req):
-                req.set_message("failed to download default thumbnail %s" % e)
-            
-            result = yield tornado.gen.Task(
-                          neondata.NeonApiRequest.modify, api_request.job_id, 
-                          api_request.api_key,
-                          _update_request_message)
-            # Even if the request state is not updated, its ok. since we'll try
-            # to handle the upload on the video client again. Hence best effort 
+            # Even if the request state is not updated, its ok. since
+            # we'll try to handle the upload on the video client
+            # again. Hence best effort
             self.set_status(201)
             self.write(response_data)
             self.finish()

@@ -35,6 +35,7 @@ import urllib
 from utils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
+from utils import statemon
 import video_processor.server
 
 _log = logging.getLogger(__name__)
@@ -239,6 +240,8 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.server = video_processor.server.Server()
         super(TestVideoServer, self).setUp()
+        
+        statemon.state._reset_values()
 
         self.base_uri = '/api/v1/submitvideo/topn'
         self.neon_api_url = self.get_url(self.base_uri)
@@ -403,15 +406,16 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
             # Check request state and message
             resp = json.loads(response.body)
-            api_request = neondata.NeonApiRequest.get(resp['job_id'], self.api_key)
+            api_request = neondata.NeonApiRequest.get(resp['job_id'],
+                                                      self.api_key)
             self.assertEqual(api_request.state, neondata.RequestState.SUBMIT)
-            self.assertIsNotNone(api_request.msg)
             
-            state_vars = video_processor.server.statemon.state.get_all_variables()
+
             self.assertEqual(
-                    state_vars.get('video_processor.server.default_thumb_error').value,
-                    1)
-            video_processor.server.statemon.state._reset_values()
+                statemon.state.get('video_processor.server.default_thumb_error'),
+                1)
+            
+            statemon.state._reset_values()
 
     def test_neon_api_request_invalid_id(self):
         resp = self.add_request("neonap_-ivid123") 
