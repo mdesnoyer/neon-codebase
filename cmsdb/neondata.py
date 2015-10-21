@@ -4590,6 +4590,53 @@ class VideoMetadata(StoredObject):
                                        _update_serving_url)
         raise tornado.gen.Return(serving_url)
         
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def image_available_in_isp(self, api_key, video_id):
+        try:
+            video = VideoMetadata.get(
+                InternalVideoID.generate(api_key, video_id))
+            if video is None:
+                _log.error('No VideoMetadata for video %s with api_key %s' 
+                    % (video_id, api_key))
+                raise tornado.gen.Return(False)
+                
+            url = video.serving_url
+            if url is None:
+                _log.error('No serving url specified for video %s' % video_id)
+                raise tornado.gen.Return(False)
+
+            req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
+                                                 follow_redirects = True)
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            res = yield http_client.fetch(req)
+
+            if res.code != 200:
+                if res.code == 204:
+                    _log.error("Cannot find ISP")
+                    raise tornado.gen.Return(False)
+
+                _log.warn('Image not available in ISP yet. Code %s' %
+                          res.code)
+                raise tornado.gen.Return(False)
+     
+            effective_url = res.effective_url
+            regex_url = re.sub(r'neontn(.*).jpe?g', "", effective_url)
+            neon_user_account = NeonUserAccount(video_id)
+            default_thumbnail_id = neon_user_account.default_thumbnail_id
+            if regex_url == default_thumbnail_id:
+                raise tornado.gen.Return(False)
+            raise tornado.gen.Return(True)
+        except tornado.httpclient.HTTPError as e: 
+            pass
+        except KeyError as e:
+            pass
+        except Exception as e:
+            _log.exception('Unexpected exception when querying isp: %s' %e)
+            raise
+
+        raise tornado.gen.Return(False)
+    
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.

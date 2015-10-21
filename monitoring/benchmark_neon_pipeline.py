@@ -59,27 +59,6 @@ class RunningTooLongError(JobError): pass
 class JobFailed(JobError): pass
 
 
-class MyHTTPRedirectHandler(tornado.httpclient.HTTPResponse):
-    '''
-    A redirect handler for tornado requests
-    in a single threaded process, you can use get_last_redirect_response()
-    to get the intermediate 302 response
-    '''
-    
-    redirect_headers = None
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def http_error_302(self, headers):
-        MyHTTPRedirectHandler.redirect_headers = headers
-        return tornado.httpclient.HTTPError(302)
-
-    http_error_301 = http_error_303 = http_error_307 = http_error_302
-
-    @classmethod
-    def get_last_redirect_headers(cls):
-        return cls.redirect_headers
-
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def create_neon_api_request(account_id, api_key, video_id=None):
@@ -100,7 +79,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
         "video_url": video_url, 
         "video_title": video_title
     }
-    req = tornado.httpclient.HTTPRequest(request_url, method='HEAD', 
+    req = tornado.httpclient.HTTPRequest(request_url, method='POST', 
                                          headers=headers,
                                          body=json.dumps(data))
     try:
@@ -112,60 +91,6 @@ def create_neon_api_request(account_id, api_key, video_id=None):
         raise SubmissionError
     api_resp = json.loads(res.buffer)
     raise tornado.gen.Return((video_id, api_resp["job_id"]))
-
-@utils.sync.optional_sync
-@tornado.gen.coroutine
-def image_available_in_isp(api_key, video_id):
-    try:
-        video = neondata.VideoMetadata.get(
-            neondata.InternalVideoID.generate(api_key, video_id))
-        if video is None:
-            _log.error('No VideoMetadata for video %s with api_key %s' 
-                % (video_id, api_key))
-            raise tornado.gen.Return(False)
-            
-        url = video.serving_url
-        if url is None:
-            _log.error('No serving url specified for video %s' % video_id)
-            raise tornado.gen.Return(False)
-
-        req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
-                                             follow_redirects = True)
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        res = yield http_client.fetch(req)
-
-        if res.code != 200:
-            if res.code == 302:
-                red = MyHTTPRedirectHandler(res)
-                yield red.http_error_302(res.headers, async=True)
-
-            _log.warn('Image not available in ISP yet. Code %s' %
-                      res.code)
-            raise tornado.gen.Return(False)
-        # check for the headers and the final image
-        headers = MyHTTPRedirectHandler.get_last_redirect_headers()
-        
-        im_url = headers['Location']
-        if neondata.InternalVideoID.NOVIDEO in im_url:
-            # It is the account level default
-            raise tornado.gen.Return(False)
-
-        effective_url = res.effective_url
-        regex_url = re.sub(r'neontn(.*).jpeg', "", effective_url)
-        neon_user_account = neondata.NeonUserAccount(video_id)
-        default_thumbnail_id = neon_user_account.default_thumbnail_id
-        if regex_url == default_thumbnail_id:
-            raise tornado.gen.Return(False)
-        raise tornado.gen.Return(True)
-    except tornado.httpclient.HTTPError as e: 
-        pass
-    except KeyError as e:
-        pass
-    except Exception as e:
-        _log.exception('Unexpected exception when querying isp: %s' %e)
-        raise
-
-    raise tornado.gen.Return(False)
 
 @utils.sync.optional_sync
 @tornado.gen.coroutine
@@ -228,9 +153,10 @@ def monitor_neon_pipeline(video_id=None):
         # Query ISP to get the IMG
         isp_start = time.time()
         isp_ready = False
+        vid_obj = neondata.VideoMetadata(video_id)
         while not isp_ready:
-            ready = yield image_available_in_isp(options.api_key, video_id, 
-                                                 async=True)
+            ready = yield vid_obj.image_available_in_isp(options.api_key, 
+                                                         video_id, async=True)
             if ready:    
                 isp_ready = True
                 break
