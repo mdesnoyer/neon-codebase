@@ -632,7 +632,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     # the hash with existing thumbnail hashes, if find a match
                     # we will disgard the thumbnail.
                     is_exist = \
-                        any([new_thumb.key == old_thum.key for old_thum in thumbs])
+                        any([new_thumb.key == old_thum.key
+                            for old_thum in thumbs]) or \
+                        any([new_thumb.phash == old_thum.phash
+                            for old_thum in thumbs])
 
                     if is_exist:
                         continue

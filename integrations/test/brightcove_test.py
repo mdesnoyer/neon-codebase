@@ -449,7 +449,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         self.assertGreater(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
-    def test_brightcove_discovery_error(self):
+    def test_new_thumbnail_but_same_photo(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/some_old_thumb.jpg'],
                           ttype=ThumbnailType.DEFAULT,
@@ -471,38 +471,67 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
               'FLVURL' : 'http://video.mp4',
               'videoStillURL' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg',
               'videoStill' : {
-                  'id' : '4562077467001',
+                  'id' : '4562077467002',
                   'referenceId' : None,
                   'remoteUrl' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'
               },
               'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
               'thumbnail' : {
-                  'id' : '4562076241001',
+                  'id' : '4562076241002',
                   'referenceId' : None,
                   'remoteUrl' : 'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'
               }
             }
             )
 
+        # Make sure the url is loaded, image uploaded.
+        self.im_download_mock.assert_called_with(
+            'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg', async=True)
+        self.assertGreater(self.cdn_mock.call_count, 0)
+
+        # Reset the future wrap
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image]
+
+        yield self.integration.submit_one_video_object(
+            { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'videoStillURL' : 'http://second.jpg',
+              'videoStill' : {
+                  'id' : '4562077467003',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'thumbnailURL' : None,
+              'thumbnail' : {
+                  'id' : '4562076241003',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              }
+            }
+            )
+
+        self.im_download_mock.assert_called_with(
+            'http://second.jpg', async=True)
+        self.assertGreater(self.cdn_mock.call_count, 0)
 
         # Make sure a new image was added to the database
+        # The first one is added, but not the second one
         video_meta = VideoMetadata.get('acct1_v1')
-        self.assertEquals(len(video_meta.thumbnail_ids), 3)
+        self.assertEquals(len(video_meta.thumbnail_ids), 4)
         thumbs = ThumbnailMetadata.get_many(video_meta.thumbnail_ids)
-        # for thumb in thumbs:
-        #     if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
-        #                          'acct1_v1_bc2']:
-        #         self.assertEquals(thumb.rank, -1)
-        #         self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
-        #         self.assertEquals(thumb.urls, [
-        #             'some_cdn_url.jpg',
-        #             'http://bc.com/new_still.jpg?x=8'])
-        #         self.assertEquals(thumb.external_id, '1234568')
+        for thumb in thumbs:
+            if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
+                                 'acct1_v1_bc2']:
+                self.assertEquals(thumb.rank, -1)
+                self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
+                self.assertEquals(thumb.urls, [
+                    'some_cdn_url.jpg',
+                    'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'])
+                self.assertEquals(thumb.external_id, '4562077467002')
 
-        # # Make sure the new image was uploaded
-        # self.im_download_mock.assert_called_with(
-        #     'http://bc.com/new_still.jpg?x=8', async=True)
-        # self.assertGreater(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
     def test_error_downloading_image(self):
