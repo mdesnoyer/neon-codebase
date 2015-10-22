@@ -144,10 +144,11 @@ class VideoProcessor(object):
         self.job_params = params
         self.reprocess = reprocess
         self.video_url = self.job_params['video_url']
-        vsuffix = self.video_url.split('/')[-1]  #get the video file extension
-        vsuffix = vsuffix.strip("!@#$%^&*[]^()+~")
+        #get the video file extension
+        parsed = urlparse.urlparse(self.video_url)
+        vsuffix = os.path.splitext(parsed.path)[1]
         self.tempfile = tempfile.NamedTemporaryFile(
-            suffix='_%s' % vsuffix, delete=True, dir=options.video_temp_dir)
+            suffix=vsuffix, delete=True, dir=options.video_temp_dir)
         self.headers = tornado.httputil.HTTPHeaders({'User-Agent': 'Mozilla/5.0 \
             (Windows; U; Windows NT 5.1; en-US; rv:1.9.1.7) Gecko/20091221 \
             Firefox/3.5.7 GTB6 (.NET CLR 3.5.30729)'})
