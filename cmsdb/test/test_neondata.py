@@ -17,6 +17,7 @@ import json
 import multiprocessing
 from mock import patch, MagicMock
 import os
+import psycopg2
 import re
 import redis
 import random
@@ -2510,6 +2511,40 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tmeta2.height, 540)
         self.assertIsNotNone(tmeta2.phash)
 
+class TestPostgresDB(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPostgresDB, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_singletoness(self): 
+        pg1 = neondata.PostgresDB() 
+        pg2 = neondata.PostgresDB() 
+
+        self.assertEquals(id(pg1), id(pg2))
+
+    @tornado.testing.gen_test 
+    def test_retry_connection(self): 
+        #exception_mocker = patch('cmsdb.neondata.PostgresDB._PostgresDB._get_momoko_connection')
+        pg1 = neondata.PostgresDB()
+        exception_mocker = patch('momoko.Connection.connect')
+        exception_mock = self._future_wrap_mock(exception_mocker.start())
+        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+
+        blah = yield pg1.get_connection()
+        import pdb; pdb.set_trace() 
+     
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGNeonUserAccount, self).setUp()
@@ -2519,7 +2554,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
-        #cls.postgresql = test_utils.postgresql.Postgresql(dump_file=os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql'))
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
     @classmethod
     def tearDownClass(cls): 

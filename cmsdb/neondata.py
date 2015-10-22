@@ -97,6 +97,7 @@ define("db_user", default="postgres", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
+define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -156,22 +157,108 @@ def _object_to_classname(otype=None):
             cname = otype.__class__.__name__ \
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
-    
 
-class PGDBConnection(tornado.web.RequestHandler): 
-    '''Connection to the postgres database. Provides 
-       both blocking and async connections for use 
-       with Tornado. 
+#class cmsdb(object):
+    # TODO move this to utils, it could be useful elsewhere. 
+#    @staticmethod
+def retry(num_of_tries, 
+          exceptions=(Exception), 
+          sleep_time=0.5, 
+          retry_message='Retrying call'):
+    def wrap(func): 
+       def wrapped_func(*args):
+            for i in range(int(num_of_tries)):
+                try: 
+                    return func(*args)
+                except Exception as e: 
+                #except exceptions as e:
+                    import pdb; pdb.set_trace() 
+                    if sleep_time is not None: 
+                        time.sleep(sleep_time) 
+                    _log.error('%s : attempt=%i : exception=%s' % 
+                               (retry_message, int(i), e))
+       return wrapped_func 
+    return wrap 
+
+class PostgresDB(tornado.web.RequestHandler): 
+    '''A DB singleton class for postgres. Manages 
+       connections and pools that are currently 
+       connected to the postgres db. 
     ''' 
-    def __init__(self):
-        host = options.get('cmsdb.neondata.db_address')
-        port = options.get('cmsdb.neondata.db_port')
-        name = options.get('cmsdb.neondata.db_name')
-        user = options.get('cmsdb.neondata.db_user')
-        self.db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (name, user, host, port), 
-                              ioloop=tornado.ioloop.IOLoop.current(), 
-                              size=3, 
-                              cursor_factory=psycopg2.extras.RealDictCursor) 
+    class _PostgresDB: 
+        def __init__(self): 
+            self.host = options.get('cmsdb.neondata.db_address')
+            self.port = options.get('cmsdb.neondata.db_port')
+            self.name = options.get('cmsdb.neondata.db_name')
+            self.user = options.get('cmsdb.neondata.db_user')
+            self.io_loop_dict = {}
+             
+        @tornado.gen.coroutine
+        def get_connection(self): 
+            '''gets a connection to postgres, this is ioloop based 
+            we want to be able to share pools across ioloops 
+            however, since we have optional_sync (which creates a new ioloop) 
+            we have to manage how the pools/connections are created.  
+            '''
+            # grab the io loop
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            io_loop_id = id(current_io_loop)
+            dict_item = self.io_loop_dict.get(io_loop_id)
+
+            if dict_item is None: 
+                # this is the first time we've seen this io_loop - just 
+                # send them a Connection object, and get them ready for a pool 
+                new_item = {} 
+                new_item['pool'] = None 
+                self.io_loop_dict[io_loop_id] = new_item
+                mo_conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
+                                            ioloop=current_io_loop,
+                                            cursor_factory=psycopg2.extras.RealDictCursor)
+
+                conn = yield self._get_momoko_connection(mo_conn) 
+            else:
+                # we have seen this ioloop before, it may or may not have a pool 
+                pool = dict_item['pool'] 
+                if pool is None:  
+                    pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
+                                       ioloop=current_io_loop, 
+                                       size=5, 
+                                       cursor_factory=psycopg2.extras.RealDictCursor)
+                    dict_item['pool'] = pool 
+                    
+                conn = yield self._get_momoko_connection(pool)
+            raise tornado.gen.Return(conn)
+        
+        # TODO try to get this wrapped in the retry 
+        @tornado.gen.coroutine 
+        def _get_momoko_connection(self, mo_conn):
+            conn = None 
+            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            for i in range(int(num_of_tries)):
+                try: 
+                    conn = yield mo_conn.connect()
+                except psycopg2.OperationalError as e: 
+                    time.sleep(0.5) 
+                    _log.error('Retrying PG connection : attempt=%d : exception=%s' % 
+                               (int(i), e))
+            if conn: 
+                raise tornado.gen.Return(conn)
+            else:  
+                _log.error('Unable to get a connection to Postgres Database')
+    
+    instance = None 
+    
+    def __new__(cls): 
+        if not PostgresDB.instance: 
+            PostgresDB.instance = PostgresDB._PostgresDB() 
+        return PostgresDB.instance 
+
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+
+    def __setattr__(self, name):
+        return setattr(self.instance, name) 
+
 class DBConnection(object):
     '''Connection to the database.
 
@@ -1010,17 +1097,18 @@ class StoredObject(object):
             raise Exception("key not set")
 
         if options.get('cmsdb.neondata.wants_postgres'): 
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
-           
+            db = PostgresDB()
+            conn = yield db.get_connection()
+
             query = "INSERT INTO %s (_data, _type) \
                      VALUES('%s', '%s')" % (self.__class__.__name__.lower(), 
                                             value, 
                                             self.__class__.__name__)
         
-            result = yield pool_conn.execute(query)
+            result = yield conn.execute(query)
             #TODO since upsert is not available until postgres 9.5 
             # we need to do an update if a duplicate key exception is thrown here 
+            conn.close()
             raise tornado.gen.Return(True)
         else: 
             db_connection = DBConnection.get(self)
@@ -1111,14 +1199,15 @@ class StoredObject(object):
         Returns the object
         '''
         if options.get('cmsdb.neondata.wants_postgres'): 
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
+
             obj = None 
             query = "SELECT _data, _type \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-            cursor = yield pool_conn.execute(query)
+            cursor = yield conn.execute(query)
             result = cursor.fetchone()
             if result:
                 obj = cls._create(key, result)
@@ -1127,7 +1216,8 @@ class StoredObject(object):
                     _log.warn('No %s for id %s in db' % (cls.__name__, key))
                 if create_default:
                     obj = cls(key)
- 
+
+            conn.close()
             raise tornado.gen.Return(obj)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1178,16 +1268,17 @@ class StoredObject(object):
         retval = []
         if options.get('cmsdb.neondata.wants_postgres'):
             results = [] 
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             query = "SELECT _data, _type \
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls.__name__.lower(), pattern)
 
-            cursor = yield pool_conn.execute(query)
+            cursor = yield conn.execute(query)
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
                 results.append(obj) 
+            conn.close()
             raise tornado.gen.Return(results)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1209,18 +1300,19 @@ class StoredObject(object):
 
         if options.get('cmsdb.neondata.wants_postgres'):
             results = [] 
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             query = "SELECT _data, _type \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls.__name__.lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
 
-            cursor = yield pool_conn.execute(query)
+            cursor = yield conn.execute(query)
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
                 results.append(obj) 
             
+            conn.close()
             raise tornado.gen.Return(results)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1305,8 +1397,8 @@ class StoredObject(object):
             create_class = cls
             
         if options.get('cmsdb.neondata.wants_postgres'):
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             if len(keys) == 0:
                 raise tornado.gen.Return({})
             # get the items, sql in a loop -- i would prefer 
@@ -1319,7 +1411,7 @@ class StoredObject(object):
                          FROM %s \
                          WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-                cursor = yield pool_conn.execute(query)
+                cursor = yield conn.execute(query)
                 item = cursor.fetchone()
                 if item is None:
                     if create_missing:
@@ -1347,7 +1439,8 @@ class StoredObject(object):
                                                                 key) 
                         sql_statements.append(query) 
     
-                cursor = yield pool_conn.transaction(sql_statements)
+                cursor = yield conn.transaction(sql_statements)
+                conn.close()
                 raise tornado.gen.Return(mappings) 
         else:  
             def _getandset(pipe):
@@ -1406,8 +1499,8 @@ class StoredObject(object):
         data = {}
 
         if options.get('cmsdb.neondata.wants_postgres'):
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             sql_statements = [] 
             for obj in objects:
                 query = "INSERT INTO %s (_data, _type) \
@@ -1416,7 +1509,8 @@ class StoredObject(object):
                                                 cls.__name__)
                 sql_statements.append(query)
             #TODO figure out rv 
-            cursor = yield pool_conn.transaction(sql_statements)
+            cursor = yield conn.transaction(sql_statements)
+            conn.close()
         else: 
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -1474,8 +1568,8 @@ class StoredObject(object):
     def _delete_many_raw_keys(cls, keys):
         '''Deletes many objects by their raw keys'''
         if options.get('cmsdb.neondata.wants_postgres'):
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             sql_statements = []
             for key in keys:
                 query = "DELETE FROM %s \
@@ -1483,7 +1577,7 @@ class StoredObject(object):
                                               key)
                 sql_statements.append(query) 
             #TODO figure out rv 
-            cursor = yield pool_conn.transaction(sql_statements)
+            cursor = yield conn.transaction(sql_statements)
         else:  
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -1911,15 +2005,16 @@ class NeonApiKey(NamespacedStoredObject):
         #NOTE: parent get() method uses json.loads() hence overriden here
         key = cls.format_key(a_id)
         if options.get('cmsdb.neondata.wants_postgres'):
-            db_connection = PGDBConnection()
-            pool_conn = yield db_connection.db.connect()
+            db = PostgresDB()
+            conn = yield db.get_connection()
             
             query = "SELECT _data \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-            cursor = yield pool_conn.execute(query)
+            cursor = yield conn.execute(query)
             result = cursor.fetchone()
+            conn.close()
             if result:  
                 raise tornado.gen.Return(result['_data']['api_key']) 
             else: 
