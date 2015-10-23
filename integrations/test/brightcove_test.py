@@ -445,7 +445,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
 
         # Make sure the new image was uploaded
         self.im_download_mock.assert_called_with(
-            'http://bc.com/new_still.jpg?x=8', async=True)
+            'http://bc.com/new_still.jpg?x=8')
         self.assertGreater(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
@@ -479,7 +479,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         self.assertEquals(len(video_meta.thumbnail_ids), 2)
 
         self.im_download_mock.assert_called_with(
-            'http://bc.com/new_thumb.jpg?x=8', async=True)
+            'http://bc.com/new_thumb.jpg?x=8')
         self.assertEquals(self.cdn_mock.call_count, 0)
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
