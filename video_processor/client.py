@@ -357,7 +357,7 @@ class VideoProcessor(object):
             _log.error("Error reading ffvideo metadata of %s: %s" %
                        (self.video_url, e))
             statemon.state.increment('ffvideo_metadata_error')
-            raise model.errors.VideoReadError(str(e))
+            raise BadVideoError(str(e))
 
         #Try to open the video file using openCV
         try:
@@ -366,7 +366,7 @@ class VideoProcessor(object):
             _log.error("Error opening video file %s: %s"  % 
                        (self.video_url, e))
             statemon.state.increment('video_read_error')
-            raise model.errors.VideoReadError(str(e))
+            raise BadVideoError(str(e))
 
         duration = self.video_metadata.duration or 0.0
 
@@ -388,9 +388,10 @@ class VideoProcessor(object):
                   n=n_thumbs,
                   video_name=self.video_url)
         except model.errors.VideoReadError:
-            _log.error("Error using OpenCV to read video. %s" % self.video_url)
+            msg = "Error using OpenCV to read video. %s" % self.video_url
+            _log.error(msg)
             statemon.state.increment('video_read_error')
-            raise
+            raise BadVideoError(msg)
 
         exists_unfiltered_images = np.any([x[4] is not None and x[4] == ''
                                            for x in results])
@@ -493,8 +494,7 @@ class VideoProcessor(object):
         _log.error('Error reading frame %i of video %s'
                     % (frameno, self.video_url))
         statemon.state.increment('extract_frame_error')
-        raise model.errors.VideoReadError('Error reading frame %i of video'
-                                          % frameno)
+        raise BadVideoError('Error reading frame %i of video' % frameno)
 
     def finalize_response(self):
         '''
