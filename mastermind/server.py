@@ -543,6 +543,11 @@ class VideoDBWatcher(threading.Thread):
             self.mastermind.update_video_info(video_metadata,
                                               thumbnails,
                                               abtest)
+
+            # Remove it from the list of entries the publisher has
+            # updated so that the next round, we might send a new
+            # callback and put it in serving state.
+            self.directive_pusher.set_video_updated(video_id)
         else:
             self.mastermind.remove_video_info(video_id)
             for thumb_id in thumb_ids:
@@ -1152,6 +1157,10 @@ class DirectivePublisher(threading.Thread):
         obj.__dict__ = unpack_obj(self.serving_urls[thumbnail_id])
         return obj
 
+    def set_video_updated(self, video_id):
+        with self.lock:
+            self.last_published_videos.discard(video_id)
+
     def update_default_sizes(self, new_map):
         with self.lock:
             self.default_sizes = new_map
@@ -1251,9 +1260,9 @@ class DirectivePublisher(threading.Thread):
                 self.last_published_videos = written_video_ids
                 if len(new_serving_videos) > 0:
                     self._incr_pending_modify(len(new_serving_videos))
-                    for new_serving_video in new_serving_videos
+                    for new_serving_video in new_serving_videos:
                         t = threading.Thread(
-                            target=self._enabled_video_in_database,
+                            target=self._enable_video_in_database,
                             args=(new_serving_video,))
                         t.daemon = True
                         t.start()
@@ -1446,11 +1455,7 @@ class DirectivePublisher(threading.Thread):
                 def _set_state(request_dict):
                     for obj in request_dict.itervalues():
                         if obj is not None:
-                            if obj.state not in [
-                                    neondata.RequestState.CUSTOMER_ERROR,
-                                    neondata.RequestState.FAILED,
-                                    neondata.RequestState.INT_ERROR]:
-                                obj.state = neondata.RequestState.FINISHED
+                            obj.state = neondata.RequestState.FINISHED
                 requests = neondata.NeonApiRequest.modify_many(request_keys,
                                                                _set_state)
 
@@ -1481,8 +1486,9 @@ class DirectivePublisher(threading.Thread):
                 request = neondata.NeonApiRequest.get(video.job_id,
                                                       video.get_account_id())
                 if (request is None or 
-                    request.state == neondata.RequestState.SERVING):
+                    request.state != neondata.RequestState.FINISHED):
                     return
+                
 
             # Now we wait until the video is serving on the isp
             start_time = time.time()
@@ -1491,6 +1497,8 @@ class DirectivePublisher(threading.Thread):
                     statemon.state.increment('timeout_waiting_for_isp')
                     _log.error('Timed out waiting for ISP for video %s' %
                                video.key)
+                    with self.lock:
+                        self.last_published_videos.discard(video_id)
                     return
                 time.sleep(5.0 * random.random())
             statemon.state.isp_ready_delay = time.time() - start_time
