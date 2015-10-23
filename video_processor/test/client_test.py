@@ -336,7 +336,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor = self.setup_video_processor("neon")
 
         with self.assertLogExists(logging.ERROR, "Error reading"):
-            with self.assertRaises(model.errors.VideoReadError):
+            with self.assertRaises(video_processor.client.BadVideoError):
                 vprocessor.process_video('a_garbage_video_thats_gone.mov')
 
     def test_process_all_filtered_video(self):
