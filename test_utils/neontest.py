@@ -127,7 +127,8 @@ class TestCase(unittest.TestCase):
         '''
         inner_mock = MagicMock()
         def _build_future(*args, **kwargs):
-            if require_async_kw and not kwargs.get('async', False):
+            async = kwargs.pop('async', False)
+            if require_async_kw and not async:
                 return inner_mock(*args, **kwargs)
                 
             future = concurrent.futures.Future()
