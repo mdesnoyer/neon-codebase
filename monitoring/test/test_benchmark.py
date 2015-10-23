@@ -16,8 +16,9 @@ from monitoring import benchmark_neon_pipeline
 from StringIO import StringIO
 import test_utils.neontest
 import test_utils.redis
+import tornado
+import tornado.httpclient
 import unittest
-import urllib2
 import utils.neon
 from utils.options import define, options
 from utils import statemon
@@ -29,23 +30,20 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(BenchmarkTest, self).setUp()
 
-        self.http_patcher = patch('monitoring.benchmark_neon_pipeline.urllib2')
-        self.http_mock = self.http_patcher.start()
-        self.http_mock.URLError = urllib2.URLError
-        self.isp_response_mock = self.http_mock.build_opener().open()
-        self.isp_response_mock.getcode.side_effect = [200]
 
-        self.neon_request_mock = self.http_mock.urlopen
-        self.neon_request_mock.reset_mock()
-        self.neon_request_mock.side_effect = [
-            StringIO(json.dumps({'job_id' : 'myjobid'}))]
+        self.http_patcher = patch('tornado.httpclient.AsyncHTTPClient.fetch')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start())
+        self.http_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, 200, buffer='{"job_id": "myjobid", "Location": "location"}')
 
-        self.isp_patcher = patch(
-            'monitoring.benchmark_neon_pipeline.MyHTTPRedirectHandler')
-        self.isp_mock = self.isp_patcher.start()
-        self.isp_mock.get_last_redirect_headers.side_effect = [
-            {'Location': 'http://somewhere.com'}
-        ]
+        # Mock out the isp request
+        self.isp_call_patcher = patch('utils.http.send_request')
+        self.isp_call_mock = self._future_wrap_mock(
+            self.isp_call_patcher.start(), require_async_kw=True)
+        self.isp_call_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, code=200, effective_url="http://www.where.com/neontntid.jpg")
 
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -76,7 +74,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         
     def tearDown(self):
         self.http_patcher.stop()
-        self.isp_patcher.stop()
+        self.isp_call_patcher.stop()
         statemon.state._reset_values()
         options._set('monitoring.benchmark_neon_pipeline.api_key',
                      self.old_api_key)
@@ -96,8 +94,7 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.INFO, 'total pipeline time'):
             benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
 
-        self.neon_request_mock.assertCalled()
-        self.isp_mock.assertCalled()
+        self.http_mock.assertCalled()
 
         self._check_request_cleanup()
 
@@ -160,8 +157,8 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
             'monitoring.benchmark_neon_pipeline.job_failed'), 1)
 
     def test_error_submitting_job(self):
-        self.http_mock.urlopen.side_effect = [
-            urllib2.URLError('Cannot submit')]
+        self.http_mock.side_effect = [
+            tornado.httpclient.HTTPError(400, 'Cannot submit')]
 
         with self.assertLogExists(logging.ERROR, 'Error submitting job'):
             with self.assertRaises(benchmark_neon_pipeline.SubmissionError):
@@ -171,68 +168,17 @@ class BenchmarkTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_submission_error'), 1)
 
-    def test_isp_timeout_with_default(self):
-        self.request.state = neondata.RequestState.SERVING
-        self.request.save()
-        self.isp_mock.get_last_redirect_headers.side_effect = [
-            {'Location': 'http://somewhere.com/NOVIDEO.jpg'}
-        ]
-
-        with self.assertLogExists(logging.ERROR,
-                                  'Too long for image to appear in ISP'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
-
-        self._check_request_cleanup()
-
-        self.assertEquals(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.not_available_in_isp'), 1)
-        self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.time_to_finished'),
-            0)
-        self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.time_to_serving'),
-            0)
-
     def test_isp_timeout(self):
         self.request.state = neondata.RequestState.SERVING
         self.request.save()
-        self.isp_mock.get_last_redirect_headers.side_effect = [
-            {'Content': 'some content'}
-        ]
+        self.isp_call_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, code=204)
 
         with self.assertLogExists(logging.ERROR,
                                   'Too long for image to appear in ISP'):
             with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
                 benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
-
-        self._check_request_cleanup()
-
-        self.assertEquals(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.not_available_in_isp'), 1)
-        self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.time_to_finished'),
-            0)
-        self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.time_to_serving'),
-            0)
-
-    def test_isp_connection_error(self):
-        options._set('monitoring.benchmark_neon_pipeline.isp_timeout', 1.0)
-        self.request.state = neondata.RequestState.SERVING
-        self.request.save()
-        self.isp_response_mock.getcode.side_effect = [
-            urllib2.URLError('Cannot find ISP'),
-            204,
-            204
-        ]
-
-        with self.assertLogExists(logging.WARNING, 'Code 204'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                benchmark_neon_pipeline.monitor_neon_pipeline('vid1')
-
-        self.neon_request_mock.assertCalled()
-        self.isp_mock.assertCalled()
 
         self._check_request_cleanup()
 

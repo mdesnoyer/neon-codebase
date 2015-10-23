@@ -20,6 +20,7 @@ import os.path
 from . import TextDetectionPy
 import utils.obj
 import utils.pycvutils
+from model.colorname import ColorName
 
 _log = logging.getLogger(__name__)
 
@@ -86,6 +87,31 @@ class GistGenerator(FeatureGenerator):
                                                  self.image_size[1])
         pimage = utils.pycvutils.to_pil(rimage)
         return leargist.color_gist(pimage)
+
+class ColorNameGenerator(FeatureGenerator):
+    '''Class that generates ColorName features.'''
+    def __init__(self, max_height = 480 ):
+        super(ColorNameGenerator, self).__init__()
+        self.max_height = max_height
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate(self, image):
+        # leargist needs a PIL image in RGB format
+        image_size = (int(2*round(float(image.shape[1]) * 
+                                self.max_height / image.shape[0] /2)),
+                                self.max_height)
+        image_resized = cv2.resize(image, image_size)
+        cn = ColorName(image_resized)
+        return cn.get_colorname_histogram()
+
 
 class MemCachedFeatures(FeatureGenerator):
     '''Wrapper for a feature generator that caches the features in memory'''
