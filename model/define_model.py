@@ -40,10 +40,12 @@ if __name__ == '__main__':
     video_searcher = model.video_searcher.BisectSearcher(
         predictor,
         filt,
-        filter_dups=False,
-        startend_buffer=0.0,
-        max_thumb_min_dist=2.0,
-        processing_time_ratio=3.0,
+        filter_dups=True,
+        startend_buffer=0.1,
+        max_startend_buffer=5.0,
+        thumb_min_dist=0.1,
+        max_thumb_min_dist=10.0,
+        processing_time_ratio=1.2,
         gist_threshold = 0.01,
         colorname_threshold = 0.015)
 
