@@ -47,6 +47,7 @@ import random
 import re
 import redis as blockingRedis
 import redis.exceptions
+import select
 import socket
 import string
 from StringIO import StringIO
@@ -98,6 +99,7 @@ define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
+define("pool_size", default=5, type=int, help="size we want our connection pools to be")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -158,9 +160,7 @@ def _object_to_classname(otype=None):
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
 
-#class cmsdb(object):
-    # TODO move this to utils, it could be useful elsewhere. 
-#    @staticmethod
+# TODO move this to utils, it could be useful elsewhere. 
 def retry(num_of_tries, 
           exceptions=(Exception), 
           sleep_time=0.5, 
@@ -171,8 +171,6 @@ def retry(num_of_tries,
                 try: 
                     return func(*args)
                 except Exception as e: 
-                #except exceptions as e:
-                    import pdb; pdb.set_trace() 
                     if sleep_time is not None: 
                         time.sleep(sleep_time) 
                     _log.error('%s : attempt=%i : exception=%s' % 
@@ -222,14 +220,14 @@ class PostgresDB(tornado.web.RequestHandler):
                 if pool is None:  
                     pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
                                        ioloop=current_io_loop, 
-                                       size=5, 
+                                       size=options.get('cmsdb.neondata.pool_size'), 
                                        cursor_factory=psycopg2.extras.RealDictCursor)
                     dict_item['pool'] = pool 
                     
                 conn = yield self._get_momoko_connection(pool)
             raise tornado.gen.Return(conn)
         
-        # TODO try to get this wrapped in the retry 
+        # TODO try to get this decorated with retry 
         @tornado.gen.coroutine 
         def _get_momoko_connection(self, mo_conn):
             conn = None 
@@ -238,9 +236,9 @@ class PostgresDB(tornado.web.RequestHandler):
                 try: 
                     conn = yield mo_conn.connect()
                 except psycopg2.OperationalError as e: 
-                    time.sleep(0.5) 
+                    time.sleep(0.3) 
                     _log.error('Retrying PG connection : attempt=%d : exception=%s' % 
-                               (int(i), e))
+                               (int(i+1), e))
             if conn: 
                 raise tornado.gen.Return(conn)
             else:  
@@ -596,13 +594,63 @@ def _erase_all_data():
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
-class PGPubSubConnection(threading.Thread): 
-    def __init__(self, class_name): 
-        super(PGPubSubConnection, self).__init__()
-        self.class_name = class_name
+class PostgresPubSub(): 
+    def __init__(self): 
+        self.host = options.get('cmsdb.neondata.db_address')
+        self.port = options.get('cmsdb.neondata.db_port')
+        self.name = options.get('cmsdb.neondata.db_name')
+        self.user = options.get('cmsdb.neondata.db_user')
+        self.listening = False
+        self.channels = []  
         
-    def __del__(self): 
-        self.stop() 
+    #@tornado.gen.coroutine 
+    '''connect function for pubsub 
+       we don't want to use momoko here, because we have to have 
+       a sync connection for autocommit to work properly or at all 
+    ''' 
+    def connect(self):
+        self.io_loop = tornado.ioloop.IOLoop.current()
+        self.connection = psycopg2.connect(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port))
+        self.connection.autocommit = True 
+    
+    @tornado.gen.coroutine 
+    def notify_callback(self, timeout=3, sleep_time=15): 
+        while True:
+            try: 
+                if select.select([self.connection], [], [], timeout) == ([], [], []):
+                    yield tornado.gen.sleep(sleep_time) 
+                else:
+                    self.connection.poll()
+                    import pdb; pdb.set_trace()
+                    _log.info('Notifying listeners of logs - %s' % (self.connection.notifies))
+                    while self.connection.notifies:
+                        yield self.connection.notifies.pop(0)
+                    yield tornado.gen.sleep(sleep_time) 
+            except Exception as e: 
+                _log.error('Something went wrong in pubsub notifications - %s' % (e))
+                self.reconnect() 
+    
+    def reconnect(self):
+        self.connection.cursor.close()
+        self.listening = False 
+        self.connect() 
+        for channel in self.channels: 
+            self.listen(channel)  
+
+    def listen(self, channel):
+        # if we have not yet spawned an infinite callback for this connection 
+        # go ahead and blast away.  
+        if channel not in self.channels: 
+            self.connection.cursor().execute('LISTEN %s' % channel)
+        if not self.listening: 
+            self.channels.append(channel)  
+            self.listening = True  
+            self.io_loop.spawn_callback(self.notify_callback)
+
+    def unlisten(self, channel):
+        with self.connection.cursor() as cursor: 
+            cursor.execute('UNLISTEN %s' % channel)
+
         
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
@@ -1661,22 +1709,32 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
-        conn = PubSubConnection.get(cls)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            pubsub = neondata.PostgresPubSub();
+            pubsub.connect()
+            yield pubsub.listen(pattern) 
+        else: 
+            conn = PubSubConnection.get(cls)
         
-        yield conn.subscribe(
-            lambda x: cls._handle_all_changes(x, func, conn, get_object),
-            '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
-            async=True)
+            yield conn.subscribe(
+                lambda x: cls._handle_all_changes(x, func, conn, get_object),
+                '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
+                async=True)
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
-        conn = PubSubConnection.get(cls)
+        if options.get('cmsdb.neondata.wants_postgres'):
+            pubsub = neondata.PostgresPubSub();
+            pubsub.connect()
+            yield pubsub.unlisten(pattern) 
+        else: 
+            conn = PubSubConnection.get(cls)
         
-        yield conn.unsubscribe(
-            '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
-            async=True)
+            yield conn.unsubscribe(
+                '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
+                async=True)
 
     @classmethod
     def format_subscribe_pattern(cls, pattern):

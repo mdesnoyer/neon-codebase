@@ -2536,15 +2536,44 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_retry_connection(self): 
-        #exception_mocker = patch('cmsdb.neondata.PostgresDB._PostgresDB._get_momoko_connection')
-        pg1 = neondata.PostgresDB()
         exception_mocker = patch('momoko.Connection.connect')
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
-        blah = yield pg1.get_connection()
-        import pdb; pdb.set_trace() 
-     
+        pg1 = neondata.PostgresDB()
+        with self.assertLogExists(logging.ERROR, 'Unable to get a connection to Postgres Database'):
+            yield pg1.get_connection()
+
+class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPostgresPubSub, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test(timeout=50)
+    def test_listen_and_notify(self): 
+        pubsub = neondata.PostgresPubSub();
+        pubsub.connect()
+        pubsub.listen('neonuseraccount')
+
+        with self.assertLogExists(logging.INFO, 'blah'): 
+            so = neondata.NeonUserAccount(uuid.uuid1().hex)
+            rv = yield so.save(async=True)
+            yield tornado.gen.sleep(30)
+            
+        #yield tornado.gen.sleep(4)  
+        #import pdb; pdb.set_trace() 
+
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGNeonUserAccount, self).setUp()

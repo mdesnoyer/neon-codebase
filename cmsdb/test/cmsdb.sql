@@ -320,6 +320,34 @@ CREATE UNIQUE INDEX account_id ON neonuseraccount USING btree (((_data ->> 'acco
 -- Name: public; Type: ACL; Schema: -; Owner: postgres
 --
 
+CREATE OR REPLACE FUNCTION tables_notify_func() RETURNS trigger as $$
+DECLARE
+  payload text;
+BEGIN   
+    IF TG_OP = 'DELETE' THEN
+    payload := row_to_json(tmp)::text FROM (
+            SELECT
+                OLD.*,
+                TG_OP
+        ) tmp;
+    ELSE
+        payload := row_to_json(tmp)::text FROM (
+            SELECT 
+                NEW.*,
+                TG_OP
+        ) tmp;
+    END IF;
+
+  PERFORM pg_notify(TG_TABLE_NAME::text, payload);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER neonuseraccount_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON neonuseraccount
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 REVOKE ALL ON SCHEMA public FROM postgres;
 GRANT ALL ON SCHEMA public TO postgres;
