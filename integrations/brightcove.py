@@ -643,9 +643,22 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     sucess = yield tornado.gen.Task(new_thumb.save)
                     if not sucess:
                         raise IOError("Could not save thumbnail")
-                    sucess = yield tornado.gen.Task(vid_meta.save)
-                    if not sucess:
-                        raise IOError("Could not save video data")
+                    # Even though the vid_meta already has the new_thumb
+                    # in thumbnail_ids, the database still doesn't have it yet.
+                    # We will modify in database first. Also, modify is used
+                    # first instead of using save directively, as other process
+                    # can modify the vid_meta as well.
+                    updated_video = yield tornado.gen.Task(
+                        vid_meta.modify,
+                        vid_meta.key,
+                        lambda x: x.thumbnail_ids.append(new_thumb.key))
+                    if updated_video is None:
+                        # It wasn't in the database, so save this object
+                        sucess = yield tornado.gen.Task(vid_meta.save)
+                        if not sucess:
+                            raise IOError("Could not save video data")
+                        else:
+                            vid_meta.__dict__ = updated_video.__dict__
 
                     _log.info(
                         'Found new thumbnail %s for video %s at Brigthcove.' %
