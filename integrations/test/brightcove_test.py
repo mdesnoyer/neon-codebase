@@ -490,9 +490,22 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         self.assertGreater(self.cdn_mock.call_count, 0)
 
         # Reset the future wrap
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
+        self.im_download_mock.result_mock()
         self.im_download_mock.side_effect = [self.random_image]
+        # Make sure a new image was added to the database
+        # The first one is added, but not the second one
+        video_meta = VideoMetadata.get('acct1_v1')
+        self.assertEquals(len(video_meta.thumbnail_ids), 4)
+        thumbs = ThumbnailMetadata.get_many(video_meta.thumbnail_ids)
+        for thumb in thumbs:
+            if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
+                                 'acct1_v1_bc2']:
+                self.assertEquals(thumb.rank, -1)
+                self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
+                self.assertEquals(thumb.urls, [
+                    'some_cdn_url.jpg',
+                    'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'])
+                self.assertEquals(thumb.external_id, '4562077467002')
 
         yield self.integration.submit_one_video_object(
             { 'id' : 'v1',
@@ -525,12 +538,9 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         for thumb in thumbs:
             if thumb.key not in ['acct1_v1_bc1', 'acct1_v1_n1',
                                  'acct1_v1_bc2']:
-                self.assertEquals(thumb.rank, -1)
-                self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
-                self.assertEquals(thumb.urls, [
-                    'some_cdn_url.jpg',
-                    'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg'])
-                self.assertEquals(thumb.external_id, '4562077467002')
+                # Validate the last thumbnail is not added.
+                self.assertNotEquals(thumb.external_id, '4562077467003')
+                self.assertNotEquals(thumb.external_id, '4562076241003')
 
 
     @tornado.testing.gen_test
