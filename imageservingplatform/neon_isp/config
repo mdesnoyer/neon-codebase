@@ -20,7 +20,6 @@ NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_neon_module.cpp
                                 $ngx_addon_dir/neon_utils.c
                                 $ngx_addon_dir/neon_utc.c
                                 $ngx_addon_dir/mastermind.cpp
-                                $ngx_addon_dir/neonHash.cpp
                                 $ngx_addon_dir/publisher.cpp
                                 $ngx_addon_dir/publisherHashtable.cpp
                                 $ngx_addon_dir/directive.cpp

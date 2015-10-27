@@ -1367,9 +1367,9 @@ class StoredObject(object):
             key_sets[obj._set_keyname()].append(key)
 
         def _del_and_remfromset(pipe):
-            for set_key, keys in key_sets.iteritems():
-                pipe.srem(set_key, *keys)
-            pipe.delete(*keys)
+            for set_key, ks in key_sets.iteritems():
+                pipe.srem(set_key, *ks)
+                pipe.delete(*ks)
             return True
             
         if callback:
@@ -1417,7 +1417,6 @@ class StoredObject(object):
         keys, ops = filtered
 
         if get_object:
-            _log.error(str(keys))
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
@@ -2537,7 +2536,7 @@ class AbstractIntegration(NamespacedStoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        return cls.__name__
+        return AbstractIntegration.__name__
 
 
 # DEPRECATED use AbstractIntegration instead
@@ -4591,6 +4590,44 @@ class VideoMetadata(StoredObject):
                                        _update_serving_url)
         raise tornado.gen.Return(serving_url)
         
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def image_available_in_isp(self):
+        try:               
+            url = yield self.get_serving_url(save=False, async=True)
+            if url is None:
+                _log.error('No serving url specified for video %s' % video_id)
+                raise tornado.gen.Return(False)
+
+            req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
+                                                 follow_redirects=True)
+            http_client = tornado.httpclient.AsyncHTTPClient()
+            res = yield utils.http.send_request(req, async=True)
+
+            if res.code != 200:
+                _log.debug('Image not available in ISP yet. Code %s' %
+                           res.code)
+                raise tornado.gen.Return(False)
+     
+            effective_url = res.effective_url
+            urlRegex = re.compile('neontn(.*)\.jpe?g')
+            urlSearch = urlRegex.search(res.effective_url)
+            if urlSearch is None:
+                _log.warn('Invalid effective url found for video %s: %s' %
+                          (self.key, res.effective_url))
+                raise tornado.gen.Return(False)
+
+            neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
+                                                       self.get_account_id())
+            if urlSearch.group(1) == neon_user_account.default_thumbnail_id:
+                _log.debug('Still redirecting to the account default url')
+                raise tornado.gen.Return(False)
+            raise tornado.gen.Return(True)
+        except tornado.httpclient.HTTPError as e: 
+            pass
+
+        raise tornado.gen.Return(False)
+    
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
