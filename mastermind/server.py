@@ -289,7 +289,11 @@ class VideoDBWatcher(object):
         _log.info('Loading current experiment info and updating in mastermind')
 
         t_begin = datetime.datetime.now()
-        for platform in neondata.AbstractPlatform.get_all():
+	print "begin time:", t_begin
+	# all_platform = yield tornado.gen.Task(neondata.AbstractPlatform.get_all())
+        all_platform = neondata.AbstractPlatform.get_all()
+	print "Length of all_platform:", len(all_platform)
+        for platform in all_platform:
             if not platform.serving_enabled:
                 continue
             for video_id in platform.get_internal_video_ids():
@@ -312,7 +316,7 @@ class VideoDBWatcher(object):
                     video_id,
                     video_status,
                     thumbnail_status_list)
-        t_end = datatime.now()
+        t_end = datetime.now()
         print "initialize_serving_directives run time is", t_end - t_begin
 
     def _process_db_data(self):
@@ -1502,10 +1506,17 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
     ioloop = tornado.ioloop.IOLoop()
     with activity_watcher.activate():
+        mastermind = Mastermind()
+        video_id_cache = VideoIdCache()
+        publisher = DirectivePublisher(mastermind, 
+                                       activity_watcher=activity_watcher)
         video_db_watcher = VideoDBWatcher(mastermind, publisher, video_id_cache,
                                           activity_watcher)
         ioloop.add_callback(video_db_watcher.initialize_serving_directives)
     ioloop.make_current()
+    def print_every_5_seconds():
+        print "[[every 5 seconds]]"
+    a = tornado.ioloop.PeriodicCallback(print_every_5_seconds, 5000, io_loop=ioloop)
 
     atexit.register(ioloop.stop)
     # atexit.register(publisher.stop)
@@ -1518,9 +1529,11 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
         statemon.state.last_publish_time = (
             datetime.datetime.utcnow() -
             publisher.last_publish_time).total_seconds()
-    tornado.ioloop.PeriodicCallback(update_publish_time, 10000, io_loop=ioloop)
+    # tornado.ioloop.PeriodicCallback(update_publish_time, 10000, io_loop=ioloop)
+    print "Right before ioloop start."
+    # a.start()
     ioloop.start()
-
+    print "print interval start status:", a.is_running()
     # publisher.join(300)
     # videoDbThread.join(30)
     # statsDbThread.join(30)
