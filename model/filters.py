@@ -143,7 +143,7 @@ class CachedCascadeFilter(CascadeFilter):
     they can be accessed later. If initialized with force, it will
     always run through all the filters.'''
     def __init__(self, filters, max_height=None, force=False):
-        super(CascadeFilter, self).__init__(max_height)
+        super(CachedCascadeFilter, self).__init__(max_height)
         self.last_scores = None
         
     def _accept_impl(self, image, frameno, video):
@@ -213,7 +213,7 @@ class UniformColorFilter(Filter):
 
         return frac_same
 
-     def accept_score(self, image, frameno=None, video=None):
+    def accept_score(self, image, frameno=None, video=None):
         score = self.score(image)
         accepted = score < self.frac_pixels
         return (accepted, score)
@@ -710,4 +710,4 @@ class ClosedEyesFilter(Filter):
         self.pca = joblib.load(fn)
 
     def short_description(self):
-        return 'closed eyes'
+        return 'closed_eyes'
