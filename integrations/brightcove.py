@@ -657,8 +657,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         sucess = yield tornado.gen.Task(vid_meta.save)
                         if not sucess:
                             raise IOError("Could not save video data")
-                        else:
-                            vid_meta.__dict__ = updated_video.__dict__
+                    else:
+                        vid_meta.__dict__ = updated_video.__dict__
 
                     _log.info(
                         'Found new thumbnail %s for video %s at Brigthcove.' %
