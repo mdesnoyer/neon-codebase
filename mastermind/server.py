@@ -81,9 +81,6 @@ define('serving_update_delay', type=int, default=30,
 define('isp_wait_timeout', type=float, default=1800.0,
        help='Timeout when waiting for the ISP to serve a new video')
 
-# Callback options
-define('send_callbacks', default=1, help='If 1, callbacks are sent')
-
 # Script running options
 define('tmp_dir', default='/tmp', help='Temp directory to work in')
 
@@ -1522,8 +1519,7 @@ class DirectivePublisher(threading.Thread):
             if (request is not None and 
                 request.callback_state == 
                 neondata.CallbackState.NOT_SENT and 
-                request.callback_url and
-                options.send_callbacks):
+                request.callback_url):
 
                 statemon.state.increment('pending_callbacks')
                 self._send_callback(request)
