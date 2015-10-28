@@ -278,6 +278,7 @@ class VideoDBWatcher(object):
         self._stopped.set()
         self._video_updater.stop()
 
+    @tornado.gen.coroutine
     def initialize_serving_directives(self):
         '''Save current experiment state and serving fracs to mastermind
          
@@ -289,15 +290,15 @@ class VideoDBWatcher(object):
         _log.info('Loading current experiment info and updating in mastermind')
 
         t_begin = datetime.datetime.now()
-	print "begin time:", t_begin
-	# all_platform = yield tornado.gen.Task(neondata.AbstractPlatform.get_all())
-        all_platform = neondata.AbstractPlatform.get_all()
-	print "Length of all_platform:", len(all_platform)
+        print "begin time:", t_begin
+	    all_platform = yield tornado.gen.Task(neondata.AbstractPlatform.get_all)
+        print "Length of all_platform:", len(all_platform)
         for platform in all_platform:
             if not platform.serving_enabled:
                 continue
             for video_id in platform.get_internal_video_ids():
-                video_metadata = neondata.VideoMetadata.get(video_id)
+                video_metadata = \
+                    yield (neondata.VideoMetadata.get, video_id)
                 account_id = video_metadata.get_account_id()
                 if not video_metadata.serving_enabled:
                     continue
