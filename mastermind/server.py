@@ -301,8 +301,8 @@ class VideoDBWatcher(object):
         for platform in all_platform:
             if not platform.serving_enabled:
                 continue
-            platform_ids = platform.get_internal_video_ids()
-            for video_id_chunck in chunks(platform_ids, 100):
+            platform_video_ids = platform.get_internal_video_ids()
+            for video_id_chunck in chunks(platform_video_ids, 100):
                 video_metadata_chunck = \
                     yield tornado.gen.Task(neondata.VideoMetadata.get_many,
                                            video_id_chunck)
