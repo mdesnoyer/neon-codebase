@@ -290,35 +290,49 @@ class VideoDBWatcher(object):
         _log.info('Loading current experiment info and updating in mastermind')
 
         t_begin = datetime.datetime.now()
-        print "begin time:", t_begin
+        # TODO: remove this line.
+        _log.info("begin time: %s" % str(t_begin))
 	    all_platform = yield tornado.gen.Task(neondata.AbstractPlatform.get_all)
         print "Length of all_platform:", len(all_platform)
+        def chunks(source, n):
+            ''' yield successive n-sized chunks from the source list.'''
+            for i in xrange(0, len(source), n):
+                yield source[i: i+n]
         for platform in all_platform:
             if not platform.serving_enabled:
                 continue
-            for video_id in platform.get_internal_video_ids():
-                video_metadata = \
-                    yield (neondata.VideoMetadata.get, video_id)
-                account_id = video_metadata.get_account_id()
-                if not video_metadata.serving_enabled:
-                    continue
-                video_status = neondata.VideoStatus.get(video_id,
-                                                        log_missing=False)
-                if video_status is None:
-                    continue
+            platform_ids = platform.get_internal_video_ids()
+            for video_id_chunck in chunks(platform_ids, 100):
+                video_metadata_chunck = \
+                    yield tornado.gen.Task(neondata.VideoMetadata.get_many,
+                                           video_id_chunck)
 
-                # Get all thumbnails
-                thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    set(video_metadata.thumbnail_ids), log_missing=False)
-                thumbnail_status_list = [x for x in thumbnail_status_list if
-                                         x is not None]
+                for video_metadata in video_metadata_chunck:
+                    account_id = video_metadata.get_account_id()
+                    if not video_metadata.serving_enabled:
+                        continue
+                    video_status = \
+                        yield tornado.gen.Task(neondata.VideoStatus.get,
+                                               video_id,
+                                               log_missing=False)
+                    if video_status is None:
+                        continue
 
-                self.mastermind.update_experiment_state_directive(
-                    video_id,
-                    video_status,
-                    thumbnail_status_list)
+                    # Get all thumbnails
+                    thumbnail_status_list = \
+                        yield tornado.gen.Task(neondata.ThumbnailStatus.get_many,
+                                               set(video_metadata.thumbnail_ids),
+                                               log_missing=False)
+                    thumbnail_status_list = [x for x in thumbnail_status_list if
+                                             x is not None]
+
+                    self.mastermind.update_experiment_state_directive(
+                        video_id,
+                        video_status,
+                        thumbnail_status_list)
+        # TODO: remove this line.
         t_end = datetime.now()
-        print "initialize_serving_directives run time is", t_end - t_begin
+        _log.info("initialize_serving_directives run time is %s" % str(t_end - t_begin))
 
     def _process_db_data(self):
         _log.info('Polling the video database for a full batch update')
