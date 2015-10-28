@@ -486,7 +486,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
 
         # Make sure the url is loaded, image uploaded.
         self.im_download_mock.assert_called_with(
-            'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg', async=True)
+            'http://r.ddmcdn.com/s_f/o_1/DSC/uploads/2015/10/150813.032.01.197_20151016_103245.jpg')
         self.assertGreater(self.cdn_mock.call_count, 0)
 
         # Reset the future wrap
@@ -526,8 +526,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
             }
             )
 
-        self.im_download_mock.assert_called_with(
-            'http://second.jpg', async=True)
+        self.im_download_mock.assert_called_with('http://second.jpg')
         self.assertGreater(self.cdn_mock.call_count, 0)
 
         # Make sure a new image was added to the database
