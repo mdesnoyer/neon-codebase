@@ -51,3 +51,11 @@ def get_mobile_clause(do_mobile):
                 "('iPhone', 'Android', 'IPad', 'BlackBerry') ")
 
     return ''
+
+def get_desktop_clause(do_desktop):
+    if do_desktop:
+        _log.info('Only collecting desktop data')
+        return (" and agentinfo_os_name in "
+                "('Windows', 'MacOS', 'Ubuntu', 'Linux') ")
+
+    return ''

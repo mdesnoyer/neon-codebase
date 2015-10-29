@@ -336,7 +336,7 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor = self.setup_video_processor("neon")
 
         with self.assertLogExists(logging.ERROR, "Error reading"):
-            with self.assertRaises(model.errors.VideoReadError):
+            with self.assertRaises(video_processor.client.BadVideoError):
                 vprocessor.process_video('a_garbage_video_thats_gone.mov')
 
     def test_process_all_filtered_video(self):
@@ -1138,7 +1138,7 @@ class SmokeTest(test_utils.neontest.TestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 'http://L\xc3\xb6rick_video.mp4'
             })
                     
         # Check the api request in the database
