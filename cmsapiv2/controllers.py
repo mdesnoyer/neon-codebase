@@ -6,7 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api_v2 import *
+from apiv2 import *
 
 _log = logging.getLogger(__name__)
 

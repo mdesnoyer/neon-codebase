@@ -6,7 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api_v2 import *
+from apiv2 import *
 from datetime import datetime, timedelta
 from passlib.hash import sha256_crypt
 
@@ -96,7 +96,7 @@ class LogoutHandler(APIV2Handler):
         schema = Schema({
           Required('token') : Any(str, unicode, Length(min=1, max=512))
         })
-        args = self.parse_args()
+        args = self.parse_args(keep_token=True)
         schema(args)
 
         try: 
@@ -148,7 +148,7 @@ class RefreshTokenHandler(APIV2Handler):
           Required('token') : Any(str, unicode, Length(min=1, max=512))
         })
 
-        args = self.parse_args()
+        args = self.parse_args(keep_token=True)
         schema(args)
         refresh_token = args.get('token') 
         try: 

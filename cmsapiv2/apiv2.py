@@ -169,18 +169,18 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         parsed_url = urlparse(request.uri) 
         request.account_id = parsed_url.path.split('/')[3]
  
-    def parse_args(self):
+    def parse_args(self, keep_token=False):
         args = {} 
         # if we have query_arguments only use them 
         if len(self.request.query_arguments) > 0: 
             for key, value in self.request.query_arguments.iteritems():
-                if key != 'token': 
+                if key != 'token' or keep_token: 
                     args[key] = value[0]
         # otherwise let's use what we find in the body, json only
         elif len(self.request.body) > 0: 
             bjson = json.loads(self.request.body) 
             for key, value in bjson.items():
-                if key != 'token': 
+                if key != 'token' or keep_token: 
                     args[key] = value
 
         return args

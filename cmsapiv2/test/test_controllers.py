@@ -5,7 +5,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
-from cmsapiv2.api_v2 import *
+from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
@@ -220,7 +220,7 @@ class TestAccountHandler(TestControllersBase):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -380,7 +380,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testiid' 
         defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -499,7 +499,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -796,7 +796,7 @@ class TestVideoHandler(TestControllersBase):
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -1264,7 +1264,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image] 
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -1436,7 +1436,7 @@ class TestVideoStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -1520,7 +1520,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.api_v2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.apiv2.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
@@ -2104,7 +2104,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         super(TestRefreshTokenHandler, self).setUp()
    
     def tearDown(self): 
-        options._set('cmsapiv2.api_v2.refresh_token_exp', 132423)
+        options._set('cmsapiv2.apiv2.refresh_token_exp', 132423)
  
     @classmethod 
     def setUpClass(cls): 
@@ -2134,7 +2134,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 400)
 
     def test_refresh_token_expired(self):
-        options._set('cmsapiv2.api_v2.refresh_token_exp', 0) 
+        options._set('cmsapiv2.apiv2.refresh_token_exp', 0) 
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
