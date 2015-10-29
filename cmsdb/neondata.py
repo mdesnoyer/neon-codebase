@@ -39,6 +39,7 @@ import itertools
 import simplejson as json
 import logging
 import multiprocessing
+from passlib.hash import sha256_crypt
 from PIL import Image
 import random
 import re
@@ -902,7 +903,16 @@ class DefaultSizes(object):
     HEIGHT = 90 
 
 class ServingControllerType(object): 
-    IMAGEPLATFORM = 'imageplatform' 
+    IMAGEPLATFORM = 'imageplatform'
+
+class AccessLevels(object): 
+    READ = 1 
+    UPDATE = 2 
+    CREATE = 4 
+    DELETE = 8
+    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
+    ADMIN = 16 
+    GLOBAL_ADMIN = 32
 
 ##############################################################################
 class StoredObject(object):
@@ -1884,6 +1894,51 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         else:
             return format_tuple(cls.get(tai))
 
+class User(NamespacedStoredObject): 
+    ''' User 
+    
+    These are users that can used across multiple systems most notably 
+    the API and the current UI. 
+
+    Each of these can be attached to a NeonUserAccount (misnamed, but this 
+    is our Application/Customer layer). This will grant the User access to 
+    anything the NeonUserAccount can access.  
+        
+    Users can be associated to many NeonUserAccounts     
+    ''' 
+    def __init__(self, 
+                 username, 
+                 password='password', 
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+ 
+        super(User, self).__init__(username)
+
+        # here for the conversion to postgres, not used yet  
+        self.user_id = uuid.uuid1().hex
+
+        # the users username, chosen by them, redis key 
+        self.username = username
+
+        # the users password_hash, we don't store plain text passwords 
+        self.password_hash = sha256_crypt.encrypt(password)
+
+        # short-lived JWtoken that will give user access to API calls 
+        self.access_token = None
+
+        # longer-lived JWtoken that will allow a user to refresh a token
+        # this token should only be sent over HTTPS to the auth endpoints
+        # for now this is not encrypted 
+        self.refresh_token = None
+
+        # access level granted to this user, uses class AccessLevels 
+        self.access_level = access_level 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return User.__name__
+        
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
 
@@ -1941,7 +1996,11 @@ class NeonUserAccount(NamespacedStoredObject):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller
-    
+
+        # What users are privy to the information assoicated to this NeonUserAccount
+        # simply a list of usernames 
+        self.users = []
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.

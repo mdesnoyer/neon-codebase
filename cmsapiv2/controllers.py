@@ -6,48 +6,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import traceback
-import datetime
-import json
-import hashlib
-import logging
-import os
-import signal
-import time
-import ast
+from api_v2 import *
 
-import tornado.httpserver
-import tornado.ioloop
-import tornado.web
-import tornado.escape
-import tornado.gen
-import tornado.httpclient
-
-import utils.neon
-import utils.logs
-import utils.http
-
-import dateutil.parser
-
-from cmsdb import neondata
-from datetime import datetime
-from functools import wraps 
-import utils.sync
-from utils.options import define, options
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any, Optional
-from urlparse import urlparse 
-
-import logging
 _log = logging.getLogger(__name__)
-import uuid
-import jwt
 
 define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
 
-from utils import statemon
 statemon.define('post_account_oks', int) 
 statemon.define('put_account_oks', int) 
 statemon.define('get_account_oks', int) 
@@ -68,181 +35,6 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int) 
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
-
-statemon.define('invalid_input_errors', int)
-_invalid_input_errors_ref = statemon.state.get_ref('invalid_input_errors')
-statemon.define('unauthorized_errors', int) 
-_unauthorized_errors_ref = statemon.state.get_ref('unauthorized_errors')
-statemon.define('not_found_errors', int) 
-_not_found_errors_ref = statemon.state.get_ref('not_found_errors')
-statemon.define('not_implemented_errors', int)
-_not_implemented_errors_ref = statemon.state.get_ref('not_implemented_errors')
-statemon.define('already_exists_errors', int)
-_already_exists_errors_ref = statemon.state.get_ref('already_exists_errors')
-
-statemon.define('internal_server_errors', int)  
-_internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
-
-class ResponseCode(object): 
-    HTTP_OK = 200
-    HTTP_ACCEPTED = 202 
-    HTTP_BAD_REQUEST = 400
-    HTTP_UNAUTHORIZED = 401 
-    HTTP_NOT_FOUND = 404 
-    HTTP_CONFLICT = 409 
-    HTTP_INTERNAL_SERVER_ERROR = 500
-    HTTP_NOT_IMPLEMENTED = 501
-
-class APIV2Sender(object): 
-    def success(self, data, code=ResponseCode.HTTP_OK):
-        self.set_status(code) 
-        self.write(data) 
-        self.finish()
-
-    def error(self, message, extra_data=None, code=None):
-        error_json = {} 
-        error_json['message'] = message
-        if code: 
-            error_json['code'] = code 
-        if extra_data: 
-            error_json['data'] = extra_data 
-        self.write(error_json)
-        self.finish() 
-
-class apiv2(object):
-    @staticmethod
-    def api_key_required(func): 
-        def _decorator(request, *args, **kwargs):
-            request.set_account_id() 
-            verified = request.verify_account()
-            if not verified: 
-                raise NotAuthorizedError()
-            return func(request, *args, **kwargs)
-        return wraps(func)(_decorator)
-    
-    ''' 
-    TODO finish implementation 
-    def internal_only_api(func): 
-        def _decorator(request, *args, **kwargs):
-            if not verified: 
-                raise NotAuthorizedError()
-            return func(request, *args, **kwargs)
-        return wraps(func)(_decorator)
-    ''' 
- 
-class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self):
-        self.set_header("Content-Type", "application/json")
-        self.header_api_key = self.request.headers.get('X-Neon-API-Key')
-        self.uri = self.request.uri 
-
-    def set_account_id(request):
-        parsed_url = urlparse(request.uri) 
-        request.account_id = parsed_url.path.split('/')[3]
-
-    def verify_account(request):
-        account = neondata.NeonUserAccount.get(request.account_id)
-        if not account: 
-            return False
-        account_api_key = account.api_v2_key
-        if request.header_api_key is None:
-            return False
-        if account_api_key not in request.header_api_key:
-            return False
-        return True
-    
-    ''' 
-    TODO finish implementation 
-    def verify_internal_access(request): 
-        blah2 = jwt.decode(blah, 'secret', algorithms=['HS256'])
-    ''' 
-        
-    def parse_args(self):
-        args = {} 
-        # if we have query_arguments only use them 
-        if len(self.request.query_arguments) > 0: 
-            for key, value in self.request.query_arguments.iteritems():
-                args[key] = value[0]
-        # otherwise let's use what we find in the body, json only
-        elif len(self.request.body) > 0: 
-            bjson = json.loads(self.request.body) 
-            for key, value in bjson.items():
-                args[key] = value
-
-        return args
-
-    def write_error(self, status_code, **kwargs):
-        def get_exc_message(exception):
-            return exception.log_message if \
-                hasattr(exception, "log_message") else str(exception)
-
-        self.clear()
-        self.set_status(status_code)
-        exception = kwargs["exc_info"][1]
-        if any(isinstance(exception, c) for c in [Invalid, 
-                                                  NotAuthorizedError,
-                                                  NotFoundError,  
-                                                  NotImplementedError]):
-            if isinstance(exception, Invalid):
-                statemon.state.increment(ref=_invalid_input_errors_ref,
-                                         safe=False)
-                self.set_status(ResponseCode.HTTP_BAD_REQUEST)
-            if isinstance(exception, NotFoundError):
-                statemon.state.increment(ref=_not_found_errors_ref,
-                                         safe=False)
-                self.set_status(ResponseCode.HTTP_NOT_FOUND)
-            if isinstance(exception, NotAuthorizedError):
-                statemon.state.increment(ref=_unauthorized_errors_ref,
-                                         safe=False)
-                self.set_status(ResponseCode.HTTP_UNAUTHORIZED)
-            if isinstance(exception, NotImplementedError):
-                statemon.state.increment(ref=_not_implemented_errors_ref,
-                                         safe=False)
-                self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
-
-            self.error(get_exc_message(exception), code=self.get_status())
-
-        elif isinstance(exception, AlreadyExists):
-            self.set_status(ResponseCode.HTTP_CONFLICT)
-            statemon.state.increment(ref=_already_exists_errors_ref,
-                                     safe=False)
-            self.error('this item already exists', extra_data=get_exc_message(exception))
- 
-        elif isinstance(exception, neondata.ThumbDownloadError): 
-            self.set_status(ResponseCode.HTTP_BAD_REQUEST)
-            self.error('failed to download thumbnail', extra_data=get_exc_message(exception)) 
-
-        else:
-            _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
-            statemon.state.increment(ref=_internal_server_errors_ref,
-                                     safe=False)
-            self.error(message=self._reason,
-                extra_data=get_exc_message(exception),
-                code=status_code)
-
-    @tornado.gen.coroutine 
-    def get(self, *args):
-        raise NotImplementedError('get not implemented')  
-
-    __get = get
- 
-    @tornado.gen.coroutine 
-    def post(self, *args):
-        raise NotImplementedError('post not implemented')  
-
-    __post = post
-
-    @tornado.gen.coroutine 
-    def put(self, *args):
-        raise NotImplementedError('put not implemented')  
-
-    __put = put
-
-    @tornado.gen.coroutine 
-    def delete(self, *args):
-        raise NotImplementedError('delete not implemented')  
-
-    __delete = delete
 
 '''****************************************************************
 Return Formatter
@@ -280,6 +72,11 @@ class NewAccountHandler(APIV2Handler):
     @tornado.gen.coroutine 
     def post(self):
         """handles account endpoint post request""" 
+
+        yield apiv2.is_authorized(self, 
+                                  neondata.AccessLevels.GLOBAL_ADMIN, 
+                                  account_required=False)
+
         schema = Schema({ 
           Required('name') : Any(str, unicode, Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
@@ -312,10 +109,12 @@ class AccountHandler(APIV2Handler):
     """Handles get,put requests to the account endpoint. 
        Gets and updates existing accounts.
     """
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):
-        """handles account endpoint get request""" 
+        """handles account endpoint get request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
         })
@@ -328,19 +127,17 @@ class AccountHandler(APIV2Handler):
 
         if not user_account: 
             raise NotFoundError()
-        # on the public endpoint, we dont want another user 
-        # to be able to get an account they do not own
-        if self.header_api_key != user_account.api_v2_key: 
-            raise NotAuthorizedError()
  
         user_account = ReturnFormatter.format_user_return(user_account)
         statemon.state.increment('get_account_oks')
         self.success(json.dumps(user_account))
  
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
-        """handles account endpoint put request""" 
+        """handles account endpoint put request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
@@ -355,11 +152,6 @@ class AccountHandler(APIV2Handler):
         if not acct_internal: 
             raise NotFoundError()
  
-        # on the public endpoint, we dont want another user 
-        # to be able to update an account they do not own
-        if self.header_api_key != acct_internal.api_v2_key: 
-            raise NotAuthorizedError()
-
         acct_for_return = ReturnFormatter.format_user_return(acct_internal)
         def _update_account(a):
             a.default_size = list(a.default_size) 
@@ -453,13 +245,13 @@ OoyalaIntegrationHandler
 *********************************************************************'''
 class OoyalaIntegrationHandler(APIV2Handler):
     """Handles get,put,post requests to the ooyala endpoint within the v2 api."""
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """Handles an ooyala endpoint post request 
         
         Keyword arguments:
         """ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -474,10 +266,12 @@ class OoyalaIntegrationHandler(APIV2Handler):
         statemon.state.increment('post_ooyala_oks')
         self.success(json.dumps(integration.__dict__))
  
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):
-        """handles an ooyala endpoint get request""" 
+        """handles an ooyala endpoint get request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
@@ -492,10 +286,12 @@ class OoyalaIntegrationHandler(APIV2Handler):
         statemon.state.increment('get_ooyala_oks')
         self.success(json.dumps(integration.__dict__))
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
-        """handles an ooyala endpoint put request""" 
+        """handles an ooyala endpoint put request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -531,10 +327,12 @@ BrightcoveIntegrationHandler
 *********************************************************************'''
 class BrightcoveIntegrationHandler(APIV2Handler):
     """handles all requests to the brightcove endpoint within the v2 API"""  
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a brightcove endpoint post request""" 
+
+        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -554,10 +352,12 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('post_brightcove_oks')
         self.success(json.dumps(integration.__dict__))
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):  
-        """handles a brightcove endpoint get request""" 
+        """handles a brightcove endpoint get request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
@@ -571,10 +371,12 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('get_brightcove_oks')
         self.success(json.dumps(integration.__dict__))
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
-        """handles a brightcove endpoint put request""" 
+        """handles a brightcove endpoint put request"""
+
+        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+ 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -617,10 +419,12 @@ ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
     """handles all requests to the thumbnails endpoint within the v2 API"""  
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles a thumbnail endpoint post request""" 
+        """handles a thumbnail endpoint post request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -671,10 +475,12 @@ class ThumbnailHandler(APIV2Handler):
         else:
             raise SaveError('unable to save thumbnail to video') 
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id): 
-        """handles a thumbnail endpoint put request""" 
+        """handles a thumbnail endpoint put request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
@@ -700,10 +506,12 @@ class ThumbnailHandler(APIV2Handler):
         statemon.state.increment('put_thumbnail_oks')
         self.success(json.dumps(thumbnail.__dict__))
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id): 
-        """handles a thumbnail endpoint get request""" 
+        """handles a thumbnail endpoint get request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+ 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512))
@@ -838,10 +646,10 @@ class VideoHelper():
 VideoHandler 
 *********************************************************************'''
 class VideoHandler(APIV2Handler):
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request""" 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
@@ -894,10 +702,12 @@ class VideoHandler(APIV2Handler):
         else:
             raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
         
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id):  
-        """handles a Video endpoint get request""" 
+        """handles a Video endpoint get request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
@@ -953,10 +763,12 @@ class VideoHandler(APIV2Handler):
         statemon.state.increment('get_video_oks')
         self.success(json.dumps(vid_dict))
 
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def put(self, account_id):
-        """handles a Video endpoint put request""" 
+        """handles a Video endpoint put request"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -985,10 +797,12 @@ class VideoHandler(APIV2Handler):
 VideoStatsHandler 
 *********************************************************************'''
 class VideoStatsHandler(APIV2Handler):
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id): 
-        """gets the video statuses of 1 -> n videos""" 
+        """gets the video statuses of 1 -> n videos"""
+ 
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
@@ -1017,7 +831,6 @@ class VideoStatsHandler(APIV2Handler):
 ThumbnailStatsHandler 
 *********************************************************************'''
 class ThumbnailStatsHandler(APIV2Handler):
-    @apiv2.api_key_required
     @tornado.gen.coroutine
     def get(self, account_id): 
         """handles a thumbnail stats request
@@ -1025,6 +838,9 @@ class ThumbnailStatsHandler(APIV2Handler):
            account_id/video_id - returns stats information about all thumbnails 
                                  for that video 
         """
+
+        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Optional('thumbnail_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
@@ -1115,59 +931,6 @@ VideoSearchHandler : class responsible for searching videos
 class VideoSearchHandler(tornado.web.RequestHandler): 
     def __init__(self): 
         super(VideoSearchHandler, self).__init__() 
-
-'''*********************************************************************
-Controller Defined Exceptions 
-*********************************************************************'''
-class Error(Exception): 
-    pass 
-
-class SaveError(Error): 
-    def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR): 
-        self.msg = msg
-        self.code = code
- 
-class NotFoundError(tornado.web.HTTPError): 
-    def __init__(self, msg='resource was not found', code=ResponseCode.HTTP_NOT_FOUND): 
-        self.msg = self.reason = self.log_message = msg
-        self.code = self.status_code = code
- 
-class NotAuthorizedError(tornado.web.HTTPError): 
-    def __init__(self, msg='not authorized', code=ResponseCode.HTTP_UNAUTHORIZED): 
-        self.msg = self.reason = self.log_message = msg
-        self.code = self.status_code = code
-
-class AlreadyExists(tornado.web.HTTPError): 
-    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST):
-        self.msg = self.reason = self.log_message = msg
-        self.code = self.status_code = code
-
-'''*********************************************************************
-Custom Voluptuous Types
-*********************************************************************'''
-class CustomVoluptuousTypes(): 
-    @staticmethod
-    def Date():
-        return lambda v: dateutil.parser.parse(v)
-
-    @staticmethod
-    def CommaSeparatedList(limit=100):
-        def f(v): 
-            csl_list = v.split(',') 
-            if len(csl_list) > limit: 
-                raise Invalid("list exceeds limit (%d)" % limit) 
-            else: 
-                return True 
-        return f
- 
-    @staticmethod
-    def Dictionary():
-        def f(v):
-            if isinstance(ast.literal_eval(v), dict): 
-                return ast.literal_eval(v)
-            else:
-                raise Invalid("not a dictionary") 
-        return f 
 
 '''*********************************************************************
 Endpoints 
