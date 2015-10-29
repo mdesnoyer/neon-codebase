@@ -66,6 +66,16 @@ class ColorName(object):
         return JSD(hist_1, hist_2)
 
     def dist(self, other):
+        '''
+        Computes the distance to another ColorName object or
+        image sa the Jensen-Shannon divergence.
+        '''
         if not hasattr(other, '_hist'):
-            raise ValueError('Object of comparison must be ColorName object')
+            if type(other).__module__ == np.__name__:
+                # it's an image, create colorname object
+                other = ColorName(other)
+            else:
+                raise ValueError("Object of comparison must "
+                                 "be a ColorName object or a "
+                                 "image as a numpy array")
         return JSD(self._hist, other._hist)
