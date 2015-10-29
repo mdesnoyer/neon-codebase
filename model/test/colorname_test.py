@@ -106,9 +106,12 @@ class TestColorName(unittest.TestCase):
 class TestDedup(unittest.TestCase):
     def test_dedup(self):
         video_searcher = VideoSearcher([])
-        image_s1 = cv2.imread('test_similar_images/s1.jpg')
-        image_s2 = cv2.imread('test_similar_images/s2.jpg')
-        image_d1 = cv2.imread('test_similar_images/d1.jpg')
+        image_s1 = cv2.imread(os.path.join(os.path.dirname(__file__),
+                                           'test_similar_images/s1.jpg'))
+        image_s2 = cv2.imread(os.path.join(os.path.dirname(__file__),
+                                          'test_similar_images/s2.jpg'))
+        image_d1 = cv2.imread(os.path.join(os.path.dirname(__file__),
+                                           'test_similar_images/d1.jpg'))
         self.assertTrue(video_searcher.is_duplicate(image_s1, image_s2))
         self.assertFalse(video_searcher.is_duplicate(image_s1, image_d1))
         self.assertFalse(video_searcher.is_duplicate(image_s2, image_d1))
