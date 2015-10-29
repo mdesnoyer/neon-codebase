@@ -111,8 +111,7 @@ class FindAndParseFaces(object):
         self._facePoints = []
         for f in self._faceDets:
             self._facePoints.append(self.predictor(image, f)) 
-        print '%i faces detected'%(len(self._faceDets))
-
+        
     def get_comp(self, face, comp):
         '''
         Given a face index and a component key, returns the
@@ -161,3 +160,16 @@ class FindAndParseFaces(object):
         for face in range(len(self._facePoints)):
             for c in comp:
                 yield self.get_comp(face, c)
+
+    def get_all(self, comp):
+        '''
+        Similar to iterate_all, only returns the values as
+        a list.
+        '''
+        rcomps = []
+        if type(comp) != list:
+            comp = [comp]
+        for face in range(len(self._facePoints)):
+            for c in comp:
+                rcomps.append(self.get_comp(face, c))
+        return rcomps
