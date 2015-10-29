@@ -55,6 +55,14 @@ class TestSendRequest(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(utils.http.send_request(request), response)
 
+    def test_invalid_url(self):
+        with self.assertLogExists(logging.ERROR, 'Invalid url to request'):
+            response = utils.http.send_request(
+                HTTPRequest('file:///some/local/file'))
+
+        self.assertEquals(response.code, 400)
+        self.assertIsNotNone(response.error)
+
     def test_json_error_field(self):
         request, valid_response = create_valid_ack()
         invalid_response = HTTPResponse(request, 200,
