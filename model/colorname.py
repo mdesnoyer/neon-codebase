@@ -40,6 +40,7 @@ class ColorName(object):
 
     def __init__(self, image):
     	self.image = image
+        self._hist = self.get_colorname_histogram()
 
     def _image_to_colorname(self):
         BB = self.image[0:, 0:, 0].astype(int) / 8
@@ -63,3 +64,8 @@ class ColorName(object):
         hist_1 = cn_1.get_colorname_histogram()
         hist_2 = cn_2.get_colorname_histogram()
         return JSD(hist_1, hist_2)
+
+    def dist(self, other):
+        if not hasattr(other, '_hist'):
+            raise ValueError('Object of comparison must be ColorName object')
+        return JSD(self._hist, other._hist)
