@@ -125,7 +125,8 @@ class apiv2(object):
             raise NotAuthorizedError('user does not exist') 
 
         except jwt.ExpiredSignatureError:
-            raise NotAuthorizedError('access token is expired, either call refresh_token, or authenticate again') 
+            raise NotAuthorizedError('access token is expired, either \
+                                      call refresh_token, or authenticate again') 
         except (jwt.DecodeError, jwt.InvalidTokenError, KeyError): 
             raise NotAuthorizedError('invalid token') 
  
