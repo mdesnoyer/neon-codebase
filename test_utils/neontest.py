@@ -16,10 +16,14 @@ import tornado.gen
 import tornado.ioloop
 import tornado.testing
 import unittest
+import utils.statemon
 import utils.sync
 
 class TestCase(unittest.TestCase):
     '''Use this instead of the unittest one to get the extra functionality.'''
+
+    def tearDown(self):
+        utils.statemon.state._reset_values()
 
     @contextmanager
     def assertLogExists(self, level, regexp):
@@ -210,6 +214,7 @@ class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''
     def setUp(self):
         tornado.testing.AsyncHTTPTestCase.setUp(self)
+        utils.statemon.state._reset_values()
 
     def tearDown(self):
         tornado.testing.AsyncHTTPTestCase.tearDown(self)
