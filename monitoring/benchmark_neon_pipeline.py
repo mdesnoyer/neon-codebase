@@ -141,7 +141,7 @@ def monitor_neon_pipeline(video_id=None):
                 statemon.state.job_not_serving = 1
                 _log.error('Job took too long to reach serving state')
                 raise RunningTooLongError
-            time.sleep(5.0)
+            time.sleep(1.0)
 
         if not job_finished:
             statemon.state.time_to_finished = time.time() - start_request
