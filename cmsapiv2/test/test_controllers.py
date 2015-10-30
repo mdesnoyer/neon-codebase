@@ -1808,7 +1808,7 @@ class TestAPIKeyRequired(TestControllersBase):
         for url, method in urls:
             self.make_calls_and_assert_401(url, 
                                            method, 
-                                           message='access token is expired, either call refresh_token, or authenticate again')
+                                           message='access token is expired, please refresh the token')
 
     def test_401_with_not_valid_user(self):
         access_token = JWTHelper.generate_token({'username' : 'testuser'}) 
