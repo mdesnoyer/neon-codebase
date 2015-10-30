@@ -168,6 +168,13 @@ class DBConnection(object):
         self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
         self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
 
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        self.conn.close()
+        self.blocking_conn.close()
+
     def fetch_keys_from_db(self, pattern='*', keys_per_call=1000,
                            set_name=None, callback=None):
         '''Gets a list of keys that match a pattern.
@@ -257,7 +264,10 @@ class DBConnection(object):
 
         NOTE: To be only used by the test code
         '''
-        cls._singleton_instance = {}
+        with cls.__singleton_lock:
+            for k in cls._singleton_instance.keys():
+                cls._singleton_instance[k].close()
+                del cls._singleton_instance[k]
 
 class RedisRetryWrapper(object):
     '''Wraps a redis client so that it retries with exponential backoff.
@@ -276,6 +286,12 @@ class RedisRetryWrapper(object):
         self.client = None
         self.connection = None
         self._connect()
+
+    def __del__(self):
+        self._disconnect()
+
+    def close(self):
+        self._disconnect()
 
     def _connect(self):
         db_address = _get_db_address(self.class_name)
@@ -371,6 +387,12 @@ class RedisAsyncWrapper(object):
         self.connection = None
         self._lock = threading.RLock()
         self._connect()
+
+    def __del__(self):
+        self._disconnect()
+
+    def close(self):
+        self._disconnect()
 
     def _connect(self):
         db_address = _get_db_address(self.class_name)

@@ -30,20 +30,19 @@ def find_free_port():
         # Check if the port is free by trying to connect to it
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(('127.0.0.1', port))
-        #111 = connection refused linux, 61 = mac, 61 on linux is not used
-        #hence can be used below safely
-        if platform.system() == 'Darwin':
-            if result == 61:
-                free_port = port
+        try:
+            #111 = connection refused linux, 61 = mac, 61 on linux is not used
+            #hence can be used below safely
+            if platform.system() == 'Darwin':
+                if result == 61:
+                    free_port = port
+            elif platform.system() == 'Linux':
+                if result == 111:
+                    free_port = port
             else:
-                sock.close()
-        elif platform.system() == 'Linux':
-            if result == 111:
-                free_port = port
-            else:
-                sock.close()
-        else:
-            raise Exception("Platform not supported")
+                raise Exception("Platform not supported")
+        finally:
+            sock.close()
 
     random.setstate(rand_state)
     return free_port
