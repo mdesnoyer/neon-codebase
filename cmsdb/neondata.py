@@ -3630,7 +3630,7 @@ The video metadata for this request must be in the database already.
                 send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
-                    method='POST',
+                    method='PUT',
                     headers={'content-type' : 'application/json'},
                     body=response.to_json(),
                     request_timeout=20.0,
