@@ -19,12 +19,14 @@ from cmsdb.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import decimal
 import fake_filesystem
 import fake_tempfile
+import json
 import logging
 from mock import patch, MagicMock
 import multiprocessing.pool
 import numpy.random
 import test_utils.neontest
 import test_utils.redis
+import tornado.httpclient
 import utils.neon
 import unittest
 
@@ -2362,6 +2364,14 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.redis.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        # Mock out the http callback
+        self.http_patcher = patch('mastermind.core.utils.http')
+        self.http_mock = self._future_wrap_mock(
+            self.http_patcher.start().send_request,
+            require_async_kw=True)
+        self.http_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(x, 200)
+
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
@@ -2382,13 +2392,21 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
         ThumbnailMetadata.save_all(self.thumbnails)
         self.video_metadata = VideoMetadata(
-            'acct1_vid1', tids=[x.key for x in self.thumbnails])
+            'acct1_vid1', request_id='job1',
+            tids=[x.key for x in self.thumbnails])
         self.video_metadata.save()
+        self.request = neondata.NeonApiRequest('job1', 'acct1', 'vid1')
+        self.request.state = neondata.RequestState.FINISHED
+        self.request.save()
+        
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
         self._wait_for_db_updates()
 
+        self.http_mock.reset_mock()
+
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
+        self.http_patcher.stop()
         self.redis.stop()
         super(TestStatusUpdatesInDb, self).tearDown()
 
@@ -2450,6 +2468,8 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(video.winner_tid)
 
     def test_db_experiment_finished(self):
+        self.request.callback_url = 'http://some_callback.url'
+        self.request.save()
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'n2', 5000, 0, 200, 0),
             ('acct1_vid1', 'n1', 5000, 0, 50, 0),
@@ -2476,6 +2496,17 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertAlmostEqual(ctrs['acct1_vid1_n1'], 50./5000)
         self.assertAlmostEqual(ctrs['acct1_vid1_n2'], 200./5000)
         self.assertAlmostEqual(ctrs['acct1_vid1_ctr'], 20./5000)
+
+        # Check the callback was sent
+        self.assertEquals(self.http_mock.call_count, 1)
+        cargs, kwargs = self.http_mock.call_args
+        cb_request = cargs[0]
+        self.assertEquals(cb_request.url, 'http://some_callback.url')
+        self.assertDictContainsSubset(
+            { 'experiment_state' : neondata.ExperimentState.COMPLETE,
+              'winner_thumbnail' : 'acct1_vid1_n2'
+              },
+            json.loads(cb_request.body))
 
     def test_db_override_thumb(self):
         self.mastermind.update_experiment_strategy(
