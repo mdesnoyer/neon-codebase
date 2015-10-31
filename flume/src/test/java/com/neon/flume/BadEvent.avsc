@@ -1,0 +1,1 @@
+"{\"type\":\"record\", \"name\":\"com.neon.Tracker.TrackerEvent\", \"fields\":[{\"name\":\"pageUrl\", \"type\":\"string\"}]}"
