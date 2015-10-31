@@ -3660,10 +3660,18 @@ The video metadata for this request must be in the database already.
                 cb_response = yield utils.http.send_request(cb_request,
                                                             **send_kwargs)
                 if cb_response.error:
-                    statemon.state.increment('callback_error')
-                    _log.warn('Error when sending callback to %s: %s' %
-                              (self.callback_url, cb_response.error))
-                    new_callback_state = CallbackState.ERROR
+                    # Now try a POST for backwards compatibility
+                    cb_request.method='POST'
+                    cb_response = yield utils.http.send_request(cb_request,
+                                                                **send_kwargs)
+                    if cb_response.error:
+                        statemon.state.increment('callback_error')
+                        _log.warn('Error when sending callback to %s: %s' %
+                                  (self.callback_url, cb_response.error))
+                        new_callback_state = CallbackState.ERROR
+                    else:
+                       statemon.state.increment('sucessful_callbacks')
+                       new_callback_state = CallbackState.SUCESS 
                 else:
                     statemon.state.increment('sucessful_callbacks')
                     new_callback_state = CallbackState.SUCESS
