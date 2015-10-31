@@ -488,6 +488,15 @@ Mastermind::GetAccountId(const char * publisherId, int & size){
     return accountId.c_str();
 }
 
+int
+Mastermind::DoesDirectiveExist(const char * account_id,
+                               const char * video_id) 
+{ 
+    string a_id = account_id;     
+    string v_id = video_id;  
+    return directiveTable->Find(a_id, v_id) ? 1 : 0;  
+}
+
 /*
  * Get Image URL for a given request
  * @input : Neon Account ID, Video ID, IP Address of client, image height, width

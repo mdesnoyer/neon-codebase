@@ -96,6 +96,9 @@ neon_mastermind_tid_lookup(const char * accountId,
                             ngx_str_t * bucketId, 
                             std::string & thumbnailId);
      
+int
+neon_mastermind_find_directive(const char *, 
+                               const char *); 
 /*
  * Check if current mastermind has expired
  */

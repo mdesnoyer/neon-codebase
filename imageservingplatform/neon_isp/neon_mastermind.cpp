@@ -182,6 +182,20 @@ neon_mastermind_image_url_lookup(const char * accountId,
     }    
 }
 
+int
+neon_mastermind_find_directive(const char * account_id, 
+                               const char * video_id) 
+{ 
+    Mastermind * mastermind = neon_get_mastermind(); 
+    
+    if(mastermind_current == 0) { 
+        return 0;
+    } 
+    
+    return mastermind->DoesDirectiveExist(account_id, video_id); 
+}
+
+
 /*
  * TID lookup Interface method 
  *
