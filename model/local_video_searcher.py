@@ -10,6 +10,12 @@ sure if we want to change how this works in the future.
 
 NOTE:
 It's not clear how passing the filters themselves will work.
+
+NOTE:
+Because of how local_video_searcher works, it currently searches
+at least every other interval but is not guaranteed to search them
+all given enough time (i.e., if a new search frame is between two
+of them that have already been searched). 
 '''
 
 import hashlib
@@ -53,16 +59,6 @@ statemon.define('low_number_of_frames_seen', int)
 # TODO: Determine how we will provide filters to the local searcher
 #       Right now, we're assuming that we will have a text filter and
 #       a closed eye filter.
-
-class ColorNameCached(ColorName):
-    '''
-    Replicates the function of ColorName class, but
-    computes the color histogram immediately, and
-    caches it
-    '''
-    def __init__(self, image):
-        super(ColorNameCached, self).__init__(image)
-        self.hist = self.get_colorname_histogram()
 
 # class ThumbVariation(object):
 #     '''
@@ -159,14 +155,16 @@ class LocalSearcher(VideoSearcher):
         self.n_thumbs = n_thumbs
         self.search_algo = search_algo(local_search_width)
         self.cur_frame = None
-
+        self.video = None
+        self.results = None
 
     def choose_thumbnails(self, video, n=1, video_name=''):
         self.gist.reset()
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
 
-    def _conduct_local_search(self, score, results):
+    def _conduct_local_search(self, start_frame, end_frame, 
+                              start_score, end_score, results):
         '''
         Given the frames that are already the best, determine
         whether it makes sense to proceed with local search. 
@@ -177,15 +175,40 @@ class LocalSearcher(VideoSearcher):
         # further, in the case of multiple faces, what is
         # an appropriate action to take?
 
-    def _compute_colorsim_mtx(self, images):
+    def _take_sample(self, video, frameno):
+        '''
+        Takes a sample, updating the estimates of mean score,
+        mean image variance, mean frame xdiff, etc. Also determines
+        whether or not to begin a local search.
+        '''
+        imgs = self.get_seq_frames(video,
+                    [frameno, frameno + self.local_search_step])
+        # get the score the image.
+        frame_score = self.predictor.predict(imgs[0])
+        # update the search algo's knowledge
+        self.search_algo.update(frameno, frame_score)
+        # determine if you can perform a local search
+        srch1 = self.search_algo.can_search(frameno)
+        if srch1:
+            sf, ef, sfs, efs = srch1
+            self._conduct_local_search(self, )
+        # get the xdiff
+        SAD = self.compute_SAD(frames)[0]
+
+    def _update_color_stats(self, images):
         '''
         Computes a color similarities for all
         pairwise combinations of images.
         '''
         colorObjs = [ColorNameCache(img) for img in images]
+        dists = []
         for i, j in permutations(range(len(images))):
+            dists.append(i.dist(j))
+        self._tot_colorname_val[0] = np.sum(dists)
+        self._tot_colorname_val[1] = len(dists)
+        self._colorname_stat = (self._tot_colorname_val[0] * 1./
+                                self._tot_colorname_val[1])
             
-
     def _mix(self, video, num_frames):
         '''
         'mix' takes a number of equispaced samples from
@@ -193,36 +216,33 @@ class LocalSearcher(VideoSearcher):
         '''
         samples = np.linspace(0, num_frames, 
                               self.mixing_samples+2).astype(int)
+        samples = [self.search_algo.get_nearest(x) for x in samples]
+        samples = list(np.unique(samples))
         # we need to be able to compute the SAD, so we need to
         # also insert local search steps
         for frameno in samples:
             framenos = [frameno, frameno + self.local_search_step]
             imgs = self.get_seq_frames(video, framenos)
-            SAD = self.compute_SAD(imgs)
-            self._SAD_stat.push(SAD)
-            pix_val = np.max(np.var(np.var(imgs[0],0),0))
-            self._tot_pixel_val[0] += pix_val
-            frame_score = self.predictor.predict(imgs[0])
-            self._tot_score_val[0] += frame_score
 
-        self._tot_pixel_val[1] += len(samples)
-        self._tot_score_val[1] += len(samples) 
+            SAD = self.compute_SAD(imgs)
+            self._SAD_stat.push(SAD[0])
+
+            pix_val = np.max(np.var(np.var(imgs[0],0),0))
+            self._pixel_stat.push(pix_val)
+
+            frame_score = self.predictor.predict(imgs[0])
+            self.search_algo.update(frameno, frame_score)
+            self._score_stat.push(frame_score) 
 
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
         # instantiate the statistics objects required
         # for computing the running stats.
-        self._pixel_stat = None # max channelwise pixel variance
-        self._colorname_stat = None # mean colorname distance
-        self._score_stat = None # mean score
-        # the _tot_x_val objects are of the form
-        # (stat_sum, tot_measurements), and are used
-        # to compute the means.
-        self._tot_pixel_val = [0, 0]
-        self._tot_colorname_val = [0, 0]
-        self._tot_score_val = [0, 0]
         self._SAD_stat = Statistics()
-        self.search_algo.start()
+        self._pixel_stat = Statistics()
+        self._colorname_stat = Statistics()
+        self._score_stat = Statistics()
         
+        self._samples = []
         self.results = []
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
@@ -231,6 +251,7 @@ class LocalSearcher(VideoSearcher):
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
         video_time = float(num_frames) / fps
+        self.search_algo.start(num_frames)
 
     def compute_SAD(self, imgs):
         '''

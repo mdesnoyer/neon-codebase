@@ -15,20 +15,90 @@ _log = logging.getLogger(__name__)
 class ThumbnailResultObject(object):
     '''
     A thumbnail result object, which stores
-    - its position in the video (frameno)
-    - its score
-    - whether or not it was filtered
-    - its filter scores (as a dict)
+    - its position in the search frame sequence
+    - its score (if defined)
+    - a pointer to the next frame (if defined)
+    - a pointer to the prev frame (if defined)
+    - a pointer to the next gap frame before
+      a gap in the analysis
     '''
-    def __init__(self, frameno, score=None):
+    def __init__(self, frameno, score=None,
+                 next_frame=None, prev_frame=None,
+                 dummy_frame=False, next_gap=None):
         self.frameno = frameno
-        self._score = score
+        self.score = score
+        # next frame won't induce a memory leak, right?
+        if next_gap == None:
+            next_gap = self
+        self.next_frame = next_frame
+        self.prev_frame = prev_frame
+        self.dummy_frame = dummy_frame
+        self.next_gap = next_gap
+        # indicates whether the interval starting with
+        # this frame has been searched.
+        self.lead_int_srchd = False
 
-    def set_score(self, score):
-        self._score = score
+    def _can_search(self):
+        '''
+        Checks to see if ether the forward or backward
+        interval can be searched. If the forward interval
+        can be searched, it is assumed that it *is* searched,
+        and sets lead_int_srchd to True. If the backward
+        interval can be searched, it does the same but for
+        the previous frame. 
 
-    def get_score(self):
-        return self._score
+        If either can be searched, it returns 
+        (startFrame, endFrame, startScore, endScore) else
+        it returns False.
+        '''
+        fwd = self._check_fwd()
+        if fwd:
+            return fwd
+        bck = self._check_bck()
+        if bck:
+            return bck
+
+    def _check_fwd(self):
+        '''
+        Replicates can_search, but for the foward interval
+        '''
+        sf = self.frameno
+        ef = self.next_frame.frameno
+        if abs(sf - ef) != 1:
+            return False
+        if self.score == None:
+            return False
+        if self.lead_int_srchd:
+            return False
+        if self.next_frame.score == None:
+            return False
+        if self.next_frame.dummy_frame:
+            return False
+        sfs = self.score
+        efs = self.next_frame.score
+        self.lead_int_srchd = True
+        return (sf, ef, sfs, efs)
+
+    def _check_bck(self):
+        '''
+        _check_fwd, only for the 'backward' interval
+        '''
+        ef = self.frameno
+        sf = self.prev_frame.frameno
+        if abs(sf - ef) != 1:
+            return False
+        if self.score == None:
+            return False
+        if self.prev_frame.lead_int_srchd:
+            return False
+        if self.prev_frame.score == None:
+            return False
+        if self.prev_frame.dummy_frame:
+            return False
+        efs = self.score
+        sfs = self.prev_frame.score
+        self.prev_frame.lead_int_srchd = True
+        return (sf, ef, sfs, efs)
 
     def __cmp__(self, other):
         if hasattr(other, 'frameno'):
@@ -36,6 +106,21 @@ class ThumbnailResultObject(object):
             # another result object
             other = other.frameno
         return cmp(self.frameno, other)
+
+    def __repr__(self):
+        if self.prev_frame:
+            pf = self.prev_frame.frameno
+        else:
+            pf = -(np.inf)
+        if self.next_frame:
+            nf = self.next_frame.frameno
+        else:
+            nf = np.inf
+        pf = str(pf)
+        nf = str(nf)
+        return ("Result Object at %i "
+                "between %s and %s")%(
+                self.frameno, pf, nf)
 
 class MonteCarloMetropolisHastings(object):
     '''
@@ -55,23 +140,34 @@ class MonteCarloMetropolisHastings(object):
     draw that sample. 
     '''
 
-    def __init__(self, min_dist=64,
-                 base_sample_prob=0.3):
+    def __init__(self, search_interval=64,
+                 base_sample_prob=0.1, explore_coef=0.):
         '''
-        min_dist : the minimum proximity that will
-                   trigger a search
+        min_dist : the search interval. This won't actually
+                   sample from the frames individually, but
+                   rather from 'search frames', which are
+                   equally spaced frames, each separated by
+                   precisely min_dist frames.
         base_sample_prob : the base probability that
                    a thumbnail will be searched.
+        explore_coef : a value between 0 and 1, the degree
+                   to which the algorithm will favor exploration
+                   over exploitation.
         '''
-        self.N = 0
+        self.N = None
+        self.tot = None
+        self.buffer = None
         self.results = []
         self.max_score = 0.
         self.n_samples = 0
         self.tot_score = 0.
         self.mean = 1.
-        self.min_dist = min_dist
+        self.search_interval = search_interval
         self.base_sample_prob = base_sample_prob
         self.max_interval = (self.N, 0, self.N)
+        explore_coef = max(0., explore_coef)
+        explore_coef = min(1., explore_coef)
+        self._ex_co = explore_coef
 
     def start(self, elements):
         '''
@@ -80,115 +176,188 @@ class MonteCarloMetropolisHastings(object):
         elements : the maximum number of elements
                    over which we will search.
         '''
-        self.N = elements
+        self.tot = elements
+        self.N = int(elements) / self.search_interval
         self.results = []
         self.max_score = 0.
         self.n_samples = 0
         self.tot_score = 0.
         self.mean = 1.
+        # compute the buffer
+        self.buffer = ((elements 
+                        % self.search_interval)
+                       / 2)
+        self._l_bound = ThumbnailResultObject(
+                            -1, score=self.mean,
+                            dummy_frame=True)
+        self._r_bound = ThumbnailResultObject(
+                            self.N, score=self.mean,
+                            dummy_frame=True)
+        self._l_bound.next_frame = self._r_bound
+        self._r_bound.prev_frame = self._l_bound
+
+    def _is_invalid_frameno(self, frameno):
+        '''
+        Returns true if frameno is not a search
+        frame.
+        '''
+        return (frameno - self.buffer) % self.search_interval
+
+    def _insert_result_at(self, frameno, score=None):
+        '''
+        Creates a new result object at frameno, and
+        updates it. THIS ASSUMES THE RESULT OBJECT
+        IS NOT ALREADY DEFINED AT THAT FRAMENO
+        '''
+        prev_frame, next_frame = self._bounds(frameno)
+        # if the next frame is immediately adjacent
+        # to the current one, then set the _next_gap
+        # appropriately
+        if next_frame.frameno == (frameno+1):
+            next_gap = next_frame.next_gap
+        else:
+            next_gap = None
+        res_obj = ThumbnailResultObject(frameno, score=score,
+                                    next_frame=next_frame,
+                                    prev_frame=prev_frame,
+                                    next_gap=next_gap)
+        if frameno == (prev_frame.frameno+1):
+            prev_frame.next_gap = res_obj.next_gap
+        prev_frame.next_frame = res_obj
+        next_frame.prev_frame = res_obj
+        insort(self.results, res_obj)
+        return res_obj
 
     def update(self, frameno, score):
         '''
         Updates the knowledge of the algorithm.
         '''
+        if self._is_invalid_frameno(frameno):
+            # ensure that this is actually a search
+            # frame
+            return
+        # compute the frameno
+        frameno = (frameno - self.buffer) / self.search_interval
         res_obj = self._get_result(frameno)
         if res_obj == None:
-            # then we're updating a frame that does
-            # not contain a result object, so instantiate
-            # one
-            res_obj = ThumbnailResultObject(frameno)
-            self._insert_result(res_obj)
-        res_obj.set_score(score)
+            res_obj = self._insert_result_at(frameno, score)
+        else:
+            res_obj.score = score
         self.max_score = max(self.max_score, score)
         self.tot_score += score
-        self.n_samples += 1
         self.mean = self.tot_score / self.n_samples
+
+    def _get_nth_empty(self, n):
+        '''
+        Returns the nth undefined slot. (with the first being 0)
+        '''
+        # import ipdb
+        # ipdb.set_trace()
+        # first, check if there's space at the beginning
+        if not len(self.results):
+            return n
+        res = self.results[0]
+        if res.frameno > n:
+            return n
+        else:
+            n -= res.frameno
+        while True:
+            # jump to the next gap
+            res = res.next_gap
+            cframeno = res.frameno
+            # get gap size
+            gap_size = res.next_frame.frameno - cframeno - 1
+            if gap_size > n:
+                return cframeno + n + 1
+            n -= gap_size
+            res = res.next_frame
+        raise ValueError('n is larger than the number of empty spaces!')
 
     def get(self):
         '''Gets the next sample'''
-        # ensure that we haven't already taken every sample
-        # possible
-        resPerFrame = self.n_samples * 1./ self.N
-        maxResPerFrame = (self.N / (1. * self.min_dist)) - 2
-        if resPerFrame >= maxResPerFrame:
+        if self.n_samples == self.N:
+            # have we taken every sample?
+            print 'Returning none for some reason?'
             return None
-        attempts = 0
-        while attempts < 200:
-            sample = np.random.choice(self.N)
-            if self._get_result(sample) == sample:
-                # reject if it's already been sampled
-                continue
-            attempts += 1
-            acc = self._accept_sample(sample)
+        # modification so that the search doesn't
+        # take too long.
+        rng = self.N - (self.n_samples+1)
+        while True:
+            if rng == 0:
+                sample = 0
+            else:
+                sample = np.random.choice(rng)
+            frameno = self._get_nth_empty(sample)
+            acc = self._accept_sample(frameno)
             if acc:
-                res_obj = ThumbnailResultObject(frameno)
-                self._insert_result(res_obj)
-                return sample
-        res_obj = ThumbnailResultObject(frameno)
-        self._insert_result(res_obj)
-        return sample
+                res_obj = self._insert_result_at(frameno)
+                self.n_samples += 1
+                return frameno*self.search_interval + self.buffer
 
-    def _compute_max_interval(self):
-        fframeno = 0
-        max_interval = 0
-        for r in self.results:
-            int_size = r.frameno - (fframeno + 1)
-            if int_size > max_interval:
-                max_interval = int_size
-                start = fframeno
-                stop = r.frameno
-            fframeno = r.frameno
-        self.max_interval = (max_interval, start, stop - 1)
-
-    def _update_max_interval(self, sample):
+    def can_search(self, frameno):
         '''
-        Determine if it's necessary to recompute
-        the maximum interval, and then recomputes it
-        as (interval, start, stop). A sample falls
-        within the maximum interval if it's between
-        the start and stop indices. 
+        Returns a search interval if the frameno participates
+        in a searchable interval. Note, this does not check
+        that the frameno is valid as a search frame, it simply
+        assumes it is. 
 
-        Note: sample must be a frameno!
+        If it's valid, it returns (start, end, start_score, end_score)
+        otherwise it returns False
         '''
-        if sample < self.max_interval[1]:
-            return
-        if sample >= self.max_interval[2]:
-            return
-        self._compute_max_interval()
+        frameno = self._frameno_to_search_frame(frameno)
+        res_obj = self._get_result(frameno)
+        if res_obj == None:
+            return False
+        can_srch = res_obj._can_search()
+        if can_srch:
+            sf, ef, sfs, efs = can_srch
+            sf = self._search_frame_to_frameno(sf)
+            ef = self._search_frame_to_frameno(ef)
+            return (sf, ef, sfs, efs)
+        return False
 
+    def _frameno_to_search_frame(self, frameno):
+        '''
+        Converts a frameno into a search frame.
+        '''
+        return (frameno - self.buffer) / self.search_interval
 
-    def _get_result(self, x):
+    def _search_frame_to_frameno(self, frameno):
+        '''
+        Converts a search frame into a frameno.
+        '''
+        return (frameno * self.search_interval) + self.buffer
+
+    def get_nearest(self, frameno):
+        '''
+        Returns the search frame nearest to the location
+        sampled. 
+        '''
+        nframe = self._frameno_to_search_frame(self, frameno)
+        return self._search_frame_to_frameno(self, nframe)
+
+    def _get_result(self, frameno):
         '''
         Obtains a result value given its frameno.
         '''
-        i = bisect_left(self.results, x)
-        if i != len(self.results) and self.results[i] == x:
+        i = bisect_left(self.results, frameno)
+        if i != len(self.results) and self.results[i] == frameno:
             return self.results[i]
         return None
-
-    def _create_result(self, frameno):
-        res_obj = ThumbnailResultObject(frameno)
-        self._insert_result(res_obj)
-
-    def _insert_result(self, result):
-        if not hasattr(result, 'frameno'):
-            raise ValueError('Not a result object!')
-        insort(self.results, result)
-        self._update_max_interval(result.frameno)
 
     def _find_lt(self, x):
         'Find rightmost value less than x'
         i = bisect_left(self.results, x)
         if i:
             return self.results[i-1]
-        return ThumbnailResultObject(-1, score=self.mean)
+        return self._l_bound
 
     def _find_gt(self, x):
         'Find leftmost value greater than x'
         i = bisect_right(self.results, x)
         if i != len(self.results):
             return self.results[i]
-        return ThumbnailResultObject(self.N, score=self.mean)
+        return self._r_bound
 
     def _bounds(self, target):
         '''
@@ -207,28 +376,21 @@ class MonteCarloMetropolisHastings(object):
             # accept if the max score is unknown
             return True
         lt, gt = self._bounds(sample)
-        pred_inp = [[lt.frameno, lt.get_score()],
-                    [gt.frameno, gt.get_score()]]
+        pred_inp = [[lt.frameno, lt.score],
+                    [gt.frameno, gt.score]]
         pred_score = self._predict_score(
                         pred_inp, sample)
         score_prob = (pred_score / self.max_score)**0.5
         rdiff = gt.frameno - sample
-        dist_thresh = self.min_dist
-        if self.max_interval[0] <= self.min_dist:
-            # wow, you've been going for a while! start
-            # sampling more aggressively, and stop caring
-            # about if it's too far away.
-            dist_thresh = self.max_interval[0] / 2
-        if rdiff < dist_thresh:
-            # the next largest sample is too close
-            return False
         if lt.frameno == -1:
             ldiff = np.inf
         else:
             ldiff = sample - lt.frameno
         min_dist = min(ldiff, rdiff)
-        dist_prob = (min_dist * 1. / dist_thresh)**0.5
-        thresh = self.base_sample_prob + dist_prob * score_prob
+        dist_prob = min_dist**0.5
+        comb_prob = ((dist_prob * self._ex_co) 
+                     *(score_prob * (1 - self._ex_co)))
+        thresh = self.base_sample_prob + comb_prob
         accept = np.random.rand() < thresh
         return accept
         
