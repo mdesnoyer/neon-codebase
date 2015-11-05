@@ -99,7 +99,7 @@ class LocalSearcher(VideoSearcher):
                  text_filt=None,
                  face_filt=None,
                  mixing_time=10,
-                 search_algo=MonteCarloMetropolisHastings):
+                 search_algo=MCMH_rpl):
         '''
         Inputs: (those distinct from abstract class)
             local_search_width:
@@ -164,7 +164,7 @@ class LocalSearcher(VideoSearcher):
         return thumbs
 
     def _conduct_local_search(self, start_frame, end_frame, 
-                              start_score, end_score, results):
+                              start_score, end_score):
         '''
         Given the frames that are already the best, determine
         whether it makes sense to proceed with local search. 
@@ -175,25 +175,46 @@ class LocalSearcher(VideoSearcher):
         # further, in the case of multiple faces, what is
         # an appropriate action to take?
 
-    def _take_sample(self, video, frameno):
+    def _take_sample(self, frameno):
         '''
         Takes a sample, updating the estimates of mean score,
-        mean image variance, mean frame xdiff, etc. Also determines
-        whether or not to begin a local search.
+        mean image variance, mean frame xdiff, etc.
         '''
-        imgs = self.get_seq_frames(video,
+        imgs = self.get_seq_frames(self.video,
                     [frameno, frameno + self.local_search_step])
         # get the score the image.
         frame_score = self.predictor.predict(imgs[0])
+        # get the xdiff
+        SAD = self.compute_SAD(imgs)[0]
+        self._SAD_stat.push(SAD)
+        # measure the image variance
+        pix_val = np.max(np.var(np.var(imgs[0],0),0))
+        self._pixel_stat.push(pix_val)
         # update the search algo's knowledge
         self.search_algo.update(frameno, frame_score)
-        # determine if you can perform a local search
-        srch1 = self.search_algo.can_search(frameno)
-        if srch1:
-            sf, ef, sfs, efs = srch1
-            self._conduct_local_search(self, )
-        # get the xdiff
-        SAD = self.compute_SAD(frames)[0]
+
+    def _should_search(self, srchTupl):
+        '''
+        Accepts a tuple about the search interval
+        and returns True / False based on whether
+        this region should be searched given the
+        searching criteria.
+        '''
+        # the search criteria so far is:
+        # - the search interval should be (a) above 
+        #   the average of the mean score and (b) at
+        #   least one frame should be higher scoring
+        #   than any of the ones searched so far.
+
+    def _step(self):
+        r = self.search_algo.get()
+        if r == None:
+            return False
+        action, meta = r
+        if action == 'sample':
+            self._take_sample(meta)
+        else:
+            self._conduct_local_search(*meta)
 
     def _update_color_stats(self, images):
         '''
@@ -209,7 +230,7 @@ class LocalSearcher(VideoSearcher):
         self._colorname_stat = (self._tot_colorname_val[0] * 1./
                                 self._tot_colorname_val[1])
             
-    def _mix(self, video, num_frames):
+    def _mix(self, num_frames):
         '''
         'mix' takes a number of equispaced samples from
         the video. 
@@ -222,7 +243,7 @@ class LocalSearcher(VideoSearcher):
         # also insert local search steps
         for frameno in samples:
             framenos = [frameno, frameno + self.local_search_step]
-            imgs = self.get_seq_frames(video, framenos)
+            imgs = self.get_seq_frames(self.video, framenos)
 
             SAD = self.compute_SAD(imgs)
             self._SAD_stat.push(SAD[0])
@@ -248,6 +269,7 @@ class LocalSearcher(VideoSearcher):
         # (score, rtuple, frameno, colorHist)
         #
         # where rtuple is the value to be returned.
+        self.video = video
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
         video_time = float(num_frames) / fps
@@ -292,18 +314,18 @@ class LocalSearcher(VideoSearcher):
         else:
             return img[xlim:-xlim, ylim:-ylim]
 
-    def _get_frame(self, video, f):
+    def _get_frame(self, f):
         more_data, self.cur_frame = pycvutils.seek_video(
-                                    video, f, 
+                                    self.video, f, 
                                     cur_frame=self.cur_frame)
         if not more_data:
             if self.cur_frame is None:
                 raise model.errors.VideoReadError(
                     "Could not read the video")
-        more_data, frame = video.read() 
+        more_data, frame = self.video.read() 
         return frame
 
-    def get_seq_frames(self, video, framenos):
+    def get_seq_frames(self, framenos):
         '''
         Acquires a series of frames, in sorted
         order.
@@ -316,11 +338,11 @@ class LocalSearcher(VideoSearcher):
             framenos = [framenos]
         frames = []
         for frameno in framenos:
-            frame = self._get_frame(video, frameno)
+            frame = self._get_frame(frameno)
             frames.append(frame)
         return frames
 
-    def get_region_frames(self, video, start, num=1,
+    def get_region_frames(self, start, num=1,
                           step=0):
         '''
         Obtains a region from the video.
@@ -328,5 +350,5 @@ class LocalSearcher(VideoSearcher):
         frame_idxs = [start]
         for i in range(num-1):
             frame_idxs.append(frame_idxs[-1]+step)
-        frames = get_seq_frames(video, framenos)
+        frames = get_seq_frames(framenos)
         return frames

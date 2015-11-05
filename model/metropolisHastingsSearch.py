@@ -141,7 +141,7 @@ class MonteCarloMetropolisHastings(object):
     '''
 
     def __init__(self, search_interval=64,
-                 base_sample_prob=0.1, explore_coef=0.):
+                 base_sample_prob=0.1, explore_coef=0.1):
         '''
         min_dist : the search interval. This won't actually
                    sample from the frames individually, but
@@ -404,3 +404,86 @@ class MonteCarloMetropolisHastings(object):
         x3 = sample
         m = float(y2 - y1) / float(x2 - x1)
         return m * (x3 - x1) + y1
+
+
+class MCMH_rpl(MonteCarloMetropolisHastings):
+    '''
+    Works just like the original Monte Carlo Metropolis 
+    Hastings, but each time it takes a sample it returns
+    the following: (sample, str). 'str' is either 'sample'
+    in which case the score must be obtained or is 'search'
+    in which case the FORWARD region can be searched.
+
+    The _rpl is for 'replacement' even though this isn't
+    really accurate. Instead, what it's going to do is
+    replace samples and check if they can be sampled versus
+    searched.
+    '''
+    def __init__(self, search_interval=64,
+                 base_sample_prob=0.1, explore_coef=0.):
+        # the search parameters are the same as for the
+        # vanilla MCMH. 
+        super(MCMH_rpl, self).__init__(search_interval,
+                                       base_sample_prob,
+                                       explore_coef)
+
+    def get(self):
+        if self.n_samples == self.N:
+            # log this
+            return None
+        while True:
+            obt = self._get()
+            if obt:
+                break
+        action, meta = obt
+        if action == 'search':
+            # convert the metadata framenos
+            sf, ef, sfs, efs = meta
+            sf = self._search_frame_to_frameno(sf)
+            ef = self._search_frame_to_frameno(ef)
+            meta = (sf, ef, sfs, efs)
+            ret = (action, meta)
+        else:
+            frameno = self._search_frame_to_frameno(meta)
+        return (action, meta)
+
+    def _get(self):
+        '''
+        Attempts to acquire a sample. If it fails,
+        returns False. Otherwise, it returns a tuple
+        of the form (index, string). See the documentation
+        under the class declaration.
+        '''
+        sample = np.random.choice(self.N)
+        result = self._get_result(sample)
+        if result == None:
+            if not len(self.results[0]):
+                self.n_samples += 1
+                res_obj = self._insert_result_at(frameno)
+                return ('sample', sample)
+            acc = self._accept_sample(sample)
+            if acc:
+                self.n_samples += 1
+                res_obj = self._insert_result_at(frameno)
+                return ('sample', sample)
+            else:
+                return False
+        elif:
+            srch = result._check_fwd()
+            if srch:
+                return ('search', srch)
+            else:
+                return False
+
+
+
+
+
+
+
+
+
+
+
+
+
