@@ -72,8 +72,8 @@ public:
                         int bucketIdLen,
                         std::string & tid);
 
-    int DoesDirectiveExist(const char *, 
-                           const char *);
+    bool DoesDirectiveExist(const char * account_id, 
+                            const char * video_id);
    
 
 protected:

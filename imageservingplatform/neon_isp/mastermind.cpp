@@ -488,7 +488,7 @@ Mastermind::GetAccountId(const char * publisherId, int & size){
     return accountId.c_str();
 }
 
-int
+bool
 Mastermind::DoesDirectiveExist(const char * account_id,
                                const char * video_id) 
 { 
