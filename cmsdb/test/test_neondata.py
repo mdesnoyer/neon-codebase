@@ -94,8 +94,116 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         nu_accounts = NeonUserAccount.get_all_accounts()
         nu_a_ids = [nu.account_id for nu in nu_accounts]
-        #print len(nu_accounts), len(a_ids)
         self.assertItemsEqual(a_ids, nu_a_ids)
+
+    @tornado.testing.gen_test
+    def test_get_all_accounts_async(self):
+        a_id_prefix = 'test_account_'
+        a_ids = []
+        for i in range(10):
+            a_id = a_id_prefix + str(i)
+            a_ids.append(a_id)
+            na = NeonUserAccount(a_id)
+            na.save()
+
+        nu_accounts = yield NeonUserAccount.get_all(async=True)
+        nu_a_ids = [nu.account_id for nu in nu_accounts]
+        self.assertItemsEqual(a_ids, nu_a_ids)
+        
+    def test_iterate_all_accounts(self):
+        a_id_prefix = 'test_account_'
+        a_ids = []
+        for i in range(4):
+            a_id = a_id_prefix + str(i)
+            a_ids.append(a_id)
+            na = NeonUserAccount(a_id)
+            na.save()
+
+        nu_accounts = list(NeonUserAccount.iterate_all(max_request_size=2))
+        nu_a_ids = [nu.account_id for nu in nu_accounts]
+        self.assertItemsEqual(a_ids, nu_a_ids)
+
+    def test_get_all_requests(self):
+        na1 = NeonUserAccount('a1', 'acct1')
+        na1.save()
+        na3 = NeonUserAccount('a3', 'acct3')
+        na3.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+
+        requests3 = [neondata.OoyalaApiRequest('joboo', 'acct3')]
+        NeonApiRequest.save_all(requests1)
+        NeonApiRequest.save_all(requests3)
+
+        requests_found = NeonApiRequest.get_many(na1.get_all_job_keys())
+        self.assertEqual(sorted(requests_found), sorted(requests1))
+
+        requests_found = NeonApiRequest.get_many(na3.get_all_job_keys())
+        self.assertEqual(requests_found, requests3)
+
+    @tornado.testing.gen_test
+    def test_get_all_requests_async(self):
+        na1 = NeonUserAccount('a1', 'acct1')
+        na1.save()
+        na3 = NeonUserAccount('a3', 'acct3')
+        na3.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+
+        requests3 = [neondata.OoyalaApiRequest('joboo', 'acct3')]
+        NeonApiRequest.save_all(requests1)
+        NeonApiRequest.save_all(requests3)
+
+        keys = yield na1.get_all_job_keys(async=True)
+        requests_found = yield tornado.gen.Task(NeonApiRequest.get_many, keys)
+        self.assertEqual(sorted(requests_found), sorted(requests1))
+
+        keys = yield na3.get_all_job_keys(async=True)
+        requests_found = yield tornado.gen.Task(NeonApiRequest.get_many, keys)
+        self.assertEqual(requests_found, requests3)
+
+    def test_iterate_all_jobs_sync(self):
+        na = NeonUserAccount('a1', 'acct1')
+        na.save()
+        requests1 = [NeonApiRequest('job1', 'acct1'),
+                     neondata.BrightcoveApiRequest('jobbc', 'acct1')]
+        NeonApiRequest.save_all(requests1)
+
+        found_jobs = list(na.iterate_all_jobs(max_request_size=1))
+        self.assertEqual(sorted(found_jobs), sorted(requests1))
+        
+
+    @tornado.testing.gen_test
+    def test_iterate_all_videos_async(self):
+        na = NeonUserAccount('a1', 'key1')
+        na.save()
+
+        for i in range(5):
+            yield tornado.gen.Task(VideoMetadata('key1_v%d' % i).save)
+
+        found_videos = []
+        iterator = yield na.iterate_all_videos(async=True, max_request_size=2)
+        while True:
+            item = yield iterator.next(async=True)
+            if isinstance(item, StopIteration):
+                break
+            found_videos.append(item)
+
+        self.assertItemsEqual([x.key for x in found_videos],
+                              ['key1_v%d' % i for i in range(5)])
+
+
+    def test_iterate_all_videos_sync(self):
+        na = NeonUserAccount('a1', 'key1')
+        na.save()
+
+        for i in range(5):
+            VideoMetadata('key1_v%d' % i).save()
+
+        found_videos = list(na.iterate_all_videos(max_request_size=2))
+
+        self.assertItemsEqual([x.key for x in found_videos],
+                              ['key1_v%d' % i for i in range(5)])
 
     def test_get_all_trackerids(self):
         ''' test get all the tracker ids '''
@@ -139,7 +247,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
                             create_missing=True)
 
-        objs = yield tornado.gen.Task(AbstractPlatform.get_all)
+        objs = yield AbstractPlatform.get_all(async=True)
 
         self.assertEquals(len(objs), 4)
 
@@ -284,7 +392,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         ''' 
         DB Connection test
         '''
-        ap = AbstractPlatform('')
+        ap = AbstractPlatform('a1', 'i1')
         db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"
@@ -300,7 +408,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
             ''' db op '''
             resultQ.put(db.blocking_conn.get(key))
 
-        ap = AbstractPlatform('')
+        ap = AbstractPlatform('a1', 'i1')
         db = DBConnection.get(ap)
         key = "fookey"
         val = "fooval"*1000
@@ -364,62 +472,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertListEqual(np.get_videos(), [u'dummyv'])
         
         #TODO: Add more failure test cases
-
-
-    def test_iterate_all_thumbnails(self):
-        #NOTE: doesn't work on MAC
-
-        # Build up a database structure
-        na = NeonUserAccount('acct1')
-        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
-                                       create_missing=True)
-        op = OoyalaPlatform.modify(na.neon_api_key, 'op1',
-                                   lambda x: x, create_missing=True)
-        na.add_platform(bp)
-        na.add_platform(op)
-        na.save()
-
-        vids = [
-            InternalVideoID.generate(na.neon_api_key, 'v0'),
-            InternalVideoID.generate(na.neon_api_key, 'v1'),
-            InternalVideoID.generate(na.neon_api_key, 'v2')
-            ]
-            
-        thumbs = [
-            ThumbnailMetadata('t1', vids[0], ['t1.jpg'], None, None, None,
-                              None, None, None),
-            ThumbnailMetadata('t2', vids[0], ['t2.jpg'], None, None, None,
-                              None, None, None),
-            ThumbnailMetadata('t3', vids[1], ['t3.jpg'], None, None, None,
-                              None, None, None),
-            ThumbnailMetadata('t4', vids[2], ['t4.jpg'], None, None, None,
-                              None, None, None),
-            ThumbnailMetadata('t5', vids[2], ['t5.jpg'], None, None, None,
-                              None, None, None)]
-        ThumbnailMetadata.save_all(thumbs)
-
-        v0 = VideoMetadata(vids[0], [thumbs[0].key, thumbs[1].key],
-                           'r0', 'v0.mp4', 0, 0, None, bp.integration_id)
-        v0.save()
-        v1 = VideoMetadata(vids[1], [thumbs[2].key],
-                           'r1', 'v1.mp4', 0, 0, None, bp.integration_id)
-        v1.save()
-        v2 = VideoMetadata(vids[2], [thumbs[3].key, thumbs[4].key],
-                           'r2', 'v2.mp4', 0, 0, None, op.integration_id)
-        v2.save()
-
-
-        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
-                                  lambda x: x.add_video('v0', 'r0'))
-        BrightcovePlatform.modify(na.neon_api_key, 'bp1', 
-                                  lambda x: x.add_video('v1', 'r1'))
-        OoyalaPlatform.modify(na.neon_api_key, 'op1', 
-                              lambda x: x.add_video('v2', 'r2'))
-        
-        # Now make sure that the iteration goes through all the thumbnails
-        found_thumb_ids = [x.key for x in  
-                           ThumbnailMetadata.iterate_all_thumbnails()]
-        self.assertItemsEqual(found_thumb_ids, [x.key for x in thumbs])
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
@@ -979,7 +1031,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                                      create_missing=True)
             nps.append(np)
 
-        keys = ['neonplatform_acct%s_0' % i for i in range(10)]
+        keys = [('acct%s' % i, '0') for i in range(10)]
         r_nps = NeonPlatform.get_many(keys)
         self.assertListEqual(nps, r_nps)
 
@@ -1511,7 +1563,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                                  create_missing=True)
       yp = YoutubePlatform.modify('acct4', 'iyt', lambda x: x,
                                   create_missing=True)
-      plats = yield tornado.gen.Task(AbstractPlatform.get_all)
+      plats = yield AbstractPlatform.get_all(async=True)
       self.assertEquals(len(plats), 4)
       deleted_counts = yield [
         tornado.gen.Task(NeonPlatform.delete, np.neon_api_key,
@@ -1764,6 +1816,65 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
       self.assertItemsEqual(conn.blocking_conn.smembers(
         NeonUserAccount('a1')._set_keyname()),
         [objs[0].key, objs[3].key])
+
+    @tornado.testing.gen_test
+    def test_send_invalid_callback(self):
+      request = NeonApiRequest('j1', 'key1', http_callback='null')
+      request.save()
+
+      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
+        yield request.send_callback(async=True)
+
+      # Make sure the state is correct now
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.ERROR)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
+    def test_image_in_isp(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+
+      acct = NeonUserAccount('a1', 'acct1')
+      acct.default_thumbnail_id = 'acct1_default_thumb'
+      acct.save()
+      video = VideoMetadata('acct1_v1')
+
+      # Check when isp returns a 204 because it doesn't have the video
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertFalse(is_avail)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      self.assertEqual(found_request.method, 'HEAD')
+      self.assertTrue(found_request.follow_redirects)
+
+      # Check when the image is there
+      fetch_mock.side_effect = \
+        lambda x: HTTPResponse(
+          x, code=200, effective_url="http://www.where.com/neontntid.jpg")
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertTrue(is_avail)
+
+      # Check when the image is the default url
+      fetch_mock.side_effect = \
+        lambda x: HTTPResponse(
+          x, code=200,
+          effective_url="http://www.where.com/neontnacct1_default_thumb.jpg")
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertFalse(is_avail)
+
+      # Check when the redirect url is invalid
+      fetch_mock.side_effect = \
+        lambda x: HTTPResponse(
+          x, code=200, effective_url="http://www.where.com/badthumb.jpg")
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertFalse(is_avail)
+
+      # Check on a raised http error
+      fetch_mock.side_effect = [tornado.httpclient.HTTPError(400, 'Bad error')]
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertFalse(is_avail)
       
       
             

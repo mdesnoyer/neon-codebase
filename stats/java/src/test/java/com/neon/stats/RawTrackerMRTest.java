@@ -1,18 +1,23 @@
 package com.neon.stats;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
 import org.apache.avro.Schema;
+import org.apache.avro.file.DataFileReader;
 import org.apache.avro.hadoop.io.AvroSerialization;
+import org.apache.avro.io.*;
 import org.apache.avro.mapred.AvroKey;
 import org.apache.avro.mapred.AvroValue;
 import org.apache.avro.mapreduce.AvroJob;
 import org.apache.avro.mapreduce.AvroKeyInputFormat;
 import org.apache.avro.mapreduce.AvroMultipleOutputs;
+import org.apache.avro.specific.SpecificDatumReader;
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.avro.util.Utf8;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mrunit.mapreduce.MapDriver;
@@ -1216,5 +1221,24 @@ public class RawTrackerMRTest {
                 .setAgentInfoBrowserVersion("10.01")
                 .setAgentInfoOsName("Windows").setAgentInfoOsVersion("7")
                 .build()));
+  }
+
+  //@Test
+  public void debugDiscoveryData() throws IOException, InterruptedException {
+    DatumReader<TrackerEvent> datumReader =
+        new SpecificDatumReader<TrackerEvent>(TrackerEvent.class);
+    DataFileReader<TrackerEvent> dataFileReader =
+        new DataFileReader<TrackerEvent>(
+            new File(
+                "/home/mdesnoyer/tmp/discovery_clicklogs/discoverylog.avro"),
+            datumReader);
+    TrackerEvent event;
+    while (dataFileReader.hasNext()) {
+      event = dataFileReader.next();
+      mapReduceDriver.addInput(
+          new AvroKey<TrackerEvent>(event), NullWritable.get());
+    }
+    // mapReduceDriver.setMapInputPath(Path("/home/mdesnoyer/tmp/discovery_clicklogs"));
+    mapReduceDriver.run();
   }
 }

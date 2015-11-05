@@ -7,7 +7,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
-from cmsdb.url2thumbnail import URL2ThumbnailIndex
 import controllers.brightcove_controller
 import json
 import logging

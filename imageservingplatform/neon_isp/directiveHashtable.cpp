@@ -1,8 +1,6 @@
 #include <iostream>
 #include "directiveHashtable.h"
 #include "neon_stats.h"
-#include "neonHash.h"
-
 
 /*
  *   Directive Table
@@ -101,20 +99,8 @@ DirectiveHashtable::Find(std::string & accountId, std::string & videoId) const {
     return directive;
 }
 
-
-size_t
-DirectiveHashtable::hash_directive::operator()(const std::string & key)  const {
-    uint32_t result = 0;
-    
-    result = NeonHash::Hash(key.c_str(), 1);
-    
-    return result;
-}
-
 void 
 DirectiveHashtable::ConstructKey(std::string & accountId, std::string & videoId, std::string *key){
-    
     (*key).append(accountId);
     (*key).append(videoId);
-
 }
