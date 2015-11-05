@@ -10,6 +10,7 @@ import numpy as np
 import cv2
 import os
 import dlib
+import utils.pycvutils
 
 comp_dict = {}
 comp_dict['face'] = range(17)
@@ -31,20 +32,119 @@ class ParseStateError(Exception):
         if self.value == 2:
             return "Invalid component requested"
 
-class FindAndParseFaces(object):
-    def __init__(self, predictor):
+class DetectFaces(object):
+    '''
+    Detects faces.
+    '''
+    def __init__(self):
         self.detector = dlib.get_frontal_face_detector()
+        self.prep = utils.pycvutils.ImagePrep(convert_to_gray=True)
+
+    def get_N_faces(self, image):
+        '''
+        Returns the number of faces an image contains.
+        '''
+        image = self.prep(image)
+        return len(self.detector(image))
+
+class MultiStageFaceParser(object):
+    '''
+    Wraps FindAndParseFaces, but allows three-stage evaluation.
+    This is necessary because the detection of faces has been
+    split from the scoring of closed eyes. Since the segmenting
+    faces requires faces to be detected, and scoring eyes requires
+    the faces be segmented, this allows us to make multiple evaluations
+    within-step and across-images without having to repeat either
+    detection or segmentation steps, which saves us time.
+
+    This is designed to work just like any other feature extractor--
+    it accepts an image on each call--however, it keeps those images
+    cached so it can match them up later.
+
+    One potentially problematic area is if the images are preprocessed
+    differently in the face detection vs. the closed eye detection
+    steps. This assumes they will stay the same! To this end, it has as
+    an attribute its own preprocessing object.
+    '''
+
+    def __init__(self, predictor, max_height=640):
+        self.detector = dlib.get_frontal_face_detector()
+        self.fParse = FindAndParseFaces(predictor, self.detector)
+        self.image_dat = []
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height)
+        self.cur_idx = 0
+
+    def reset(self):
+        self.image_dat = []
+        self.cur_idx = 0
+
+    def get_faces(self, image):
+        det = self.fParse._SEQfindFaces(image)
+        self.image_dat.append([image, det])
+        return len(det)
+
+    def get_seg(self, image):
+        '''
+        Performs segmentation, but does not return anything
+        (at the moment). This must be queried in the order
+        in which the images were originally submitted to the
+        detector, but can otherwise tolerate dropped frames.
+        '''
+        # find the image index
+        fnd = False
+        for n in range(len(self.image_dat)):
+            idx = (n + self.cur_idx) % len(self.image_dat)
+            i = self.image_dat[idx]
+            if len(i) > 2:
+                continue
+            if np.array_equal(i[0], image):
+                fnd = True
+                break
+        if not fnd:
+            raise ValueError('Unknown image')
+        self.cur_idx = (idx + 1) % len(self.image_dat)
+        img, det = self.image_dat[n]
+        points = self.fParse._SEQsegFaces(img, det)
+        self.image_dat[n].append(points)
+
+    def restore_parser(self, image):
+        '''
+        Returns the face parser to a ready state so that we
+        can leverage it for closed eye detection.
+        '''
+        fnd = False
+        for n in range(len(self.image_dat)):
+            idx = (n + self.cur_idx) % len(self.image_dat)
+            i = self.image_dat[idx]
+            if len(i) > 3:
+                continue
+            if np.array_equal(i[0], image):
+                fnd = True
+                break
+        if not fnd:
+            raise ValueError('Unknown image')
+        self.cur_idx = (idx + 1) % len(self.image_dat)
+        img, det, points = self.image_dat[n]
+        self.fParse._SEQfinStep(self, img, det, points)
+        self.image_dat[n].append('True')
+        return self.fParse
+
+class FindAndParseFaces(object):
+    '''
+    Detects faces, and segments them.
+    '''
+    def __init__(self, predictor, detector=None):
+        if detector == None:
+            self.detector = dlib.get_frontal_face_detector()
+        else:
+            self.detector = detector
         self.predictor = predictor
         self._faceDets = []
         self._facePoints = []
         self._image = None
-
-    @staticmethod
-    def get_gray(image):
-        # returns the grayscale version of an image
-        if len(image.shape) == 3 and image.shape[2] > 1:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return image
+        self.prep = utils.pycvutils.ImagePrep(convert_to_gray=True)
 
     def _check_valid(self, face=None, comp=None):
         '''
@@ -105,13 +205,43 @@ class FindAndParseFaces(object):
         return self._image[left:left+width, top:top+height]
 
     def ingest(self, image):
-        image = FindAndParseFaces.get_gray(image)
+        image = self.prep(image)
         self._image = image
         self._faceDets = self.detector(image)
         self._facePoints = []
         for f in self._faceDets:
-            self._facePoints.append(self.predictor(image, f)) 
-        
+            self._facePoints.append(self.predictor(image, f))
+
+    def _SEQfindFaces(self, image):
+        '''
+        Detects faces, returns detections to be used by
+        MultiStageFaceParser.
+        '''
+        self._image = self.prep(image)
+        return self.detector(image)
+
+    def _SEQsegFaces(self, image, dets):
+        '''
+        Returns segmented face points given the image and
+        the detections, to be used by MultiStageFaceParser
+        '''
+        self._faceDets = dets
+        self._image = self.prep(image)
+        self._facePoints = []
+        for f in self._faceDets:
+            self._facePoints.append(self.predictor(image, f))
+        return self._facePoints
+
+    def _SEQfinStep(self, image, dets, points):
+        '''
+        Restores the parser to the 'final' configuration,
+        as if it had run the entire thing from end-to-end,
+        allowing us to proceed with the eye scoring.
+        '''
+        self._faceDets = dets
+        self._image = self.prep(image)
+        self._facePoints = facePoints
+
     def get_comp(self, face, comp):
         '''
         Given a face index and a component key, returns the
