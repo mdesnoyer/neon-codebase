@@ -232,12 +232,19 @@ class FaceGenerator(RegionFeatureGenerator):
     Returns a boolean which indicates whether or not a face
     was detected in each grame given a sequence of frames.
     '''
-    def __init__(self, max_height=640):
+    def __init__(self, MSFP):
+        '''
+        MSFP is a multi-stage face parser, which has as
+        an attribute the preprocessor--this ensures that
+        the images passed to FaceGenerator and the images
+        passed to ClosedEyeGenerator are preprocessed
+        in the same way. Otherwise, the images cannot be
+        matched with each other.
+        '''
         super(FaceGenerator, self).__init__()
-        self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
-                        max_height=self.max_height)
-        self.det = DetectFaces()
+        self.MSFP = MSFP
+        self.prep = MSFP.prep
+        self.max_height = MSFP.max_height
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -252,7 +259,8 @@ class FaceGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            feat_vec.append(self.det.get_N_faces(img) > 0)
+            feat_vec.append(len(
+                self.MSFP.get_faces(img)) > 0)
         return np.array(feat_vec)
 
     def get_feat_name(self):
@@ -263,12 +271,15 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
     Returns the distance to the separating hyperplane of the
     'least open eyes' in a sequence of frames.
     '''
-    def __init__(self, predictor, classifier, max_height=640):
+    def __init__(self, MSFP, classifier):
+        '''
+        MSFP is a multi-stage face parser; see FaceGenerator
+        for an explanation of why this must be so.
+        '''
         super(ClosedEyeGenerator, self).__init__()
-        self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
-                        max_height=self.max_height)
-        self.faceParse = FindAndParseFaces(predictor)
+        self.MSFP = MSFP
+        self.prep = MSFP.prep
+        self.max_height = MSFP.max_height
         self.scoreEyes = ScoreEyes(classifier)
 
     def __cmp__(self, other):
@@ -284,8 +295,9 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            self.faceParse.ingest(img)
-            eyes = self.faceParse.get_all(['l eye', 'r eye'])
+            self.MSFP.get_seq(img)
+            faceParse = self.MSFP.restore_parser(image)
+            eyes = faceParse.get_all(['l eye', 'r eye'])
             classif, scores = self.scoreEyes.classifyScore(eyes)
             feat_vec.append(np.min(scores))
         return np.array(feat_vec)
