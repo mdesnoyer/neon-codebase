@@ -28,7 +28,7 @@ import stats.metrics
 import utils.neon
 from utils.options import options, define
 
-define("stats_host", default="54.210.126.245",
+define("stats_host", default="localhost",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
