@@ -952,6 +952,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
+                         neondata.RequestState.CUSTOMER_ERROR,
                          neondata.RequestState.FAILED]
         
         # single video state, if video not found return an error
