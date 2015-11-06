@@ -1117,11 +1117,22 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         full_winner = winner_tid
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
+        old_state = [None]
         def _update(status):
+           old_state[0] = status.experiment_state
            status.set_experiment_state(experiment_state)
            status.winner_tid = full_winner
            status.experiment_value_remaining = value_left
         neondata.VideoStatus.modify(video_id, _update, create_missing=True)
+
+        # Send the callback for the request if there was a state change
+        if old_state[0] != experiment_state:
+            vmeta = neondata.VideoMetadata.get(video_id)
+            if vmeta is not None:
+                request = neondata.NeonApiRequest.get(vmeta.job_id,
+                                                      vmeta.get_account_id())
+                if request is not None:
+                    request.send_callback()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

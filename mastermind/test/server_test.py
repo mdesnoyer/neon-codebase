@@ -1776,7 +1776,13 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
                           neondata.CallbackState.SUCESS)
         self.assertEquals(self.callback_mock.call_count, 1)
         cb_request = self.callback_mock.call_args[0][0]
-        self.assertEquals(json.loads(cb_request.body), {'video_id' : 'vid1'})
+        self.assertDictContainsSubset(
+            {'video_id' : 'vid1',
+             'job_id' : 'job1',
+             'error' : None,
+             'processing_state' : neondata.RequestState.SERVING
+             },
+            json.loads(cb_request.body))
         self.assertEquals(cb_request.url, 'http://callback.com')
         
 
