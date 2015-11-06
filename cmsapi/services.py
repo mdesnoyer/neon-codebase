@@ -557,7 +557,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                 self.send_json_response(
                                     '{"error": "no valid thumbnail found. '
                                     'Only a type of \'custom_upload\' is '
-                                    'currently"}', 400)
+                                    'currently allowed"}', 400)
                                 return
                             yield self.upload_video_custom_thumbnails(
                                 i_id, i_vid,
