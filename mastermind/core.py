@@ -1126,7 +1126,7 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         neondata.VideoStatus.modify(video_id, _update, create_missing=True)
 
         # Send the callback for the request if there was a state change
-        if old_state != experiment_state:
+        if old_state[0] != experiment_state:
             vmeta = neondata.VideoMetadata.get(video_id)
             if vmeta is not None:
                 request = neondata.NeonApiRequest.get(vmeta.job_id,

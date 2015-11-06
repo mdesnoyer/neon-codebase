@@ -2448,6 +2448,24 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                          neondata.ExperimentState.DISABLED)
         self.assertIsNone(video.winner_tid)
 
+    def test_experiment_state_no_change(self):
+        video = neondata.VideoStatus.get('acct1_vid1')
+        video.experiment_state = neondata.ExperimentState.RUNNING
+        video.save()
+
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_n1', 100, None, 1, None),
+            ('acct1_vid1', 'acct1_vid1_bc', 110, None, 1, None),
+            ])
+        self._wait_for_db_updates()
+
+        video = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+
+        # Make sure no callback was sent
+        self.assertEquals(self.http_mock.call_count, 0)
+
     def test_db_remove_video(self):
         # Remove a video that is there
         self.assertTrue(self.mastermind.is_serving_video('acct1_vid1'))
