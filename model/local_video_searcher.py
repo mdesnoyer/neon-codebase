@@ -81,6 +81,30 @@ statemon.define('low_number_of_frames_seen', int)
 #         # similarity matrix.
 #         self._id_to_idx = dict()
 
+class Criterion(object):
+    '''
+    A class that represents a filtering
+    criterion. Criteria come in several flavors,
+    but all are initialized with any of the following:
+        - a Statistics() object
+        - threshold values
+        - lambda functions of these
+
+    Each criteria may be of the following
+    types:
+        - judge interval
+            Either accepts or rejects an entire interval. If
+            this is the case, it accepts just the search frames
+            (i.e., the start and the end) statistics.
+        - filter interval
+            Returns a subset (or none at all) of the frames
+            in an interval that are acceptable.
+        - winner selector
+            Returns a single winning frame
+        - ranking criteria
+            Returns the frame numbers in ranked-order
+            according to some ranking function
+    '''
 
 
 class LocalSearcher(object):
@@ -160,7 +184,9 @@ class LocalSearcher(object):
         # for computing the running stats.
         for gen_name in self.feats_to_cache_name:
             self.stats[gen_name] = Statistics()
-        
+        self.stats['score'] = Statistics()
+        self.stats['colorname'] = Statistics()
+
         self._samples = []
         self.results = []
         # maintain results as:
@@ -195,14 +221,11 @@ class LocalSearcher(object):
         # get the score the image.
         frame_score = self.predictor.predict(imgs[0])
         # extract all the features we want to cache
-        for f in self.feature_generators:
-            
-        # get the xdiff
-        SAD = self.compute_SAD(imgs)[0]
-        self._SAD_stat.push(SAD)
-        # measure the image variance
-        pix_val = np.max(np.var(np.var(imgs[0],0),0))
-        self._pixel_stat.push(pix_val)
+        for n, f in zip(self.feats_to_cache_name, 
+                        self.feats_to_cache):
+            vals = f.generate(imgs, fonly=True)
+            self.stats[n].push(vals[0])
+        self.stats['score'].push(frame_score)
         # update the search algo's knowledge
         self.search_algo.update(frameno, frame_score)
 
@@ -267,45 +290,6 @@ class LocalSearcher(object):
             frame_score = self.predictor.predict(imgs[0])
             self.search_algo.update(frameno, frame_score)
             self._score_stat.push(frame_score) 
-
-    def compute_SAD(self, imgs):
-        '''
-        Computes the sum of absolute difference between
-        a list of frames. 
-        '''
-        SAD_vals = []
-        prev_img = imgs[0]
-        for next_img in imgs[1:]:
-            sad = np.sum(cv2.absdiff(prev_img, next_img))
-            SAD_vals.append(sad)
-            prev_img = next_img
-        return SAD_vals
-
-    def compute_blur(self, img):
-        '''
-        Computes the average blurriness of an image by
-        computing the variance of the laplacian.
-        '''
-        if type(img) == list:
-            return [self.compute_blur(x) for x in img]
-        image = self._center_crop(img, 0.5)
-        return cv2.Laplacian(image, cv2.CV_32F).var()
-
-    def _center_crop(self, img, crop_frac):
-        '''
-        Takes the center <crop_frac> of an image
-        and returns it.
-        '''
-        if len(img.shape) == 3:
-            x, y, w = img.shape
-        else:
-            x, y = img.shape
-        xlim = int(x * (1. - crop_frac)/2)
-        ylim = int(y * (1. - crop_frac)/2)
-        if len(img.shape) == 3:
-            return img[xlim:-xlim, ylim:-ylim, :]
-        else:
-            return img[xlim:-xlim, ylim:-ylim]
 
     def _get_frame(self, f):
         more_data, self.cur_frame = pycvutils.seek_video(
