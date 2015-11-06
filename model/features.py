@@ -64,12 +64,17 @@ class RegionFeatureGenerator(FeatureGenerator):
         self.max_height = None
         self.crop_frac = None
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
         '''
         Creates a feature vector for list of images.
 
         Input:
         images - a list of N images in openCV BGR format.
+        fonly - defaults to False. First only: compute this feature
+                only for the first image obtained. In the case of
+                features that require more than one frame to be
+                computed properly (i.e., SAD), the quantity is computed
+                with the minimal number of frames required.
         Returns: 
             1D/2D numpy feature object of N[xF] elements,
             where F is the number of features.
@@ -161,9 +166,11 @@ class BlurGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
+        if fonly:
+            images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
@@ -204,15 +211,19 @@ class SADGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
+        if fonly:
+            images = images[:2]
         images = [self.prep(x) for x in images]
         SAD_vals = self._compute_SAD(images)
         feat_vec = [float(SAD_vals[1])]
         for i in range(1, len(SAD_vals)-1):
             feat_vec.append((SAD_vals[i]+SAD_vals[i+1])/2.)
         feat_vec.append(float(SAD_vals[-1]))
+        if fonly:
+            feat_vec = feat_vec[:1]
         return np.array(feat_vec)
 
     def _compute_SAD(self, images):
@@ -255,7 +266,11 @@ class FaceGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
@@ -291,7 +306,11 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
@@ -329,7 +348,11 @@ class TextGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
@@ -363,7 +386,11 @@ class PixelVarGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images):
+    def generate(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
