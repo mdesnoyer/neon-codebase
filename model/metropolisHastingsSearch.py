@@ -107,7 +107,7 @@ class ThumbnailResultObject(object):
             other = other.frameno
         return cmp(self.frameno, other)
 
-    def __repr__(self):
+    def __str__(self):
         if self.prev_frame:
             pf = self.prev_frame.frameno
         else:

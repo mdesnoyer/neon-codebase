@@ -48,14 +48,13 @@ def _get_one_hist(b, bins):
     return chist
 
 class ScoreEyes(object):
-    def __init__(self, clf, scaler):
+    def __init__(self, clf):
         '''
         Classifies and scores eyes based
         on whether they are open or closed.
 
         INPUTS:
             clf - a classifier
-            scaler - a standard scaler
             the following are defined by the clf:
                 n_size - a float, the size of the LBP
                 n_circ_sym - number of the LBP divisions to use
@@ -63,6 +62,7 @@ class ScoreEyes(object):
                          subdivide the image
                 trim - the number of pixels to trim off the
                          the borders of the returned LBP image.
+                scaler - a standard scaler
         '''
         self.clf = clf
         self._n_size = clf.n_size
@@ -70,7 +70,7 @@ class ScoreEyes(object):
         self._n_split = clf.n_splits
         self._trim = clf.trim
         self._resize = clf.img_size
-        self.scaler = scaler
+        self.scaler = clf.scaler
         self.f_lbp = lambda x: feature.local_binary_pattern(x, 
                                     self._n_circ_sym, 
                                     self._n_size).astype(int)

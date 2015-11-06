@@ -32,7 +32,7 @@ from itertools import permutations
 import cv2
 import ffvideo
 import model.errors
-import model.features
+import model.features as feat
 import numpy as np
 import utils.obj
 from model import colorname
@@ -83,25 +83,22 @@ statemon.define('low_number_of_frames_seen', int)
 
 
 
-class LocalSearcher(VideoSearcher):
-    def __init__(self, predictor,
-                 startend_buffer=0.1,
-                 max_startend_buffer=5.0,
+class LocalSearcher(object):
+    def __init__(self, predictor, face_finder,
+                 eye_classifier, 
                  processing_time_ratio=1.0,
                  local_search_width=64,
                  local_search_step=8,
-                 retain_scores=True,
-                 soft_filtering=False,
-                 max_im_var=True,
                  n_thumbs=5,
-                 text_std_mult=1,
-                 scene_diff_std_mult=2,
-                 text_filt=None,
-                 face_filt=None,
-                 mixing_time=10,
-                 search_algo=MCMH_rpl):
+                 mixing_samples=10,
+                 search_algo=MCMH_rpl,
+                 feature_generators=None,
+                 feats_to_cache=None,
+                 criteria=None):
         '''
-        Inputs: (those distinct from abstract class)
+        Inputs: 
+            predictor:
+                computes the score for a given image
             local_search_width:
                 The number of frames to search forward.
             local_search_step:
@@ -109,23 +106,8 @@ class LocalSearcher(VideoSearcher):
                 ===> for instance, if local_search_width = 6 
                      and local_search_step = 2, then it will
                      obtain 6 frames across 12 frames (about 0.5 sec) 
-            retain_scores:
-                Save the obtained filtering scores.
-            soft_filtering:
-                Always run all the filters, retaining
-                scores. Use filter scores to rank, not
-                to exclude.
-            max_im_var:
-                Only add an image to the heap when it increases
-                the variety of the images.
             n_thumbs:
                 The number of top images to store.
-            scene_diff_mult:
-                The frames must be >= <mean_SAD> - scene_diff_std_mult * <std_SAD>
-            text_filt:
-                The text filter
-            face_filt:
-                The closed eye / face filter
             mixing_samples:
                 The number of samples to draw to establish baseline
                 statistics.
@@ -134,34 +116,62 @@ class LocalSearcher(VideoSearcher):
                 over which to search. Should support asynchronous result updating,
                 so it is easy to switch the predictor between sequential (CPU-based)
                 and non-sequential (GPU-based) predictor methods.
+            feature_generators:
+                A list of feature generators. Note that this have to be of the
+                RegionFeatureGenerator type.
+            feats_to_cache:
+                The name of all features to save as running statistics.
+                (features are only cached during sampling)
+            criteria:
+                A list of criterion for conducting the local search based on
+                the values of the features. TODO: what the hell is this gonna
+                look like?
         '''
-        if soft_filtering:
-            retain_scores = True
-            raise NotImplementedError('Soft filtering not implemented yet.')
-        self.startend_buffer = startend_buffer
-        self.max_startend_buffer = max_startend_buffer
-        self.processing_time_ratio = processing_time_ratio
         self.predictor = predictor
         self.local_search_width = local_search_width
         self.local_search_step = local_search_step
-        self.retain_scores = retain_scores
-        self.soft_filtering = soft_filtering
-        self.max_im_var = max_im_var
-        self.text_std_mult = text_std_mult
-        self.scene_diff_mult = scene_diff_mult
-        self.text_filt = text_filt
-        self.face_filt = face_filt
-        self.mixing_samples = mixing_samples
         self.n_thumbs = n_thumbs
+        self.mixing_samples = mixing_samples
         self.search_algo = search_algo(local_search_width)
+        self.generators = feature_generators
+        self.generator_names = []
+        self.feats_to_cache = []
+        self.feats_to_cache_name = []
+        self.criteria = criteria
         self.cur_frame = None
         self.video = None
         self.results = None
+        self.stats = dict()
+
+        # determine the generators to cache.
+        for f in self.feature_generators:
+            gen_name = f.get_feat_name()
+            self.generator_names.append(gen_name)
+            if gen_name in self.feats_to_cache:
+                self.feats_to_cache.append(f)
+                self.feats_to_cache_name.append(gen_name)
 
     def choose_thumbnails(self, video, n=1, video_name=''):
-        self.gist.reset()
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
+
+    def choose_thumbnails_impl(self, video, n=1, video_name=''):
+        # instantiate the statistics objects required
+        # for computing the running stats.
+        for gen_name in self.feats_to_cache_name:
+            self.stats[gen_name] = Statistics()
+        
+        self._samples = []
+        self.results = []
+        # maintain results as:
+        # (score, rtuple, frameno, colorHist)
+        #
+        # where rtuple is the value to be returned.
+        self.video = video
+        fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
+        num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        video_time = float(num_frames) / fps
+        self.search_algo.start(num_frames)
 
     def _conduct_local_search(self, start_frame, end_frame, 
                               start_score, end_score):
@@ -184,6 +194,9 @@ class LocalSearcher(VideoSearcher):
                     [frameno, frameno + self.local_search_step])
         # get the score the image.
         frame_score = self.predictor.predict(imgs[0])
+        # extract all the features we want to cache
+        for f in self.feature_generators:
+            
         # get the xdiff
         SAD = self.compute_SAD(imgs)[0]
         self._SAD_stat.push(SAD)
@@ -254,26 +267,6 @@ class LocalSearcher(VideoSearcher):
             frame_score = self.predictor.predict(imgs[0])
             self.search_algo.update(frameno, frame_score)
             self._score_stat.push(frame_score) 
-
-    def choose_thumbnails_impl(self, video, n=1, video_name=''):
-        # instantiate the statistics objects required
-        # for computing the running stats.
-        self._SAD_stat = Statistics()
-        self._pixel_stat = Statistics()
-        self._colorname_stat = Statistics()
-        self._score_stat = Statistics()
-        
-        self._samples = []
-        self.results = []
-        # maintain results as:
-        # (score, rtuple, frameno, colorHist)
-        #
-        # where rtuple is the value to be returned.
-        self.video = video
-        fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
-        num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
-        video_time = float(num_frames) / fps
-        self.search_algo.start(num_frames)
 
     def compute_SAD(self, imgs):
         '''
