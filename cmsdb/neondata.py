@@ -905,7 +905,8 @@ class DefaultSizes(object):
 class ServingControllerType(object): 
     IMAGEPLATFORM = 'imageplatform'
 
-class AccessLevels(object): 
+class AccessLevels(object):
+    NONE = 0 
     READ = 1 
     UPDATE = 2 
     CREATE = 4 

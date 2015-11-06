@@ -63,6 +63,12 @@ class ResponseCode(object):
     HTTP_INTERNAL_SERVER_ERROR = 500
     HTTP_NOT_IMPLEMENTED = 501
 
+class HTTPVerbs(object): 
+    POST = 'POST' 
+    PUT = 'PUT' 
+    GET = 'GET' 
+    DELETE = 'DELETE' 
+
 class TokenTypes(object): 
     ACCESS_TOKEN = 0 
     REFRESH_TOKEN = 1
@@ -83,9 +89,61 @@ class APIV2Sender(object):
         self.write(error_json)
         self.finish() 
 
-class apiv2(object):
-    @staticmethod
-    @tornado.gen.coroutine 
+class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
+    def initialize(self):
+        self.set_header('Content-Type', 'application/json')
+        self.uri = self.request.uri 
+    
+    def set_access_token_information(self): 
+        """Helper function to get the access token 
+
+           the key can be in one of three places 
+              1) the Authorization header : Authorization: Bearer <token> 
+              2) the query string params : &token=meisatoken 
+              3) the post body params : as token 
+        """
+        self.access_token = None 
+        auth_header = self.request.headers.get('Authorization') 
+        if auth_header and auth_header.startswith('Bearer'):
+            self.access_token = auth_header[7:]
+        elif len(self.request.query_arguments) > 0: 
+            query_args = self.request.query_arguments
+            try: 
+                self.access_token = str(query_args['token'][0])
+            except KeyError: 
+                pass
+        elif len(self.request.body) > 0: 
+            content_type = self.request.headers.get('Content-Type', None)
+            if content_type and 'application/json' in content_type: 
+                bjson = json.loads(self.request.body) 
+                try:
+                    self.access_token = str(bjson['token'])
+                except KeyError: 
+                    pass
+            else:
+                raise BadRequestError('Content-Type Not Supported')
+        
+    def set_account_id(request):
+        parsed_url = urlparse(request.uri) 
+        request.account_id = parsed_url.path.split('/')[3]
+ 
+    def parse_args(self, keep_token=False):
+        args = {} 
+        # if we have query_arguments only use them 
+        if len(self.request.query_arguments) > 0: 
+            for key, value in self.request.query_arguments.iteritems():
+                if key != 'token' or keep_token: 
+                    args[key] = value[0]
+        # otherwise let's use what we find in the body, json only
+        elif len(self.request.body) > 0: 
+            bjson = json.loads(self.request.body) 
+            for key, value in bjson.items():
+                if key != 'token' or keep_token: 
+                    args[key] = value
+
+        return args
+    
+    @tornado.gen.coroutine
     def is_authorized(request, access_level_required, account_required=True):
         """checks to see if a user is authorized to call a function 
            
@@ -99,10 +157,12 @@ class apiv2(object):
            Raises: 
              NotAuthorizedErrors if not allowed 
         """ 
+        request.set_access_token_information()
+        if access_level_required is neondata.AccessLevels.NONE: 
+            raise tornado.gen.Return(True)
         request.set_account_id() 
         account = yield tornado.gen.Task(neondata.NeonUserAccount.get, request.account_id)
         access_token = request.access_token
-
         if account_required and not account:
             raise NotAuthorizedError('account does not exist')
         if not access_token:  
@@ -130,60 +190,24 @@ class apiv2(object):
             raise NotAuthorizedError('invalid token') 
  
         raise tornado.gen.Return(True)
-
-class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self):
-        self.set_header('Content-Type', 'application/json')
-        self.set_access_token_information()
-        self.header_api_key = self.request.headers.get('X-Neon-API-Key')
-        self.uri = self.request.uri 
     
-    def set_access_token_information(self): 
-        """Helper function to get the access token 
-
-           the key can be in one of three places 
-              1) the Authorization header : Authorization: Bearer <token> 
-              2) the query string params : &token=meisatoken 
-              3) the post body params : as token 
-        """
-        self.access_token = None 
-        auth_header = self.request.headers.get('Authorization') 
-        if auth_header and auth_header.startswith('Bearer'):
-            self.access_token = auth_header[7:]
-        elif len(self.request.query_arguments) > 0: 
-            query_args = self.request.query_arguments
-            try: 
-                self.access_token = str(query_args['token'][0])
-            except KeyError: 
-                pass
-        elif len(self.request.body) > 0: 
-            content_type = self.request.headers.get('Content-Type')
-            if content_type and 'application/json' in content_type: 
-                bjson = json.loads(self.request.body) 
-                try:
-                    self.access_token = str(bjson['token'])
-                except KeyError: 
-                    pass
-        
-    def set_account_id(request):
-        parsed_url = urlparse(request.uri) 
-        request.account_id = parsed_url.path.split('/')[3]
+    def get_access_levels(self): 
+        raise NotImplementedError('access levels are not defined') 
  
-    def parse_args(self, keep_token=False):
-        args = {} 
-        # if we have query_arguments only use them 
-        if len(self.request.query_arguments) > 0: 
-            for key, value in self.request.query_arguments.iteritems():
-                if key != 'token' or keep_token: 
-                    args[key] = value[0]
-        # otherwise let's use what we find in the body, json only
-        elif len(self.request.body) > 0: 
-            bjson = json.loads(self.request.body) 
-            for key, value in bjson.items():
-                if key != 'token' or keep_token: 
-                    args[key] = value
+    @tornado.gen.coroutine 
+    def prepare(self):
+        access_level_dict = self.get_access_levels()
+        
+        try: 
+            account_required_list = access_level_dict['account_required'] 
+        except KeyError: 
+            account_required_list = [] 
 
-        return args
+        try:
+           yield self.is_authorized(access_level_dict[self.request.method],
+                                    self.request.method in account_required_list) 
+        except KeyError:
+            pass 
 
     def write_error(self, status_code, **kwargs):
         def get_exc_message(exception):
@@ -195,7 +219,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         exception = kwargs["exc_info"][1]
         if any(isinstance(exception, c) for c in [Invalid, 
                                                   NotAuthorizedError,
-                                                  NotFoundError,  
+                                                  NotFoundError, 
+                                                  BadRequestError,  
                                                   NotImplementedError]):
             if isinstance(exception, Invalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
@@ -213,6 +238,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_not_implemented_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_NOT_IMPLEMENTED)
+            if isinstance(exception, BadRequestError):
+                statemon.state.increment(ref=_invalid_input_errors_ref,
+                                         safe=False)
+                self.set_status(ResponseCode.HTTP_BAD_REQUEST)
 
             self.error(get_exc_message(exception), code=self.get_status())
 
@@ -306,6 +335,11 @@ class NotAuthorizedError(tornado.web.HTTPError):
 
 class AlreadyExists(tornado.web.HTTPError): 
     def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+
+class BadRequestError(tornado.web.HTTPError): 
+    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST): 
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 

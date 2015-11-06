@@ -151,10 +151,16 @@ class TestNewAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
         super(TestNewAccountHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
@@ -220,15 +226,15 @@ class TestAccountHandler(TestControllersBase):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
-        #self.verify_account_mocker.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -239,14 +245,16 @@ class TestAccountHandler(TestControllersBase):
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 404) 
 	    pass
- 
+
     @tornado.testing.gen_test
     def test_post_acct_not_implemented(self):
         try: 
+            header = { 'Content-Type':'application/json' }
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='abc123', 
-                                                    method="POST")
+                                                    body='{"abc123":"1"}', 
+                                                    method="POST", 
+                                                    headers=header)
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 501) 
 	    pass 
@@ -327,6 +335,17 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(default_size_new[0],default_size_old[0])
 
     @tornado.testing.gen_test 
+    def test_update_acct_no_content_type(self): 
+        try: 
+            url = '/api/v2/124abc' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='{"abc123":"1"}', 
+                                                    method="PUT") 
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 400) 
+	    pass 
+
+    @tornado.testing.gen_test 
     def test_update_acct_width_only(self): 
         # do a get here to test and make sure the height wasn't messed up
         url = '/api/v2/%s' % (self.user.neon_api_key) 
@@ -380,10 +399,10 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testiid' 
         defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -499,10 +518,10 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -796,10 +815,10 @@ class TestVideoHandler(TestControllersBase):
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -1264,10 +1283,10 @@ class TestThumbnailHandler(TestControllersBase):
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image] 
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
@@ -1436,10 +1455,10 @@ class TestVideoStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         super(TestVideoStatsHandler, self).setUp()
 
     def tearDown(self): 
@@ -1520,10 +1539,10 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.apiv2.is_authorized')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = lambda x, callback: callback(True)
+        self.verify_account_mock.sife_effect = True
         neondata.ThumbnailMetadata('testingtid', width=800).save()
         neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
@@ -2101,10 +2120,11 @@ class TestAuthenticationHandler(TestAuthenticationBase):
 
 class TestRefreshTokenHandler(TestAuthenticationBase): 
     def setUp(self): 
+        self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
         super(TestRefreshTokenHandler, self).setUp()
-   
+         
     def tearDown(self): 
-        options._set('cmsapiv2.apiv2.refresh_token_exp', 132423)
+        options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
  
     @classmethod 
     def setUpClass(cls): 
@@ -2117,7 +2137,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         user.save()
 
     @classmethod 
-    def tearDownClass(cls): 
+    def tearDownClass(cls):
         cls.redis.stop()
 
     def test_no_token(self): 

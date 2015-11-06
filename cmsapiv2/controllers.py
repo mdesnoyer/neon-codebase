@@ -73,10 +73,6 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
 
-        yield apiv2.is_authorized(self, 
-                                  neondata.AccessLevels.GLOBAL_ADMIN, 
-                                  account_required=False)
-
         schema = Schema({ 
           Required('name') : Any(str, unicode, Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
@@ -102,6 +98,12 @@ class NewAccountHandler(APIV2Handler):
  
         self.success(json.dumps(user))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE 
+               }  
+
 '''*****************************************************************
 AccountHandler 
 *****************************************************************'''
@@ -113,7 +115,7 @@ class AccountHandler(APIV2Handler):
     def get(self, account_id):
         """handles account endpoint get request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -136,7 +138,7 @@ class AccountHandler(APIV2Handler):
     def put(self, account_id):
         """handles account endpoint put request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
 
         schema = Schema({ 
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -163,6 +165,15 @@ class AccountHandler(APIV2Handler):
         result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
         self.success(json.dumps(acct_for_return))
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT] 
+               }  
+         
 
 '''*********************************************************************
 IntegrationHelper 
@@ -251,7 +262,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         
         Keyword arguments:
         """ 
-        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
@@ -270,7 +281,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
     def get(self, account_id):
         """handles an ooyala endpoint get request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -290,7 +301,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
     def put(self, account_id):
         """handles an ooyala endpoint put request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -322,6 +333,17 @@ class OoyalaIntegrationHandler(APIV2Handler):
         statemon.state.increment('put_ooyala_oks')
         self.success(json.dumps(ooyala_integration.__dict__))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, 
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST] 
+               }  
+
 '''*********************************************************************
 BrightcoveIntegrationHandler
 *********************************************************************'''
@@ -331,7 +353,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     def post(self, account_id):
         """handles a brightcove endpoint post request""" 
 
-        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -356,7 +378,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     def get(self, account_id):  
         """handles a brightcove endpoint get request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -375,7 +397,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     def put(self, account_id):
         """handles a brightcove endpoint put request"""
 
-        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
  
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -414,6 +436,17 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('put_brightcove_oks')
         self.success(json.dumps(integration.__dict__))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, 
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST] 
+               }  
+
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
@@ -423,7 +456,7 @@ class ThumbnailHandler(APIV2Handler):
     def post(self, account_id):
         """handles a thumbnail endpoint post request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -479,7 +512,7 @@ class ThumbnailHandler(APIV2Handler):
     def put(self, account_id): 
         """handles a thumbnail endpoint put request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -510,7 +543,7 @@ class ThumbnailHandler(APIV2Handler):
     def get(self, account_id): 
         """handles a thumbnail endpoint get request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
  
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -526,6 +559,17 @@ class ThumbnailHandler(APIV2Handler):
             raise NotFoundError('thumbnail does not exist with id = %s' % (thumbnail_id)) 
         statemon.state.increment('get_thumbnail_oks')
         self.success(json.dumps(thumbnail.__dict__))
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, 
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST] 
+               }  
 
 '''*********************************************************************
 VideoHelper  
@@ -649,7 +693,7 @@ class VideoHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request""" 
-        yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.CREATE) 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
@@ -706,7 +750,7 @@ class VideoHandler(APIV2Handler):
     def get(self, account_id):  
         """handles a Video endpoint get request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -767,7 +811,7 @@ class VideoHandler(APIV2Handler):
     def put(self, account_id):
         """handles a Video endpoint put request"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.UPDATE)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -793,6 +837,17 @@ class VideoHandler(APIV2Handler):
         statemon.state.increment('put_video_oks')
         self.success(json.dumps(video.__dict__))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, 
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST] 
+               }  
+
 '''*********************************************************************
 VideoStatsHandler 
 *********************************************************************'''
@@ -801,7 +856,7 @@ class VideoStatsHandler(APIV2Handler):
     def get(self, account_id): 
         """gets the video statuses of 1 -> n videos"""
  
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -827,6 +882,13 @@ class VideoStatsHandler(APIV2Handler):
 
         self.success(json.dumps(stats_dict))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.GET] 
+               }  
+
 '''*********************************************************************
 ThumbnailStatsHandler 
 *********************************************************************'''
@@ -839,7 +901,7 @@ class ThumbnailStatsHandler(APIV2Handler):
                                  for that video 
         """
 
-        yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
+        #yield apiv2.is_authorized(self, neondata.AccessLevels.READ)
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
@@ -887,6 +949,13 @@ class ThumbnailStatsHandler(APIV2Handler):
 
         self.success(json.dumps(stats_dict))
 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.GET] 
+               }  
+
 '''*********************************************************************
 HealthCheckHandler 
 *********************************************************************'''
@@ -903,6 +972,12 @@ class HealthCheckHandler(APIV2Handler):
         else: 
             raise Exception('unable to get to the v1 api', 
                             ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.NONE 
+               }  
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
@@ -954,9 +1029,8 @@ application = tornado.web.Application([
 
 def main():
     global server
-    print "API V2 is running" 
-    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server) 
     server.listen(options.port)
     tornado.ioloop.IOLoop.current().start()
 

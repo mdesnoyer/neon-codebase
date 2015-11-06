@@ -79,6 +79,12 @@ class AuthenticateHandler(APIV2Handler):
         else: 
             statemon.state.increment('failed_authenticates')
             raise NotFoundError()
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE
+               }  
            
 '''*****************************************************************
 LogoutHandler 
@@ -115,7 +121,13 @@ class LogoutHandler(APIV2Handler):
             # TODO debating if this is the right course of action... 
             # should we always allow logout regardless of the access token state? 
             statemon.state.increment('token_expiration_logout')
-            raise NotAuthorizedError('access token has expired, please refresh the access token') 
+            raise NotAuthorizedError('access token has expired, please refresh the access token')
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               }  
 
 '''*********************************************************************
 HealthCheckHandler 
@@ -123,7 +135,13 @@ HealthCheckHandler
 class HealthCheckHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
-        self.success('<html>Server OK</html>') 
+        self.success('<html>Server OK</html>')
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               }  
 
 '''*****************************************************************
 RefreshTokenHandler 
@@ -169,7 +187,13 @@ class RefreshTokenHandler(APIV2Handler):
             self.success(json.dumps(result)) 
             
         except jwt.ExpiredSignatureError:
-            raise NotAuthorizedError('refresh token has expired, please authenticate again') 
+            raise NotAuthorizedError('refresh token has expired, please authenticate again')
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               }  
          
 '''*********************************************************************
 Endpoints 
@@ -183,9 +207,8 @@ application = tornado.web.Application([
 
 def main():
     global server
-    print "API Authentication is running" 
-    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     server = tornado.httpserver.HTTPServer(application)
+    utils.ps.register_tornado_shutdown(server) 
     server.listen(options.port)
     tornado.ioloop.IOLoop.current().start()
 
