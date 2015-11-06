@@ -140,7 +140,7 @@ class HealthCheckHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+                 HTTPVerbs.GET : neondata.AccessLevels.NONE 
                }  
 
 '''*****************************************************************

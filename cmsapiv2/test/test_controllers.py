@@ -214,9 +214,9 @@ class TestNewAccountHandler(TestControllersBase):
                                                     method="GET")
 
     def test_post_acct_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.AccountHandler.post')
-        params = json.dumps({'rando': '123123abc'})
-	url = '/api/v2/124234234?param=123'
+        exception_mocker = patch('cmsapiv2.controllers.NewAccountHandler.post')
+        params = json.dumps({'name': '123123abc'})
+	url = '/api/v2/accounts'
         self.post_exceptions(url, params, exception_mocker) 
 
 class TestAccountHandler(TestControllersBase):

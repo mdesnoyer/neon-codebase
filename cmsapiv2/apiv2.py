@@ -207,7 +207,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            yield self.is_authorized(access_level_dict[self.request.method],
                                     self.request.method in account_required_list) 
         except KeyError:
-            pass 
+            raise NotImplementedError('access levels are not defined') 
 
     def write_error(self, status_code, **kwargs):
         def get_exc_message(exception):
