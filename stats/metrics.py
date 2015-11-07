@@ -14,12 +14,14 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import dateutil.parser
 import math
 import numpy as np
 import pandas
 import scipy.stats
 
-def calc_lift_at_first_significant_hour(impressions, conversions):
+def calc_lift_at_first_significant_hour(impressions, conversions,
+                                        video_status, thumb_statuses):
     '''Calculates the lift for each thumbnail relative to the others 
     when statistical significant is reached.
     Inputs:
@@ -27,6 +29,8 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                   and columns are thumbnails
     Conversions - A pandas DataFrame of conversion counts where rows are hours
                   and columns are thumbnails
+    video_status - The video status object for this video
+    thumb_status - List of thumbnail status objects for the thumbnails
     
     If there is no statistically significant point, then the aggregate
     is used for calculating the stats.
@@ -37,6 +41,12 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
     cols and rows represent the thumbnail and the entries are row
     vs. col (baseline)
     '''
+
+    # See when the experiment ended
+    exp_end = None
+    if video_status.experiment_state == 'complete' and len(video_status.state_history) > 0:
+        exp_end = dateutil.parser.parse(video_status.state_history[-1][0])
+    thumb_ctrs = dict([(x.get_id(), x.ctr or 0.0) for x in thumb_statuses])
 
     # Calculate the cumulative, per thumbnail stats we need.
     cum_imp = impressions.cumsum().fillna(method='ffill')
@@ -64,32 +74,50 @@ def calc_lift_at_first_significant_hour(impressions, conversions):
                 index=zscore.index)
             p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
-            # Find where the first hour of statististical significance is
-            sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
-                          (cum_imp[top] > 500) & (cum_conv[base] > 5) &
-                          (cum_conv[top] > 5)]
-            #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
-            #              (cum_imp[top] > 500)]
-            if len(sig) == 0:
-                # There isn't statistical significance anywhere so use
-                # the aggregate stats.
-                idx = p_value.index[-1]
-
-                # TODO(mdesnoyer): Playing. only keep data that's significant
-                #continue
+            if exp_end and max(cum_imp.index) > exp_end:
+                # The experiment has ended, so assume the ctrs in the
+                # database are correct
+                exp_end = exp_end.replace(minute=0, second=0, microsecond=0)
+                idx = cum_imp.iloc[cum_imp.index > exp_end].index[0]
+                stats['p_value'][base][top] = np.max(p_value)
+                if thumb_ctrs[base] > 0.0:
+                    stats['lift'][base][top] = (
+                        (thumb_ctrs[top] - thumb_ctrs[base]) /
+                        thumb_ctrs[base])
+                stats['revlift'][base][top] = (thumb_ctrs[top] - 
+                                               thumb_ctrs[base])
+                stats['xtra_conv_at_sig'][base][top] = (
+                    cum_conv[top][idx] - cum_imp[top][idx] *
+                    cum_ctr[base][idx])
             else:
-                idx = sig.index[0]
-                
-            stats['p_value'][base][top] = p_value[idx]
-            stats['lift'][base][top] = ((
-                cum_ctr[top][idx] - cum_ctr[base][idx]) /
-                cum_ctr[base][idx])
 
-            stats['revlift'][base][top] = (
-                cum_ctr[top][idx] - cum_ctr[base][idx])
+                # Find where the first hour of statististical significance is
+                sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                              (cum_imp[top] > 500) & (cum_conv[base] > 5) &
+                              (cum_conv[top] > 5)]
+                #sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
+                #              (cum_imp[top] > 500)]
+                if len(sig) == 0:
+                    # There isn't statistical significance anywhere so use
+                    # the aggregate stats.
+                    idx = p_value.index[-1]
 
-            stats['xtra_conv_at_sig'][base][top] = (
-                cum_conv[top][idx] - cum_imp[top][idx] * cum_ctr[base][idx])
+                    # TODO(mdesnoyer): Playing. only keep data that's
+                    #significant continue
+                else:
+                    idx = sig.index[0]
+
+                stats['p_value'][base][top] = p_value[idx]
+                stats['lift'][base][top] = ((
+                    cum_ctr[top][idx] - cum_ctr[base][idx]) /
+                    cum_ctr[base][idx])
+
+                stats['revlift'][base][top] = (
+                    cum_ctr[top][idx] - cum_ctr[base][idx])
+
+                stats['xtra_conv_at_sig'][base][top] = (
+                    cum_conv[top][idx] - cum_imp[top][idx] * 
+                    cum_ctr[base][idx])
 
     return stats
 

@@ -74,7 +74,7 @@ def get_data():
                 if row[1] in video_info.thumbnail_ids]
 
     label_map = []
-    for thumbnail_id in video_info.thumbnail_ids:
+    for thumbnail_id in set(video_info.thumbnail_ids):
         thumb_info = neondata.ThumbnailMetadata.get(thumbnail_id)
         label = '%s_%i' % (thumb_info.type, thumb_info.rank)
         label_map.append({'thumbnail_id' : thumbnail_id,
