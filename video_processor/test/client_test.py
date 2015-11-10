@@ -17,6 +17,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
+from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 import boto.exception
 import cmsdb.cdnhosting
@@ -45,6 +46,7 @@ import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
 import test_utils.redis
+from test_utils import sqsmock
 from tornado.concurrent import Future
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import tornado.ioloop
@@ -90,6 +92,16 @@ class TestVideoClient(test_utils.neontest.TestCase):
        
         #setup process video object
         self.api_request = None
+
+        # Mock the SQS implementation
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_queue = sqsmock.SQSQueueMock('Priority_0', False)
+        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+                                 'connect_to_region')
+        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.queue_patcher = patch('video_processor.sqs_utilities.' \
+                                    'VideoProcessingQueue._create_queue')
+        self.queue_patcher.start().return_value = self.mock_queue
         
         #patch for download_and_add_thumb
         self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
@@ -100,6 +112,8 @@ class TestVideoClient(test_utils.neontest.TestCase):
     def tearDown(self):
         self.utils_patch.stop()
         self.redis.stop()
+        self.sqs_patcher.stop()
+        self.queue_patcher.stop()
         super(TestVideoClient, self).tearDown()
         
     def setup_video_processor(self, request_type, url='http://url.com'):
@@ -398,6 +412,9 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor._get_random_frame(self.test_video_file)
         meta2, img2 = vprocessor.thumbnails[1]
         self.assertNotEqual(meta2.frameno, meta1.frameno)
+
+    def dequeue_job(self):
+        video_processor.client.VideoClient.dequeue_job()
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
     ''' 
@@ -1082,6 +1099,16 @@ class SmokeTest(test_utils.neontest.TestCase):
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         self.model.choose_thumbnails.return_value = ct_output
 
+        # Mock the SQS implementation
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_queue = sqsmock.SQSQueueMock('Priority_0', False)
+        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+                                 'connect_to_region')
+        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.queue_patcher = patch('video_processor.sqs_utilities.' \
+                                    'VideoProcessingQueue._create_queue')
+        self.queue_patcher.start().return_value = self.mock_queue
+
         # create the client object
         self.video_client = video_processor.client.VideoClient(
             'some/dir/my_model.model',
@@ -1095,12 +1122,16 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.cloudinary_patcher.stop()
         self.model_patcher.stop()
         self.redis.stop()
+        self.sqs_patcher.stop()
+        self.queue_patcher.stop()
         super(SmokeTest, self).tearDown()
 
-    def _run_job(self, job):
+    def _run_job(self, job, message=None):
         '''Runs the job'''
         self.job_queue.put(job)
-        
+        if(message is not None):
+            self.mock_queue.write(message)
+
         with options._set_bounded('video_processor.client.dequeue_period', 0.01):
             self.video_client.start()
 
@@ -1132,7 +1163,18 @@ class SmokeTest(test_utils.neontest.TestCase):
                     self.fail('The subprocess did not die cleanly')
 
     def test_smoke_test(self):
-        self._run_job({
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1140,6 +1182,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://L\xc3\xb6rick_video.mp4'
             })
+
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://L\xc3\xb6rick_video.mp4'
+            }, message)
                     
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1201,7 +1254,18 @@ class SmokeTest(test_utils.neontest.TestCase):
         video_meta.serving_url = 'my_serving_url.jpg'
         video_meta.save()
 
-        self._run_job({
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1210,6 +1274,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'video_url' : 'http://video.mp4'
             })
 
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
+        
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state,
@@ -1227,7 +1302,18 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.video_download_mock.side_effect = [
             urllib2.URLError('Oops')]
 
-        self._run_job({
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1235,6 +1321,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
             })
+
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1255,7 +1352,19 @@ class SmokeTest(test_utils.neontest.TestCase):
         modify_mock.side_effect = [
             redis.ConnectionError("Connection Error")]
 
-        self._run_job({
+
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1263,6 +1372,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
             })
+
+        message.set_body(message_body)
+        
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1280,7 +1400,18 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.api_request.state = neondata.RequestState.SERVING
         self.api_request.save()
 
-        self._run_job({
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1288,6 +1419,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
             })
+
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
         
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1299,7 +1441,19 @@ class SmokeTest(test_utils.neontest.TestCase):
         # register it as a customer error in the database.
         self.im_download_mock.side_effect = [IOError('Cannot download')]
         
-        self._run_job({
+
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1307,6 +1461,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
             })
+
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1349,7 +1514,19 @@ class SmokeTest(test_utils.neontest.TestCase):
     def test_unexpected_error(self):
         self.video_download_mock.side_effect = [Exception('Some bad error')]
 
-        self._run_job({
+
+        message = Message()
+        message.message_attributes = {
+                  "priority": {
+                        "data_type": "Number",
+                        "string_value": "0"
+                 }, "duration": {
+                        "data_type": "Number",
+                        "string_value": "300"
+                 }
+        }
+
+        message_body = json.dumps({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1357,6 +1534,17 @@ class SmokeTest(test_utils.neontest.TestCase):
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
             })
+
+        message.set_body(message_body)
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            }, message)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
