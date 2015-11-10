@@ -11,6 +11,7 @@ import cv2
 import logging
 import numpy as np
 from . import imageutils
+from model import smartcrop
 
 _log = logging.getLogger(__name__)
 
@@ -27,17 +28,9 @@ def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
 
     Returns: The resized and cropped image.
     '''
-    scaling = max(float(h) / image.shape[0],
-                  float(w) / image.shape[1])
-
-    newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
-                           interpolation=interpolation)
-
-    sr = np.floor((newsize[0] - h)/2)
-    sc = np.floor((newsize[1] - w)/2)
-
-    return big_image[sr:sr + h, sc:sc + w, :]
+    sc = smartcrop.SmartCrop(image)
+    cropped_im = sc.crop(w, h)
+    return cropped_im
 
 def to_pil(im):
     '''Converts an OpenCV image to a PIL image.'''

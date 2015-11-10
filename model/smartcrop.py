@@ -266,16 +266,3 @@ class SmartCrop(object):
     
         self.resized_im = cv2.resize(self.cropped_im, (w, h))
         return self.resized_im
-
-    def resize_crop():
-        scaling = max(float(h) / image.shape[0],
-              float(w) / image.shape[1])
-
-        newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-        big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
-                               interpolation=interpolation)
-
-        sr = np.floor((newsize[0] - h)/2)
-        sc = np.floor((newsize[1] - w)/2)
-
-        return big_image[sr:sr + h, sc:sc + w, :]
