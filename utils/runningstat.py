@@ -9,6 +9,8 @@ user grantjenks
 https://github.com/grantjenks/python_runstats
 
 Apache License 2.0
+
+Modified by N Dufour
 '''
 
 from __future__ import division
@@ -106,6 +108,14 @@ class Statistics:
     def kurtosis(self):
         """Kurtosis of values."""
         return self._count * self._phi / (self._rho * self._rho) - 3.0
+
+    def normpdf(self, x):
+        """The PDF of a Gaussian at x with the parameters of self."""
+        sigma = ((self._rho / (self._count - 1.0))**0.5)
+        mu = self._eta
+        u = (x-mu)/abs(sigma)
+        y = (1/(sqrt(2*pi)*abs(sigma)))*exp(-u*u/2)
+        return y
 
     def __add__(self, that):
         """Add two Statistics objects together."""

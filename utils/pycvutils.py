@@ -162,7 +162,7 @@ class ImagePrep(object):
         self.convert_to_gray = convert_to_gray
 
     def __call__(self, image):
-        image = _censure_CV(image)
+        image = _ensure_CV(image)
         if self.max_height != None:
             image = self._resize_to_max(image, 0)
         if self.max_width != None:

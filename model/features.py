@@ -228,8 +228,8 @@ class SADGenerator(RegionFeatureGenerator):
 
     def _compute_SAD(self, images):
         SAD_vals = []
-        prev_img = imgs[0]
-        for next_img in imgs[1:]:
+        prev_img = images[0]
+        for next_img in images[1:]:
             sad = np.sum(cv2.absdiff(prev_img, next_img))
             SAD_vals.append(sad)
             prev_img = next_img

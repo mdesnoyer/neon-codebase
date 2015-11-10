@@ -95,6 +95,37 @@ class Filter(object):
         '''
         pass 
 
+class LocalFilter(object):
+    '''
+    Abstract local filter. In contrast with other filters, this one
+    relies on the output of a feature generator. Therefore, it accepts
+    a list or 1D numpy array of feature and returns an equal-sized list
+    of booleans indicating whether or not the frame should be filtered.
+    '''
+    def __init__(self):
+        self.__version__ = 1
+
+    def _ensure_np(self, feat_vec):
+        '''Makes sure the input vec is a numpy-style array'''
+        if not type(feat_vec).__module__ == np.__name__:
+            feat_vec = np.array(feat_vec)
+        return feat_vec
+
+    def filter(self, feat_vec):
+        '''
+        Inputs:
+            A 1D numpy array or list of features (floats or ints)
+        Returns:
+            a list of type boolean with size
+            equal to that of the feat_vec.
+        '''
+        feat_vec = self._ensure_np(feat_vec)
+        return self._filter_impl(feat_vec)
+
+    def _filter_impl(self, feat_vec):
+        raise NotImplementedError()
+
+
 class VideoFilter(Filter):
     '''Abstract video filter'''
     def __init__(self, max_height=None):
@@ -105,6 +136,80 @@ class VideoFilter(Filter):
             # This isn't a video, so the image passes automatically
             return True
         return self._accept_impl(self._resize_image(image), frameno, video)
+
+class ThreshFilt(LocalFilter):
+    '''
+    Removes frames for whom the value of the feature is too low
+    '''
+    def __init__(self, thresh):
+        super(SceneChanges, self).__init__()
+        self.thresh = thresh
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec > self.thresh
+
+class SceneChange(LocalFilter):
+    '''
+    Removes frames that are near scene changes. 
+    '''
+    def __init__(self, mean_mult=None, std_mult=None, 
+                 min_thresh=None, max_thresh=None):
+        '''
+        Scene Change filtering. 
+        Parameters:
+            mean_mult : defines thresh1, see below
+            std_mult  : defines thresh2, see below
+            min_thresh : images with SAD < min_thresh are never filtered
+            max_thresh : images with SAD > max_thresh are always filtered
+
+        Constructs parameters based on mean and std.
+
+        thresh1 = mean(SAD) * mean_mult
+        thresh2 = std(SAD) * std_mult
+
+        Images are filtered if:
+        ((SAD_i > thresh1) AND (SAD_i > thresh2) AND SAD_i > min_thresh)
+        OR 
+        (SAD_i > max_thresh)
+
+        If any input parameters are None, then they do not effect the
+        calculation. 
+        '''
+        super(SceneChanges, self).__init__()
+        self.mean_mult = mean_mult
+        self.std_mult = std_mult
+        self.min_thresh = min_thresh
+        self.max_thresh = max_thresh
+
+    def _get_thresh1(self, feat_vec):
+        return np.mean(feat_vec) * self.mean_mult
+
+    def _get_thresh2(self, feat_vec):
+        return np.std(feat_vec) * self.std_mult
+
+    def _filter_impl(self, feat_vec):
+        crit = np.ones(feat_vec.shape, dtype=bool)
+        if self.mean_mult is not None:
+            thresh1 = self._get_thresh1(feat_vec)
+            crit = np.logical_and(crit, feat_vec > thresh1)
+        if self.std_mult is not None:
+            thresh2 = self._get_thresh2(feat_vec)
+            crit = np.logical_and(crit, feat_vec > thresh2)
+        if self.min_thresh is not None:
+            crit = np.logical_and(crit, feat_vec > self.min_thresh)
+        if self.max_thresh is not None:
+            crit = np.logical_or(crit, feat_vec > self.max_thresh)
+        return crit
+
+class FaceFilter(LocalFilter):
+    '''
+    Removes frames that have less faces than other frames.
+    '''
+    def __init__(self):
+        super(FaceFilter, self).__init__()
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec == np.max(feat_vec)
 
 class CascadeFilter(Filter):
     '''A sequence of filters where if one cuts out the image, it fails.'''

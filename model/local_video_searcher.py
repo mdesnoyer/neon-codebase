@@ -9,13 +9,11 @@ This no longer inherits from the VideoSearcher() object, I'm not
 sure if we want to change how this works in the future.
 
 NOTE:
-It's not clear how passing the filters themselves will work.
-
-NOTE:
-Because of how local_video_searcher works, it currently searches
-at least every other interval but is not guaranteed to search them
-all given enough time (i.e., if a new search frame is between two
-of them that have already been searched). 
+While this initially used Statistics() objects to calculate running
+statistics, in principle even with a small search interval (32 frames)
+and a very long video (2 hours), we'd only have about 5,000 values to
+store, which we can easily manage. Thus we will hand-roll our own Statistics
+objects. 
 '''
 
 import hashlib
@@ -38,7 +36,7 @@ import utils.obj
 from model import colorname
 from model.video_searcher import VideoSearcher
 from utils import pycvutils, statemon
-from utils.runningstat import Statistics
+#from utils.runningstat import Statistics
 from utils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject, MonteCarloMetropolisHastings
 
@@ -49,63 +47,127 @@ statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
 
-
+MINIMIZE = -1   # flag for statistics where better = smaller
+NORMALIZE = 0   # flag for statistics where better = closer to mean
+MAXIMIZE = 1    # flag for statistics where better = larger
 
 # __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 # if sys.path[0] != __base_path__:
 #     sys.path.insert(0, __base_path__)
 
-
-# TODO: Determine how we will provide filters to the local searcher
-#       Right now, we're assuming that we will have a text filter and
-#       a closed eye filter.
-
-# class ThumbVariation(object):
-#     '''
-#     This class keeps track of the variation
-#     of the top thumbnails, and also indicates
-#     whether or not a new thumbnail is permissible
-#     to add to the top thumbnails. 
-
-#     A new thumbnails is appropriate to add to the
-#     top thumbnail list if the distance to the
-#     'closest' thumbnail is greater than closest
-#     thumbnail pair thus found.
-#     '''
-#     def __init__(self, n_thumbs):
-#         # instantiate a similarity matrix
-#         self.sim_matrix = np.zeros((n_thumbs, n_thumbs))
-#         self._tot_thumbs = 0
-#         # instantiate a dictionary that will map
-#         # thumbnail ids to their index in the
-#         # similarity matrix.
-#         self._id_to_idx = dict()
-
-class Criterion(object):
+class Statistics(object):
     '''
-    A class that represents a filtering
-    criterion. Criteria come in several flavors,
-    but all are initialized with any of the following:
-        - a Statistics() object
-        - threshold values
-        - lambda functions of these
+    Replicates (to a degree) the functionality of the
+    true running statistics objects (which are in the
+    utils folder under runningstat). This is because
+    it is unlikely that we will ever need to maintain
+    a very large number of measurements. 
 
-    Each criteria may be of the following
-    types:
-        - judge interval
-            Either accepts or rejects an entire interval. If
-            this is the case, it accepts just the search frames
-            (i.e., the start and the end) statistics.
-        - filter interval
-            Returns a subset (or none at all) of the frames
-            in an interval that are acceptable.
-        - winner selector
-            Returns a single winning frame
-        - ranking criteria
-            Returns the frame numbers in ranked-order
-            according to some ranking function
+    If init is not None, it initializes with the values
+    provided.
     '''
+    def __init__(self, max_size=5000, init=None):
+        """
+        Parameters:
+            max_size = the maximum size of the value array
+            init = an initial set of values to instantiate it
+        """
+        self._count = 0
+        self._max_size = max_size
+        self._vals = np.zeros(max_size)
+        if init is not None:
+            self.push(init)
 
+    def push(self, x):
+        '''
+        pushes a value onto x
+        '''
+        if type(x) == list:
+            for ix in x:
+                self.push(ix)
+        if self._count == self._max_size:
+            # randomly replace one
+            idx = np.random.choice(self._max_size)
+            self._vals[idx] = x
+        else:
+            self._vals[self._count] = x
+            self._count += 1 # increment count
+
+    def var(self):
+        return np.var(self._vals[:self._count])
+
+    def mean(self):
+        return np.mean(self._vals[:self._count])
+
+    def rank(self, x):
+        '''Returns the rank of x'''
+        quant = np.sum(self._vals[:self._count] < x)
+        return quant * 1./self._count
+
+class Combiner(object):
+    '''
+    Combines arbitrary feature vectors according
+    to either (1) predefined weights or (2) attempts
+    to deduce the weight given the global statistics
+    object.
+    '''
+    def __init__(self, stats_dict, weight_dict=None,
+                 weight_valence=None, combine=lambda x: np.sum(x)):
+        '''
+        stats_dict is a dictionary of {'stat name': Statistics()}
+        weight_dict is a dictionary of {'stat name': weight} which
+            yields absolute weights.
+        weight_valence is a dictionary of {'stat name': valence} 
+            encoding, which indicates whether 'better' is higher,
+            lower, or maximally typical.
+        combine is an anonymous function to combine scored statistics;
+            combine must have a single argument and be able to operate
+            on lists of floats.
+        Note: if a statistic has an entry in both the stats and
+            weights dict, then weights dict takes precedence.
+        '''
+        self._stats_dict = stats_dict
+        self.weight_dict = weight_dict
+        self.weight_valence = weight_valence
+        self._combine = combine
+
+    def _compute_stat_score(self, feat_name, feat_vec):
+        '''
+        Computes the statistics score for a feature vector.
+        If it has a defined weight, then we simply return the
+        product of this weight with the 
+        '''
+        if self.weight_dict.has_key(feat_name):
+            return [x * self.weight_dict[feat_name] for x in feat_vec]
+        
+        if self._stats_dict.has_key(feat_name):
+            vals = []
+            if self.weight_valence.has_key(feat_name):
+                valence = self.weight_valence[feat_name]
+            else:
+                valence = MINIMIZE # assume you are trying to maximize it
+            for v in feat_vec:
+                rank = self._stats_dict[feat_name].rank()
+                if valence == MINIMIZE:
+                    rank = 1. - rank
+                if valence == NORMALIZE:
+                    rank = 1. - abs(0.5 - rank)*2
+                vals.append(rank)
+            return vals
+
+        return feat_vec
+
+    def combine_scores(self, feat_dict):
+        '''
+        Returns the scores for the thumbnails given a feat_dict,
+        which is a dictionary {'feature name': feature_vector}
+        '''
+        stat_scores = []
+        for k, v in feat_dict.iteritems():
+            stat_score.append(self._compute_stat_score(k, v))
+        comb_scores = []
+        for x in zip(*stat_score):
+            comb_scores.append(self._combine(x))
 
 class LocalSearcher(object):
     def __init__(self, predictor, face_finder,
@@ -118,6 +180,8 @@ class LocalSearcher(object):
                  search_algo=MCMH_rpl,
                  feature_generators=None,
                  feats_to_cache=None,
+                 combiner=None,
+                 filters=None,
                  criteria=None):
         '''
         Inputs: 
@@ -146,10 +210,15 @@ class LocalSearcher(object):
             feats_to_cache:
                 The name of all features to save as running statistics.
                 (features are only cached during sampling)
-            criteria:
-                A list of criterion for conducting the local search based on
-                the values of the features. TODO: what the hell is this gonna
-                look like?
+            combiner:
+                Combines the feature scores. See class definition above.
+            filters:
+                A lists tuples or lists of tuples of (feature_name, filter). If we have:
+                [[(feature1, filter1), (feature2, filter2)], [(feature3, filter3)]]
+
+                Then the first two features are extracted and the first two filters
+                applied. The third feature is obtained only for images which pass
+                the first 
         '''
         self.predictor = predictor
         self.local_search_width = local_search_width
