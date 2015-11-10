@@ -6,6 +6,11 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import boto.exception
+import boto.sqs
+from boto.sqs.message import Message
+from boto.s3.connection import S3Connection
+
 import traceback
 import datetime
 import json
@@ -27,6 +32,8 @@ import utils.neon
 import utils.logs
 import utils.http
 
+import video_processor.sqs_utilities
+
 import dateutil.parser
 
 from cmsdb import neondata
@@ -46,6 +53,10 @@ define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define('region', default='us-east-1', help='Region of the SQS queue to connect to')
+define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
+define('secret_key', default='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', 
+       help='Secret key to connect to AWS')
 
 from utils import statemon
 statemon.define('post_account_oks', int) 
@@ -870,22 +881,36 @@ class VideoHandler(APIV2Handler):
         # modify the video if there is a thumbnail set serving_enabled 
         def _set_serving_enabled(v):
             v.serving_enabled = len(v.thumbnail_ids) > 0
-        yield tornado.gen.Task(neondata.VideoMetadata.modify,
+        '''yield tornado.gen.Task(neondata.VideoMetadata.modify,
                                new_video.key,
-                               _set_serving_enabled)
+                               _set_serving_enabled)'''
             
         # add the job
-        vs_job_url = 'http://%s:%s/job' % (options.video_server, 
-                                           options.video_server_port)
-        request = tornado.httpclient.HTTPRequest(url=vs_job_url,
+        '''vs_job_url = 'http://%s:%s/job' % (options.video_server, 
+                                           options.video_server_port)'''
+        '''request = tornado.httpclient.HTTPRequest(url=vs_job_url,
                                                  method="POST",
                                                  body=api_request.to_json(),
                                                  request_timeout=30.0,
                                                  connect_timeout=10.0)
 
-        response = yield tornado.gen.Task(utils.http.send_request, request)
+        response = yield tornado.gen.Task(utils.http.send_request, request)'''
+        
+        server = video_processor.sqs_utilities
+        self.sqs_queue = server.VideoProcessingQueue(options.region,
+                                                     options.aws_key,
+                                                     options.secret_key)
 
-        if response and response.code is ResponseCode.HTTP_OK: 
+        message = Message()
+        message.set_body(api_request.to_json())
+
+        account = neondata.NeonUserAccount.get(account_id)
+
+        message = self.sqs_queue.write_message(account.get_processing_priority(), 
+                                               message)
+        
+        #if response and response.code is ResponseCode.HTTP_OK: 
+        if message:
             job_info = {} 
             job_info['job_id'] = api_request.job_id
             job_info['video'] = new_video.__dict__
@@ -1193,6 +1218,7 @@ def main():
     global server
     print "API V2 is running" 
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+    
     server = tornado.httpserver.HTTPServer(application)
     server.listen(options.port)
     tornado.ioloop.IOLoop.current().start()

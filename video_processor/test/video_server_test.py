@@ -24,6 +24,7 @@ from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis
 import test_utils.neontest
+from test_utils import sqsmock
 import time
 import threading
 import tornado.gen
@@ -36,7 +37,7 @@ from utils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
 from utils import statemon
-import video_processor.server
+import video_processor
 
 _log = logging.getLogger(__name__)
 NEON_AUTH = "secret_key"
@@ -980,35 +981,6 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
             jobs_found.append(j)
         self.assertItemsEqual([x.api_request.job_id for x in jobs_found],
                               ['job%i' % i for i in range(7)])
-         
-class TestSQSServer(test_utils.neontest.TestCase):
-     '''Used to test the SQS queue'''
-
-     def setUp(self):
-         super(TestSQSServer, self).setUp()
-         region = 'us-east-1'
-         aws_key = 'AKIAIG2UEH2FF6WSRXDA'
-         secret_key = '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'
-         
-         serv = video_processor.server
-         self.SQS = serv.SQSServer(region, aws_key, secret_key)
-         self.m = None
-
-     def tearDown(self):
-         super(TestSQSServer, self).tearDown()
-     
-     def test_message_upload(self):
-         for i in range(1, 101):
-             self.m = Message()
-             self.m.set_body(str(i))
-             self.SQS.write_message(i%3, self.m)
-
-	 count = 100
-         while count > 0:
-             mes = self.SQS.read_message()
-	     if mes != None:
-                  self.SQS.delete_message(mes)
-                  count = count - 1
          
 if __name__ == '__main__':
     utils.neon.InitNeon()

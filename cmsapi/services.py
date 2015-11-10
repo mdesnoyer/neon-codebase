@@ -12,6 +12,10 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
+import boto.exception
+import boto.sqs
+from boto.sqs.message import Message
+from boto.s3.connection import S3Connection
 import datetime
 import json
 import hashlib
@@ -31,6 +35,7 @@ import traceback
 import utils.neon
 import utils.logs
 import utils.http
+import video_processor.sqs_utilities
 
 from StringIO import StringIO
 from cmsdb import neondata
@@ -47,6 +52,10 @@ define("video_server", default="50.19.216.114", help="thumbnails.neon api", type
 define("max_videoid_size", default=128, help="max vid size", type=int)
 # max tid size = vid_size + 40(md5 hexdigest)
 define("max_tid_size", default=168, help="max tid size", type=int)
+define('region', default='us-east-1', help='Region of the SQS queue to connect to')
+define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
+define('secret_key', default='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', 
+       help='Secret key to connect to AWS')
 
 import logging
 _log = logging.getLogger(__name__)
@@ -684,6 +693,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         result = yield tornado.gen.Task(utils.http.send_request, req)
         
+        #TODO (hmaidan): implement SQS
+        server = video_processor.sqs_utilities
+        self.sqs_queue = server.VideoProcessingQueue(options.region,
+                                                     options.aws_key,
+                                                     options.secret_key)
+
+        message = Message()
+        message.set_body(body)
+
+        message = self.sqs_queue.write_message(0, message)
+        
+
         if result.code == 409:
             job_id = json.loads(result.body)["job_id"]
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\

@@ -5,6 +5,10 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
+
+from boto.sqs.message import Message
+from boto.s3.connection import S3Connection
+import boto.exception
 from cmsapiv2 import controllers
 import json
 import tornado.gen
@@ -17,6 +21,7 @@ import utils.neon
 import utils.http
 import urllib
 import test_utils.neontest
+from test_utils import sqsmock
 import uuid
 import jwt
 from mock import patch
@@ -25,6 +30,8 @@ from StringIO import StringIO
 from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
+import video_processor.sqs_utilities
+
 
 class TestControllersBase(test_utils.neontest.AsyncHTTPTestCase): 
     def get_app(self): 
@@ -866,6 +873,17 @@ class TestVideoHandler(TestControllersBase):
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.side_effect = True
+
+        # Mock the SQS implementation
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_queue = sqsmock.SQSQueueMock('Priority_0', True)
+        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+                                 'connect_to_region')
+        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.queue_patcher = patch('video_processor.sqs_utilities.' \
+                                    'VideoProcessingQueue._create_queue')
+        self.queue_patcher.start().return_value = self.mock_queue
+
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -874,6 +892,8 @@ class TestVideoHandler(TestControllersBase):
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
+        self.sqs_patcher.stop()
+        self.queue_patcher.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -1468,11 +1488,24 @@ class TestHealthCheckHandler(TestControllersBase):
         self.http_mocker = patch('utils.http.send_request')
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
+
+        # Mock the SQS implementation
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_queue = sqsmock.SQSQueueMock('Priority_0', True)
+        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+                                 'connect_to_region')
+        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.queue_patcher = patch('video_processor.sqs_utilities.' \
+                                    'VideoProcessingQueue._create_queue')
+        self.queue_patcher.start().return_value = self.mock_queue
+
         super(TestHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
         self.http_mocker.stop()
+        self.sqs_patcher.stop()
+        self.queue_patcher.stop()
  
     def test_healthcheck_success(self): 
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))

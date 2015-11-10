@@ -26,6 +26,7 @@ from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.redis
+from test_utils import sqsmock
 import time
 import tornado.gen
 import tornado.ioloop
@@ -148,9 +149,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         super(TestServices, cls).setUpClass()
 
     def setUp(self):
-        super(TestServices, self).setUp()
         #NOTE: Make sure that you don't repatch objects
-
+        super(TestServices, self).setUp()
         #Http Connection pool Mock
         self.cp_async_patcher = \
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
@@ -171,11 +171,23 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         
+        # Mock the SQS implementation
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_queue = sqsmock.SQSQueueMock('Priority_0', True)
+        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+                                 'connect_to_region')
+        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.queue_patcher = patch('video_processor.sqs_utilities.' \
+                                    'VideoProcessingQueue._create_queue')
+        self.queue_patcher.start().return_value = self.mock_queue
+
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
         self.redis.stop()
+        self.sqs_patcher.stop()
+        self.queue_patcher.stop()
         super(TestServices, self).tearDown()
     
     def get_app(self):

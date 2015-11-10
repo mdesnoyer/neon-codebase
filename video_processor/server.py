@@ -11,10 +11,6 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import boto.exception
-import boto.sqs
-from boto.sqs.message import Message
-from boto.s3.connection import S3Connection
 from cmsdb import neondata
 from collections import deque
 import datetime
@@ -692,96 +688,6 @@ class RequeueHandler(tornado.web.RequestHandler):
             raise tornado.web.HTTPError(500)
 
         self.finish()
-
-class SQSServer(object):
-    '''Replaces the current server code with an AWS SQS instance'''
-
-    def __init__(self, region, access_key, secret_key, num_queues=3):
-        self.conn = boto.sqs.connect_to_region(
-                    region, aws_access_key_id=access_key,
-                    aws_secret_access_key=secret_key)
-       
-        self.q = None
-        self.p = 0.0
-        self.max_p = num_queues - 1
-        self.max_priority = 0.0
-        self.cumulative_priorities = []
-
-        for i in range(num_queues):
-            self.q = self._create_queue("Priority_" + str(i))
-            self.max_priority += 1.0/2**(i)
-            self.cumulative_priorities.append(self.max_priority)
-
-    def _create_queue(self, queue_name, timeout=30):
-        return self.conn.create_queue(queue_name, timeout)
-
-    def _get_priority_qindex(self):
-        p = random.uniform(0, self.max_priority)
-        for index in range(len(self.cumulative_priorities)):
-            if p < self.cumulative_priorities[index]:
-                return index
-
-    def _get_queue(self, priority):
-        if self.p != priority:
-            self.p = priority
-            return self.conn.get_queue("Priority_" + str(priority))
-        else:
-            return self.q
-
-    def _add_priority_attribute(self, priority, message):
-        #Attaches priority information to the message
-        message.message_attributes = {
-                  "priority": {
-                        "data_type": "Number",
-                        "string_value": str(priority)
-                  }
-        }
-        return message
-
-    def _change_message_visibility(self, message):
-        #Changes the visiblity of the message based on the information in 
-        #the body of the message. If not specified, set it to 15 minutes
-        #(900 seconds)
-        timeout = 900
-        m_body = message.get_body()
-        if m_body['duration']:
-           timeout = m_body['duration']
-        self.conn.change_message_visibility(self.q, message.receipt_handle,
-                                            timeout)
-
-    def write_message(self, priority, message):
-        #Writes a message to the specified priority queue
-        self.q = self._get_queue(priority)
-        message = self._add_priority_attribute(priority, message)
-        self.q.write(message)
-
-    def read_message(self):
-        #Picks a random queue to read from, using the fairweighted priority
-        priority = self._get_priority_qindex()
-        self.q = self._get_queue(priority)
-        message = self.q.read(message_attributes=['priority'])
-        while self.p < self.max_p + 1 and message == None:
-            self.q = self._get_queue(self.p + 1)
-            message = self.q.read(message_attributes=['priority'])
-        self._change_message_visibility(message)
-        return message
-                 
-    def message_count(self):
-        #Returns the number of messages in the queue.
-        #This is not guaranteed to be 100% accurate
-        return self.q.count()    
-
-    def delete_message(self, message):
-        #Deletes the specified message
-        priority = int(message.message_attributes['priority']['string_value'])
-        self.q = self._get_queue(priority) 
-        self.q.delete_message(message)
-
-    def dump(self, priority):
-        #Dumps all the messages to a text file to be read at a later date
-        if self.p != priority:
-           self.q = self._get_queue(priority)
-        self.q.dump('dump.txt', sep='\n----------------\n')
 
 ## ===================== API ===========================================#
 # External Handlers

@@ -56,6 +56,7 @@ import utils.neon
 import utils.pycvutils
 import utils.http
 from utils import statemon
+import video_processor
 
 import logging
 _log = logging.getLogger(__name__)
@@ -110,6 +111,10 @@ define('max_bandwidth_per_core', default=15500000.0,
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
+define('region', default='us-east-1', help='Region of the SQS queue to connect to')
+define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
+define('secret_key', default='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', 
+       help='Secret key to connect to AWS')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -749,33 +754,25 @@ class VideoClient(multiprocessing.Process):
         self.cv_semaphore = cv_semaphore
         self.videos_processed = 0
 
+    @tornado.gen.coroutine
     def dequeue_job(self):
         ''' Blocking http call to global queue to dequeue work
             Change state to PROCESSING after dequeue
         '''
-        _log.debug("Dequeuing job [%s] " % (self.pid))
-        headers = {'X-Neon-Auth' : options.server_auth} 
+        _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        '''dequeue_url = 'http://%s/dequeue' % options.video_server
-        req = tornado.httpclient.HTTPRequest(
-                                            url=dequeue_url,
-                                            method="GET",
-                                            headers=headers,
-                                            request_timeout=60.0,
-                                            connect_timeout=10.0)
-        
-        utils.http.send_request(req)
-'''
-        #TODO: SQS implementation
-        sqs_reader = server.SQSServer()
-        response = Message()
-        response = sqs_reader.read_message() 
-   
-        if not response.error:
-            result = JSON.parse(response.get_body())
-             
+        server = video_processor.sqs_utilities
+        self.sqs_queue = server.VideoProcessingQueue(options.region,
+                                                     options.aws_key,
+                                                     options.secret_key)
+
+        message = Message()
+        message = yield self.sqs_queue.read_message()
+        if message:
+            result = message.get_body()
             if result is not None and result != "{}":
                 try:
+                    self.sqs_queue.delete_message(message)
                     job_params = tornado.escape.json_decode(result)
                     #Change Job State
                     api_key = job_params['api_key']
@@ -800,23 +797,23 @@ class VideoClient(multiprocessing.Process):
                         _log.error('Could not get job %s for %s' %
                                    (job_id, api_key))
                         statemon.state.increment('dequeue_error')
-                        return False
+                        yield False
                     if api_request.state != neondata.RequestState.PROCESSING:
                         _log.info('Job %s for account %s ignored' %
                                   (job_id, api_key))
-                        return False
+                        yield False
                     _log.info("key=worker [%s] msg=processing request %s for "
                               "%s." % (self.pid, job_id, api_key))
-                    return job_params
+                    yield job_params
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))
-                    return False
-            return result
+                    yield False
+            yield result
         else:
             _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
-        return False
+        yield False
 
     ##### Model Methods #####
 
