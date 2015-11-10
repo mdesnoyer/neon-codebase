@@ -2233,8 +2233,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         self.min_conversion = min_conversion
 
         # Fraction adjusting power rate. When this number is 0, it is
-        # equivalent to standard t-test, when it is 1.0, it is the
-        # regular multi-bandit problem.
+        # equivalent to all the serving fractions being the same,
+        # while if it is 1.0, the serving fraction will be controlled
+        # by the strategy.
         self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
@@ -4158,14 +4159,24 @@ class ThumbnailMetadata(StoredObject):
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
-    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None,
+                 lift=None, imp=None, conv=None):
         super(ThumbnailStatus, self).__init__(thumbnail_id)
 
         # The fraction of traffic this thumbnail will get
         self.serving_frac = serving_frac
 
-        # The currently click through rate for this thumbnail
+        # The current click through rate for this thumbnail
         self.ctr = ctr
+
+        # The lift when this thumbnail is either turned off or wins
+        self.lift = lift
+
+        # The number of impressions this thumbnail received
+        self.imp = imp
+
+        # The number of conversions this thumbnail received
+        self.conv = conv
 
     @classmethod
     def _baseclass_name(cls):

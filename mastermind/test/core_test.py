@@ -1160,7 +1160,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # high serving percentages for high score thumbnails.
         # Chosen one gets 5% lift. 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['ctr', 'n2', 'bc', 'n1'])
+                         ['ctr', 'bc', 'n1', 'n2'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1508,7 +1508,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # leads to higher serving frac.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
+            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
                                exp_frac = '1.0'))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
@@ -1517,18 +1517,18 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 5.0),
-                                               base_conversions=100,
-                                               base_impressions=2000),
+                                               base_conversions=10,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
                                                ttype='neon',
-                                               model_score = 3.0),
-                                               base_conversions=110,
-                                               base_impressions=2000),
+                                               model_score = 0.3),
+                                               base_conversions=11,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
                                                ttype='random',
-                                               model_score = 0.2),
-                                               base_conversions=110,
-                                               base_impressions=2000)],
+                                               model_score = 0.1),
+                                               base_conversions=11,
+                                               base_impressions=200)],
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
@@ -1622,10 +1622,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_conversions=110,
                                                base_impressions=2000)],
                 score_type = ScoreType.RANK_CENTRALITY))
-        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
-        # b1 is the default, and it will take 0.5 server frac.
-        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
-                         ['n2', 'n1', 'b1'])
+        # All the serving fractions should be the same because prior
+        # is ignored in this case.
+        self.assertAlmostEqual(run_frac['b1'], 0.5)
+        self.assertAlmostEqual(run_frac['n1'], 0.25)
+        self.assertAlmostEqual(run_frac['n2'], 0.25)
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1920,7 +1921,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         directive_dict = dict((x, y) for x, y in directives[0][1])
         self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 
                                directive_dict['acct1_vid1_tid2'])
-        self.assertGreater(directive_dict['acct1_vid1_tid3'],
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid3'],
                                directive_dict['acct1_vid1_tid2'])
 
         updated_state = self.mastermind.experiment_state['acct1_vid1']
