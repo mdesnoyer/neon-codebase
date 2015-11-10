@@ -296,59 +296,77 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                             ]) }
         self.mastermind.video_info['testacct123_4324552316001'] = VideoInfo(
                 'testacct123', True,
-                [build_thumb(ThumbnailMetadata('d6dfa36d8431e795b573263bed0a71e8', '4324552316001', ctr=None,rank=1,height=720,width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=4437922592898527388,
-                                               ttype='neon', model_score=5.654004413457463),
-                                               phash=14285162934004088064L,
-                                               incremental_impressions=0,
-                                               base_impressions=234234234,
-                                               incremental_conversions=234234234,
-                                               base_conversions=-1),
-                 build_thumb(ThumbnailMetadata('1e10632ba402134d74bef2eb47ae51af', '4324552316001', rank=3, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=11159919755030691327L,
-                                               ttype='neon',
-                                               model_score=5.009933999821487)),
-                 build_thumb(ThumbnailMetadata('bb0dbd191853aa5ce998121e1b6d54d6', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               phash=4438202951250849932,
-                                               ttype='random',
-                                               model_score=None)),
-                 build_thumb(ThumbnailMetadata('050c67f1b38449ea254f1eb3024b999e', '4324552316001', rank=2, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=1949432825026632815,
-                                               ttype='neon',
-                                               model_score=5.037118012144308)),
-                 build_thumb(ThumbnailMetadata('ec480d6634dadbae513e9a4fc28e84eb', '4324552316001', rank=0, height=360, width=740,
-                                               ctr=None,
-                                               model_version=None,
-                                               phash=10216194004065988127L,
-                                               ttype='brightcove',
-                                               model_score=None)),
-                 build_thumb(ThumbnailMetadata('4dd194c4c4a082bba85a4f3bd57dc854', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=4438202951275983004,
-                                               ttype='neon',
-                                               model_score=5.666209793655988)),
-                 build_thumb(ThumbnailMetadata('7833f53877497433fed22ee030a534a8', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               model_version=None,
-                                               phash=4437921476290916540,
-                                               filtered=None,
-                                               ttype='centerframe',
-                                               model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'd6dfa36d8431e795b573263bed0a71e8', '4324552316001', 
+                    ctr=None,rank=1,height=720,width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash=4437922592898527388,
+                    ttype='neon', model_score=5.654004413457463),
+                    phash=14285162934004088064L,
+                    incremental_impressions=0,
+                    base_impressions=234234234,
+                    incremental_conversions=234234234,
+                    base_conversions=-1),
+                 build_thumb(ThumbnailMetadata(
+                     '1e10632ba402134d74bef2eb47ae51af',
+                     '4324552316001', rank=3, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=11159919755030691327L,
+                     ttype='neon',
+                     model_score=5.009933999821487)),
+                 build_thumb(ThumbnailMetadata(
+                     'bb0dbd191853aa5ce998121e1b6d54d6',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     phash=4438202951250849932,
+                     ttype='random',
+                     model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     '050c67f1b38449ea254f1eb3024b999e',
+                     '4324552316001', rank=2, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=1949432825026632815,
+                     ttype='neon',
+                     model_score=5.037118012144308)),
+                 build_thumb(ThumbnailMetadata(
+                     'ec480d6634dadbae513e9a4fc28e84eb',
+                     '4324552316001', rank=0, height=360, width=740,
+                     ctr=None,
+                     model_version=None,
+                     phash=10216194004065988127L,
+                     ttype='brightcove',
+                     model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     '4dd194c4c4a082bba85a4f3bd57dc854',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=4438202951275983004,
+                     ttype='neon',
+                     model_score=5.666209793655988)),
+                 build_thumb(ThumbnailMetadata(
+                     '7833f53877497433fed22ee030a534a8',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     model_version=None,
+                     phash=4437921476290916540,
+                     filtered=None,
+                     ttype='centerframe',
+                     model_score=None))],
                  score_type=ScoreType.CLASSICAL)
 
-        self.mastermind._calculate_new_serving_directive('testacct123_4324552316001')
-        self.assertEquals(len(self.mastermind.serving_directive['testacct123_4324552316001'][1]), 7)
+        self.mastermind._calculate_new_serving_directive(
+            'testacct123_4324552316001')
+        self.assertEquals(len(
+            self.mastermind.serving_directive['testacct123_4324552316001'][1]),
+            7)
 
     def test_ign_breaker_one(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2,
+                                        baseline_type='brightcove'))
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
@@ -364,51 +382,60 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                             ]) }
         self.mastermind.video_info['acct1_vid1'] = VideoInfo(
                 'acct1', True,
-                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=14285162934004088064L,
-                                               urls=['http://blah.invalid.com'],
-                                               ttype='neon', model_score=5.406484635388814)),
-                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='random', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='brightcove', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859715',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.292761188458726)),
-                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859716',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.330244313549762)),
-                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859717',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.390517351344677)),
-                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859718',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='centerframe', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859719',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.3649998500954)),
-                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859720',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'n1', 'vid1', rank=0, height=720, width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash=14285162934004088064L,
+                    urls=['http://blah.invalid.com'],
+                    ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata(
+                     'n2', 'vid1', rank=0, height=720, width=1280,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n3', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n4', 'vid1', rank=4, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859715',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata(
+                     'n5', 'vid1', rank=3, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859716',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata(
+                     'n6', 'vid1', rank=1, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859717',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata(
+                     'n7', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859718',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n8', 'vid1', rank=2, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859719',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata(
+                     'n9', 'vid1', rank=0, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859720',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=None))],
                  score_type=ScoreType.CLASSICAL)
 
         self.mastermind._calculate_new_serving_directive('acct1_vid1')
@@ -416,7 +443,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_ign_breaker_two(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2,
+                                        baseline_type='brightcove'))
         self.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
@@ -433,51 +461,60 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         directive = self.mastermind._calculate_current_serving_directive(
             VideoInfo(
                 'acct1', True,
-                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859712',
-                                               urls=['http://blah.invalid.com'],
-                                               ttype='neon', model_score=5.406484635388814)),
-                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='random', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='brightcove', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859715',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.292761188458726)),
-                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859716',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.330244313549762)),
-                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859717',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.390517351344677)),
-                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859718',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='centerframe', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859719',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.3649998500954)),
-                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859720',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'n1', 'vid1', rank=0, height=720, width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash='4576300592785859712',
+                    urls=['http://blah.invalid.com'],
+                    ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata(
+                     'n2', 'vid1', rank=0, height=720, width=1280,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n3', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n4', 'vid1', rank=4, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859715',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata(
+                     'n5', 'vid1', rank=3, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859716',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata(
+                     'n6', 'vid1', rank=1, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859717',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata(
+                     'n7', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859718',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n8', 'vid1', rank=2, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859719',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata(
+                     'n9', 'vid1', rank=0, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859720',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=None))],
                  score_type=ScoreType.CLASSICAL))[1]
 
         self.assertEquals(len(directive), 9)
@@ -939,39 +976,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             self.assertIsNone(
                 self.mastermind._calculate_current_serving_directive(
                     video_info))
-
-    def test_sequential_strategy(self):
-        # The sequential strategy is currently not implemented, so we
-        # should log a fatal and then fallback on the multi-armed
-        # bandit.
-        self.mastermind.update_experiment_strategy(
-            'acct1',
-            ExperimentStrategy('acct1',
-                               experiment_type=ExperimentStrategy.SEQUENTIAL))
-
-        video_info = VideoInfo(
-            'acct1', True,
-            [build_thumb(ThumbnailMetadata('n1', 'vid1',
-                                           ttype='neon', model_score=5.8)),
-             build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5)),
-             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='random')),
-             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                           ttype='brightcove'))],
-             score_type=ScoreType.CLASSICAL)
-
-        with self.assertLogExists(logging.ERROR, 'not implemented'):
-            directive = self.mastermind._calculate_current_serving_directive(
-                video_info)[1]
-
-        self.assertItemsEqual(sorted(directive.keys(),
-                                     key=lambda x: directive[x]),
-                         ['n2', 'ctr', 'n1', 'bc'])
-        self.assertAlmostEqual(sum(directive.values()), 1.0)
-        for val in directive.values():
-            self.assertGreater(val, 0.0)
-        self.assertEqual(directive['bc'], 0.99)
 
     def test_invalid_strategy(self):
         self.mastermind.update_experiment_strategy(
@@ -1508,8 +1512,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # leads to higher serving frac.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy('acct1',
+                               frac_adjust_rate=1.0,
+                               exp_frac='1.0'))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1522,7 +1527,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 0.3),
-                                               base_conversions=11,
+                                               base_conversions=12,
                                                base_impressions=200),
                  build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
                                                ttype='random',
@@ -1531,7 +1536,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=200)],
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
-                         ['b1', 'n2', 'n1'])
+                         ['b1', 'n1', 'n2'])
 
     def test_frac_with_model_score_prior_but_half_bandit(self):
         # Try the similar setup but frac_adjust_rate = 0.5
@@ -1628,6 +1633,50 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertAlmostEqual(run_frac['n1'], 0.25)
         self.assertAlmostEqual(run_frac['n2'], 0.25)
 
+    def test_sequential_strategy_priors(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=1.0,
+                               exp_frac=0.20))
+
+        video_info = VideoInfo(
+            'acct1', True,
+            [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8)),
+             build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                           ttype='neon', model_score=3.5)),
+             build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                           ttype='random')),
+             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                           ttype='brightcove'))],
+             score_type=ScoreType.CLASSICAL)
+
+        # The priors should give precendence to the higher model scores
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        self.assertItemsEqual(sorted(directive.keys(),
+                                     key=lambda x: directive[x]),
+                                     ['n2', 'ctr', 'n1', 'bc'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
+        self.assertEqual(directive['bc'], 0.80)
+
+        # With frac_adjust_rate=0.0, all the thumbs in the experiment
+        # should run the same serving fraction
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=0.20))
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        self.assertEqual({'bc': 0.80, 'n1': 0.2/3, 'n2': 0.2/3, 'ctr': 0.2/3},
+                         directive)
+
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestUpdatingFuncs, self).setUp()
@@ -1637,6 +1686,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind = Mastermind()
@@ -1937,6 +1987,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind = Mastermind()
@@ -2222,8 +2273,8 @@ class TestExperimentState(test_utils.neontest.TestCase):
 
         # run the update
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 100, 0),
-            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 0, 135, 0)])
+            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 10, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 10, 135, 0)])
         self.mastermind.wait_for_pending_modifies()
         
         directives = dict([x for x in self.mastermind.get_directives()])
@@ -2545,6 +2596,61 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                          neondata.ExperimentState.OVERRIDE)
         self.assertIsNone(video_status.winner_tid)
 
+    def test_sequential_strategy_turn_off_bad_thumbs(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=1.0))
+
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 90, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 80, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+        self.mastermind.wait_for_pending_modifies()
+
+        # Now, if more stats come in that drop the CTR of the running
+        # thumbs, we should not turn on the thumbnail that was turned
+        # off.
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 1000, 90, 45),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 1000, 100, 50),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 1000, 80, 40),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+
+        self.mastermind.wait_for_pending_modifies()
+
+        # Now check the thumbnail status
+        tstatus1 = neondata.ThumbnailStatus.get('acct1_vid1_n1')
+        self.assertAlmostEquals(tstatus1.serving_frac, 1./3)
+        self.assertAlmostEquals(tstatus1.ctr, 0.075)
+        self.assertEquals(tstatus1.imp, 2000)
+        self.assertEquals(tstatus1.conv, 150)
+        self.assertEquals([x[1] for x in tstatus1.serving_history],
+                          [0.25, 1./3])
+        tstatus2 = neondata.ThumbnailStatus.get('acct1_vid1_n2')
+        self.assertAlmostEquals(tstatus2.serving_frac, 0.0)
+        self.assertAlmostEquals(tstatus2.ctr, 0.069)
+        self.assertEquals(tstatus2.imp, 1000)
+        self.assertEquals(tstatus2.conv, 69)
+        self.assertEquals([x[1] for x in tstatus2.serving_history],
+                          [0.25, 0.0])
+        
+
 class TestModifyDatabase(test_utils.neontest.TestCase):
     def setUp(self):
         self.neondata_patcher = patch('mastermind.core.neondata')
@@ -2568,7 +2674,7 @@ class TestModifyDatabase(test_utils.neontest.TestCase):
                                                    None)
 
     def test_unexpected_exception_serving_frac_modify(self):
-        self.datamock.ThumbnailStatus.save_all.side_effect = [
+        self.datamock.ThumbnailStatus.modify_all.side_effect = [
             IOError('Some weird error')]
         with self.assertLogExists(logging.ERROR,
                                   'Unhandled exception when updating thumbs'):

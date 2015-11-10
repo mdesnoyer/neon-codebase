@@ -115,7 +115,8 @@ class ModelMapper(object):
 
 class VideoInfo(object):
     '''Container to store information needed about each video.'''
-    def __init__(self, account_id, testing_enabled, thumbnails=[], score_type=ScoreType.UNKNOWN):
+    def __init__(self, account_id, testing_enabled, thumbnails=[],
+                 score_type=ScoreType.UNKNOWN):
         self.account_id = str(account_id)
         self.thumbnails = thumbnails # [ThumbnailInfo]
         self.testing_enabled = testing_enabled # Is A/B testing enabled?
@@ -128,6 +129,8 @@ class VideoInfo(object):
         return str(self)
 
     def __cmp__(self, other):
+        if other is None:
+            return 1
         return cmp(self.__dict__, other.__dict__)
         
 
@@ -192,6 +195,8 @@ class ThumbnailInfo(object):
         return str(self)
 
     def __cmp__(self, other):
+        if other is None:
+            return 1
         return cmp((self.enabled,
                     self.type,
                     self.chosen,
@@ -411,9 +416,17 @@ class Mastermind(object):
         video_id = str(video_metadata.get_id())
         testing_enabled = testing_enabled and video_metadata.testing_enabled
         thumbnail_infos = [ThumbnailInfo(x) for x in thumbnails]
+        new_video_info = VideoInfo(
+            video_metadata.get_account_id(),
+            testing_enabled,
+            thumbnail_infos,
+            score_type=ModelMapper.get_model_type(
+                video_metadata.model_version))
+        old_video_info = None
+        
         with self.lock:
             try:
-                video_info = self.video_info[video_id]
+                old_video_info = self.video_info[video_id]
                 
                 # Update the statistics for all the thumbnails based
                 # on our known state.
@@ -422,22 +435,17 @@ class Mastermind(object):
                 added_thumbnail_infos = []
                 for new_thumb in thumbnail_infos:
                     is_exist = False
-                    for old_thumb in video_info.thumbnails:
+                    for old_thumb in old_video_info.thumbnails:
                         if new_thumb.id == old_thumb.id:
                             new_thumb.update_stats(old_thumb)
                             is_exist = True
                     if not is_exist:
                         added_thumbnail_infos.append(new_thumb)
 
-                video_info.thumbnails = thumbnail_infos
-                video_info.testing_enabled = testing_enabled
-                if video_metadata.get_account_id() != video_info.account_id:
+                if video_metadata.get_account_id() != old_video_info.account_id:
                     _log.error(('The account has changed for video id %s, '
                                 'account id %s and it should not have') % 
                                 (video_id, video_metadata.get_account_id()))
-                    video_info.account_id = video_metadata.get_account_id()
-                video_info.score_type = ModelMapper.get_model_type(
-                    video_metadata.model_version)
 
                 # If the video experiment ended, but there are new editor
                 # thumbnails added, we will restart the experiment again.
@@ -445,25 +453,22 @@ class Mastermind(object):
                 if self.experiment_state.get(video_id, None) == \
                     neondata.ExperimentState.COMPLETE:
                     for thumb in added_thumbnail_infos:
-                        if thumb.type not in [neondata.ThumbnailType.CENTERFRAME,
-                            neondata.ThumbnailType.RANDOM,
-                            neondata.ThumbnailType.FILTERED]:
+                        if thumb.type not in [
+                                neondata.ThumbnailType.CENTERFRAME,
+                                neondata.ThumbnailType.RANDOM,
+                                neondata.ThumbnailType.FILTERED]:
                             self.experiment_state[video_id] = \
                                 neondata.ExperimentState.RUNNING
                             break
 
             except KeyError:
                 # No information about this video yet, so add it to the index
-                score_type = ModelMapper.get_model_type(
-                    video_metadata.model_version)
-                video_info = VideoInfo(
-                    video_metadata.get_account_id(),
-                    testing_enabled,
-                    thumbnail_infos,
-                    score_type=score_type)
-                self.video_info[video_id] = video_info
+                pass
+            
+            self.video_info[video_id] = new_video_info
 
-            self._calculate_new_serving_directive(video_id)
+            if old_video_info != new_video_info:
+                self._calculate_new_serving_directive(video_id)
 
     def remove_video_info(self, video_id):
         '''Removes the video from being managed.'''
@@ -496,27 +501,46 @@ class Mastermind(object):
         not updated.
 
         Inputs:
-        data - generator that creates a stream of 
+        data - generator that creates a stream of tuples grouped by video id
                (video_id, thumb_id, base_impr, incr_impr, base_conv, incr_conv)
         
         '''
+        last_video_id = None
+        last_vid_change = False
         for video_id, thumb_id, base_imp, incr_imp, base_conv, incr_conv in \
           data:
             with self.lock:
+                did_change = False
                 # Load up all the data
                 thumb = self._find_thumb(video_id, thumb_id)
                 if thumb is None:
                     continue
-                if base_imp is not None:
+                if base_imp is not None and thumb.base_imp != float(base_imp):
                     thumb.base_imp = float(base_imp)
-                if incr_imp is not None:
+                    did_change = True
+                if incr_imp is not None and thumb.incr_imp != float(incr_imp):
                     thumb.incr_imp = float(incr_imp)
-                if base_conv is not None:
+                    did_change = True
+                if (base_conv is not None and 
+                    thumb.base_conv != float(base_conv)):
                     thumb.base_conv = float(base_conv)
-                if incr_conv is not None:
+                    did_change = True
+                if (incr_conv is not None and 
+                    thumb.incr_conv != float(incr_conv)):
                     thumb.incr_conv = float(incr_conv)
+                    did_change = True
 
-                self._calculate_new_serving_directive(video_id)
+                if video_id != last_video_id:
+                    if last_vid_change and last_video_id is not None:
+                        self._calculate_new_serving_directive(last_video_id)
+                    
+                    last_video_id = video_id
+                    last_vid_change = did_change
+                last_vid_change = last_vid_change or did_change
+                
+        if last_video_id is not None and last_vid_change:
+            with self.lock:
+                self._calculate_new_serving_directive(last_video_id)
 
     def update_experiment_strategy(self, account_id, strategy):
         '''Updates the experiment strategy for a given account.
@@ -595,22 +619,6 @@ class Mastermind(object):
 
         experiment_state, new_directive, value_left, winner_tid = result
         self.experiment_state[video_id] = experiment_state
-                    
-        try:
-            old_directive = self.serving_directive[video_id][1]
-            if len(old_directive) == len(new_directive):
-                # Don't register a change if the max change is less than 0.5%
-                diff = np.fabs(np.subtract([x[1] for x in old_directive],
-                                           new_directive.values()))
-                if max(diff) < 0.005:
-                    return
-            
-        except KeyError:
-            pass
-         
-        except Exception as e:
-            _log.error('Unhandled exception calculating new serving directive %s old_directive = %s new_directive = %s' % (e, old_directive, new_directive.values()))
-            raise
 
         self._modify_video_state(video_id, experiment_state, value_left,
                                  winner_tid, new_directive, video_info)
@@ -802,7 +810,8 @@ class Mastermind(object):
                 neondata.ExperimentStrategy.SEQUENTIAL):
                 experiment_state, exp_frac, value_left, winner = \
                   self._get_sequential_fracs(strategy, candidates, video_info,
-                                             non_exp_thumb, editor or baseline)
+                                             non_exp_thumb, editor or baseline,
+                                             video_id)
             else:
                 _log.error('Invalid experiment type for video %s : %s' % 
                            (video_id, strategy.experiment_type))
@@ -1021,7 +1030,7 @@ class Mastermind(object):
                              Mastermind.PRIOR_IMPRESSION_SIZE))
 
     def _get_sequential_fracs(self, strategy, candidates, video_info,
-                              non_exp_thumb, baseline):
+                              non_exp_thumb, baseline, video_id):
         '''Gets the serving fractions for a sequential testing strategy.
 
         This strategy gives equal serving percentages to each
@@ -1084,9 +1093,20 @@ class Mastermind(object):
                 data['z_base'] = ((data['ctr'] - data['ctr'][baseline.id]) / 
                                   np.sqrt(data['std_var'] + 
                                           data['std_var'][baseline.id]))
-                done_thumbs = (data['z_base'] < -1.96 and
-                               data['impr'] >= 500)
+                done_thumbs = ((data['z_base'] < -1.645) &
+                               (data['impr'] >= 500))
                 run_frac[done_thumbs] = 0.0
+
+                # Now turn off any thumbs that were previously turned off
+                try:
+                    old_directive = self.serving_directive[video_id][1]
+                    off_thumbs = [x[0] for x in old_directive if (
+                        x[1] < 1e-7 and 
+                        (baseline is None or x[0] != baseline.id) and
+                        (non_exp_thumb is None or x[0] != non_exp_thumb.id))]
+                    run_frac[off_thumbs] = 0.0
+                except KeyError:
+                    pass
 
             # Normalize the running fractions to sum to 1.0
             if non_exp_thumb is not None:
@@ -1185,15 +1205,22 @@ class Mastermind(object):
 def _modify_many_serving_fracs(mastermind, video_id, new_directive,
                                video_info):
     try:
-        ctrs = dict([(x.id, float(x.get_conversions()) / 
-                      max(x.get_impressions(), 1)) for x in 
-                     video_info.thumbnails])
-        objs = [neondata.ThumbnailStatus(
-            '_'.join([video_id, thumb_id]),
-            serving_frac=frac,
-            ctr=ctrs[thumb_id])
-            for thumb_id, frac in new_directive.iteritems()]
-        neondata.ThumbnailStatus.save_all(objs)
+        def _update(status_dict):
+            for thumb_info in video_info.thumbnails:
+                try:
+                    status = status_dict['_'.join([video_id, thumb_info.id])]
+                    status.set_serving_frac(new_directive[thumb_info.id])
+                    if thumb_info.get_impressions() > 0:
+                        status.ctr = (float(thumb_info.get_conversions()) /
+                                      float(thumb_info.get_impressions()))
+                    status.imp = thumb_info.get_impressions()
+                    status.conv = thumb_info.get_conversions()
+                except KeyError:
+                    continue
+
+        neondata.ThumbnailStatus.modify_many(
+            ['_'.join([video_id, x.id]) for x in video_info.thumbnails],
+            _update)
     except Exception as e:
         _log.exception('Unhandled exception when updating thumbs %s' % e)
         statemon.state.increment('db_update_error')
