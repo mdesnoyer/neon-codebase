@@ -217,6 +217,10 @@ class SmartCrop(object):
             else:
                 top_height_array.append(min(height_of_points))
         # leave 3 pixels for cushion.
+        if not top_height_array:
+            self.cropped_im = self.original_im
+            self.cropped_height, self.cropped_width = self.src_height, self.src_width
+            return self.cropped_im
         top_height = min(top_height_array) - 3
         self.cropped_im = self.original_im[0 : top_height, 0 : self.src_width]
         (self.cropped_height, self.cropped_width, elem) = self.cropped_im.shape
@@ -236,29 +240,29 @@ class SmartCrop(object):
             new_width = int(self.cropped_height / float(h) * float(w))
             saliency_array = []
             for i in xrange(0, self.cropped_width - new_width + 1):
-                area_saliency = self.integral_map[i+new_width, self.cropped_height] - \
-                    self.integral_map[i, self.cropped_height] - \
-                    self.integral_map[i+new_width, 0] + \
-                    self.integral_map[i, 0]
-                saliency_array.append(area_saliency)
-            saliency_array = np.array(saliency_array)
-            max_index = saliency_array.argmax()
-            self.cropped_im = self.cropped_im[max_index:max_index + new_width, \
-                                              0:self.cropped_height]
-        else
-            # Crop vertically
-            new_height = int(self.cropped_width / float(w) * float(h))
-            saliency_array = []
-            for i in xrange(0, self.cropped_height - new_height + 1):
-                area_saliency = self.integral_map[self.cropped_width, i+new_height] - \
-                    self.integral_map[self.cropped_width, i] - \
-                    self.integral_map[0, i+new_height] + \
+                area_saliency = self.integral_map[self.cropped_height, i+new_width] - \
+                    self.integral_map[self.cropped_height, i] - \
+                    self.integral_map[0, i+new_width] + \
                     self.integral_map[0, i]
                 saliency_array.append(area_saliency)
             saliency_array = np.array(saliency_array)
             max_index = saliency_array.argmax()
-            self.cropped_im = self.cropped_im[0:self.cropped_width,
-                                              max_index:max_index + new_height]
+            self.cropped_im = self.cropped_im[0:self.cropped_height, \
+                                              max_index:max_index + new_width]
+        else:
+            # Crop vertically
+            new_height = int(self.cropped_width / float(w) * float(h))
+            saliency_array = []
+            for i in xrange(0, self.cropped_height - new_height + 1):
+                area_saliency = self.integral_map[i+new_height, self.cropped_width] - \
+                    self.integral_map[i, self.cropped_width] - \
+                    self.integral_map[i+new_height, 0] + \
+                    self.integral_map[i, 0]
+                saliency_array.append(area_saliency)
+            saliency_array = np.array(saliency_array)
+            max_index = saliency_array.argmax()
+            self.cropped_im = self.cropped_im[max_index:max_index + new_height, \
+                                              0:self.cropped_width]
     
         self.resized_im = cv2.resize(self.cropped_im, (w, h))
         return self.resized_im
