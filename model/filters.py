@@ -143,14 +143,14 @@ class ThreshFilt(LocalFilter):
     Removes frames for whom the value of the feature is too low
     '''
     def __init__(self, thresh, feature='pixvar'):
-        super(SceneChanges, self).__init__()
+        super(ThreshFilt, self).__init__()
         self.thresh = thresh
         self.feature = feature
 
     def _filter_impl(self, feat_vec):
         return feat_vec > self.thresh
 
-class SceneChange(LocalFilter):
+class SceneChangeFilter(LocalFilter):
     '''
     Removes frames that are near scene changes. 
     '''
@@ -177,7 +177,7 @@ class SceneChange(LocalFilter):
         If any input parameters are None, then they do not effect the
         calculation. 
         '''
-        super(SceneChanges, self).__init__()
+        super(SceneChangeFilter, self).__init__()
         self.mean_mult = mean_mult
         self.std_mult = std_mult
         self.min_thresh = min_thresh
