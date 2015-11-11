@@ -355,7 +355,8 @@ class ResultsList(object):
         for idx in sco_by_idx:
             res_obj = self.results[idx]
             if not res_obj._defined:
-                continue
+                statemon.state.increment('low_number_of_frames_seen')
+                break
             res.append(res_obj.image, res_obj.score, res_obj.frameno)
         return res
 
