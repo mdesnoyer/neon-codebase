@@ -1001,8 +1001,9 @@ application = tornado.web.Application([
 
 def main():
     global server
+    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     server = tornado.httpserver.HTTPServer(application)
-    utils.ps.register_tornado_shutdown(server) 
+    #utils.ps.register_tornado_shutdown(server) 
     server.listen(options.port)
     tornado.ioloop.IOLoop.current().start()
 
