@@ -19,12 +19,12 @@ class ThumbnailResultObject(object):
     - its score (if defined)
     - a pointer to the next frame (if defined)
     - a pointer to the prev frame (if defined)
-    - a pointer to the next gap frame before
-      a gap in the analysis
+    - a pointer to the next gap frame before a gap in the analysis
+    - bad indicates whether or not there was some kind of issue processing
+      this thumbnail, and causes this thumbnail to not be searched.
     '''
-    def __init__(self, frameno, score=None,
-                 next_frame=None, prev_frame=None,
-                 dummy_frame=False, next_gap=None):
+    def __init__(self, frameno, score=None, next_frame=None, prev_frame=None,
+                 dummy_frame=False, next_gap=None, bad=False):
         self.frameno = frameno
         self.score = score
         # next frame won't induce a memory leak, right?
@@ -34,22 +34,20 @@ class ThumbnailResultObject(object):
         self.prev_frame = prev_frame
         self.dummy_frame = dummy_frame
         self.next_gap = next_gap
+        self.bad = bad
         # indicates whether the interval starting with
         # this frame has been searched.
         self.lead_int_srchd = False
 
     def _can_search(self):
         '''
-        Checks to see if ether the forward or backward
-        interval can be searched. If the forward interval
-        can be searched, it is assumed that it *is* searched,
-        and sets lead_int_srchd to True. If the backward
-        interval can be searched, it does the same but for
-        the previous frame. 
+        Checks to see if ether the forward or backward interval can be
+        searched. If the forward interval can be searched, it is assumed that
+        it *is* searched, and sets lead_int_srchd to True. If the backward
+        interval can be searched, it does the same but for the previous frame. 
 
-        If either can be searched, it returns 
-        (startFrame, endFrame, startScore, endScore) else
-        it returns False.
+        If either can be searched, it returns (startFrame, endFrame,
+        startScore, endScore) else it returns False.
         '''
         fwd = self._check_fwd()
         if fwd:
@@ -124,35 +122,29 @@ class ThumbnailResultObject(object):
 
 class MonteCarloMetropolisHastings(object):
     '''
-    A generic searching algorithm that
-    samples from the distribution of the
-    scores in accordance with the algorithm's
-    belief in the viability of that region.
+    A generic searching algorithm that samples from the distribution of the
+    scores in accordance with the algorithm's belief in the viability of that
+    region.
 
-    Supports asynchronous updating (i.e., it
-    is possible to draw sequential samples without
-    updating the object's knowledge about the 
-    distribution)
+    Supports asynchronous updating (i.e., it is possible to draw sequential
+    samples without updating the object's knowledge about the distribution)
 
-    Note that this will has a min_dist for sampling,
-    such that if the next largest sampled thumbnail
-    by frameno is closer than min_dist, it will not
+    Note that this will has a min_dist for sampling, such that if the next
+    largest sampled thumbnail by frameno is closer than min_dist, it will not
     draw that sample. 
     '''
 
     def __init__(self, search_interval=64,
                  base_sample_prob=0.1, explore_coef=0.1):
         '''
-        min_dist : the search interval. This won't actually
-                   sample from the frames individually, but
-                   rather from 'search frames', which are
-                   equally spaced frames, each separated by
-                   precisely min_dist frames.
-        base_sample_prob : the base probability that
-                   a thumbnail will be searched.
-        explore_coef : a value between 0 and 1, the degree
-                   to which the algorithm will favor exploration
-                   over exploitation.
+        min_dist : the search interval. This won't actually sample from the
+                   frames individually, but rather from 'search frames', which
+                   are equally spaced frames, each separated by precisely
+                   min_dist frames.
+        base_sample_prob : the base probability that a thumbnail will be
+                   sampled (or seached)
+        explore_coef : a value between 0 and 1, the degree to which the
+                   algorithm will favor exploration over exploitation.
         '''
         self.N = None
         self.tot = None
@@ -173,8 +165,7 @@ class MonteCarloMetropolisHastings(object):
         '''
         Re-initializes the search. 
 
-        elements : the maximum number of elements
-                   over which we will search.
+        elements : the maximum number of elements over which we will search.
         '''
         self.tot = elements
         self.N = int(elements) / self.search_interval
@@ -198,16 +189,14 @@ class MonteCarloMetropolisHastings(object):
 
     def _is_invalid_frameno(self, frameno):
         '''
-        Returns true if frameno is not a search
-        frame.
+        Returns true if frameno is not a search frame.
         '''
         return (frameno - self.buffer) % self.search_interval
 
-    def _insert_result_at(self, frameno, score=None):
+    def _insert_result_at(self, frameno, score=None, bad=False):
         '''
-        Creates a new result object at frameno, and
-        updates it. THIS ASSUMES THE RESULT OBJECT
-        IS NOT ALREADY DEFINED AT THAT FRAMENO
+        Creates a new result object at frameno, and updates it. THIS ASSUMES
+        THE RESULT OBJECT IS NOT ALREADY DEFINED AT THAT FRAMENO
         '''
         prev_frame, next_frame = self._bounds(frameno)
         # if the next frame is immediately adjacent
@@ -220,7 +209,7 @@ class MonteCarloMetropolisHastings(object):
         res_obj = ThumbnailResultObject(frameno, score=score,
                                     next_frame=next_frame,
                                     prev_frame=prev_frame,
-                                    next_gap=next_gap)
+                                    next_gap=next_gap, bad=bad)
         if frameno == (prev_frame.frameno+1):
             prev_frame.next_gap = res_obj.next_gap
         prev_frame.next_frame = res_obj
@@ -228,7 +217,7 @@ class MonteCarloMetropolisHastings(object):
         insort(self.results, res_obj)
         return res_obj
 
-    def update(self, frameno, score):
+    def update(self, frameno, score=None, bad=False):
         '''
         Updates the knowledge of the algorithm.
         '''
@@ -240,7 +229,9 @@ class MonteCarloMetropolisHastings(object):
         frameno = (frameno - self.buffer) / self.search_interval
         res_obj = self._get_result(frameno)
         if res_obj == None:
-            res_obj = self._insert_result_at(frameno, score)
+            if score == None:
+                score = self.mean
+            res_obj = self._insert_result_at(frameno, score, bad)
         else:
             res_obj.score = score
         self.max_score = max(self.max_score, score)
@@ -276,8 +267,6 @@ class MonteCarloMetropolisHastings(object):
     def get(self):
         '''Gets the next sample'''
         if self.n_samples == self.N:
-            # have we taken every sample?
-            print 'Returning none for some reason?'
             return None
         # modification so that the search doesn't
         # take too long.
@@ -296,10 +285,9 @@ class MonteCarloMetropolisHastings(object):
 
     def can_search(self, frameno):
         '''
-        Returns a search interval if the frameno participates
-        in a searchable interval. Note, this does not check
-        that the frameno is valid as a search frame, it simply
-        assumes it is. 
+        Returns a search interval if the frameno participates in a searchable
+        interval. Note, this does not check that the frameno is valid as a
+        search frame, it simply assumes it is. 
 
         If it's valid, it returns (start, end, start_score, end_score)
         otherwise it returns False
@@ -310,6 +298,8 @@ class MonteCarloMetropolisHastings(object):
             return False
         can_srch = res_obj._can_search()
         if can_srch:
+            if res_obj.bad:
+                return False
             sf, ef, sfs, efs = can_srch
             sf = self._search_frame_to_frameno(sf)
             ef = self._search_frame_to_frameno(ef)
@@ -396,9 +386,9 @@ class MonteCarloMetropolisHastings(object):
         
     def _predict_score(self, neighbs, sample):
         '''
-        Predicts the score of a sample given
-        its neighbors. Currently only supports
-        nearest neighbor on both sides.
+        Predicts the score of a sample given its neighbors. Currently only
+        supports nearest neighbor on both sides, but may (in the future) be
+        extended to something a bit more elaborate.
         '''
         [x1, y1], [x2, y2] = neighbs
         x3 = sample
@@ -408,16 +398,16 @@ class MonteCarloMetropolisHastings(object):
 
 class MCMH_rpl(MonteCarloMetropolisHastings):
     '''
-    Works just like the original Monte Carlo Metropolis 
-    Hastings, but each time it takes a sample it returns
-    the following: (sample, str). 'str' is either 'sample'
-    in which case the score must be obtained or is 'search'
-    in which case the FORWARD region can be searched.
+    Works just like the original Monte Carlo Metropolis Hastings, but each
+    time it takes a sample it returns the following: (str, meta). 'str' is
+    either 'sample' in which case the score must be obtained or is 'search'
+    in which case the FORWARD region can be searched. meta is a frameno in the
+    case of sample, and a search tuple in the case of search (which is
+    start_frame, start_score, end_frame, end_score).
 
-    The _rpl is for 'replacement' even though this isn't
-    really accurate. Instead, what it's going to do is
-    replace samples and check if they can be sampled versus
-    searched.
+    The _rpl is for 'replacement' even though this isn't really accurate.
+    Instead, what it's going to do is replace samples and check if they can be
+    sampled versus searched.
     '''
     def __init__(self, search_interval=64,
                  base_sample_prob=0.1, explore_coef=0.):
@@ -426,12 +416,18 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
         super(MCMH_rpl, self).__init__(search_interval,
                                        base_sample_prob,
                                        explore_coef)
+        self.searched = []
+
+    def start(self, elements):
+        super(MCMH_rpl, self).start(elements)
+        self.searched = 0
 
     def get(self):
-        if self.n_samples == self.N:
-            # log this
-            return None
         while True:
+            if self.searched == self.N:
+                # log this
+                return None
+                # add log to note that searching is incomplete
             obt = self._get()
             if obt:
                 break
@@ -449,9 +445,8 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
 
     def _get(self):
         '''
-        Attempts to acquire a sample. If it fails,
-        returns False. Otherwise, it returns a tuple
-        of the form (index, string). See the documentation
+        Attempts to acquire a sample. If it fails, returns False. Otherwise,
+        it returns a tuple of the form (index, string). See the documentation
         under the class declaration.
         '''
         sample = np.random.choice(self.N)
@@ -471,6 +466,12 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
         elif:
             srch = result._check_fwd()
             if srch:
+                self.searched += 1
+                # ensure that search intervals are not 'bad' frames.
+                if result.bad:
+                    return False
+                if result.next_frame.bad:
+                    return False
                 return ('search', srch)
             else:
                 return False
