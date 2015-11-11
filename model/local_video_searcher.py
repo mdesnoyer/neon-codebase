@@ -244,10 +244,12 @@ class ResultsList(object):
         self.n_thumbs = n_thumbs
         self.reset()
 
-    def reset(self):
+    def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
         self.results = [_Result() for x in range(self.n_thumbs)]
         self.min = 0
+        if n_thumbs != None:
+            self.n_thumbs = n_thumbs
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
 
     def _update_dists(self, entry_idx):
@@ -469,8 +471,8 @@ class LocalSearcher(object):
         for gen_name in self.feats_to_cache_name:
             self.stats[gen_name] = Statistics()
         self.stats['score'] = Statistics()
-
-        self.results.reset()
+        self.n_thumbs = n
+        self.results.reset(n)
         self.min_score = 0
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
