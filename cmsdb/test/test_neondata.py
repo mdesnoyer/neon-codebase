@@ -2601,7 +2601,7 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         super(TestPostgresDB, self).setUp()
     
     @classmethod
-    def setUpClass(cls): 
+    def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
@@ -2618,7 +2618,7 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         pg2 = neondata.PostgresDB() 
 
         self.assertEquals(id(pg1), id(pg2))
-
+    
     @tornado.testing.gen_test 
     def test_retry_connection(self): 
         exception_mocker = patch('momoko.Connection.connect')
@@ -2628,6 +2628,7 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         pg1 = neondata.PostgresDB()
         with self.assertLogExists(logging.ERROR, 'Unable to get a connection to Postgres Database'):
             yield pg1.get_connection()
+        exception_mocker.stop()
 
 class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
@@ -2654,13 +2655,13 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         pubsub.listen('neonuseraccount', listen_cb)
 
         #with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 
+        #import pdb; pdb.set_trace()
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
  
     @tornado.testing.gen_test(timeout=50)
     def test_subscribe_to_changes(self): 
         def subscribe_cb(key, obj, op):
-            import pdb; pdb.set_trace()
             print key 
         neondata.NeonUserAccount.subscribe_to_changes(subscribe_cb, async=True)
         #with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 

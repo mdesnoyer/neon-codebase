@@ -163,7 +163,6 @@ def _object_to_classname(otype=None):
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
 
-# TODO move this to utils, it could be useful elsewhere. 
 def retry(num_of_tries, 
           exceptions=(Exception), 
           sleep_time=0.5, 
@@ -231,7 +230,6 @@ class PostgresDB(tornado.web.RequestHandler):
                 conn = yield self._get_momoko_connection(pool)
             raise tornado.gen.Return(conn)
         
-        # TODO try to get this decorated with retry 
         @tornado.gen.coroutine 
         def _get_momoko_connection(self, mo_conn):
             conn = None 
@@ -259,8 +257,8 @@ class PostgresDB(tornado.web.RequestHandler):
         return getattr(self.instance, name)
 
     def __setattr__(self, name):
-        return setattr(self.instance, name) 
-
+        return setattr(self.instance, name)
+ 
 class DBConnection(object):
     '''Connection to the database.
 
@@ -722,7 +720,10 @@ class PostgresPubSub(object):
             '''unlisten from a subscribed channel 
 
                WARN : this is a clear all command, any callback functions 
-                      that have open listeners to this will be cleared out 
+                      that have open listeners to this will be cleared out
+
+               TODO : have function_id passed in as well, to only clear 
+                      the callback we care about  
             '''
             channel = self.channels[channel_name] 
             connection = channel['connection']

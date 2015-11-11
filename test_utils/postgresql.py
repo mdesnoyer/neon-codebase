@@ -22,6 +22,7 @@ import signal
 import psycopg2
 import tempfile
 import subprocess
+from cmsdb import neondata
 from glob import glob
 from time import sleep
 from shutil import copytree, rmtree
@@ -187,6 +188,7 @@ class Postgresql(object):
     def stop(self, _signal=signal.SIGINT):
         options._set('cmsdb.neondata.db_port', self.old_port)
         options._set('cmsdb.neondata.db_name', self.old_name)
+        neondata.PostgresDB.instance = None  
         self.terminate(_signal)
         self.cleanup()
 
