@@ -368,7 +368,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
     Computes the maximum channelwise variance per image for
     every image in a sequence
     '''
-    def __init__(self, max_height=480):
+    def __init__(self, max_height=480, crop_frac=.8):
         super(PixelVarGenerator, self).__init__()
         self.max_height = max_height
         self.prep = utils.pycvutils.ImagePrep(
