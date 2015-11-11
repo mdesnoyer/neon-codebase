@@ -3239,7 +3239,6 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature 
     
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
