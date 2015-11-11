@@ -104,6 +104,7 @@ class LocalFilter(object):
     '''
     def __init__(self):
         self.__version__ = 1
+        self.feature = None
 
     def _ensure_np(self, feat_vec):
         '''Makes sure the input vec is a numpy-style array'''
@@ -584,7 +585,7 @@ class CrossFadeFilter(VideoFilter):
     def short_description(self):
         return 'cross_fade'
 
-class ClosedEyeDetector(filter):
+class ClosedEyeDetector(Filter):
     def __init__(self, predictor_path, classifier_path, scaler_path, max_height=640):
         super(ClosedEyeDetector, self).__init__(max_height=max_height)
         self.detector = dlib.get_frontal_face_detector()
