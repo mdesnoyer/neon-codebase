@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 import threading
-import time
+from time import time
 import traceback
 from Queue import Queue
 from itertools import permutations
@@ -468,7 +468,7 @@ class LocalSearcher(object):
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
         # instantiate the statistics objects required
         # for computing the running stats.
-        for gen_name in self.feats_to_cache_name:
+        for gen_name in self.feats_to_cache.keys():
             self.stats[gen_name] = Statistics()
         self.stats['score'] = Statistics()
         self.n_thumbs = n
