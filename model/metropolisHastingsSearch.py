@@ -463,7 +463,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
                 return ('sample', sample)
             else:
                 return False
-        elif:
+        else:
             srch = result._check_fwd()
             if srch:
                 self.searched += 1
