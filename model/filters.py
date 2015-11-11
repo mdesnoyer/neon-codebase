@@ -141,9 +141,10 @@ class ThreshFilt(LocalFilter):
     '''
     Removes frames for whom the value of the feature is too low
     '''
-    def __init__(self, thresh):
+    def __init__(self, thresh, feature='pixvar'):
         super(SceneChanges, self).__init__()
         self.thresh = thresh
+        self.feature = feature
 
     def _filter_impl(self, feat_vec):
         return feat_vec > self.thresh
@@ -152,7 +153,7 @@ class SceneChange(LocalFilter):
     '''
     Removes frames that are near scene changes. 
     '''
-    def __init__(self, mean_mult=None, std_mult=None, 
+    def __init__(self, mean_mult=2., std_mult=1.5, 
                  min_thresh=None, max_thresh=None):
         '''
         Scene Change filtering. 
@@ -180,6 +181,7 @@ class SceneChange(LocalFilter):
         self.std_mult = std_mult
         self.min_thresh = min_thresh
         self.max_thresh = max_thresh
+        self.feature = 'sad'
 
     def _get_thresh1(self, feat_vec):
         return np.mean(feat_vec) * self.mean_mult
@@ -207,9 +209,23 @@ class FaceFilter(LocalFilter):
     '''
     def __init__(self):
         super(FaceFilter, self).__init__()
+        self.feature = 'faces'
 
     def _filter_impl(self, feat_vec):
         return feat_vec == np.max(feat_vec)
+
+class EyeFilter(LocalFilter):
+    '''
+    Removes frames that definitely have closed eyes (i.e.,
+    the eye scores do not cross the separating hyperplane
+    of the classifier)
+    '''
+    def __init__(self):
+        super(EyeFilter, self).__init__()
+        self.feature = 'eyes'
+
+    def _filter_impl(self, feat_vec):
+        return feat_vec > 0
 
 class CascadeFilter(Filter):
     '''A sequence of filters where if one cuts out the image, it fails.'''
