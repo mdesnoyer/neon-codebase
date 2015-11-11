@@ -604,9 +604,6 @@ class PostgresPubSub(object):
             self.user = options.get('cmsdb.neondata.db_user')
 
             self.channels = {} 
-            self.channel_name = None
-            self.listener = None
-            self.callback_functions = [] 
             
         def _connect(self):
             '''connect function for pubsub 
@@ -626,10 +623,9 @@ class PostgresPubSub(object):
             '''_receive_notification, callback for add_handler that monitors an open 
                pg file handler 
 
-               will use the io_loop that was sent in on the listen to add a future 
-               to the expecting callbacks 
-               
-               sends a future with a list of strings  
+               will use the current io_loop to add a future to the expecting callbacks
+ 
+               sends a future with a list of json strings  
             '''
             try:   
                 channel = self.channels[channel_name]
@@ -1213,7 +1209,7 @@ class StoredObject(object):
         value = self.to_json()
 
         if self.key is None:
-            raise Exception("key not set")
+            raise ValueError("key not set")
 
         if options.get('cmsdb.neondata.wants_postgres'): 
             db = PostgresDB()
