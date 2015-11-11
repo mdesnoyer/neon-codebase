@@ -13,6 +13,7 @@ if sys.path[0] != __base_path__:
 from api import brightcove_api
 from cmsdb import neondata
 import datetime
+import dateutil.parser
 import integrations.ovp
 import logging
 import re
@@ -32,6 +33,7 @@ statemon.define('cant_get_image', int)
 statemon.define('cant_get_refid', int)
 statemon.define('cant_get_custom_id', int)
 statemon.define('video_not_found', int)
+statemon.define('old_videos_skipped', int)
 
 _log = logging.getLogger(__name__)
 
@@ -261,7 +263,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
             try:
                 item = yield video_iter.next(async=True)
-                if item == StopIteration:
+                if isinstance(item, StopIteration):
                     break
             except brightcove_api.BrightcoveApiServerError as e:
                 statemon.state.increment('bc_apiserver_errors')
@@ -282,7 +284,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 # No new videos
                 break
 
-            yield self.submit_one_video_object(item)
+            yield self.submit_one_video_object(item, skip_old_video=True)
 
             count += 1
             last_mod_date = max(last_mod_date,
@@ -335,7 +337,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
-    def submit_one_video_object(self, vid_obj, grab_new_thumb=True):
+    def submit_one_video_object(self, vid_obj, grab_new_thumb=True,
+                                skip_old_video=False):
         '''Submits one video object
 
         Inputs:
@@ -347,7 +350,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''
         try:
             retval = yield self._submit_one_video_object_impl(vid_obj,
-                                                              grab_new_thumb)
+                                                              grab_new_thumb,
+                                                              skip_old_video)
         except integrations.ovp.CMSAPIError as e:
             # Error is already logged
             raise
@@ -360,7 +364,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(retval)
 
     @tornado.gen.coroutine
-    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True):
+    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True,
+                                      skip_old_video=False):
         # Get the video url to process
         video_url = self._get_video_url_to_download(vid_obj)
         if (video_url is None or 
@@ -416,9 +421,20 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         publish_date = vid_obj.get('publishedDate', None)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(
-                int(publish_date) / 1000.0).isoformat()
+                int(publish_date) / 1000.0)
 
         if not video_id in self.platform.videos:
+            # See if the video should be skipped because it is too old
+            if (skip_old_video and 
+                publish_date is not None and 
+                self.platform.oldest_video_allowed is not None and
+                publish_date < 
+                dateutil.parser.parse(self.platform.oldest_video_allowed)):
+                _log.info('Skipped video %s from account %s because it is too'
+                          ' old' % (video_id, self.platform.neon_api_key))
+                statemon.state.increment('old_videos_skipped')
+                raise tornado.gen.Return(None)
+        
             # The video hasn't been submitted before
             job_id = None
             try:
@@ -431,7 +447,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     callback_url=self.platform.callback_url,
                     custom_data = custom_data,
                     duration=float(vid_obj['length']) / 1000.0,
-                    publish_date=publish_date)
+                    publish_date=(publish_date.isoformat() if 
+                                  publish_date is not None else None))
                 job_id = response['job_id']
 
             except Exception as e:
@@ -587,6 +604,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                                            thumb.key,
                                            _set_external_id)
 
+        is_exist = False
         if not found_thumb:
             # Add the thumbnail to our system
             urls = _get_urls_from_bc_response(data)
@@ -599,12 +617,49 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         rank = min_rank-1,
                         external_id = external_id
                         )
+
                     yield vid_meta.download_and_add_thumbnail(
                         new_thumb,
                         url,
-                        save_objects=True,
+                        save_objects=False,
                         async=True)
-            
+                    
+                    # Validate the new_thumb key exists or not. We noticed that
+                    # Brightcove can send the same thumbnail with different
+                    # external ids multiple times. This triggers the same
+                    # thumbnail as new and restart the experiment. Since the
+                    # thumbnail key is generated by md5 hashing, we will compare
+                    # the hash with existing thumbnail hashes, if find a match
+                    # we will disgard the thumbnail.
+                    is_exist = \
+                        any([new_thumb.key == old_thum.key
+                            for old_thum in thumbs]) or \
+                        any([new_thumb.phash == old_thum.phash
+                            for old_thum in thumbs])
+
+                    if is_exist:
+                        continue
+
+                    sucess = yield tornado.gen.Task(new_thumb.save)
+                    if not sucess:
+                        raise IOError("Could not save thumbnail")
+                    # Even though the vid_meta already has the new_thumb
+                    # in thumbnail_ids, the database still doesn't have it yet.
+                    # We will modify in database first. Also, modify is used
+                    # first instead of using save directively, as other process
+                    # can modify the vid_meta as well.
+                    updated_video = yield tornado.gen.Task(
+                        vid_meta.modify,
+                        vid_meta.key,
+                        lambda x: x.thumbnail_ids.append(new_thumb.key))
+                    if updated_video is None:
+                        # It wasn't in the database, so save this object
+                        sucess = yield tornado.gen.Task(vid_meta.save)
+                        if not sucess:
+                            raise IOError("Could not save video data")
+                    else:
+                        vid_meta.__dict__ = updated_video.__dict__
+
                     _log.info(
                         'Found new thumbnail %s for video %s at Brigthcove.' %
                         (external_id, vid_meta.key))
@@ -614,7 +669,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 except IOError:
                     # Error getting the image, so keep going
                     pass
-            if not added_image:
+            if not added_image and not is_exist:
                 _log.error('Could not find valid image to add to video %s. '
                            'Tried urls %s' % (vid_meta.key, urls))
                 statemon.state.increment('cant_get_image')

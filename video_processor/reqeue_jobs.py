@@ -32,29 +32,32 @@ define('api_key', default=None, type=str, help='account api key')
 _log = logging.getLogger(__name__)
 
 def main():
-    requests = neondata.NeonApiRequest.get_all()
     if options.api_key is not None:
-        requests = [x for x in requests if x.api_key == options.api_key]
-            
-    for request in requests:
-        if request.state in [neondata.RequestState.SUBMIT,
-                             neondata.RequestState.PROCESSING, 
-                             neondata.RequestState.REQUEUED,
-                             neondata.RequestState.FAILED,
-                             neondata.RequestState.INT_ERROR]:
-            url = 'http://%s:%s/requeue' % (options.host, options.port)
+        accounts = [neondata.NeonUserAccount.get(options.api_key)]
+    else:
+        accounts = neondata.NeonUserAccount.get_all()
 
-            try:
-                response = urllib2.urlopen(url, request.to_json())
-                if response.code == 200:
-                    _log.info('Requeued request %s for account %s' %
-                          (request.job_id, request.api_key))
-                else:
-                    _log.error('Could not requeue %s for account %s' %
-                               (request.job_id, request.api_key))
-            except urllib2.HTTPError as e:
-                _log.error('Could not requeue %s for account %s: %s' %
-                               (request.job_id, request.api_key, e))
+
+    for account in accounts:
+        for request in account.iterate_all_jobs():
+            if request.state in [neondata.RequestState.SUBMIT,
+                                 neondata.RequestState.PROCESSING, 
+                                 neondata.RequestState.REQUEUED,
+                                 neondata.RequestState.FAILED,
+                                 neondata.RequestState.INT_ERROR]:
+                url = 'http://%s:%s/requeue' % (options.host, options.port)
+
+                try:
+                    response = urllib2.urlopen(url, request.to_json())
+                    if response.code == 200:
+                        _log.info('Requeued request %s for account %s' %
+                              (request.job_id, request.api_key))
+                    else:
+                        _log.error('Could not requeue %s for account %s' %
+                                   (request.job_id, request.api_key))
+                except urllib2.HTTPError as e:
+                    _log.error('Could not requeue %s for account %s: %s' %
+                                   (request.job_id, request.api_key, e))
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

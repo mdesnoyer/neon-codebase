@@ -19,6 +19,8 @@ http {     default_type  application/octet-stream; \
             v1_client; 		} \
         location ~ ^/v1/server/(.+\.*)$ { \
             v1_server; 		}\
+        location ~ ^/v1/video/?$ { \
+            v1_video; 		}\
         location ~ ^/v1/getthumbnailid/(.+\.*)$ { \
             v1_getthumbnailid; 		}\
         location = /stats { \

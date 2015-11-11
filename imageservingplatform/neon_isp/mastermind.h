@@ -71,6 +71,9 @@ public:
                         unsigned char * bucketId,
                         int bucketIdLen,
                         std::string & tid);
+
+    bool DoesDirectiveExist(const char * account_id, 
+                            const char * video_id);
    
 
 protected:
@@ -109,20 +112,4 @@ protected:
 using namespace std;
 using namespace __gnu_cxx;
 
-
-namespace __gnu_cxx {
-    template<>
-    struct hash<std::string>
-    {
-        hash<char*> h;
-        size_t operator()(const std::string &s) const
-        {
-            return h(s.c_str());
-        };
-    };
-}
-
-
 #endif
-
-

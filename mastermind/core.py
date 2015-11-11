@@ -416,10 +416,17 @@ class Mastermind(object):
                 
                 # Update the statistics for all the thumbnails based
                 # on our known state.
+                # Also, we will find out if there are new thumbnails added,
+                # this can happen if editor add new thumbnails.
+                added_thumbnail_infos = []
                 for new_thumb in thumbnail_infos:
+                    is_exist = False
                     for old_thumb in video_info.thumbnails:
                         if new_thumb.id == old_thumb.id:
                             new_thumb.update_stats(old_thumb)
+                            is_exist = True
+                    if not is_exist:
+                        added_thumbnail_infos.append(new_thumb)
 
                 video_info.thumbnails = thumbnail_infos
                 video_info.testing_enabled = testing_enabled
@@ -430,7 +437,20 @@ class Mastermind(object):
                     video_info.account_id = video_metadata.get_account_id()
                 video_info.score_type = ModelMapper.get_model_type(
                     video_metadata.model_version)
-                
+
+                # If the video experiment ended, but there are new editor
+                # thumbnails added, we will restart the experiment again.
+                # TODO: validate if there is only one chosen?
+                if self.experiment_state.get(video_id, None) == \
+                    neondata.ExperimentState.COMPLETE:
+                    for thumb in added_thumbnail_infos:
+                        if thumb.type not in [neondata.ThumbnailType.CENTERFRAME,
+                            neondata.ThumbnailType.RANDOM,
+                            neondata.ThumbnailType.FILTERED]:
+                            self.experiment_state[video_id] = \
+                                neondata.ExperimentState.RUNNING
+                            break
+
             except KeyError:
                 # No information about this video yet, so add it to the index
                 score_type = ModelMapper.get_model_type(
@@ -670,8 +690,8 @@ class Mastermind(object):
                                   neondata.ThumbnailType.RANDOM,
                                   neondata.ThumbnailType.FILTERED]:
                 if (default is None or 
-                    default.type == neondata.ThumbnailType.DEFAULT 
-                    or thumb.rank < default.rank):
+                    (thumb.type == neondata.ThumbnailType.DEFAULT 
+                     and thumb.rank < default.rank)):
                     default = thumb
 
         if strategy.chosen_thumb_overrides and chosen is not None:
@@ -921,6 +941,22 @@ class Mastermind(object):
             win_frac = np.around(win_frac[:-1], 2)
             win_frac = win_frac / np.sum(win_frac)
 
+        # Use the _get_prior_conversions as the adjustment. And the percentage
+        # is normalized to one.
+        win_frac_prior = np.array([self._get_prior_conversions(x, video_info)
+            for x in valid_bandits])
+        # Optional, win_frac_prior will get adjusted by frac_adjust_rate
+        # For example, when frac_adjust_rate is 1.0, we are running the a
+        # full dynamic experiment, it probably doesn't make sense to keep a
+        # constant lift boost on top of a dynamic process. When frac_adjust_rate
+        # is 0, the serving percentage is constant, it makes sense to have a
+        # boost to the thumbnails with high scores.
+        win_frac_prior = win_frac_prior ** (1.0 - frac_adjust_rate)
+        # Adjust by model score and re-normalize.
+        win_frac = win_frac * win_frac_prior
+        win_frac = win_frac / np.sum(win_frac)
+
+
         for thumb_id, frac in zip(bandit_ids, win_frac):
             run_frac[thumb_id] = frac * experiment_frac
 
@@ -1081,11 +1117,22 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
         full_winner = winner_tid
         if full_winner is not None:
             full_winner = '_'.join([video_id, full_winner])
+        old_state = [None]
         def _update(status):
+           old_state[0] = status.experiment_state
            status.set_experiment_state(experiment_state)
            status.winner_tid = full_winner
            status.experiment_value_remaining = value_left
         neondata.VideoStatus.modify(video_id, _update, create_missing=True)
+
+        # Send the callback for the request if there was a state change
+        if old_state[0] != experiment_state:
+            vmeta = neondata.VideoMetadata.get(video_id)
+            if vmeta is not None:
+                request = neondata.NeonApiRequest.get(vmeta.job_id,
+                                                      vmeta.get_account_id())
+                if request is not None:
+                    request.send_callback()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
         statemon.state.increment('db_update_error')

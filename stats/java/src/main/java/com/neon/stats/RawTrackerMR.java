@@ -25,6 +25,7 @@ import org.apache.avro.specific.SpecificDatumWriter;
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.NullWritable;
@@ -1246,8 +1247,10 @@ public class RawTrackerMR extends Configured implements Tool {
       System.err.println("Usage: RawTrackerMR <input path> <output path>");
       return -1;
     }
+    
+    Configuration conf = getConf();
 
-    Job job = Job.getInstance(getConf());
+    Job job = Job.getInstance(conf);
     job.setJarByClass(RawTrackerMR.class);
     job.setJobName("Raw Tracker Data Cleaning");
 

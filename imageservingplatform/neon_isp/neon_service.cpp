@@ -576,7 +576,7 @@ neon_service_set_no_content_headers(ngx_http_request_t *request)
  *
  * */
 
-NEON_SERVER_API_ERROR
+API_ERROR
 neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain) 
 {
 
@@ -586,7 +586,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     if(b == NULL){
         request->headers_out.status = NGX_HTTP_INTERNAL_SERVER_ERROR; //500
         neon_stats[NGINX_OUT_OF_MEMORY] ++;
-        return NEON_SERVER_API_FAIL;
+        return API_FAIL;
     } 
     
     chain->buf = b;
@@ -609,7 +609,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     if(ret !=0){
         neon_stats[NEON_SERVER_API_ACCOUNT_ID_NOT_FOUND] ++;    
         neon_service_server_api_not_found(request, chain);
-        return NEON_SERVER_API_FAIL;
+        return API_FAIL;
     }
     
     
@@ -637,7 +637,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
         ngx_log_error(NGX_LOG_ERR, request->connection->log, 0, "IM URL Not Found");
         neon_stats[NEON_SERVER_API_URL_NOT_FOUND] ++;
         neon_service_server_api_not_found(request, chain);
-        return NEON_SERVER_API_FAIL;
+        return API_FAIL;
     }
     
     // a copy here to avoid invalid reads when trying to free image_url
@@ -659,7 +659,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
     // set the headers and the request is done! 
     neon_service_set_json_headers(request, NGX_HTTP_OK, content_length); 
 
-    return NEON_SERVER_API_OK;
+    return API_OK;
 }
 
 /////////// CLIENT API METHODS ////////////
@@ -679,7 +679,7 @@ neon_service_server_api(ngx_http_request_t *request, ngx_chain_t  * chain)
  * @return: NEON_CLIENT_API_OK or NEON_CLIENT_API_FAIL 
  */
 
-NEON_CLIENT_API_ERROR
+API_ERROR
 neon_service_client_api(ngx_http_request_t *request,
                         ngx_chain_t  * chain){
 
@@ -701,7 +701,7 @@ neon_service_client_api(ngx_http_request_t *request,
     if (ret !=0){
         neon_stats[NEON_CLIENT_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
-        return NEON_CLIENT_API_FAIL;
+        return API_FAIL;
     }
     
     ngx_str_t vid = ngx_uchar_to_string(video_id);
@@ -743,9 +743,13 @@ neon_service_client_api(ngx_http_request_t *request,
                       image_url);
 
     if (image_url.size() == 0) { 
-        neon_stats[NEON_CLIENT_API_URL_NOT_FOUND] ++;
+        if (neon_stats[NEON_CLIENT_API_URL_NOT_FOUND]++ % 5 == 0) { 
+            ngx_log_error(NGX_LOG_ERR, request->connection->log, 0,
+                "video id %s for account %s not found", 
+                 video_id, account_id);
+        } 
         neon_service_set_no_content_headers(request);
-        return NEON_CLIENT_API_FAIL;
+        return API_FAIL;
     }
 
     buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
@@ -760,12 +764,77 @@ neon_service_client_api(ngx_http_request_t *request,
     // and off we go. 
     neon_service_set_redirect_headers(request, buf); 
     
-    return NEON_CLIENT_API_OK;
+    return API_OK;
 }
 
+/* Video status service handler */
+API_ERROR 
+neon_service_video(ngx_http_request_t *request, ngx_chain_t  *  chain)
+{
+    ngx_buf_t *buf;
+    int content_length = 0; 
+    int found_directive = 0;
+    u_char* video_id = 0; 
+    u_char* publisher_id=0; 
+  
+    static ngx_str_t pid_arg = ngx_string("arg_publisher_id");
+    static ngx_str_t vid_arg = ngx_string("arg_video_id");
+
+    static ngx_uint_t pid_arg_key = ngx_hash_key(pid_arg.data, pid_arg.len); 
+    static ngx_uint_t vid_arg_key = ngx_hash_key(vid_arg.data, vid_arg.len); 
+     
+    ngx_http_variable_value_t * publisher_id_var = ngx_http_get_variable(request, &pid_arg, pid_arg_key);
+    ngx_http_variable_value_t * video_id_var = ngx_http_get_variable(request, &vid_arg, vid_arg_key);
+
+    if (video_id_var->not_found == 0 && publisher_id_var->not_found == 0) { 
+        video_id = (u_char *)ngx_palloc(request->pool, video_id_var->len+1);
+        memset(video_id, 0, video_id_var->len+1);
+        ngx_copy(video_id, video_id_var->data, video_id_var->len);
+
+        publisher_id = (u_char *)ngx_palloc(request->pool, publisher_id_var->len+1);
+        memset(publisher_id, 0, publisher_id_var->len+1);
+        ngx_copy(publisher_id, publisher_id_var->data, publisher_id_var->len);
+
+        const char * account_id = 0;
+        int account_id_size = 0;
+    
+        NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_ERROR rv = neon_mastermind_account_id_lookup((char*)publisher_id,
+                                                                                       &account_id,
+                                                                                       &account_id_size);
+        if(rv == NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK) {
+            found_directive = neon_mastermind_find_directive((char*)account_id, (char*)video_id);
+        } 
+    }
+    else 
+    { 
+        ngx_str_t message = ngx_string("{\"error\": \"publisher_id and video_id are required query parameters\"}");
+        buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
+        buf->pos = message.data; 
+        buf->last = buf->pos + message.len;  
+        content_length += message.len;  
+        neon_service_add_to_chain(request, chain, buf); 
+        neon_service_set_json_headers(request, NGX_HTTP_BAD_REQUEST, content_length);
+        return API_OK; 
+    } 
+
+    if (found_directive) { 
+        ngx_str_t message = ngx_string("{\"message\": \"found directive\"}");
+        buf = (ngx_buf_t*)ngx_calloc_buf(request->pool);
+        buf->pos = message.data; 
+        buf->last = buf->pos + message.len;  
+        content_length += message.len;  
+        neon_service_add_to_chain(request, chain, buf); 
+        neon_service_set_json_headers(request, NGX_HTTP_OK, content_length); 
+        return API_OK; 
+    }
+    else { 
+        neon_service_set_no_content_headers(request);
+    } 
+    return API_OK; 
+}
 
 /* Get Thumbnail ID service handler */
-NEON_GETTHUMB_API_ERROR 
+API_ERROR 
 neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
 {
     int wants_html = 0, clen = 0; 
@@ -805,7 +874,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     if(publisher_id == NULL) {
         neon_stats[NEON_GETTHUMBNAIL_API_PUBLISHER_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
-        return NEON_GETTHUMB_API_FAIL;
+        return API_FAIL;
     }
     // Account ID
     const char * account_id = 0;
@@ -819,7 +888,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     if(error_account_id != NEON_MASTERMIND_ACCOUNT_ID_LOOKUP_OK){
         neon_stats[NEON_GETTHUMBNAIL_API_ACCOUNT_ID_NOT_FOUND] ++;
         neon_service_set_no_content_headers(request);
-        return NEON_GETTHUMB_API_FAIL;
+        return API_FAIL;
     }
 
     static ngx_str_t noimage = ngx_string("null");
@@ -832,7 +901,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     // If video_ids haven't been parsed 
     if (video_ids.len <= 0){
         neon_service_set_no_content_headers(request);
-        return NEON_GETTHUMB_API_FAIL;
+        return API_FAIL;
     }
 
     // make a copy of params o we can parse and extract them with str_tok
@@ -924,7 +993,7 @@ neon_service_getthumbnailid(ngx_http_request_t *request, ngx_chain_t  **  chain)
     }  
     request->headers_out.content_length_n = clen;
         
-    return NEON_GETTHUMB_API_OK;
+    return API_OK;
 }
 // Getting geoip stuff in nginx
 //ngx_str_t variable_name = ngx_string("geoip_country_code");

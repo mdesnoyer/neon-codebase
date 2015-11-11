@@ -725,7 +725,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                 "dl.dropboxusercontent.com")
         video_title = InputSanitizer.sanitize_string(
             self.get_argument('video_title', None))
-        topn = self.get_argument('topn', 1)
+        topn = self.get_argument('topn', 5)
         callback_url = InputSanitizer.sanitize_string(
             self.get_argument('callback_url', None))
         default_thumbnail = self.get_argument('default_thumbnail', None)
@@ -952,6 +952,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
+                         neondata.RequestState.CUSTOMER_ERROR,
                          neondata.RequestState.FAILED]
         
         # single video state, if video not found return an error

@@ -1,8 +1,5 @@
 #include "neon_stats.h"
-#include "neonHash.h"
 #include "publisherHashtable.h"
-
-
 
 /*
  *   Publisher Table
@@ -14,13 +11,11 @@ PublisherHashtable::PublisherHashtable()
     initialized = false;
 }
 
-
 PublisherHashtable::~PublisherHashtable()
 {
     table = 0;
     initialized = false;
 }
-
 
 void
 PublisherHashtable::Init(unsigned numOfBuckets)
@@ -34,7 +29,6 @@ PublisherHashtable::Init(unsigned numOfBuckets)
     
     initialized = true;
 }
-
 
 void
 PublisherHashtable::Shutdown()
@@ -63,13 +57,11 @@ PublisherHashtable::Shutdown()
     initialized = false;
 }
 
-
 unsigned
 PublisherHashtable::GetSize()
 {
     return table->size();
 }
-
 
 void
 PublisherHashtable::AddPublisher(rapidjson::Document & document)
@@ -100,7 +92,6 @@ PublisherHashtable::AddPublisher(rapidjson::Document & document)
 	return;
 }
 
-
 Publisher *
 PublisherHashtable::Find(const char * publisherIdKey)
 {
@@ -113,17 +104,3 @@ PublisherHashtable::Find(const char * publisherIdKey)
     
     return publisher;
 }
-
-
-size_t
-PublisherHashtable::hash_publisher::operator()(const std::string key)  const
-{
-    uint32_t result = 0;
-    
-    result = NeonHash::Hash(key.c_str(), 1);
-    
-    return result;
-};
-
-
-
