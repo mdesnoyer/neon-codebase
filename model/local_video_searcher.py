@@ -39,7 +39,6 @@ import model.features as feat
 import numpy as np
 import utils.obj
 from model import colorname
-from model.video_searcher import VideoSearcher
 from utils import pycvutils, statemon
 from utils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject
