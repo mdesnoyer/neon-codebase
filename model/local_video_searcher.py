@@ -42,7 +42,7 @@ from model import colorname
 from utils import pycvutils, statemon
 from utils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject
-from model.metropolisHastingsSearch import MonteCarloMetropolisHastings
+from model.metropolisHastingsSearch import MCMH_rpl
 
 _log = logging.getLogger(__name__)
 
@@ -109,10 +109,9 @@ class Combiner(object):
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
-    def __init__(self, stats_dict, weight_dict=None,
-                 weight_valence=None, combine=lambda x: np.sum(x)):
+    def __init__(self, weight_dict=dict(), weight_valence=dict(),
+                 combine=lambda x: np.sum(x)):
         '''
-        stats_dict is a dictionary of {'stat name': Statistics()}
         weight_dict is a dictionary of {'stat name': weight} which yields
             absolute weights.
         weight_valence is a dictionary of {'stat name': valence} encoding,
@@ -124,10 +123,19 @@ class Combiner(object):
         Note: if a statistic has an entry in both the stats and weights dict,
             then weights dict takes precedence.
         '''
-        self._stats_dict = stats_dict
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         self._combine = combine
+
+    def _set_stats_dict(self, stats_dict):
+        '''
+        Sets the statistics dictionary given a video searcher object.
+
+        Should only be called by the object that has the stats dictionary.
+
+        stats_dict is a dictionary of {'stat name': Statistics()}
+        '''
+        self._stats_dict = stats_dict
 
     def _compute_stat_score(self, feat_name, feat_vec):
         '''
@@ -434,6 +442,9 @@ class LocalSearcher(object):
             self.generators[gen_name] = f
             if gen_name in feats_to_cache:
                 self.feats_to_cache[gen_name] = f
+
+        # instantiate the combiner
+        self.combiner._set_stats_dict(self.stats)
 
     @property
     def min_score(self):
