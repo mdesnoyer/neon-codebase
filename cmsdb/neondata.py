@@ -116,6 +116,9 @@ statemon.define('sucessful_callbacks', int)
 statemon.define('callback_error', int)
 statemon.define('invalid_callback_url', int)
 
+statemon.define('postgres_pubsub_connections', int) 
+statemon.define('postgres_unknown_errors', int) 
+
 #constants 
 #BCOVE_STILL_WIDTH = 480
 
@@ -1237,7 +1240,8 @@ class StoredObject(object):
         if self.key is None:
             raise ValueError("key not set")
 
-        if options.get('cmsdb.neondata.wants_postgres'): 
+        if options.get('cmsdb.neondata.wants_postgres'):
+            rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
 
@@ -1245,12 +1249,26 @@ class StoredObject(object):
                      VALUES('%s', '%s')" % (self.__class__.__name__.lower(), 
                                             value, 
                                             self.__class__.__name__)
-        
-            result = yield conn.execute(query)
-            #TODO since upsert is not available until postgres 9.5 
-            # we need to do an update if a duplicate key exception is thrown here 
+            
+            try:  
+                result = yield conn.execute(query)
+            except psycopg2.IntegrityError as e:  
+                # since upsert is not available until postgres 9.5 
+                # we need to do an update here
+                query = "UPDATE %s \
+                         SET _data = '%s' \
+                         WHERE _data->>'key' = '%s'" % (self.__class__.__name__.lower(), 
+                                                        value, 
+                                                        self.account_id)
+                result = yield conn.execute(query) 
+
+            except Exception as e: 
+                rv = False
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
+                statemon.state.increment('postgres_unknown_errors')
+            
             conn.close()
-            raise tornado.gen.Return(True)
+            raise tornado.gen.Return(rv)
         else: 
             db_connection = DBConnection.get(self)
              

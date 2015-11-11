@@ -2696,8 +2696,14 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         so2 = neondata.NeonUserAccount(so.account_id)
         self.assertEquals(so.neon_api_key, so2.neon_api_key) 
 
-    #@tornado.testing.gen_test 
-    #def test_save_duplicate_neon_user_accounts(self): 
+    @tornado.testing.gen_test 
+    def test_save_duplicate_neon_user_accounts(self):
+        user_id = uuid.uuid1().hex 
+        so1 = neondata.NeonUserAccount(user_id) 
+        so2 = neondata.NeonUserAccount(user_id) 
+
+        yield so1.save(async=True) 
+        yield so2.save(async=True)  
     
     @tornado.testing.gen_test 
     def test_get_neon_user_account(self):
