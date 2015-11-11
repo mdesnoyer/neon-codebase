@@ -2562,18 +2562,26 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=50)
     def test_listen_and_notify(self): 
-        pubsub = neondata.PostgresPubSub();
-        pubsub.connect()
-        pubsub.listen('neonuseraccount')
+        def listen_cb(fut):
+            print fut.result()
+ 
+        pubsub = neondata.PostgresPubSub()
+        pubsub.listen('neonuseraccount', listen_cb)
 
-        with self.assertLogExists(logging.INFO, 'blah'): 
+        with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 
             so = neondata.NeonUserAccount(uuid.uuid1().hex)
             rv = yield so.save(async=True)
-            yield tornado.gen.sleep(30)
+ 
+    @tornado.testing.gen_test(timeout=50)
+    def test_subscribe_to_changes(self): 
+        def subscribe_cb(key, obj, op):
+            import pdb; pdb.set_trace()
+            print key 
+        neondata.NeonUserAccount.subscribe_to_changes(subscribe_cb, async=True)
+        with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 
+            so = neondata.NeonUserAccount(uuid.uuid1().hex)
+            rv = yield so.save(async=True)
             
-        #yield tornado.gen.sleep(4)  
-        #import pdb; pdb.set_trace() 
-
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGNeonUserAccount, self).setUp()

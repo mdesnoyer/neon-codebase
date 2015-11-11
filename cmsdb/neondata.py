@@ -199,6 +199,7 @@ class PostgresDB(tornado.web.RequestHandler):
             we have to manage how the pools/connections are created.  
             '''
             # grab the io loop
+            conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = id(current_io_loop)
             dict_item = self.io_loop_dict.get(io_loop_id)
@@ -594,63 +595,133 @@ def _erase_all_data():
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
-class PostgresPubSub(): 
-    def __init__(self): 
-        self.host = options.get('cmsdb.neondata.db_address')
-        self.port = options.get('cmsdb.neondata.db_port')
-        self.name = options.get('cmsdb.neondata.db_name')
-        self.user = options.get('cmsdb.neondata.db_user')
-        self.listening = False
-        self.channels = []  
+class PostgresPubSub(object):
+    class _PostgresPubSub: 
+        def __init__(self): 
+            self.host = options.get('cmsdb.neondata.db_address')
+            self.port = options.get('cmsdb.neondata.db_port')
+            self.name = options.get('cmsdb.neondata.db_name')
+            self.user = options.get('cmsdb.neondata.db_user')
+
+            self.channels = {} 
+            self.channel_name = None
+            self.listener = None
+            self.callback_functions = [] 
+            
+        def _connect(self):
+            '''connect function for pubsub 
+               we don't want to use momoko here, because we have to have 
+               a sync connection for autocommit to work properly or at all 
+            ''' 
+            connection = psycopg2.connect(dsn='dbname=%s user=%s host=%s port=%s' \
+                                          % (self.name, self.user, self.host, self.port))
+            connection.autocommit = True 
+            return connection 
         
-    #@tornado.gen.coroutine 
-    '''connect function for pubsub 
-       we don't want to use momoko here, because we have to have 
-       a sync connection for autocommit to work properly or at all 
-    ''' 
-    def connect(self):
-        self.io_loop = tornado.ioloop.IOLoop.current()
-        self.connection = psycopg2.connect(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port))
-        self.connection.autocommit = True 
-    
-    @tornado.gen.coroutine 
-    def notify_callback(self, timeout=3, sleep_time=15): 
-        while True:
-            try: 
-                if select.select([self.connection], [], [], timeout) == ([], [], []):
-                    yield tornado.gen.sleep(sleep_time) 
-                else:
-                    self.connection.poll()
-                    import pdb; pdb.set_trace()
-                    _log.info('Notifying listeners of logs - %s' % (self.connection.notifies))
-                    while self.connection.notifies:
-                        yield self.connection.notifies.pop(0)
-                    yield tornado.gen.sleep(sleep_time) 
+        @tornado.gen.coroutine 
+        def _receive_notification(self, 
+                                  fd, 
+                                  events, 
+                                  channel_name): 
+            '''_receive_notification, callback for add_handler that monitors an open 
+               pg file handler 
+
+               will use the io_loop that was sent in on the listen to add a future 
+               to the expecting callbacks 
+               
+               sends a future with a list of strings  
+            '''
+            try:   
+                channel = self.channels[channel_name]
+                notifications = [] 
+                connection = channel['connection']  
+                connection.poll()
+                _log.info('Notifying listeners of db changes - %s' % (connection.notifies))
+                
+                while connection.notifies:
+                    notification = connection.notifies.pop() 
+                    payload = notification.payload
+                    notifications.append(payload) 
+
+                future = tornado.concurrent.Future()
+                future.set_result(notifications)
+                channel = self.channels[channel_name]
+                callback_functions = channel['callback_functions'] 
+                for func in callback_functions: 
+                    tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
-                _log.error('Something went wrong in pubsub notifications - %s' % (e))
-                self.reconnect() 
+                _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
+                self._reconnect(channel_name) 
+        
+        def _reconnect(self, channel_name):
+            '''reconnects to postgres in the case of a database mishap, or 
+               a possible io_loop mishap 
+
+               grabs the current channel that is listening 
+               closes the connection (in case it's still open) 
+               deletes it from the singleton list
+               readds it and relistens on the callback functions that
+                   currently exist
+
+               TODO - make it so previous notifications that may have 
+                      been lost get retried
+            '''
+            channel = self.channels[channel_name] 
+            callback_functions = channel['callback_functions'] 
+            connection = channel['connection'] 
+            connection.close()
+            self.channels.pop(channel_name, None)
+ 
+            for cb in callback_functions: 
+                self.listen(channel_name, cb)  
+        
+        def listen(self, channel_name, func):
+            '''publicly accessible function that starts listening on a channel 
+                
+               channel - currently the baseclassname, will call PG LISTEN on this 
+               func - the function to callback to if we receive notifications 
+ 
+               simply is added to the io_loop via add_handler 
+            ''' 
+            if channel_name in self.channels: 
+                self.channels[channel_name]['callback_functions'].append(func) 
+            else: 
+                connection = self._connect()
+                connection.cursor().execute('LISTEN %s' % channel_name)
+                io_loop = tornado.ioloop.IOLoop.current()
+                self.channels[channel_name] = { 
+                                                'connection' : connection, 
+                                                'callback_functions' : [func] 
+                                              }
+                io_loop.add_handler(connection.fileno(), 
+                                    lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                                    io_loop.READ) 
+                                          
+        def unlisten(self, channel_name):
+            '''unlisten from a subscribed channel 
+
+               WARN : this is a clear all command, any callback functions 
+                      that have open listeners to this will be cleared out 
+            '''
+            channel = self.channels[channel_name] 
+            connection = channel['connection']
+            with connection.cursor() as cursor: 
+                cursor.execute('UNLISTEN %s' % channel)
+            connection.close()
+            self.channels.pop(channel_name, None)
+
+    instance = None 
     
-    def reconnect(self):
-        self.connection.cursor.close()
-        self.listening = False 
-        self.connect() 
-        for channel in self.channels: 
-            self.listen(channel)  
+    def __new__(cls): 
+        if not PostgresPubSub.instance: 
+            PostgresPubSub.instance = PostgresPubSub._PostgresPubSub() 
+        return PostgresPubSub.instance 
 
-    def listen(self, channel):
-        # if we have not yet spawned an infinite callback for this connection 
-        # go ahead and blast away.  
-        if channel not in self.channels: 
-            self.connection.cursor().execute('LISTEN %s' % channel)
-        if not self.listening: 
-            self.channels.append(channel)  
-            self.listening = True  
-            self.io_loop.spawn_callback(self.notify_callback)
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
 
-    def unlisten(self, channel):
-        with self.connection.cursor() as cursor: 
-            cursor.execute('UNLISTEN %s' % channel)
-
+    def __setattr__(self, name):
+        return setattr(self.instance, name) 
         
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
@@ -1645,7 +1716,32 @@ class StoredObject(object):
                                             *keys,
                                             value_from_callable=True)
             raise tornado.gen.Return(result)
-        
+    
+    @classmethod 
+    def _handle_all_changes_pg(cls, future, func): 
+        '''Callback to handle all changes occurring on postgres objects 
+           
+           the singleton connection that stores a map from classname -> func 
+
+           it will take this list and call all the expecting cbs with a format 
+           of : 
+               func(key, object, operation) 
+        ''' 
+        results = future.result() 
+        for r in results: 
+            r = json.loads(r)
+            data = r['_data'] 
+            op = r['tg_op']
+            key = data['key'] 
+            obj = cls.get(key) 
+            try:
+                func(key, obj, op)
+            except Exception as e:
+                _log.error('Unexpected exception on db change when calling'
+                           ' %s with arguments %s: %s' % 
+                           (func, (key, obj, op), e))
+            
+
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
@@ -1669,21 +1765,21 @@ class StoredObject(object):
             if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
                 keys.append(cls.key2id(response[2].partition(':')[2]))
-
+    
             response = conn.get_parsed_message()
-
+    
         # Filter out the invalid keys
         filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
-                                zip(*(keys, ops))))
+                               zip(*(keys, ops))))
         if len(filtered) == 0:
             return
         keys, ops = filtered
-
+    
         if get_object:
             objs = cls.get_many(keys)
         else:
             objs = [None for x in range(len(keys))]
-
+    
         for key, obj, op in zip(*(keys, objs, ops)):
             if obj is None or isinstance(obj, cls):
                 try:
@@ -1710,9 +1806,11 @@ class StoredObject(object):
                      Otherwise, it will be passed into the function as None
         '''
         if options.get('cmsdb.neondata.wants_postgres'):
-            pubsub = neondata.PostgresPubSub();
-            pubsub.connect()
-            yield pubsub.listen(pattern) 
+            pubsub = PostgresPubSub();
+            pattern = cls._baseclass_name().lower()
+
+            pubsub.listen(pattern, 
+                          lambda x: cls._handle_all_changes_pg(x, func)) 
         else: 
             conn = PubSubConnection.get(cls)
         
