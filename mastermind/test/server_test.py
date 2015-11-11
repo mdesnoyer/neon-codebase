@@ -44,6 +44,7 @@ import unittest
 import utils.neon
 from utils.options import options
 import utils.ps
+from utils import statemon
 
 STAGING = neondata.TrackerAccountIDMapper.STAGING
 PROD = neondata.TrackerAccountIDMapper.PRODUCTION
@@ -77,6 +78,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         datamock.InternalVideoID = neondata.InternalVideoID
         # Define platforms in the database
         api_key = "neonapikey"
+
+        self.directive_publisher.last_published_videos.add(api_key + '_0')
 
         bcPlatform = neondata.BrightcovePlatform(api_key, 'i1', 
                                                  abtest=False)
@@ -183,6 +186,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertFalse(directives.has_key((api_key, api_key+'_10')))
 
         self.assertTrue(self.watcher.is_loaded.is_set())
+
+        self.assertNotIn(api_key + '_0', 
+                         self.directive_publisher.last_published_videos)
 
     def test_serving_url_update(self, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -1647,12 +1653,27 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
     def setUp(self):
         super(TestPublisherStatusUpdatesInDB, self).setUp()
 
-        # Mock out the callback manager
-        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
-        self.callback_mock = self._future_wrap_mock(
-            self.callback_patcher.start())
+        statemon.state._reset_values()
+
+        # Mock out http connections
+        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
+                                                require_async_kw=True)
+        self.callback_mock = MagicMock()
+        self.isp_mock = MagicMock()
+        def _handle_http(x, **kw):
+            if x.method == 'HEAD':
+                return self.isp_mock(x, **kw)
+            else:
+                return self.callback_mock(x, **kw)
+        self.http_mock.side_effect = _handle_http
+
         self.callback_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
+
+        self.isp_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
 
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
@@ -1722,7 +1743,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         logging.getLogger('mastermind.server').reset_sample_counters()
 
     def tearDown(self):
-        self.callback_patcher.stop()
+        self.http_patcher.stop()
         mastermind.server.tempfile = self.real_tempfile
         mastermind.server.os = self.real_os
         self.s3_patcher.stop()
@@ -1755,7 +1776,13 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
                           neondata.CallbackState.SUCESS)
         self.assertEquals(self.callback_mock.call_count, 1)
         cb_request = self.callback_mock.call_args[0][0]
-        self.assertEquals(json.loads(cb_request.body), {'video_id' : 'vid1'})
+        self.assertDictContainsSubset(
+            {'video_id' : 'vid1',
+             'job_id' : 'job1',
+             'error' : None,
+             'processing_state' : neondata.RequestState.SERVING
+             },
+            json.loads(cb_request.body))
         self.assertEquals(cb_request.url, 'http://callback.com')
         
 
@@ -1766,12 +1793,19 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
                  % self.acc.tracker_account_id)
         self.assertRegexpMatches(serving_url, s3httpRe)
 
+        self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
         # Now remove the video and make sure it goes back to state finished
         self.mastermind.remove_video_info('acct1_vid1')
         self.publisher._publish_directives()
         self._wait_for_db_updates()
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.FINISHED)
+
+        # Make sure the serving url is gone
+        self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
+
+        self.assertNotIn('acct1_vid1', self.publisher.last_published_videos)
 
     def test_request_state_when_no_serving_urls(self):
         self.publisher.serving_urls = {}
@@ -1790,6 +1824,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
+
+        self.assertNotIn('acct1_vid1', self.publisher.last_published_videos)
 
     def test_no_update_when_only_default_thumb(self):
         # TODO: Add ThumbnailMetadata change to this test when we
@@ -1817,6 +1853,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertFalse(self.callback_mock.called)
 
         self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
+
+        self.assertNotIn('acct1_vid1', self.publisher.last_published_videos)
 
     def test_no_callback_if_already_sent(self):
         def _mod_request(x):
@@ -1856,6 +1894,8 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.ERROR)
 
+        self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
     def test_unexpected_callback_error(self):
         self.callback_mock.side_effect = \
           [Exception('Some bad exception')]
@@ -1874,6 +1914,80 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         # Make sure the callback was flagged as error
         self.assertEquals(request.callback_state,
                           neondata.CallbackState.NOT_SENT)
+
+        self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
+    def test_isp_timeout(self):
+        self.isp_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 400)
+              
+        with options._set_bounded('mastermind.server.isp_wait_timeout', -1.0):
+            with self.assertLogExists(logging.ERROR, 'Timed out waiting for'):
+                self.publisher._publish_directives()
+                self._wait_for_db_updates()
+
+        self.assertEquals(statemon.state.get(
+            'mastermind.server.timeout_waiting_for_isp'), 1)
+
+        # Check the state of the database to make sure it was not updated
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertEquals(request.state,
+                          neondata.RequestState.FINISHED)
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
+        self.assertFalse(self.callback_mock.called)
+        self.assertIsNone(neondata.VideoMetadata.get('acct1_vid1').serving_url)
+        
+        self.assertNotIn('acct1_vid1', self.publisher.last_published_videos)
+
+    def test_already_serving(self):
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        request.state = neondata.RequestState.SERVING
+        request.save()
+
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # Don't need to send callback
+        self.assertFalse(self.callback_mock.called)
+
+        # Video is added to the list
+        self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
+    def test_error_then_sucess(self):
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        request.state = neondata.RequestState.INT_ERROR
+        request.save()
+
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # Don't need to send callback
+        self.assertFalse(self.callback_mock.called)
+
+        # Video is added to the list of known ones
+        self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
+        # Now change the video and finish it
+        request.state = neondata.RequestState.FINISHED
+        request.save()
+        self.publisher.set_video_updated('acct1_vid1')
+
+        self.publisher._publish_directives()
+        self._wait_for_db_updates()
+
+        # Check the state and callback
+        request = neondata.NeonApiRequest.get('job1', 'acct1')
+        self.assertTrue(self.callback_mock.called)
+        self.assertEquals(request.state,
+                          neondata.RequestState.SERVING)
+        self.assertEquals(request.callback_state,
+                          neondata.CallbackState.SUCESS)
+        self.assertIsNotNone(neondata.VideoMetadata.get(
+            'acct1_vid1').serving_url)
+        
+        
+        
         
 class SmokeTesting(test_utils.neontest.TestCase):
 
@@ -1889,12 +2003,25 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.s3_patcher.start().return_value = self.s3conn
         self.s3conn.create_bucket('neon-image-serving-directives-test')
 
-        # Mock out the callback manager
-        self.callback_patcher = patch('cmsdb.neondata.utils.http.send_request')
-        self.callback_mock = self._future_wrap_mock(
-            self.callback_patcher.start())
+        # Mock out the http connections
+        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
+                                                require_async_kw=True)
+        self.callback_mock = MagicMock()
+        self.isp_mock = MagicMock()
+        def _handle_http(x, **kw):
+            if x.method == 'HEAD':
+                return self.isp_mock(x, **kw)
+            else:
+                return self.callback_mock(x, **kw)
+        self.http_mock.side_effect = _handle_http
+
         self.callback_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
+
+        self.isp_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
 
         # Insert a fake filesystem
         self.filesystem = fake_filesystem.FakeFilesystem()
@@ -1975,7 +2102,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         mastermind.server.os = self.real_os
         self.hbase_patcher.stop()
         self.cluster_patcher.stop()
-        self.callback_patcher.stop()
+        self.http_patcher.stop()
         self.s3_patcher.stop()
         self.sqlite_connect_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
@@ -2154,12 +2281,13 @@ class SmokeTesting(test_utils.neontest.TestCase):
 
             # Check state for the customer_error video and ensure its in the 
             # list of last published videos
-            self.assertEquals(neondata.NeonApiRequest.get('job3', 'key1').state,
-                          neondata.RequestState.CUSTOMER_ERROR)
             self.assertWaitForEquals(
                 lambda: 'key1_vid3' in \
                 self.directive_publisher.last_published_videos,
                 True)
+            self.assertEquals(
+                neondata.NeonApiRequest.get('job3', 'key1').state,
+                neondata.RequestState.CUSTOMER_ERROR)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

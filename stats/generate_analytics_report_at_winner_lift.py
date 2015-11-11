@@ -36,9 +36,15 @@ define("pub_id", default=None, type=str,
        help=("Publisher, in the form of the tracker account id to get the "
              "data for"))
 define("start_time", default=None, type=str,
-       help="If set, the start time to pay attention to in ISO UTC format")
+       help=("If set, the time of the earliest data to pay attention to in "
+             "ISO UTC format"))
 define("end_time", default=None, type=str,
-       help="If set, the start time to pay attention to in ISO UTC format")
+       help=("If set, the time of the latest data to pay attention to in "
+             "ISO UTC format"))
+define("start_video_time", default=None, type=str,
+       help="If set, only show videos that were published after this time")
+define("end_video_time", default=None, type=str,
+       help="If set, only show videos that were published before this time")
 define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
 define("min_impressions", default=1000,
@@ -47,6 +53,8 @@ define("baseline_types", default="centerframe",
        help="Comma separated list of thumbnail type to treat as baseline")
 define("do_mobile", default=0, type=int,
        help="Only collect mobile data if 1")
+define("do_desktop", default=0, type=int,
+       help="Only collect desktop data if 1")
 
 _log = logging.getLogger(__name__)
 
@@ -61,7 +69,7 @@ def connect():
                                 port=options.stats_port,
                                 timeout=10000)
 
-def get_video_ids():
+def get_video_objects():
     _log.info('Querying for video ids')
     conn = connect()
     cursor = conn.cursor()
@@ -73,8 +81,34 @@ def get_video_ids():
                       statutils.get_time_clause(options.start_time,
                                                 options.end_time)))
 
-    vidRe = re.compile('[0-9a-zA-Z]+_[0-9a-zA-Z]+')
-    retval = [x[0] for x in cursor if vidRe.match(x[0])]
+    vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
+    video_ids = [vidRe.match(x[0]).group(2) for 
+                 x in cursor if vidRe.match(x[0])]
+
+    _log.info('Loading video info')
+    videos = neondata.VideoMetadata.get_many(video_ids)
+    retval = []
+    start_video_time = None
+    end_video_time = None
+    if options.start_video_time is not None:
+        start_video_time = dateutil.parser.parse(options.start_video_time)
+    if options.end_video_time is not None:
+        end_video_time = dateutil.parser.parse(options.end_video_time)
+    for video in videos:
+        if video is None:
+            continue
+
+        if start_video_time:
+            if (video.publish_date is None or 
+                dateutil.parser.parse(video.publish_date) < start_video_time):
+                continue
+
+        if end_video_time:
+            if (video.publish_date is None or 
+                dateutil.parser.parse(video.publish_date) > end_video_time):
+                continue
+
+        retval.append(video)
     return retval
     
 
@@ -118,13 +152,15 @@ def collect_stats(thumb_info, video_info,
             1) in (%s)
             %s
             %s
+            %s
             group by thumbnail_id, hr""" %
             (col_map[impression_metric], options.pub_id,
              col_map[impression_metric],
              ','.join(["'%s'" % x for x in video_info.keys()]),
              statutils.get_time_clause(options.start_time,
                                        options.end_time),
-             statutils.get_mobile_clause(options.do_mobile)))
+             statutils.get_mobile_clause(options.do_mobile),
+             statutils.get_desktop_clause(options.do_desktop)))
     else:
         query = (
             """select 
@@ -137,13 +173,15 @@ def collect_stats(thumb_info, video_info,
             1) in (%s) 
             %s
             %s
+            %s
             group by thumbnail_id, hr
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
                    ','.join(["'%s'" % x for x in video_info.keys()]),
                    statutils.get_time_clause(options.start_time,
                                              options.end_time),
-                   statutils.get_mobile_clause(options.do_mobile)))
+                   statutils.get_mobile_clause(options.do_mobile),
+                   statutils.get_desktop_clause(options.do_desktop)))
     cursor.execute(query)
 
     impala_cols = [metadata[0] for metadata in cursor.description]
@@ -427,7 +465,7 @@ def calculate_cmsdb_stats():
         
 def main():    
     _log.info('Getting metadata about the videos.')
-    video_info = neondata.VideoMetadata.get_many(get_video_ids())
+    video_info = get_video_objects()
     video_info = dict([(x.key, x) for x in video_info if x is not None])
 
     _log.info('Getting metadata about the thumbnails.')

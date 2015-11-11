@@ -3,6 +3,7 @@
 
 #include <string>
 #include <ext/hash_map>
+#include "stringHash.h"
 #include "rapidjson/document.h"
 #include "publisher.h"
 
@@ -12,68 +13,16 @@ public:
     
     PublisherHashtable();
     ~PublisherHashtable();
-    
-    
-    /*
-     *
-     */
+
     void Init(unsigned numOfBuckets);
-    
-    
     void Shutdown();
-    
-    
     unsigned GetSize();
     
-    /*
-     *
-     */
     void AddPublisher(rapidjson::Document & publisher);
-
-    
-    
     Publisher * Find(const char * publisherIdKey);
-    
-    /*
-     *
-     */
-    
-    /*
-    struct eq_pub
-	{
-        bool operator()(const Publisher * p1, const Publisher * p2) const
-        {
-            return p1->GetPublisherIdRef() == p2->GetPublisherIdRef();
-        }
-	};
-    */
-
-    /*
-	struct hash_publisher {
-        size_t operator()(const std::string key)  const {
-           // unsigned long long ret = (in >> 32L) ^ (in & 0xFFFFFFFF);
-            //return (size_t) ret;
-            return 0;
-        }
-	};
-    */
-    
-    
-    struct hash_publisher {
-        size_t operator()(const std::string key)  const;
-	};
-
-
-    typedef __gnu_cxx::hash_map<std::string, Publisher *, hash_publisher>  PublisherTable;
-
-
+    typedef __gnu_cxx::hash_map<std::string, Publisher *>  PublisherTable;
     bool initialized;
 
     PublisherTable * table;
 };
-
-
-
 #endif
-
-

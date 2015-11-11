@@ -1268,6 +1268,30 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         self.assertIsNotNone(response)
         self.assertRegexpMatches(response, "thumb[0-1]")
 
+    def test_get_video_with_content(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
+
+    def test_get_video_no_content(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s213" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 204)
+
+    def test_get_video_bad_params(self):
+        url = "http://localhost:%s/v1/video?pub_id=%s&vid_id=%s213" % \
+                (self.port, self.pub_id, self.vid)
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 400)
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     test_utils.neontest.main()

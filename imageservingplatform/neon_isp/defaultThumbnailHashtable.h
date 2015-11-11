@@ -4,6 +4,7 @@
 
 #include <string>
 #include <ext/hash_map>
+#include "stringHash.h" 
 #include "rapidjson/document.h"
 #include "defaultThumbnail.h"
 
@@ -42,12 +43,7 @@ public:
 protected:
 
     bool initialized;
-
-    struct hash_directive {
-        size_t operator()(const std::string & key)  const;
-	};
-
-    typedef __gnu_cxx::hash_map<std::string, DefaultThumbnail*, hash_directive>  DefaultThumbnailTable;
+    typedef __gnu_cxx::hash_map<std::string, DefaultThumbnail*>  DefaultThumbnailTable;
     
     DefaultThumbnailTable * table;
 };
