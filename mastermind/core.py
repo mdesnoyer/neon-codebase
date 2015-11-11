@@ -1063,21 +1063,36 @@ class Mastermind(object):
               } for x in valid_thumbs])
         data = data.set_index('tid')
 
+        # Figure out which thumbs have been turned off in the past
+        enough_conversions = (np.sum(data['conv']) >=
+                              int(strategy.min_conversion))
+        off_thumbs = []
+        if baseline is not None and enough_conversions:
+            try:
+                old_directive = self.serving_directive[video_id][1]
+                off_thumbs = [x[0] for x in old_directive if (
+                    x[1] < 1e-7 and
+                    x[0] != baseline.id and
+                    (non_exp_thumb is None or x[0] != non_exp_thumb.id))]
+            except KeyError:
+                pass
+
         # Now calculate the statistical significance relative to the
         # winning thumb.
         data['ctr'] = data['conv'] / data['impr']
         data['std_var'] = data['ctr'] * (1-data['ctr']) /  data['impr']
-        win_id = data['ctr'].argmax()
+        win_id = data['ctr'][~data.index.isin(off_thumbs)].argmax()
         data['z_winner'] = ((data['ctr'] - data['ctr'][win_id]) / 
                             np.sqrt(data['std_var'] + 
                                     data['std_var'][win_id]))
 
         # Is the winning thumb the winner, enough conversions and impressions?
-        best_z = np.max(data['z_winner'][data.index != win_id])
-        value_remaining = sp.stats.norm(0,1).cdf(best_z)
-        enough_conversions = (np.sum(data['conv']) >= 
-                              int(strategy.min_conversion))
-        if (value_remaining < 0.025 and
+        data['p_vals'] = sp.stats.norm(0,1).cdf(data['z_winner'])
+	data['p_vals'][data['p_vals'] < 0.5] = 1 - data['p_vals']
+	p_winner = np.prod(data['p_vals'][~data.index.isin(off_thumbs +
+                           [win_id])])
+        value_remaining = 1 - p_winner
+        if (value_remaining < 0.05 and
             data['impr'][win_id] >= 500 and
             enough_conversions):
             experiment_state = neondata.ExperimentState.COMPLETE
@@ -1087,26 +1102,19 @@ class Mastermind(object):
             run_frac = data['model_score'] / np.sum(data['model_score'])
             run_frac = run_frac ** float(strategy.frac_adjust_rate)
 
+            # Turn off the thumbs which were off before
+            run_frac[off_thumbs] = 0.0
+
             # Now remove thumbnails that are significantly worse than
-            # the baseline
+            # the baseline but make sure there are at least 3 still going
             if baseline is not None and enough_conversions:
                 data['z_base'] = ((data['ctr'] - data['ctr'][baseline.id]) / 
                                   np.sqrt(data['std_var'] + 
                                           data['std_var'][baseline.id]))
                 done_thumbs = ((data['z_base'] < -1.645) &
                                (data['impr'] >= 500))
-                run_frac[done_thumbs] = 0.0
-
-                # Now turn off any thumbs that were previously turned off
-                try:
-                    old_directive = self.serving_directive[video_id][1]
-                    off_thumbs = [x[0] for x in old_directive if (
-                        x[1] < 1e-7 and 
-                        (baseline is None or x[0] != baseline.id) and
-                        (non_exp_thumb is None or x[0] != non_exp_thumb.id))]
-                    run_frac[off_thumbs] = 0.0
-                except KeyError:
-                    pass
+                if np.sum(~done_thumbs) >= 3:
+                    run_frac[done_thumbs] = 0.0
 
             # Normalize the running fractions to sum to 1.0
             if non_exp_thumb is not None:
