@@ -279,7 +279,7 @@ class FaceGenerator(RegionFeatureGenerator):
         return np.array(feat_vec)
 
     def get_feat_name(self):
-        return 'face'
+        return 'faces'
 
 class ClosedEyeGenerator(RegionFeatureGenerator):
     '''
@@ -314,9 +314,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            self.MSFP.get_seq(img)
-            faceParse = self.MSFP.restore_parser(image)
-            eyes = faceParse.get_all(['l eye', 'r eye'])
+            eyes = self.MSFP.get_eyes(img)
             classif, scores = self.scoreEyes.classifyScore(eyes)
             feat_vec.append(np.min(scores))
         return np.array(feat_vec)
