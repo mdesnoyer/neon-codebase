@@ -27,6 +27,7 @@ import traceback
 from Queue import Queue
 from itertools import permutations
 from collections import OrderedDict as odict
+from random import getrandbits
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -183,15 +184,15 @@ class _Result(object):
     def __init__(self, frameno=None, score=-np.inf, image=None, 
                  feat_score=None, meta=None):
         self._defined = False
-        if self.score:
+        if score and frameno:
             self._defined = True
-            _log.debug(('Instantiating result object at frame %i with',
+            _log.debug(('Instantiating result object at frame %i with'
                            ' score %.3f')%(frameno, score))
         self.score = score
         self.frameno = frameno
         self._color_name = None
         self._feat_score = feat_score
-        self._hash = np.random.getrandbits(128)
+        self._hash = getrandbits(128)
         self.image = image
         self.meta = meta
 
