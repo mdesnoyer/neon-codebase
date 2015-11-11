@@ -58,8 +58,8 @@ class MultiStageFaceParser(object):
     detection or segmentation steps, which saves us time.
 
     This is designed to work just like any other feature extractor--
-    it accepts an image on each call--however, it keeps those images
-    cached so it can match them up later.
+    it accepts an image on each call--however, it keeps the MD5 of
+    those images cached so that it can look for them again.
 
     One potentially problematic area is if the images are preprocessed
     differently in the face detection vs. the closed eye detection
@@ -70,19 +70,20 @@ class MultiStageFaceParser(object):
     def __init__(self, predictor, max_height=640):
         self.detector = dlib.get_frontal_face_detector()
         self.fParse = FindAndParseFaces(predictor, self.detector)
-        self.image_dat = []
+        self.image_dat = {}
         self.max_height = max_height
         self.prep = utils.pycvutils.ImagePrep(
                         max_height=self.max_height)
-        self.cur_idx = 0
 
     def reset(self):
-        self.image_dat = []
-        self.cur_idx = 0
+        self.image_dat = {}
 
     def get_faces(self, image):
+        ihash = hash(image.tostring())
+        if self.image_data.has_key(ihash):
+            return self.image_data[ihash]
         det = self.fParse._SEQfindFaces(image)
-        self.image_dat.append([image, det])
+        self.image_dat[ihash] = [det]
         return len(det)
 
     def get_seg(self, image):
@@ -93,43 +94,23 @@ class MultiStageFaceParser(object):
         detector, but can otherwise tolerate dropped frames.
         '''
         # find the image index
-        fnd = False
-        for n in range(len(self.image_dat)):
-            idx = (n + self.cur_idx) % len(self.image_dat)
-            i = self.image_dat[idx]
-            if len(i) > 2:
-                continue
-            if np.array_equal(i[0], image):
-                fnd = True
-                break
-        if not fnd:
-            raise ValueError('Unknown image')
-        self.cur_idx = (idx + 1) % len(self.image_dat)
-        img, det = self.image_dat[n]
-        points = self.fParse._SEQsegFaces(img, det)
-        self.image_dat[n].append(points)
+        ihash = hash(image.tostring())
+        if self.image_data.has_key(ihash):
+            if len(self.image_data[ihash] > 1):
+                return self.image_data[ihash][1]
+        else:
+            self.get_faces(image)
+        det = self.image_dat[ihash]
+        points = self.fParse._SEQsegFaces(image, det)
+        self.image_dat[ihash].append(points)
 
-    def restore_parser(self, image):
+    def get_eyes(self, image):
         '''
-        Returns the face parser to a ready state so that we
-        can leverage it for closed eye detection.
+        Obtains all the eyes for an image.
         '''
-        fnd = False
-        for n in range(len(self.image_dat)):
-            idx = (n + self.cur_idx) % len(self.image_dat)
-            i = self.image_dat[idx]
-            if len(i) > 3:
-                continue
-            if np.array_equal(i[0], image):
-                fnd = True
-                break
-        if not fnd:
-            raise ValueError('Unknown image')
-        self.cur_idx = (idx + 1) % len(self.image_dat)
-        img, det, points = self.image_dat[n]
-        self.fParse._SEQfinStep(self, img, det, points)
-        self.image_dat[n].append('True')
-        return self.fParse
+        self.get_seg(image)
+        return self.fParse.get_all(['l eye', 'r eye'])
+
 
 class FindAndParseFaces(object):
     '''
