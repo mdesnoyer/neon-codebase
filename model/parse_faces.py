@@ -38,7 +38,7 @@ class DetectFaces(object):
     '''
     def __init__(self):
         self.detector = dlib.get_frontal_face_detector()
-        self.prep = utils.pycvutils.ImagePrep(convert_to_gray=True)
+        self.prep = ImagePrep(convert_to_gray=True)
 
     def get_N_faces(self, image):
         '''
@@ -72,7 +72,7 @@ class MultiStageFaceParser(object):
         self.fParse = FindAndParseFaces(predictor, self.detector)
         self.image_data = {}
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = ImagePrep(
                         max_height=self.max_height)
 
     def reset(self):
