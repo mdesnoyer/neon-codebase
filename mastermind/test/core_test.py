@@ -253,8 +253,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  score_type=ScoreType.CLASSICAL))[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
-        self.assertAlmostEqual(directive['n1'], 0.9)
-        self.assertAlmostEqual(directive['bc'], 0.1)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['bc'], 0.0)
 
     def test_inf_model_score(self):
         self.mastermind.update_experiment_strategy(
@@ -856,7 +856,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.assertAlmostEqual(directive['n2'], 0.99)
         self.assertAlmostEqual(directive['bc'], 0.0)
-        self.assertGreater(directive['n1'], directive['ctr'])
+        self.assertAlmostEqual(directive['n1'], directive['ctr'])
         self.assertGreater(directive['ctr'], 0.0)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
 
@@ -1173,7 +1173,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # There needs to be 500 impressions of the winner in order to declare
         # it
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+            'acct1', ExperimentStrategy(
+                'acct1', exp_frac=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -1267,23 +1269,24 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         base_impressions=3000, base_conversions=900),
+                         base_impressions=3000, base_conversions=700),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5)),
+                                           ttype='neon', model_score=3.5),
+                         base_impressions=400, base_conversions=1),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='random'),
-                         base_impressions=10, base_conversions=4),
+                         base_impressions=100, base_conversions=40),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=1200, base_conversions=150)],
+                         base_impressions=100, base_conversions=40)],
              score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
-        self.assertAlmostEqual(max(directive.values()), directive['n1'])
-        self.assertGreater(0.001, directive['bc'])
+        self.assertGreater(0.001, directive['n1'])
         self.assertGreater(directive['ctr'], 0.05)
+        self.assertGreater(directive['bc'], 0.05)
         self.assertGreater(directive['n2'], 0.05)
 
     def test_much_worse_than_prior(self):
@@ -1291,8 +1294,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # that we don't know anything about, we drive a lot of
         # traffice there.
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
-                                        frac_adjust_rate=1.0))
+            'acct1', ExperimentStrategy(
+                'acct1', exp_frac=1.0, frac_adjust_rate=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -1343,7 +1347,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEquals(experiment_state, 'running')
         self.assertLess(value_left, Mastermind.VALUE_THRESHOLD)
 
-        # deduce the min_conversion to 0
+        # reduce the min_conversion to 0
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', exp_frac=1.0, min_conversion = 0))
@@ -1406,7 +1410,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # result, frac_adjust_rate = 0.0, then equally distributed.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=1.0))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1423,7 +1429,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1441,7 +1449,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.5))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.5,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1460,7 +1470,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Testing frac_adjust_rate=0.0, but there are a baseline thumbnail.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1484,8 +1496,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.0,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1536,7 +1550,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=200)],
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
-                         ['b1', 'n1', 'n2'])
+                         ['b1', 'n2', 'n1'])
 
     def test_frac_with_model_score_prior_but_half_bandit(self):
         # Try the similar setup but frac_adjust_rate = 0.5
@@ -1544,8 +1558,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # The fractions will still be determined by the model scores.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.5,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.5,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1576,8 +1592,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # The winner should be the higher conversion ones, not the higher score ones.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=1.0,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -2649,6 +2667,94 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tstatus2.conv, 69)
         self.assertEquals([x[1] for x in tstatus2.serving_history],
                           [0.25, 0.0])
+
+        # Next, make another thumb bad. It shouldn't turn off because
+        # we want to keep 3 thumbs running.
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 1000, 90, 45),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 1000, 100, 50),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 2000, 80, 40),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+
+    def test_sequential_strategy_found_winner(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=1.0))
+
+        # This should not have a winner. Pairwise it would, but on
+        # aggregate, we don't hit a p-value of 0.95
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 78, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 0.25),
+                               ('acct1_vid1_n1', 0.25),
+                               ('acct1_vid1_n2', 0.25),
+                               ('acct1_vid1_ctr', 0.25)])
+        self.mastermind.wait_for_pending_modifies()
+
+        vstatus = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(vstatus.experiment_state,
+                          neondata.ExperimentState.RUNNING)
+        self.assertIsNone(vstatus.winner_tid)
+        self.assertEquals(len(vstatus.state_history), 1)
+
+        # Now we will have a winner
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1100, 0, 120, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 78, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 0.00),
+                               ('acct1_vid1_n1', 0.99),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 0.01)])
+        self.mastermind.wait_for_pending_modifies()
+
+        vstatus = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(vstatus.experiment_state,
+                          neondata.ExperimentState.COMPLETE)
+        self.assertEquals(vstatus.winner_tid, 'acct1_vid1_n1')
+        self.assertEquals([x[1] for x in vstatus.state_history], 
+                          [neondata.ExperimentState.RUNNING,
+                           neondata.ExperimentState.COMPLETE])
+
+        # Check the thumbnail status
+        tstatus_bc = neondata.ThumbnailStatus.get('acct1_vid1_bc')
+        self.assertAlmostEqual(tstatus_bc.serving_frac, 0.00)
+        self.assertAlmostEqual(tstatus_bc.ctr, 0.078)
+        self.assertEqual(tstatus_bc.imp, 1000)
+        self.assertEqual(tstatus_bc.conv, 78)
+        self.assertEqual(zip(*tstatus_bc.serving_history)[1],
+                         (0.25, 0.00))
+        tstatus_n1 = neondata.ThumbnailStatus.get('acct1_vid1_n1')
+        self.assertAlmostEqual(tstatus_n1.serving_frac, 0.99)
+        self.assertAlmostEqual(tstatus_n1.ctr, 120./1100)
+        self.assertEqual(tstatus_n1.imp, 1100)
+        self.assertEqual(tstatus_n1.conv, 120)
+        self.assertEqual(zip(*tstatus_n1.serving_history)[1],
+                         (0.25, 0.99))
+        tstatus_ctr = neondata.ThumbnailStatus.get('acct1_vid1_ctr')
+        self.assertAlmostEqual(tstatus_ctr.serving_frac, 0.01)
+        self.assertAlmostEqual(tstatus_ctr.ctr, 0.078)
+        self.assertEqual(tstatus_ctr.imp, 1000)
+        self.assertEqual(tstatus_ctr.conv, 78)
+        self.assertEqual(zip(*tstatus_ctr.serving_history)[1],
+                         (0.25, 0.01))
         
 
 class TestModifyDatabase(test_utils.neontest.TestCase):
@@ -2674,7 +2780,7 @@ class TestModifyDatabase(test_utils.neontest.TestCase):
                                                    None)
 
     def test_unexpected_exception_serving_frac_modify(self):
-        self.datamock.ThumbnailStatus.modify_all.side_effect = [
+        self.datamock.ThumbnailStatus.modify_many.side_effect = [
             IOError('Some weird error')]
         with self.assertLogExists(logging.ERROR,
                                   'Unhandled exception when updating thumbs'):

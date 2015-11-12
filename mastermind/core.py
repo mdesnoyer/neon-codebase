@@ -1057,6 +1057,7 @@ class Mastermind(object):
         data = pandas.DataFrame(
             [{'conv': (self._get_prior_conversions(x, video_info) +
                        x.get_conversions()),
+              'true_conv': x.get_conversions(),         
               'impr': Mastermind.PRIOR_IMPRESSION_SIZE + x.get_impressions(),
               'tid': x.id,
               'model_score' : self._get_rc_equivalent_prior(x, video_info)
@@ -1064,7 +1065,7 @@ class Mastermind(object):
         data = data.set_index('tid')
 
         # Figure out which thumbs have been turned off in the past
-        enough_conversions = (np.sum(data['conv']) >=
+        enough_conversions = (np.sum(data['true_conv']) >=
                               int(strategy.min_conversion))
         off_thumbs = []
         if baseline is not None and enough_conversions:
@@ -1088,13 +1089,16 @@ class Mastermind(object):
 
         # Is the winning thumb the winner, enough conversions and impressions?
         data['p_vals'] = sp.stats.norm(0,1).cdf(data['z_winner'])
-	data['p_vals'][data['p_vals'] < 0.5] = 1 - data['p_vals']
-	p_winner = np.prod(data['p_vals'][~data.index.isin(off_thumbs +
-                           [win_id])])
+        data['p_vals'] = np.maximum(data['p_vals'], 1 - data['p_vals'])
+        p_winner = np.prod(data['p_vals'][~data.index.isin(off_thumbs +
+                                                           [win_id])])
+        if np.isnan(p_winner):
+            p_winner = 1.0
         value_remaining = 1 - p_winner
-        if (value_remaining < 0.05 and
+        if (len(data) == 1 or (
+            value_remaining < 0.05 and
             data['impr'][win_id] >= 500 and
-            enough_conversions):
+            enough_conversions)):
             experiment_state = neondata.ExperimentState.COMPLETE
             winner = [x for x in valid_thumbs if x.id == win_id][0]
         else:
@@ -1113,6 +1117,7 @@ class Mastermind(object):
                                           data['std_var'][baseline.id]))
                 done_thumbs = ((data['z_base'] < -1.645) &
                                (data['impr'] >= 500))
+                done_thumbs[off_thumbs] = True
                 if np.sum(~done_thumbs) >= 3:
                     run_frac[done_thumbs] = 0.0
 

@@ -2222,7 +2222,7 @@ class ExperimentStrategy(DefaultedStoredObject):
                  baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT,
+                 experiment_type=SEQUENTIAL,
                  impression_type=MetricType.VIEWS,
                  conversion_type=MetricType.CLICKS,
                  max_neon_thumbs=None):
