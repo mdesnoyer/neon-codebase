@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import atexit
 from cmsdb import neondata
 import datetime
+import functools
 import logging
 import integrations.brightcove
 import integrations.exceptions
@@ -112,7 +113,7 @@ class Manager(object):
         for key in new_keys:
             _log.info('Turning on integration (%s,%s)' % key)
             timer = tornado.ioloop.PeriodicCallback(
-                lambda: process_one_account(*key),
+                functools.partial(process_one_account, *key),
                 options.poll_period * 1000.)
             timer.start()
             self._timers[key] = timer
