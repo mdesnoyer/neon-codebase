@@ -118,9 +118,7 @@ statemon.define('invalid_callback_url', int)
 
 statemon.define('postgres_pubsub_connections', int) 
 statemon.define('postgres_unknown_errors', int) 
-
-#constants 
-#BCOVE_STILL_WIDTH = 480
+statemon.define('postgres_listeners', int) 
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -689,18 +687,19 @@ class PostgresPubSub(object):
                       been lost get retried
             '''
             channel = self.channels[channel_name] 
-            callback_functions = channel['callback_functions'] 
-            connection = channel['connection'] 
-            connection.close()
-            self.channels.pop(channel_name, None)
+            callback_functions = channel['callback_functions']
+            self.unlisten(channel_name)  
  
             for cb in callback_functions: 
                 self.listen(channel_name, cb)  
         
         def listen(self, channel_name, func):
             '''publicly accessible function that starts listening on a channel 
-                
-               channel - currently the baseclassname, will call PG LISTEN on this 
+               
+               handles the postgres connection as well, no need to connect before 
+               calling me 
+  
+               channel - baseclassname of the object, will call PG LISTEN on this 
                func - the function to callback to if we receive notifications 
  
                simply is added to the io_loop via add_handler 
@@ -708,6 +707,10 @@ class PostgresPubSub(object):
             if channel_name in self.channels: 
                 self.channels[channel_name]['callback_functions'].append(func) 
             else: 
+                _log.info(
+                    'Opening a new listener on postgres at %s for channel %s' %
+                    (self.host, channel_name))
+                statemon.state.increment('postgres_listeners')
                 connection = self._connect()
                 connection.cursor().execute('LISTEN %s' % channel_name)
                 io_loop = tornado.ioloop.IOLoop.current()
@@ -728,6 +731,10 @@ class PostgresPubSub(object):
                TODO : have function_id passed in as well, to only clear 
                       the callback we care about  
             '''
+            _log.info(
+                'Unlistening on postgres at %s for channel %s' %
+                (self.host, channel_name))
+            statemon.state.decrement('postgres_listeners')
             channel = self.channels[channel_name] 
             connection = channel['connection']
             with connection.cursor() as cursor: 
