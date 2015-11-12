@@ -2950,7 +2950,7 @@ class BrightcoveIntegration(AbstractIntegration):
     BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, i_id=None, a_id='', p_id=None, 
-                rtoken=None, wtoken=None, auto_update=False,
+                rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
@@ -2965,7 +2965,6 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
-        self.auto_update = auto_update 
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
@@ -2997,66 +2996,10 @@ class BrightcoveIntegration(AbstractIntegration):
         return "brightcove_integration"
 
     def get_api(self, video_server_uri=None):
-        '''Return the Brightcove API object for this integration.'''
+        '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update,
-            self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created, callback_url=self.callback_url)
-
-    def create_job(self, vid, callback):
-        ''' Create neon job for particular video '''
-        def created_job(result):
-            if not result.error:
-                try:
-                    job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid, job_id)
-                    self.save(callback)
-                except Exception,e:
-                    callback(False)
-            else:
-                callback(False)
-        
-        vserver = options.video_server
-        self.get_api(vserver).create_video_request(vid, self.integration_id,
-                                            created_job)
-
-    def check_feed_and_create_api_requests(self):
-        ''' Use this only after you retreive the object from DB '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        bc.create_neon_api_requests(self.integration_id)    
-        bc.create_requests_unscheduled_videos(self.integration_id)
-
-    def check_feed_and_create_request_by_tag(self):
-        ''' Temp method to support backward compatibility '''
-        self.get_api().create_brightcove_request_by_tag(self.integration_id)
-
-    def check_playlist_feed_and_create_requests(self):
-        ''' Get playlists and create requests '''
-        
-        for pid in self.playlist_feed_ids:
-            self.get_api().create_request_from_playlist(pid, self.integration_id)
-
-    @tornado.gen.coroutine
-    def verify_token_and_create_requests_for_video(self, n):
-        ''' Method to verify brightcove token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with brightcove vid metadata
-        '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        val = yield bc.verify_token_and_create_requests(
-            self.integration_id, n)
-        raise tornado.gen.Return(val)
-
-    def sync_individual_video_metadata(self):
-        ''' sync video metadata from bcove individually using 
-        find_video_id api '''
-        self.get_api().bcove_api.sync_individual_video_metadata(
-            self.integration_id)
+            self.neon_api_key, self.publisher_id, 
+            self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
@@ -3066,18 +3009,6 @@ class BrightcoveIntegration(AbstractIntegration):
         ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
-
-    @staticmethod
-    def find_all_videos(token, limit, callback=None):
-        ''' find all brightcove videos '''
-
-        # Get the names and IDs of recently published videos:
-        url = 'http://api.brightcove.com/services/library?\
-                command=find_all_videos&sort_by=publish_date&token=' + token
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
-                request_timeout=60.0, connect_timeout=10.0)
-        http_client.fetch(req, callback)
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
@@ -3288,8 +3219,7 @@ class OoyalaIntegration(AbstractIntegration):
                  a_id='', 
                  p_code=None, 
                  api_key=None, 
-                 api_secret=None, 
-                 auto_update=False): 
+                 api_secret=None): 
         '''
         Init ooyala platform 
         
@@ -3297,15 +3227,12 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-
         super(OoyalaIntegration, self).__init__()
- 
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
         self.api_secret = api_secret 
-        self.auto_update = auto_update 
-    
+ 
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
@@ -3320,25 +3247,7 @@ class OoyalaIntegration(AbstractIntegration):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
-    def check_feed_and_create_requests(self):
-        '''
-        #check feed and create requests
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo.process_publisher_feed(copy.deepcopy(self)) 
-
-    #verify token and create requests on signup
-    def create_video_requests_on_signup(self, n, callback=None):
-        ''' Method to verify ooyala token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with ooyala vid metadata
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
+            return signature 
     
 # DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
@@ -3354,9 +3263,6 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
  
@@ -3394,7 +3300,6 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature 
     
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine

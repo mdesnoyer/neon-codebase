@@ -81,6 +81,26 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(cargs[1].integration_id, 'i1')
 
     @tornado.testing.gen_test
+    def test_two_platforms(self):
+        def _set_platform(x):
+            x.account_id = 'a2'
+        neondata.BrightcovePlatform.modify('acct2', 'i2', 
+                                           _set_platform,
+                                           create_missing=True)
+
+        self.int_mock.reset_mock()
+        self.manager.start()
+
+        yield self.assertWaitForEquals(lambda: self.int_mock.call_count,
+                                       2, async=True)
+
+        calls = dict([x[0] for x in self.int_mock.call_args_list])
+
+        self.assertItemsEqual(calls.keys(), ['a1', 'a2'])
+        self.assertEquals(calls['a1'].integration_id, 'i1')
+        self.assertEquals(calls['a2'].integration_id, 'i2')
+
+    @tornado.testing.gen_test
     def test_platform_disabled(self):
         def _set_platform(x):
             x.enabled = False
