@@ -10,7 +10,7 @@ import numpy as np
 import cv2
 import os
 import dlib
-import utils.pycvutils
+from utils.pycvutils import ImagePrep
 
 comp_dict = {}
 comp_dict['face'] = range(17)
@@ -70,20 +70,20 @@ class MultiStageFaceParser(object):
     def __init__(self, predictor, max_height=640):
         self.detector = dlib.get_frontal_face_detector()
         self.fParse = FindAndParseFaces(predictor, self.detector)
-        self.image_dat = {}
+        self.image_data = {}
         self.max_height = max_height
         self.prep = utils.pycvutils.ImagePrep(
                         max_height=self.max_height)
 
     def reset(self):
-        self.image_dat = {}
+        self.image_data = {}
 
     def get_faces(self, image):
         ihash = hash(image.tostring())
         if self.image_data.has_key(ihash):
             return self.image_data[ihash]
         det = self.fParse._SEQfindFaces(image)
-        self.image_dat[ihash] = [det]
+        self.image_data[ihash] = [det]
         return len(det)
 
     def get_seg(self, image):
@@ -100,9 +100,9 @@ class MultiStageFaceParser(object):
                 return self.image_data[ihash][1]
         else:
             self.get_faces(image)
-        det = self.image_dat[ihash]
+        det = self.image_data[ihash][0]
         points = self.fParse._SEQsegFaces(image, det)
-        self.image_dat[ihash].append(points)
+        self.image_data[ihash].append(points)
 
     def get_eyes(self, image):
         '''
