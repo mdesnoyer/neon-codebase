@@ -77,40 +77,16 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         else:
             _log.error_n("Error fetching CNN feed")
             return None
- 
 
-    @tornado.gen.coroutine
-    def _does_neon_video_exist(video_id):
-        '''
-        Get video object from Neon Account
-        ''' 
-        video_api_formater = "%s/api/v1/accounts/%s/brightcove_integrations/%s/videos?video_ids=%s"
-
-        #TODO Update API, Account, integration IDs
-        headers = {"X-Neon-API-Key" : "12456235234" }
-        request_url = video_api_formater % ("http://services.neon-lab.com/", "315", "0", video_id)
-
-        req = urllib2.Request(request_url, headers=headers)
-        res = urllib2.urlopen(req)
-
-        #Note: this will return an array with the count of the number of items requested.  Need to check
-        # to make sure there are keys in each object.
-        video = json.loads(res.read())
-        if video.has_key("items"):
-            item = video["items"][0]
-            if item.has_key("serving"):
-                return True
-            else:
-                return False
-        else:
-            return False
 
     def _get_videoID(cnn_json_item):
          '''
         Return a video ID for 1 item in the json
         '''
-        if cnn_json_item.has_key('sourceId'):
-            return cnn_json_item['sourceId']
+        if cnn_json_item.has_key('videoId'):
+            #since we aren't sure if we can handle slashes in videoID, replace with -
+            no_slash_id = cnn_json_item['videoId'].replace("/", "-")
+            return no_slash_id
         else
             return None
 
