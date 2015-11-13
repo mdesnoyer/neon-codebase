@@ -218,8 +218,8 @@ class SADGenerator(RegionFeatureGenerator):
             images = images[:2]
         images = [self.prep(x) for x in images]
         SAD_vals = self._compute_SAD(images)
-        feat_vec = [float(SAD_vals[1])]
-        for i in range(1, len(SAD_vals)-1):
+        feat_vec = [float(SAD_vals[0])]
+        for i in range(0, len(SAD_vals)-1):
             feat_vec.append((SAD_vals[i]+SAD_vals[i+1])/2.)
         feat_vec.append(float(SAD_vals[-1]))
         if fonly:
@@ -274,8 +274,7 @@ class FaceGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            feat_vec.append(len(
-                self.MSFP.get_faces(img)) > 0)
+            feat_vec.append(self.MSFP.get_faces(img))
         return np.array(feat_vec)
 
     def get_feat_name(self):
@@ -315,6 +314,9 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         for img in images:
             img = self.prep(img)
             eyes = self.MSFP.get_eyes(img)
+            if not len(eyes):
+                feat_vec.append(0)
+                continue
             classif, scores = self.scoreEyes.classifyScore(eyes)
             feat_vec.append(np.min(scores))
         return np.array(feat_vec)
@@ -392,7 +394,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            feat_vec.append(np.max(np.var(np.var(imgs[0],0),0)))
+            feat_vec.append(np.max(np.var(np.var(images[0],0),0)))
         return np.array(feat_vec)
 
     def get_feat_name(self):

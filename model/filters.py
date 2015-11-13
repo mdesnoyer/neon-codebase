@@ -101,6 +101,9 @@ class LocalFilter(object):
     relies on the output of a feature generator. Therefore, it accepts
     a list or 1D numpy array of feature and returns an equal-sized list
     of booleans indicating whether or not the frame should be filtered.
+
+    FALSE -> Filter frame.
+    TRUE  -> Do not filter frame.
     '''
     def __init__(self):
         self.__version__ = 1
@@ -188,20 +191,20 @@ class SceneChangeFilter(LocalFilter):
         return np.mean(feat_vec) * self.mean_mult
 
     def _get_thresh2(self, feat_vec):
-        return np.std(feat_vec) * self.std_mult
+        return np.std(feat_vec) * self.std_mult + np.mean(feat_vec)
 
     def _filter_impl(self, feat_vec):
         crit = np.ones(feat_vec.shape, dtype=bool)
         if self.mean_mult is not None:
             thresh1 = self._get_thresh1(feat_vec)
-            crit = np.logical_and(crit, feat_vec > thresh1)
+            crit = np.logical_and(crit, feat_vec < thresh1)
         if self.std_mult is not None:
             thresh2 = self._get_thresh2(feat_vec)
-            crit = np.logical_and(crit, feat_vec > thresh2)
+            crit = np.logical_and(crit, feat_vec < thresh2)
         if self.min_thresh is not None:
-            crit = np.logical_and(crit, feat_vec > self.min_thresh)
+            crit = np.logical_or(crit, feat_vec < self.min_thresh)
         if self.max_thresh is not None:
-            crit = np.logical_or(crit, feat_vec > self.max_thresh)
+            crit = np.logical_and(crit, feat_vec < self.max_thresh)
         return crit
 
 class FaceFilter(LocalFilter):
@@ -226,7 +229,7 @@ class EyeFilter(LocalFilter):
         self.feature = 'eyes'
 
     def _filter_impl(self, feat_vec):
-        return feat_vec > 0
+        return feat_vec >= 0
 
 class CascadeFilter(Filter):
     '''A sequence of filters where if one cuts out the image, it fails.'''

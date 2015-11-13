@@ -81,7 +81,7 @@ class MultiStageFaceParser(object):
     def get_faces(self, image):
         ihash = hash(image.tostring())
         if self.image_data.has_key(ihash):
-            return self.image_data[ihash]
+            return len(self.image_data[ihash][0])
         det = self.fParse._SEQfindFaces(image)
         self.image_data[ihash] = [det]
         return len(det)
@@ -96,7 +96,7 @@ class MultiStageFaceParser(object):
         # find the image index
         ihash = hash(image.tostring())
         if self.image_data.has_key(ihash):
-            if len(self.image_data[ihash] > 1):
+            if len(self.image_data[ihash]) > 1:
                 return self.image_data[ihash][1]
         else:
             self.get_faces(image)
@@ -125,7 +125,7 @@ class FindAndParseFaces(object):
         self._faceDets = []
         self._facePoints = []
         self._image = None
-        self.prep = utils.pycvutils.ImagePrep(convert_to_gray=True)
+        self.prep = ImagePrep(convert_to_gray=True)
 
     def _check_valid(self, face=None, comp=None):
         '''

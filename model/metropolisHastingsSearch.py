@@ -416,7 +416,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
         super(MCMH_rpl, self).__init__(search_interval,
                                        base_sample_prob,
                                        explore_coef)
-        self.searched = []
+        self.searched = 0
 
     def start(self, elements):
         super(MCMH_rpl, self).start(elements)
@@ -424,7 +424,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
 
     def get(self):
         while True:
-            if self.searched == self.N:
+            if self.searched == self.N - 1:
                 # log this
                 return None
                 # add log to note that searching is incomplete
@@ -440,7 +440,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
             meta = (sf, ef, sfs, efs)
             ret = (action, meta)
         else:
-            frameno = self._search_frame_to_frameno(meta)
+            meta = self._search_frame_to_frameno(meta)
         return (action, meta)
 
     def _get(self):
@@ -449,18 +449,19 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
         it returns a tuple of the form (index, string). See the documentation
         under the class declaration.
         '''
-        sample = np.random.choice(self.N)
-        result = self._get_result(sample)
+        frameno = np.random.choice(self.N)
+        result = self._get_result(frameno)
         if result == None:
-            if not len(self.results[0]):
+            if not len(self.results):
+                # handle the case when the first sample is taken
                 self.n_samples += 1
                 res_obj = self._insert_result_at(frameno)
-                return ('sample', sample)
-            acc = self._accept_sample(sample)
+                return ('sample', frameno)
+            acc = self._accept_sample(frameno)
             if acc:
                 self.n_samples += 1
                 res_obj = self._insert_result_at(frameno)
-                return ('sample', sample)
+                return ('sample', frameno)
             else:
                 return False
         else:

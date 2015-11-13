@@ -34,10 +34,12 @@ def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
     big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
                            interpolation=interpolation)
 
-    sr = np.floor((newsize[0] - h)/2)
-    sc = np.floor((newsize[1] - w)/2)
-
-    return big_image[sr:sr + h, sc:sc + w, :]
+    sr = int(np.floor((newsize[0] - h)/2))
+    sc = int(np.floor((newsize[1] - w)/2))
+    if len(big_image.shape) > 2:
+        return big_image[sr:sr + h, sc:sc + w, :]
+    else:
+        return big_image[sr:sr + h, sc:sc + w]
 
 def to_pil(im):
     '''Converts an OpenCV image to a PIL image.'''
@@ -148,6 +150,15 @@ class ImagePrep(object):
                   or a 4-element list. Which either specify the 
                   overall, top+bottom and left+right crop frac, or 
                   the top / right / bottom / left crop frac.
+
+                  IMPORTANT:
+                    If crop_frac is a 4-element list, then it refers to the 
+                    percentage from FROM that edge. I.e., 
+                    crop_frac = [.6, .7] = retain 60% of the horizontal and 
+                        70% of the vertical
+                    crop_frac = [.2, .3, .1, .0] = cut 20% off the top, 30%
+                        off the right, 10% off the bottom, and 0% off the
+                        left.
             - convert image to grayscale.
         '''
         self.max_height = max_height
@@ -163,6 +174,10 @@ class ImagePrep(object):
 
     def __call__(self, image):
         image = _ensure_CV(image)
+        # import ipdb
+        # ipdb.set_trace()
+        if self.convert_to_gray:
+            image = _convert_to_gray(image)
         if self.max_height != None:
             image = self._resize_to_max(image, 0)
         if self.max_width != None:
@@ -174,15 +189,16 @@ class ImagePrep(object):
         if self.scale_width != None:
             image = self._resize_side(image, 1)
         if self.image_size != None:
-            image = cv2.resize(image, image_size[::-1])
+            image = cv2.resize(image,
+                               (self.image_size[1],
+                               self.image_size[0]))
         if self.crop_image_size != None:
+            #image = self._resize_and_crop(image, self.crop_image_size)
             image = self._resize_and_crop(image)
         if self.image_area != None:
             image = self._resize_to_area(image)
         if self.crop_frac != None:
             image = self._center_crop(image)
-        if self.convert_to_gray:
-            image = _convert_to_gray(image)
         return image
 
     def _center_crop(self, image):
@@ -194,7 +210,11 @@ class ImagePrep(object):
         elements, which either specify the top+bottom and
         left+right crop frac, or the top / right / bottom 
         / left crop frac.
+
+        IMPORTANT: SEE NOTE
         '''
+        # import ipdb
+        # ipdb.set_trace()
         if self.crop_frac == None:
             return image
         if len(image.shape) == 3:
@@ -211,29 +231,34 @@ class ImagePrep(object):
             if len(self.crop_frac) == 2:
                 # top/bottom
                 xlim1 = int(x * (1. - self.crop_frac[0])/2)
-                xlim2 = -xlim1
+                xlim2 = xlim1
                 # left/right
-                ylim1 = int(x * (1. - self.crop_frac[1])/2)
-                ylim2 = -ylim1
+                ylim1 = int(y * (1. - self.crop_frac[1])/2)
+                ylim2 = ylim1
             elif len(self.crop_frac) == 4:
-                # top
-                xlim1 = int(x * (1. - self.crop_frac[0]))
-                ylim2 = int(x * (1. - self.crop_frac[1]))
-                xlim2 = int(x * (1. - self.crop_frac[2]))
-                ylim1 = int(x * (1. - self.crop_frac[3]))
+                # top - right - bottom - left
+                xlim1 = int(x * self.crop_frac[0])
+                ylim2 = int(y * self.crop_frac[1])
+                xlim2 = int(x * self.crop_frac[2])
+                ylim1 = int(y * self.crop_frac[3])
             else:
                 raise ValueError('Improper crop frac specification')
         elif type(self.crop_frac)==float:
             xlim1 = int(x * (1. - self.crop_frac)/2)
             ylim1 = int(y * (1. - self.crop_frac)/2)
-            xlim2 = -xlim1
-            ylim2 = -ylim1
+            xlim2 = xlim1
+            ylim2 = ylim1
         else:
             raise ValueError('Improper crop frac specification')
-        if len(image.shape) == 3:
-            return image[xlim1:xlim2, ylim1:-ylim2, :]
+        if xlim2 != 0:
+            timage = image[xlim1:-xlim2]
         else:
-            return image[xlim1:xlim2, ylim1:-ylim2]
+            timage = image[xlim1:]
+        if ylim2 != 0:
+            timage = image[:, ylim1:-ylim2]
+        else:
+            timage = image[:, ylim1:]
+        return timage
 
     def _resize_to_max(self, image, dim=None):
         '''
@@ -290,5 +315,5 @@ class ImagePrep(object):
         return image
 
     def _resize_and_crop(self, image):
-        h, w = self.crop_image_size()
+        h, w = self.crop_image_size
         return resize_and_crop(image, h, w)

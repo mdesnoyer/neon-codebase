@@ -39,7 +39,7 @@ import model.errors
 import model.features as feat
 import numpy as np
 import utils.obj
-from model import colorname
+from model.colorname import ColorName
 from utils import pycvutils, statemon
 from utils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject
@@ -154,7 +154,7 @@ class Combiner(object):
             else:
                 valence = MINIMIZE # assume you are trying to maximize it
             for v in feat_vec:
-                rank = self._stats_dict[feat_name].rank()
+                rank = self._stats_dict[feat_name].rank(v)
                 if valence == MINIMIZE:
                     rank = 1. - rank
                 if valence == NORMALIZE:
@@ -171,10 +171,11 @@ class Combiner(object):
         '''
         stat_scores = []
         for k, v in feat_dict.iteritems():
-            stat_score.append(self._compute_stat_score(k, v))
+            stat_scores.append(self._compute_stat_score(k, v))
         comb_scores = []
-        for x in zip(*stat_score):
+        for x in zip(*stat_scores):
             comb_scores.append(self._combine(x))
+        return comb_scores
 
 class _Result(object):
     '''
@@ -190,10 +191,13 @@ class _Result(object):
                            ' score %.3f')%(frameno, score))
         self.score = score
         self.frameno = frameno
-        self._color_name = None
         self._feat_score = feat_score
         self._hash = getrandbits(128)
         self.image = image
+        if self.image != None:
+            self._color_name = ColorName(image)
+        else:
+            self._color_name = None
         self.meta = meta
 
     def __cmp__(self, other):
@@ -322,11 +326,11 @@ class ResultsList(object):
                 c_min_dist = dists[arg_srt_idx[0]]
             # if the resulting minimum distance is >= the results minimum 
             # distance, you may replace it. 
-            if c_min_dist >= np.min(delf.dists[idx]):
+            if c_min_dist >= np.min(self.dists[idx]):
                 break
         # replace the idx
         rep_score = self.results[idx].score
-        _log.debug('%s replacing %s'%(self.results[idx], res))
+        _log.debug('%s replacing %s'%(res, self.results[idx]))
         self.results[idx] = res
         self._update_dists(idx)
         if rep_score == self.min:
@@ -523,36 +527,41 @@ class LocalSearcher(object):
         frame_feats = dict()
         allowed_frames = np.ones(len(frames)).astype(bool)
         # obtain the features required for the filter.
+        
         for f in self.filters:
             fgen = self.generators[f.feature]
             feats = fgen.generate(frames)
             frame_feats[f.feature] = feats
             accepted = f.filter(feats)
-            _log.debug(('Filter for feature %s has rejected %i',
-                        ' frames, %i remain')%(f.feature, 
-                                                np.sum(
-                                                    np.logical_not(accepted)),
-                                                np.sum(accepted)))
+            n_rej = np.sum(np.logical_not(accepted))
+            n_acc = np.sum(accepted)
+            _log.debug(('Filter for feature %s has '
+                        'has rejected %i frames, %i remain'%(
+                            f.feature, n_rej, n_acc)))
             if not np.any(accepted):
                 _log.debug('No frames accepted by filters')
                 return
             # filter the current features across all feature
             # dicts, as well as the framenos
+            acc_idxs = list(np.nonzero(accepted)[0])
             for k in frame_feats.keys():
-                frame_feats[k] = [x for n, x in enumerate(frame_feats[k])
-                                    if accepted[n]]
-            framenos = [x for n, x in enumerate(framenos) if accepted[n]]
-            frames = [x for n, x in enumerate(frames) if accepted[n]]
+                frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+            framenos = [framenos[x] for x in acc_idxs]
+            frames = [frames[x] for x in acc_idxs]
+            #     frame_feats[k] = [x for n, x in enumerate(frame_feats[k])
+            #                         if accepted[n]]
+            # framenos = [x for n, x in enumerate(frames) if accepted[n]]
+            # frames = [x for n, x in enumerate(frames) if accepted[n]]
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue
             frame_feats[k] = f.generate(frames)
         # get the combined scores
-        comb = self.combine(frame_feats.keys(), frame_feats.values())
+        comb = self.combiner.combine_scores(frame_feats)
         comb = np.array(comb)
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
-        _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]',
+        _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
                     ' is %i with feature score %.3f')%(start_frame, 
                             start_score, end_frame, end_score, best_frameno,
                             np.max(comb)))
@@ -568,7 +577,7 @@ class LocalSearcher(object):
         Takes a sample, updating the estimates of mean score, mean image
         variance, mean frame xdiff, etc.
         '''
-        frames = self.get_seq_frames(self.video,
+        frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])
         if frames == None:
             # uh-oh, something went wrong! Update the knowledge state of the
@@ -578,8 +587,7 @@ class LocalSearcher(object):
         # get the score the image.
         frame_score = self.predictor.predict(frames[0])
         # extract all the features we want to cache
-        for n, f in zip(self.feats_to_cache_name, 
-                        self.feats_to_cache):
+        for n, f in self.feats_to_cache.iteritems():
             vals = f.generate(frames, fonly=True)
             self.stats[n].push(vals[0])
         self.stats['score'].push(frame_score)
@@ -602,9 +610,10 @@ class LocalSearcher(object):
                 _log.debug('Interval should be searched')
                 return True
             else:
-                _log.debug('Interval can be in results but does not exceed',
+                _log.debug('Interval can be in results but does not exceed'
                            ' mean observed score data')
-        _log.debug('Interval cannot be admitted to results')
+        else:
+            _log.debug('Interval cannot be admitted to results')
         return False
         
     def _step(self):
@@ -693,7 +702,7 @@ class LocalSearcher(object):
         frame_idxs = [start]
         for i in range(num-1):
             frame_idxs.append(frame_idxs[-1]+step)
-        frames = get_seq_frames(framenos)
+        frames = self.get_seq_frames(frame_idxs)
         return frames
 
     def get_search_frame(self, start_frame):
@@ -702,9 +711,8 @@ class LocalSearcher(object):
         '''
         num = (self.local_search_width /
                self.local_search_step)
-        frames = self.get_region_frames(self,
-                start_frame, num,
-                self.local_search_step)
+        frames = self.get_region_frames(start_frame, num,
+                                        self.local_search_step)
         frameno = range(start_frame, 
                         start_frame + self.local_search_width + 1,
                         self.local_search_step)
