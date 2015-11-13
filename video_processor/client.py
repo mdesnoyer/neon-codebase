@@ -56,7 +56,7 @@ import utils.neon
 import utils.pycvutils
 import utils.http
 from utils import statemon
-import video_processor
+from video_processor import sqs_utilities
 
 import logging
 _log = logging.getLogger(__name__)
@@ -756,23 +756,25 @@ class VideoClient(multiprocessing.Process):
 
     @tornado.gen.coroutine
     def dequeue_job(self):
-        ''' Blocking http call to global queue to dequeue work
+        ''' Asynchronous SQS call to dequeue work
             Change state to PROCESSING after dequeue
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        server = video_processor.sqs_utilities
+        server = sqs_utilities
         self.sqs_queue = server.VideoProcessingQueue(options.region,
                                                      options.aws_key,
                                                      options.secret_key)
 
+        _log.info("Connected to SQS server")
+
         message = Message()
         message = yield self.sqs_queue.read_message()
+        _log.info("Read a message")
         if message:
             result = message.get_body()
             if result is not None and result != "{}":
                 try:
-                    self.sqs_queue.delete_message(message)
                     job_params = tornado.escape.json_decode(result)
                     #Change Job State
                     api_key = job_params['api_key']
@@ -797,23 +799,30 @@ class VideoClient(multiprocessing.Process):
                         _log.error('Could not get job %s for %s' %
                                    (job_id, api_key))
                         statemon.state.increment('dequeue_error')
-                        yield False
+                        raise tornado.gen.Return(False)
                     if api_request.state != neondata.RequestState.PROCESSING:
                         _log.info('Job %s for account %s ignored' %
                                   (job_id, api_key))
-                        yield False
+                        raise tornado.gen.Return(False)
                     _log.info("key=worker [%s] msg=processing request %s for "
                               "%s." % (self.pid, job_id, api_key))
-                    yield job_params
+                    #self.sqs_queue.delete_message(message)
+                    #raise tornado.gen.Return(job_params)
+                except tornado.gen.Return:
+                    raise tornado.gen.Return(False)
                 except Exception,e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))
-                    yield False
-            yield result
+                    raise tornado.gen.Return(False)
+            if(job_params):
+                #self.sqs_queue.delete_message(message)
+                raise tornado.gen.Return(job_params)
+ 
+            raise tornado.gen.Return(result)
         else:
             _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
-        yield False
+            raise tornado.gen.Return(False)
 
     ##### Model Methods #####
 
@@ -830,23 +839,24 @@ class VideoClient(multiprocessing.Process):
             _log.error('Error loading the Model from %s' % self.model_file)
             raise IOError('Error loading model from %s' % self.model_file)
 
+    @tornado.gen.coroutine
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " % (self.pid))
         
         # Register a function to die cleanly on a sigterm
         atexit.register(self.stop)
-        
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
-            self.do_work()
-
+            yield self.do_work()
+ 
         _log.info("stopping worker [%s] " % (self.pid))
 
+    @tornado.gen.coroutine
     def do_work(self):   
         ''' do actual work here'''
         try:
-            job = self.dequeue_job()
+            job = yield self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
 
@@ -909,6 +919,8 @@ if __name__ == "__main__":
 
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+
+    tornado.ioloop.IOLoop.instance().start()
 
     cv_slots = max(multiprocessing.cpu_count() - 1, 1)
     cv_semaphore = multiprocessing.BoundedSemaphore(cv_slots)

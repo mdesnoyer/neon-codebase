@@ -682,7 +682,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
-        http_client = tornado.httpclient.AsyncHTTPClient()
+        '''http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
                                              method="POST",
@@ -691,7 +691,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              request_timeout=300.0,
                                              connect_timeout=30.0)
         
-        result = yield tornado.gen.Task(utils.http.send_request, req)
+        result = yield tornado.gen.Task(utils.http.send_request, req)'''
         
         #TODO (hmaidan): implement SQS
         server = video_processor.sqs_utilities
@@ -702,10 +702,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         message = Message()
         message.set_body(body)
 
-        message = self.sqs_queue.write_message(0, message)
+        message = yield self.sqs_queue.write_message(0, message)
         
 
-        if result.code == 409:
+        '''if result.code == 409:
             job_id = json.loads(result.body)["job_id"]
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
                     % (video_id, job_id)
@@ -723,10 +723,11 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     "msg=thumbnail api error %s" %result.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return
+            return'''
 
         #Success
-        self.send_json_response(result.body, 201)
+        if message:
+            self.send_json_response(message.get_body(), 201)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self, integration_id):

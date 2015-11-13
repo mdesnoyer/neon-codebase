@@ -17,8 +17,6 @@ import pickle
 import random
 from random import randrange
 import threading
-import tornado
-from tornado.concurrent import run_on_executor
 
 import logging
 _log = logging.getLogger(__name__)
@@ -75,11 +73,10 @@ class SQSQueueMock(object):
             # What happens here?
             return False
         return True
-
-    #Assumption: delete_message is only called after read_message, so the message
-    #            is in the same string stream.        
+      
     def delete_message(self, message):
-        in_stream = cStringIO.StringIO(self.out_stream.getvalue())
+        priority = int(message.message_attributes['priority']['string_value'])
+        in_stream = cStringIO.StringIO(self.queue_list[priority].getvalue())
         with self.lock:
             prev_data = pickle.load(in_stream)
         #for data in prev_data:
@@ -119,7 +116,8 @@ class SQSQueueMock(object):
         return messages
        
     def read(self, visibility_timeout=None, message_attributes=None):
-        random_index = randrange(0, self.num_queues - 1)
+        #random_index = randrange(0, self.num_queues)
+        random_index = 0
         while(random_index < self.num_queues):
             self.out_stream = self.queue_list[random_index]
             in_stream = cStringIO.StringIO(self.out_stream.getvalue())
@@ -170,6 +168,11 @@ class SQSConnectionMock(object):
     def create_queue(self, name, visibility_timeout=None):
         q = SQSQueueMock(name, create=True)
         return q
+
+    #As the memory streams aren't meant to be persistent, this should always
+    #return None
+    def lookup(self, name):
+        return None
 
     #TODO: change this so it can actually approximate the functionality        
     def change_message_visibility(self, queue, receipt_handle, timeout):
