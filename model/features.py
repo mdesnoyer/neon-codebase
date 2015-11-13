@@ -64,7 +64,7 @@ class RegionFeatureGenerator(FeatureGenerator):
         self.max_height = None
         self.crop_frac = None
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         '''
         Creates a feature vector for list of images.
 
@@ -166,7 +166,7 @@ class BlurGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -211,7 +211,7 @@ class SADGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -266,7 +266,7 @@ class FaceGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -305,7 +305,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -348,7 +348,7 @@ class TextGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -386,7 +386,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
-    def generate(self, images, fonly=False):
+    def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
         if fonly:

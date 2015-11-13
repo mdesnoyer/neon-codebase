@@ -260,7 +260,7 @@ class ResultsList(object):
     variety_thresh specifies the maximum threshold for image divergence; if
     the new thumbnails is of distance at least variety_thresh, it is accepted.
     '''
-    def __init__(self, n_thumbs=5, max_variety=True, variety_thresh=0.3):
+    def __init__(self, n_thumbs=5, max_variety=True, variety_thresh=0.2):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
@@ -552,7 +552,7 @@ class LocalSearcher(object):
         
         for f in self.filters:
             fgen = self.generators[f.feature]
-            feats = fgen.generate(frames)
+            feats = fgen.generate_many(frames)
             frame_feats[f.feature] = feats
             accepted = f.filter(feats)
             n_rej = np.sum(np.logical_not(accepted))
@@ -577,7 +577,7 @@ class LocalSearcher(object):
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue
-            frame_feats[k] = f.generate(frames)
+            frame_feats[k] = f.generate_many(frames)
         # get the combined scores
         comb = self.combiner.combine_scores(frame_feats)
         comb = np.array(comb)
@@ -610,7 +610,7 @@ class LocalSearcher(object):
         frame_score = self.predictor.predict(frames[0])
         # extract all the features we want to cache
         for n, f in self.feats_to_cache.iteritems():
-            vals = f.generate(frames, fonly=True)
+            vals = f.generate_many(frames, fonly=True)
             self.stats[n].push(vals[0])
         self.stats['score'].push(frame_score)
         _log.debug('Took sample at %i, score is %.3f'%(frameno, frame_score))
