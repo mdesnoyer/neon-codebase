@@ -3018,6 +3018,19 @@ class BrightcoveIntegration(AbstractIntegration):
                 request_timeout=60.0, connect_timeout=10.0)
         http_client.fetch(req, callback)
 
+
+class CNNIntegration(AbstractIntegration):
+    ''' CNN Integration class '''
+
+    LAST_PROCESSED = ''
+    
+    def __init__(self, i_id=None, a_id='', p_id=None):
+
+        ''' On every successful processing, the last video processed is saved '''
+
+        super(CNNIntegration, self).__init__(enabled)
+
+
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
