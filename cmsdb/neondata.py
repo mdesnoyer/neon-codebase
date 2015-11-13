@@ -119,6 +119,7 @@ statemon.define('invalid_callback_url', int)
 statemon.define('postgres_pubsub_connections', int) 
 statemon.define('postgres_unknown_errors', int) 
 statemon.define('postgres_listeners', int) 
+statemon.define('postgres_successful_pubsub_callbacks', int) 
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -238,6 +239,7 @@ class PostgresDB(tornado.web.RequestHandler):
             for i in range(int(num_of_tries)):
                 try: 
                     conn = yield mo_conn.connect()
+                    break
                 except psycopg2.OperationalError as e: 
                     time.sleep(0.3) 
                     _log.error('Retrying PG connection : attempt=%d : exception=%s' % 
@@ -670,6 +672,7 @@ class PostgresPubSub(object):
                 for func in callback_functions: 
                     tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
+                statemon.state.increment('postgres_unknown_errors')
                 _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
                 self._reconnect(channel_name) 
         
@@ -711,17 +714,26 @@ class PostgresPubSub(object):
                     'Opening a new listener on postgres at %s for channel %s' %
                     (self.host, channel_name))
                 statemon.state.increment('postgres_listeners')
-                connection = self._connect()
-                connection.cursor().execute('LISTEN %s' % channel_name)
-                io_loop = tornado.ioloop.IOLoop.current()
-                self.channels[channel_name] = { 
-                                                'connection' : connection, 
-                                                'callback_functions' : [func] 
-                                              }
-                io_loop.add_handler(connection.fileno(), 
-                                    lambda fd, events: self._receive_notification(fd, events, channel_name), 
-                                    io_loop.READ) 
-                                          
+                try: 
+                    connection = self._connect()
+                    connection.cursor().execute('LISTEN %s' % channel_name)
+
+                    io_loop = tornado.ioloop.IOLoop.current()
+                    self.channels[channel_name] = { 
+                                                    'connection' : connection, 
+                                                    'callback_functions' : [func] 
+                                                  }
+                    io_loop.add_handler(connection.fileno(), 
+                                        lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                                        io_loop.READ) 
+                except psycopg2.Error as e: 
+                    _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
+                                   % (channel_name, e)) 
+                except Exception as e: 
+                    _log.exception('an unknown error occurred when listening to %s on postgres %s' \
+                                   % (channel_name, e)) 
+                    statemon.state.increment('postgres_unknown_errors')
+                    
         def unlisten(self, channel_name):
             '''unlisten from a subscribed channel 
 
@@ -734,13 +746,21 @@ class PostgresPubSub(object):
             _log.info(
                 'Unlistening on postgres at %s for channel %s' %
                 (self.host, channel_name))
-            statemon.state.decrement('postgres_listeners')
-            channel = self.channels[channel_name] 
-            connection = channel['connection']
-            with connection.cursor() as cursor: 
-                cursor.execute('UNLISTEN %s' % channel)
-            connection.close()
-            self.channels.pop(channel_name, None)
+            try: 
+                channel = self.channels[channel_name] 
+                connection = channel['connection']
+                with connection.cursor() as cursor: 
+                    cursor.execute('UNLISTEN %s' % channel_name)
+                connection.close()
+                self.channels.pop(channel_name, None)
+                statemon.state.decrement('postgres_listeners')
+            except psycopg2.Error as e: 
+                _log.exception('a psycopg error occurred when UNlistening to %s on postgres %s' \
+                                % (channel_name, e)) 
+            except Exception as e: 
+                _log.exception('an unknown error occurred when UNlistening to %s on postgres %s' \
+                               % (channel_name, e)) 
+                statemon.state.increment('postgres_unknown_errors')
 
     instance = None 
     
@@ -1782,12 +1802,12 @@ class StoredObject(object):
             key = data['key'] 
             obj = cls.get(key) 
             try:
+                statemon.state.increment('postgres_successful_pubsub_callbacks')
                 func(key, obj, op)
             except Exception as e:
                 _log.error('Unexpected exception on db change when calling'
                            ' %s with arguments %s: %s' % 
                            (func, (key, obj, op), e))
-            
 
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
@@ -1857,7 +1877,7 @@ class StoredObject(object):
             pattern = cls._baseclass_name().lower()
 
             pubsub.listen(pattern, 
-                          lambda x: cls._handle_all_changes_pg(x, func)) 
+                          lambda x: cls._handle_all_changes_pg(x, func))
         else: 
             conn = PubSubConnection.get(cls)
         
@@ -1871,9 +1891,8 @@ class StoredObject(object):
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
         if options.get('cmsdb.neondata.wants_postgres'):
-            pubsub = neondata.PostgresPubSub();
-            pubsub.connect()
-            yield pubsub.unlisten(pattern) 
+            pubsub = PostgresPubSub();
+            pubsub.unlisten(channel) 
         else: 
             conn = PubSubConnection.get(cls)
         

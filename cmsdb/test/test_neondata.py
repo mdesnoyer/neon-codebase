@@ -15,7 +15,7 @@ import dateutil.parser
 import logging
 import json
 import multiprocessing
-from mock import patch, MagicMock
+from mock import patch, MagicMock, ANY
 import os
 import psycopg2
 import re
@@ -2648,25 +2648,51 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=50)
     def test_listen_and_notify(self): 
-        def listen_cb(fut):
-            print fut.result()
- 
+        cb = MagicMock()     
         pubsub = neondata.PostgresPubSub()
-        pubsub.listen('neonuseraccount', listen_cb)
-
-        #with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 
-        #import pdb; pdb.set_trace()
+        pubsub.listen('neonuseraccount', cb)
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
+        yield tornado.gen.sleep(0.01) 
+        cb.assert_called_with(ANY)
  
-    @tornado.testing.gen_test(timeout=50)
-    def test_subscribe_to_changes(self): 
-        def subscribe_cb(key, obj, op):
-            print key 
-        neondata.NeonUserAccount.subscribe_to_changes(subscribe_cb, async=True)
-        #with self.assertLogExists(logging.INFO, 'Notifying listeners of db changes'): 
+    @tornado.testing.gen_test()
+    def test_subscribe_to_changes(self):
+        cb = MagicMock()     
+        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
+        yield tornado.gen.sleep(0.01) 
+        cb.assert_called_with(so.key, ANY, ANY)
+ 
+    @tornado.testing.gen_test()
+    def test_unsubscribe_from_changes(self):
+        cb = MagicMock()     
+        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        rv = yield so.save(async=True)
+
+        neondata.NeonUserAccount.unsubscribe_from_changes('neonuseraccount', async=True)
+        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
+        rv = yield so2.save(async=True)
+
+        yield tornado.gen.sleep(0.01) 
+        cb.assert_called_once_with(so.key, ANY, ANY)
+ 
+    @tornado.testing.gen_test()
+    def test_multiple_functions_listening(self):
+        cb = MagicMock()     
+        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
+
+        cb2 = MagicMock() 
+        neondata.NeonUserAccount.subscribe_to_changes(cb2, async=True)
+
+        so = neondata.NeonUserAccount(uuid.uuid1().hex)
+        rv = yield so.save(async=True)
+
+        yield tornado.gen.sleep(0.01) 
+        cb.assert_called_once_with(so.key, ANY, ANY)
+        cb2.assert_called_once_with(so.key, ANY, ANY)
             
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
