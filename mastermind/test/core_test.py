@@ -24,6 +24,8 @@ import logging
 from mock import patch, MagicMock
 import multiprocessing.pool
 import numpy.random
+import numpy as np
+import pandas
 import test_utils.neontest
 import test_utils.redis
 import tornado.httpclient
@@ -90,8 +92,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_patcher.start()
+        self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        logging.getLogger('cmsdb.neondata').propagate = False
 
         # TODO(wiley): Once we actually listen to the priors but keep
         # serving fractions constant, set frac_adjust_rate to the
@@ -104,6 +108,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        logging.getLogger('cmsdb.neondata').propagate = True
 
     def test_serving_directives_with_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -1694,6 +1699,101 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             video_info)[1]
         self.assertEqual({'bc': 0.80, 'n1': 0.2/3, 'n2': 0.2/3, 'ctr': 0.2/3},
                          directive)
+
+    def test_monte_carlo_sequential_strategy(self):
+        # Runs a monte carlo test on the sequential strategy where we
+        # simulate the experiment running and make sure we don't make
+        # the wrong decision too often.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=1.0,
+                               holdback_frac=0.0,
+                               exp_frac=1.0))
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_rand', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_n1', 'acct1_vid1',
+                               ttype='neon', rank=0),
+             ThumbnailMetadata('acct1_vid1_n2', 'acct1_vid1',
+                               ttype='neon', rank=1),
+             ThumbnailMetadata('acct1_vid1_n3', 'acct1_vid1',
+                               ttype='neon', rank=0),
+                               ], True)
+
+        TRUE_CTRS = pandas.Series({
+            'acct1_vid1_rand' : 0.04,
+            'acct1_vid1_n1' : 0.05,
+            'acct1_vid1_n2' : 0.03,
+            'acct1_vid1_n3' : 0.01
+            })
+        N_SIMS = 100
+        IMP_PER_STEP = 500
+        CTR_DECAY_RATE = 0.98
+        turned_off = pandas.Series(0.0, index=TRUE_CTRS.index)
+        turned_back_on = pandas.Series(0.0, index=TRUE_CTRS.index)
+        winner = pandas.Series(0.0, index=TRUE_CTRS.index)
+        exp_finished = 0
+        
+        for sim in range(N_SIMS):
+            impressions = pandas.Series(0, index=TRUE_CTRS.index)
+            clicks = pandas.Series(0, index=TRUE_CTRS.index)
+            ctrs = TRUE_CTRS.copy()
+            last_directive = None
+        
+            for i in range(150):
+                cur_directive = self.mastermind.get_directives(
+                    ['acct1_vid1']).next()
+                cur_directive = pandas.Series(dict(cur_directive[1]))
+                # Check for the experiment being done
+                if (self.mastermind.experiment_state['acct1_vid1'] == 
+                    neondata.ExperimentState.COMPLETE):
+                    exp_finished +=1
+                    winner[np.argmax(cur_directive)] += 1 
+                    break
+
+                # Check for a thumb being turned off
+                if last_directive is None:
+                    turned_off[cur_directive == 0.0] += 1
+                else:
+                    turned_off[(cur_directive == 0.0) & 
+                               (last_directive > 0.0)] += 1
+                    turned_back_on[(cur_directive > 0.0) & 
+                                   (last_directive == 0.0)] += 1
+                last_directive = cur_directive                
+
+                # Simulate the next bunch of impressions
+                new_impressions = np.round(IMP_PER_STEP * cur_directive)
+                impressions += new_impressions
+                for tid in new_impressions.index:
+                    clicks[tid] += np.sum(np.random.random(
+                        new_impressions[tid]) < ctrs[tid])
+                
+                self.mastermind.update_stats_info([
+                    ('acct1_vid1', tid, impressions[tid], 0, clicks[tid], 0)
+                    for tid in TRUE_CTRS.index])
+
+                ctrs *= CTR_DECAY_RATE
+
+            # Reset mastermind
+            self.mastermind.experiment_state['acct1_vid1'] = \
+              neondata.ExperimentState.RUNNING
+            self.mastermind.update_stats_info([
+                    ('acct1_vid1', tid, 0, 0, 0, 0)
+                    for tid in TRUE_CTRS.index])
+
+        # Check the results finished is a statistically valid way from
+        # what we would expect.
+        self.assertGreater(exp_finished, 0.90*N_SIMS)
+        self.assertGreater(winner['acct1_vid1_n1'], 0.95*exp_finished)
+        self.assertEquals(turned_off['acct1_vid1_n1'], 0)
+        self.assertLess(turned_off['acct1_vid1_n2'], 0.01*N_SIMS)
+        self.assertGreater(turned_off['acct1_vid1_n3'], 0.5*N_SIMS)
+        self.assertEquals(turned_off['acct1_vid1_rand'], 0)
+        self.assertEquals(np.max(turned_back_on), 0)
+        
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
