@@ -361,7 +361,7 @@ class ResultsList(object):
             if not res_obj._defined:
                 statemon.state.increment('low_number_of_frames_seen')
                 break
-            res.append(res_obj.image, res_obj.score, res_obj.frameno)
+            res.append([res_obj.image, res_obj.score, res_obj.frameno])
         return res
 
 class LocalSearcher(object):
