@@ -17,8 +17,7 @@ import integrations.ovp
 import logging
 import re
 import tornado.gen
-import urllib2
-import urlparse
+from utils import http
 from utils.options import options, define
 from utils import statemon
 
@@ -49,11 +48,13 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 'exlarge16to9',
                 '1920x1080_5500k_mp4']
 
+    def _get_api_key():
+        return "12345"
+
     def _get_video_url_to_download(cnn_json_item):
         '''
         Return a video url to download from a the CNN json item 
         '''
-
         try:
             d_urls  = cnn_json_item['cdnUrls']
         except KeyError, e:
@@ -66,10 +67,38 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         else:
             return None
 
+    @tornado.gen.coroutine
     def _make_CNN_feed_request(request_url):
+        '''
+        Make the pre-formatted call to the CNN feed to get videos
+        '''
+        res = yield http.send_request(request_url)
+        return json.loads(res.read())  
+
+    def _does_neon_video_exist(video_id):
+        '''
+        Get video object from Neon Account
+        ''' 
+        video_api_formater = "%s/api/v1/accounts/%s/brightcove_integrations/%s/videos?video_ids=%s"
+
+        #TODO Update API, Account, integration IDs
+        headers = {"X-Neon-API-Key" : "12456235234" }
+        request_url = video_api_formater % ("http://services.neon-lab.com/", "315", "0", video_id)
+
         req = urllib2.Request(request_url, headers=headers)
         res = urllib2.urlopen(req)
-            return json.loads(res.read())   
+
+        #Note: this will return an array with the count of the number of items requested.  Need to check
+        # to make sure there are keys in each object.
+        video = json.loas(res.read())
+        if video.has_key("items"):
+            item = video["items"][0]
+            if item.has_key("serving"):
+                return True
+            else:
+                return False
+        else:
+            return False
 
     def _get_videoID(cnn_json_item):
          '''
@@ -79,6 +108,23 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             return cnn_json_item['sourceId']
         else
             return None
+
+    def lookup_cnn_new_videos():
+        thumb = ""
+        vid_src = ""
+        videoID = ""
+
+        request_url = _get_CNN_feed_url()
+        data = _make_CNN_feed_request(request_url)
+
+        if data.has_key('docs'):
+            for video in data['docs']:
+                videoID = _get_videoID(data)
+                if _does_neon_video_exist(videoID):
+                    thumb = _get_best_image_info(data['relatedMedia'])
+                    vid_src = _get_video_url_to_download(data)
+                    if (thumb != "" and vid_src != "" and videoID != ""):
+                        submit_one_video_object(videoID, thumb, vid_src)
 
 
     @staticmethod
@@ -97,60 +143,11 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
     def _get_CNN_feed_url():
         return "https://services.cnn.com/newsgraph/search/type:video/firstPublishDate:2015-10-29T00:00:00Z~2015-10-29T23:59:59Z/rows:50/start:0/sort:lastPublishDate,desc?api_key=c2vfn5fb8gubhrmd67x7bmv9"
 
-    @tornado.gen.coroutine
-    def lookup_and_submit_videos(self, ovp_video_ids, continue_on_error=False):
-        '''Looks up a list of video ids and submits them.
-
-        Returns: dictionary of video_id => job_id or exception
-        '''
-        try:
-            bc_video_info = yield self.bc_api.find_videos_by_ids(
-                ovp_video_ids,
-                video_fields=BrightcoveIntegration.get_submit_video_fields(),
-                custom_fields=self.get_custom_fields(),
-                async=True)
-        except brightcove_api.BrightcoveApiServerError as e:
-            statemon.state.increment('bc_apiserver_errors')
-            _log.error('Server error getting data from Brightcove for '
-                       'platform %s: %s' % (self.platform.get_id(), e))
-            raise integrations.ovp.OVPError(e)
-        except brightcove_api.BrightcoveApiClientError as e:
-            statemon.state.increment('bc_apiclient_errors')
-            _log.error('Client error getting data from Brightcove for '
-                       'platform %s: %s' % (self.platform.get_id(), e))
-            raise integrations.ovp.OVPError(e)
-            
-
-        retval = yield self.submit_many_videos(
-            bc_video_info,
-            continue_on_error=continue_on_error)
-
-        raise tornado.gen.Return(retval)
-
 
 
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.lookup_cnn_new_videos()
-
-
-    def lookup_cnn_new_videos():
-        thumb = ""
-        vid_src = ""
-        videoID = ""
-
-        request_url = _get_CNN_feed_url()
-        data = _make_CNN_feed_request(request_url)
-
-        if data.has_key('docs'):
-            for video in data['docs']:
-                # TODO add check to make sure the video doesn't already exist on our side
-
-                thumb = _get_best_image_info(data['relatedMedia'])
-                vid_src = _get_video_url_to_download(data)
-                videoID = _get_videoID(data)
-                if (thumb != "" and vid_src != "" and videoID != ""):
-                    submit_one_video_object(videoID, thumb, vid_src)
 
     @tornado.gen.coroutine
     def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True,
