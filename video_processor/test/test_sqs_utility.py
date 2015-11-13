@@ -104,5 +104,5 @@ class TestVideoProcessingQueue(test_utils.neontest.TestCase):
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()
-    #io_loop = tornado.ioloop.IOLoop.instance()
-    #io_loop.start()
+    io_loop = tornado.ioloop.IOLoop.instance()
+    io_loop.start()
