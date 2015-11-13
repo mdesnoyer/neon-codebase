@@ -143,7 +143,9 @@ class VideoFilter(Filter):
 
 class ThreshFilt(LocalFilter):
     '''
-    Removes frames for whom the value of the feature is too low
+    Removes frames for whom the value of the feature is too low. Accepts
+    a function as the thresh, so that it may be calculated dynamically. The
+    function must accept no arguments and return only a single value.
     '''
     def __init__(self, thresh, feature='pixvar'):
         super(ThreshFilt, self).__init__()
@@ -151,7 +153,11 @@ class ThreshFilt(LocalFilter):
         self.feature = feature
 
     def _filter_impl(self, feat_vec):
-        return feat_vec > self.thresh
+        if hasattr(self.thresh, '__call__'):
+            thresh = self.thresh()
+        else:
+            thresh = self.thresh
+        return feat_vec > thresh
 
 class SceneChangeFilter(LocalFilter):
     '''
@@ -167,6 +173,9 @@ class SceneChangeFilter(LocalFilter):
             min_thresh : images with SAD < min_thresh are never filtered
             max_thresh : images with SAD > max_thresh are always filtered
 
+        Note: min_thresh and max_thresh may be calculated dynamically, similar
+        to ThreshFilt, if passed as a function that takes no parameter. 
+
         Constructs parameters based on mean and std.
 
         thresh1 = mean(SAD) * mean_mult
@@ -177,8 +186,9 @@ class SceneChangeFilter(LocalFilter):
         OR 
         (SAD_i > max_thresh)
 
-        If any input parameters are None, then they do not effect the
+        If any input parameters are None, then they do not affect the
         calculation. 
+
         '''
         super(SceneChangeFilter, self).__init__()
         self.mean_mult = mean_mult
@@ -194,6 +204,14 @@ class SceneChangeFilter(LocalFilter):
         return np.std(feat_vec) * self.std_mult + np.mean(feat_vec)
 
     def _filter_impl(self, feat_vec):
+        if hasattr(self.min_thresh, '__call__'):
+            min_thresh = self.min_thresh()
+        else:
+            min_thresh = self.min_thresh
+        if hasattr(self.max_thresh, '__call__'):
+            max_thresh = self.max_thresh()
+        else:
+            max_thresh = max_thresh
         crit = np.ones(feat_vec.shape, dtype=bool)
         if self.mean_mult is not None:
             thresh1 = self._get_thresh1(feat_vec)
@@ -201,10 +219,10 @@ class SceneChangeFilter(LocalFilter):
         if self.std_mult is not None:
             thresh2 = self._get_thresh2(feat_vec)
             crit = np.logical_and(crit, feat_vec < thresh2)
-        if self.min_thresh is not None:
-            crit = np.logical_or(crit, feat_vec < self.min_thresh)
-        if self.max_thresh is not None:
-            crit = np.logical_and(crit, feat_vec < self.max_thresh)
+        if min_thresh is not None:
+            crit = np.logical_or(crit, feat_vec < min_thresh)
+        if max_thresh is not None:
+            crit = np.logical_and(crit, feat_vec < max_thresh)
         return crit
 
 class FaceFilter(LocalFilter):
