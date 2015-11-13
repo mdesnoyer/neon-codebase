@@ -3030,6 +3030,9 @@ class CNNIntegration(AbstractIntegration):
 
         super(CNNIntegration, self).__init__(enabled)
 
+    def _set_last_video(x):
+        self.LAST_PROCESSED = x
+
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
