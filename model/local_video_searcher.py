@@ -242,11 +242,15 @@ class ResultsList(object):
     histogram of the colorname. Thus, new results added to the pile will not
     be added if the minimium pairwise distance between all results is
     decreased.
+
+    variety_thresh specifies the maximum threshold for image divergence; if
+    the new thumbnails is of distance at least variety_thresh, it is accepted.
     '''
-    def __init__(self, n_thumbs=5, max_variety=True):
+    def __init__(self, n_thumbs=5, max_variety=True, variety_thresh=0.3):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
+        self.variety_thresh = variety_thresh
 
     def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
@@ -328,6 +332,10 @@ class ResultsList(object):
             # distance, you may replace it. 
             if c_min_dist >= np.min(self.dists[idx]):
                 break
+            # if you are 'sufficiently different' then replace the lowest
+            # scoring one.
+            if c_min_dist > self.variety_thresh:
+                return self._push_over_lowest(res)
         # replace the idx
         rep_score = self.results[idx].score
         _log.debug('%s replacing %s'%(res, self.results[idx]))
