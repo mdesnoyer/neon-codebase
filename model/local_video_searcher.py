@@ -75,6 +75,10 @@ class Statistics(object):
         self._count = 0
         self._max_size = max_size
         self._vals = np.zeros(max_size)
+        self._update_var = False
+        self._p_var = None
+        self._update_mean = False
+        self._p_mean = None
         if init is not None:
             self.push(init)
 
@@ -82,6 +86,8 @@ class Statistics(object):
         '''
         pushes a value onto x
         '''
+        self._update_var = True
+        self._update_mean = True
         if type(x) == list:
             for ix in x:
                 self.push(ix)
@@ -93,11 +99,19 @@ class Statistics(object):
             self._vals[self._count] = x
             self._count += 1 # increment count
 
+    @property
     def var(self):
-        return np.var(self._vals[:self._count])
+        if self._update_var:
+            self._p_var = np.var(self._vals[:self._count])
+            self._update_var = False
+        return self._p_var
 
+    @property
     def mean(self):
-        return np.mean(self._vals[:self._count])
+        if self._update_mean:
+            self._p_mean = np.mean(self._vals[:self._count])
+            self._update_mean = False
+        return self._p_mean
 
     def rank(self, x):
         '''Returns the rank of x'''
