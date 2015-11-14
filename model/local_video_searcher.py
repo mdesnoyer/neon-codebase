@@ -181,6 +181,10 @@ class ColorStatistics(object):
     def mean(self):
         return self._dists.mean
 
+    @property:
+    def median(self):
+        return np.median(self._dists)
+
     def percentile(self, x):
         '''
         The notion of Rank doesnt have much meaning in this sense, since
@@ -601,8 +605,9 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
-        f_min_var_acc = lambda: max(0.015, self.col_stat.percentile(5.))
-        f_max_var_rej = lambda: min(0.20, self.col_stat.percentile(50.))
+        f_min_var_acc = lambda: max(0.015, 
+                                    self.col_stat.percentile(1./self.n))
+        f_max_var_rej = lambda: min(0.25, self.col_stat.percentile(60.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej)
@@ -697,7 +702,7 @@ class LocalSearcher(object):
         framescore = (start_score + end_score) / 2
         # push the frame into the results object.
         self.results.accept_replace(best_frameno, framescore, best_frame,
-                                    np.max(comb))
+                                    np.max(comb), meta=frame_feats)
 
     def _take_sample(self, frameno):
         '''
@@ -735,7 +740,7 @@ class LocalSearcher(object):
         '''
         mean_score = (start_score + end_score) / 2.
         if mean_score > self.min_score:
-            if mean_score > self.stats['score'].mean:
+            if mean_score > self.stats['score'].median:
                 _log.debug('Interval should be searched')
                 return True
             else:
