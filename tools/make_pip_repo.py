@@ -30,7 +30,8 @@ define('append', default=1, type=int,
 
 _log = logging.getLogger(__name__)
 
-pkgRe = re.compile('([a-zA-Z0-9_\-\.]+)\.(tar\.gz|zip|tar\.bz2|whl)')
+#pkgRe = re.compile('([a-zA-Z0-9_\-\.]+)\.(tar\.gz|zip|tar\.bz2|whl)')
+pkgRe = re.compile('([a-zA-Z0-9_\-\.]+)\.(tar\.gz|zip|tar\.bz2|whl|tgz)')
 
 def build_index():
     '''Creates an html file that will point to the packages stored there.'''
@@ -72,6 +73,8 @@ def main():
             if pkg_match.group(2) == 'zip':
                 mime = 'application/zip'
             elif pkg_match.group(2) == 'tar.gz':
+                mime = 'application/x-gzip'
+            elif pkg_match.group(2) == '.tgz':
                 mime = 'application/x-gzip'
             elif pkg_match.group(2) == 'tar.bz2':
                 mime = 'application/x-bzip2'
