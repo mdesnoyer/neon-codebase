@@ -324,7 +324,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'eyes'
 
-class LightnessGenerator(RegionFeatureGenerator):
+class VibranceGenerator(RegionFeatureGenerator):
     '''
     Returns the mean darkness in an image.
     '''
@@ -359,7 +359,7 @@ class LightnessGenerator(RegionFeatureGenerator):
         return np.array(feat_vec)
 
     def get_feat_name(self):
-        return 'light'
+        return 'vibrance'
 
 class TextGenerator(RegionFeatureGenerator):
     '''
