@@ -850,3 +850,6 @@ class LocalSearcher(object):
     def __getstate__(self):
         self._reset()
         return self.__dict__.copy()
+
+    def get_name(self):
+        return 'LocalSearcher'
