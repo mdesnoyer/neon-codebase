@@ -163,6 +163,8 @@ class MonteCarloMetropolisHastings(object):
         self.tot_score = 0.
         self.mean = 1.
         self.max_interval = (self.N, 0, self.N)
+        self._l_bound = None
+        self._r_bound = None
 
     def start(self, elements):
         '''
@@ -407,6 +409,7 @@ class MonteCarloMetropolisHastings(object):
         pointers between elements of the results list.
         '''
         self._reset()
+
         return self.__dict__.copy()
 
 class MCMH_rpl(MonteCarloMetropolisHastings):

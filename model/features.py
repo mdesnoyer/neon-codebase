@@ -329,7 +329,7 @@ class VibranceGenerator(RegionFeatureGenerator):
     Returns the mean darkness in an image.
     '''
     def __init__(self, max_height=480):
-        super(DarknessGenerator, self).__init__()
+        super(VibranceGenerator, self).__init__()
         self.max_height = max_height
         self.prep = utils.pycvutils.ImagePrep(max_height=self.max_height)
 
@@ -355,7 +355,8 @@ class VibranceGenerator(RegionFeatureGenerator):
             elif img.shape[2] == 1:
                 return np.mean(img)
             # convert to HSV
-            feat_vec.append(np.mean(cv2.cvtColor(img, cv2.cv.BGR2HSV)[:,:,2]))
+            feat_vec.append(np.mean(cv2.cvtColor(
+                                        img, cv2.cv.CV_BGR2HSV)[:,:,2]))
         return np.array(feat_vec)
 
     def get_feat_name(self):
