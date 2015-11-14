@@ -214,6 +214,11 @@ class SADGenerator(RegionFeatureGenerator):
     def generate_many(self, images, fonly=False):
         if not type(images) == list:
             images = [images]
+        # theres an edge case, in which only one image is obtained--in this
+        # case, reject return a score of np.inf. This can occur if, for
+        # instance, the previous filters reject all but one frame. 
+        if len(images) < 2:
+            return np.array([np.inf])
         if fonly:
             images = images[:2]
         images = [self.prep(x) for x in images]
