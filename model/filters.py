@@ -129,7 +129,6 @@ class LocalFilter(object):
     def _filter_impl(self, feat_vec):
         raise NotImplementedError()
 
-
 class VideoFilter(Filter):
     '''Abstract video filter'''
     def __init__(self, max_height=None):
@@ -200,12 +199,10 @@ class SceneChangeFilter(LocalFilter):
         self._max_thresh = max_thresh
         self.feature = 'sad'
 
-    @property
-    def mean_thresh(self):
+    def mean_thresh(self, feat_vec):
         return np.mean(feat_vec) * self.mean_mult 
 
-    @property
-    def std_thresh(self):
+    def std_thresh(self, feat_vec):
         return np.std(feat_vec) * self.std_mult + np.mean(feat_vec)
 
     @property
@@ -215,7 +212,7 @@ class SceneChangeFilter(LocalFilter):
         except TypeError:
             return self._min_thresh
 
-    @peropty
+    @property
     def max_thresh(self):
         try:
             return self._max_thresh()
@@ -225,9 +222,9 @@ class SceneChangeFilter(LocalFilter):
     def _filter_impl(self, feat_vec):
         crit = np.ones(feat_vec.shape, dtype=bool)
         if self.mean_mult is not None:
-            crit = np.logical_and(crit, feat_vec < self.mean_thresh)
+            crit = np.logical_and(crit, feat_vec < self.mean_thresh(feat_vec))
         if self.std_mult is not None:
-            crit = np.logical_and(crit, feat_vec < self.std_thresh)
+            crit = np.logical_and(crit, feat_vec < self.std_thresh(feat_vec))
         if self.min_thresh is not None:
             crit = np.logical_or(crit, feat_vec < self.min_thresh)
         if self.max_thresh is not None:

@@ -26,6 +26,8 @@ import ipdb
 
 import random
 
+from glob import glob
+
 # set the random seed
 random.seed(1337)
 np.random.seed(1337)
@@ -117,6 +119,11 @@ _log.addHandler(ch)
 # logging.basicConfig(level=logging.INFO,
 #                     format='[%(process)-10s][%(threadName)-10s][%(funcName)s] %(message)s',
 #                     handlers=[ColorHandler()])
+'''
+=======================================================================
+                             END LOGGING
+=======================================================================
+'''
 
 '''
 =======================================================================
@@ -155,7 +162,7 @@ eye_scorer = ScoreEyes(classifier)
 
 # generate the filters
 _log.info('generating filters')
-pix_filt = ThreshFilt(thresh=0)
+pix_filt = ThreshFilt(thresh=200)
 scene_filt = SceneChangeFilter()
 face_filt = FaceFilter()
 eye_filt = EyeFilter()
@@ -188,8 +195,17 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
 
 _log.info('Reading in video')
 video_file = '/data/rank_centrality/starwars.mp4'
-video = cv2.VideoCapture(video_file)
-video_name = 'star wars'
-n = 5
+videos = [video_file] + glob('/data/discovery_pres/videos/*')
+for video_file in videos:
+    video = cv2.VideoCapture(video_file)
+    video_name = video_file.split('/')[-1].split('.')[0]
+    #video_name = 'star wars'
+    n = 5
 
-thumbs = LS.choose_thumbnails(video, n, video_name)
+    thumbs = LS.choose_thumbnails(video, n, video_name)
+
+    for n,t in enumerate(thumbs):
+        cv2.imwrite('/data/discovery_pres/extracted_thumbs/%s_%i.jpg'%(video_name, n), t[0])
+    from cPickle import dump
+    with open('/data/discovery_pres/extracted_thumb_data/%s'%video_name, 'w') as f:
+        dump(thumbs, f)

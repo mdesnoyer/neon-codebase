@@ -628,7 +628,7 @@ class LocalSearcher(object):
         '''
         mean_score = (start_score + end_score) / 2.
         if mean_score > self.min_score:
-            if mean_score > self.stats['score'].mean():
+            if mean_score > self.stats['score'].mean:
                 _log.debug('Interval should be searched')
                 return True
             else:

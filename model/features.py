@@ -394,7 +394,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            feat_vec.append(np.max(np.var(np.var(images[0],0),0)))
+            feat_vec.append(np.max(np.var(np.var(img,0),0)))
         return np.array(feat_vec)
 
     def get_feat_name(self):
