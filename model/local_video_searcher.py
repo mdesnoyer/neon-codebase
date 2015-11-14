@@ -27,6 +27,7 @@ import traceback
 from Queue import Queue
 from itertools import permutations
 from collections import OrderedDict as odict
+from collections import defaultdict as ddict
 from random import getrandbits
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -187,7 +188,7 @@ class Combiner(object):
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
-    def __init__(self, weight_dict=dict(), weight_valence=dict(),
+    def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
                  combine=lambda x: np.sum(x)):
         '''
         weight_dict is a dictionary of {'stat name': weight} which yields
@@ -221,8 +222,6 @@ class Combiner(object):
         defined weight, then we simply return the product of this weight with
         the value of the feature. 
         '''
-        if self.weight_dict.has_key(feat_name):
-            return [x * self.weight_dict[feat_name] for x in feat_vec]
         
         if self._stats_dict.has_key(feat_name):
             vals = []
@@ -236,9 +235,11 @@ class Combiner(object):
                     rank = 1. - rank
                 if valence == NORMALIZE:
                     rank = 1. - abs(0.5 - rank)*2
-                vals.append(rank)
+                vals.append(rank * self.weight_dict[feat_name])
             return vals
 
+        else:
+            return [x * self.weight_dict[feat_name] for x in feat_vec]
         return feat_vec
 
     def combine_scores(self, feat_dict):
@@ -426,7 +427,7 @@ class ResultsList(object):
 
         if dists[arg_srt_idx[0]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
-                        'seen in the video so far.'res)%(res))
+                        'seen in the video so far.')%(res))
             return False
         # otherwise, iterate over the lowest scoring ones and replace the
         # lowest one that is 'less different' than you are from the 
