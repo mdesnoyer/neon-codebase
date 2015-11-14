@@ -149,15 +149,18 @@ class ThreshFilt(LocalFilter):
     '''
     def __init__(self, thresh, feature='pixvar'):
         super(ThreshFilt, self).__init__()
-        self.thresh = thresh
+        self._thresh = thresh
         self.feature = feature
 
+    @property
+    def thresh(self):
+        try:
+            return self._thresh()
+        except TypeError:
+            return self._thresh
+
     def _filter_impl(self, feat_vec):
-        if hasattr(self.thresh, '__call__'):
-            thresh = self.thresh()
-        else:
-            thresh = self.thresh
-        return feat_vec > thresh
+        return feat_vec > self.thresh
 
 class SceneChangeFilter(LocalFilter):
     '''
@@ -193,36 +196,42 @@ class SceneChangeFilter(LocalFilter):
         super(SceneChangeFilter, self).__init__()
         self.mean_mult = mean_mult
         self.std_mult = std_mult
-        self.min_thresh = min_thresh
-        self.max_thresh = max_thresh
+        self._min_thresh = min_thresh
+        self._max_thresh = max_thresh
         self.feature = 'sad'
 
-    def _get_thresh1(self, feat_vec):
-        return np.mean(feat_vec) * self.mean_mult
+    @property
+    def mean_thresh(self):
+        return np.mean(feat_vec) * self.mean_mult 
 
-    def _get_thresh2(self, feat_vec):
+    @property
+    def std_thresh(self):
         return np.std(feat_vec) * self.std_mult + np.mean(feat_vec)
 
+    @property
+    def min_thresh(self):
+        try:
+            return self._min_thresh()
+        except TypeError:
+            return self._min_thresh
+
+    @peropty
+    def max_thresh(self):
+        try:
+            return self._max_thresh()
+        except TypeError:
+            return self._max_thresh
+
     def _filter_impl(self, feat_vec):
-        if hasattr(self.min_thresh, '__call__'):
-            min_thresh = self.min_thresh()
-        else:
-            min_thresh = self.min_thresh
-        if hasattr(self.max_thresh, '__call__'):
-            max_thresh = self.max_thresh()
-        else:
-            max_thresh = max_thresh
         crit = np.ones(feat_vec.shape, dtype=bool)
         if self.mean_mult is not None:
-            thresh1 = self._get_thresh1(feat_vec)
-            crit = np.logical_and(crit, feat_vec < thresh1)
+            crit = np.logical_and(crit, feat_vec < self.mean_thresh)
         if self.std_mult is not None:
-            thresh2 = self._get_thresh2(feat_vec)
-            crit = np.logical_and(crit, feat_vec < thresh2)
-        if min_thresh is not None:
-            crit = np.logical_or(crit, feat_vec < min_thresh)
-        if max_thresh is not None:
-            crit = np.logical_and(crit, feat_vec < max_thresh)
+            crit = np.logical_and(crit, feat_vec < self.std_thresh)
+        if self.min_thresh is not None:
+            crit = np.logical_or(crit, feat_vec < self.min_thresh)
+        if self.max_thresh is not None:
+            crit = np.logical_and(crit, feat_vec < self.max_thresh)
         return crit
 
 class FaceFilter(LocalFilter):
