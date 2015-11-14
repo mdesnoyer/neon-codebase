@@ -178,6 +178,12 @@ class SceneChangeFilter(LocalFilter):
         Note: min_thresh and max_thresh may be calculated dynamically, similar
         to ThreshFilt, if passed as a function that takes no parameter. 
 
+        Note: There is an edge case in which filtering is performed on only
+        one image. This can occur if the previous filters reject all-but-one
+        image, in which case the SAD feature generator cannot calculate SAD,
+        and hence the entire interval is thrown out (as it's likely to be bad
+        anyway). 
+
         Constructs parameters based on mean and std.
 
         thresh1 = mean(SAD) * mean_mult
@@ -220,6 +226,9 @@ class SceneChangeFilter(LocalFilter):
             return self._max_thresh
 
     def _filter_impl(self, feat_vec):
+        if len(feat_vec) < 2:
+            # nothing can be determined. Throw the whole thing out.
+            return np.array([False])
         crit = np.ones(feat_vec.shape, dtype=bool)
         if self.mean_mult is not None:
             crit = np.logical_and(crit, feat_vec < self.mean_thresh(feat_vec))
