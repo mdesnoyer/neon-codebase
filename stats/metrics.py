@@ -84,9 +84,15 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                     stats['lift'][base][top] = (
                         (thumb_ctrs[top] - thumb_ctrs[base]) /
                         thumb_ctrs[base])
-                stats['revlift'][base][top] = (thumb_ctrs[top] - 
-                                               thumb_ctrs[base])
-                stats['xtra_conv_at_sig'][base][top] = (
+                #stats['revlift'][base][top] = (thumb_ctrs[top] - 
+                #                               thumb_ctrs[base])
+                if (thumb_ctrs[top] < 1e-8 or
+                    not np.isfinite(cum_ctr[top][idx])):
+                    stats['revlift'][base][top] = 0.0
+                else:
+                    stats['revlift'][base][top] = (
+                        1 - (thumb_ctrs[base] / thumb_ctrs[top]))
+		stats['xtra_conv_at_sig'][base][top] = (
                     cum_conv[top][idx] - cum_imp[top][idx] *
                     cum_ctr[base][idx])
             else:
@@ -112,8 +118,12 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                     cum_ctr[top][idx] - cum_ctr[base][idx]) /
                     cum_ctr[base][idx])
 
-                stats['revlift'][base][top] = (
-                    cum_ctr[top][idx] - cum_ctr[base][idx])
+                if (cum_ctr[top][idx] < 1e-8 or 
+                    not np.isfinite(cum_ctr[top][idx])):
+                    stats['revlift'][base][top] = 0.0
+                else:
+                    stats['revlift'][base][top] = (
+                        1 - (cum_ctr[base][idx] / cum_ctr[top][idx]))
 
                 stats['xtra_conv_at_sig'][base][top] = (
                     cum_conv[top][idx] - cum_imp[top][idx] * 
@@ -121,18 +131,18 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
 
     return stats
 
-def calc_extra_conversions(impressions, revlift):
+def calc_extra_conversions(conversions, revlift):
     '''Calculate the extra conversions for each thumb relative to the others.
     Inputs:
-    impressions - A pandas DataFrame of impression counts where rows are hours
+    conversions - A pandas DataFrame of conversion counts where rows are hours
                   and columns are thumbnails
     revlift - A DataFrame of lift where row and cols are thumbs. cols are baseline
     Returns:
     A DataFrame of extra conversions in the same shape as revlift
     '''
-    impr_totals = impressions.sum()
+    conv_totals = conversions.sum()
             
-    retval = revlift.multiply(impr_totals, axis='index')
+    retval = revlift.multiply(conv_totals, axis='index')
     retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
     return retval
 

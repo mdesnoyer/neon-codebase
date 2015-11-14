@@ -69,25 +69,8 @@ def connect():
                                 port=options.stats_port,
                                 timeout=10000)
 
-def get_video_objects():
-    _log.info('Querying for video ids')
-    conn = connect()
-    cursor = conn.cursor()
-    cursor.execute(
-    """select distinct regexp_extract(thumbnail_id, 
-    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
-    thumbnail_id is not NULL and
-    tai='%s' %s""" % (options.pub_id, 
-                      statutils.get_time_clause(options.start_time,
-                                                options.end_time)))
-
-    vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
-    video_ids = [vidRe.match(x[0]).group(2) for 
-                 x in cursor if vidRe.match(x[0])]
-
+def filter_video_objects(videos):
     _log.info('Loading video info')
-    videos = neondata.VideoMetadata.get_many(video_ids)
-    videos = [x for x in videos if x is not None]
     requests = neondata.NeonApiRequest.get_many([(x.job_id, x.get_account_id())
                                                  for x in videos])
     retval = []
@@ -123,6 +106,28 @@ def get_video_objects():
 
         retval.append(video)
     return retval
+    
+
+def get_video_objects():
+    _log.info('Querying for video ids')
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+    """select distinct regexp_extract(thumbnail_id, 
+    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
+    thumbnail_id is not NULL and
+    tai='%s' %s""" % (options.pub_id, 
+                      statutils.get_time_clause(options.start_time,
+                                                options.end_time)))
+
+    vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
+    video_ids = [vidRe.match(x[0]).group(2) for 
+                 x in cursor if vidRe.match(x[0])]
+
+    videos = neondata.VideoMetadata.get_many(video_ids)
+    videos = [x for x in videos if x is not None]
+
+    return filter_video_objects(videos)
     
 
 def collect_stats(thumb_info, video_info,
@@ -236,7 +241,7 @@ def collect_stats(thumb_info, video_info,
         cum_conv = windowed_conversions.cumsum().fillna(method='ffill')
             
         extra_conv = stats.metrics.calc_extra_conversions(
-            windowed_impressions,
+            windowed_conversions,
             cross_stats['revlift'])
 
         # Find the baseline thumb
@@ -447,29 +452,7 @@ def calculate_cmsdb_stats():
     videos = list(neondata.NeonUserAccount(
         None, api_key=api_key).iterate_all_videos())
 
-    # Get the published time if we don't know it
-    requests = neondata.VideoMetadata.get_video_requests(
-        [x.key for x in videos if x.publish_date is None])
-    requests = dict([(x.video_id, x) for x in requests])
-    for video in videos:
-        if video.publish_date is None:
-            request = requests.get(video.key, None)
-            if request is not None:
-                video.publish_date = request.publish_date
-
-    # Filter the videos by time
-    if options.start_time:
-        start_time = dateutil.parser.parse(options.start_time)
-        videos = [x for x in videos if 
-                  (x.publish_date is None or 
-                   dateutil.parser.parse(x.publish_date) > start_time)]
-
-    if options.end_time:
-        end_time = dateutil.parser.parse(options.end_time)
-        videos = [x for x in videos if 
-                  (x.publish_date is None or 
-                   dateutil.parser.parse(x.publish_date) < end_time)]
-    
+    videos = filter_video_objects(videos)
 
     return pandas.Series({
         'Video Counts' : len(videos),
