@@ -324,6 +324,43 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'eyes'
 
+class LightnessGenerator(RegionFeatureGenerator):
+    '''
+    Returns the mean darkness in an image.
+    '''
+    def __init__(self, max_height=480):
+        super(DarknessGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(max_height=self.max_height)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            # check to see if the image is black and white
+            if len(img.shape) < 3:
+                return np.mean(img)
+            elif img.shape[2] == 1:
+                return np.mean(img)
+            # convert to HSV
+            feat_vec.append(np.mean(cv2.cvtColor(img, cv2.cv.BGR2HSV)[:,:,2]))
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'lightness'
+
 class TextGenerator(RegionFeatureGenerator):
     '''
     Returns the quantity of text per frame given a sequence
