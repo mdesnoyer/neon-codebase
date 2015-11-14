@@ -193,6 +193,18 @@ class PostgresDB(tornado.web.RequestHandler):
             self.port = options.get('cmsdb.neondata.db_port')
             self.name = options.get('cmsdb.neondata.db_name')
             self.user = options.get('cmsdb.neondata.db_user')
+            
+            # a base pool to draw connnections from, this will be 
+            # the pool you get a connection from when the first call is made
+            #self.base_io_loop = tornado.ioloop.IOLoop.current() 
+            #self.base_pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
+            #                           ioloop=tornado.ioloop.IOLoop.current(),
+            #                           size=options.get('cmsdb.neondata.pool_size'),
+            #                           cursor_factory=psycopg2.extras.RealDictCursor)
+            self.base_pool = None 
+            #self.base_pool.connect()
+            # keeps track of the io_loops we have seen, mapped from 
+            # id -> pool
             self.io_loop_dict = {}
              
         @tornado.gen.coroutine
@@ -209,36 +221,60 @@ class PostgresDB(tornado.web.RequestHandler):
             dict_item = self.io_loop_dict.get(io_loop_id)
 
             if dict_item is None: 
-                # this is the first time we've seen this io_loop - just 
-                # send them a Connection object, and get them ready for a pool 
-                new_item = {} 
-                new_item['pool'] = None 
-                self.io_loop_dict[io_loop_id] = new_item
-                mo_conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
-                                            ioloop=current_io_loop,
-                                            cursor_factory=psycopg2.extras.RealDictCursor)
-
-                conn = yield self._get_momoko_connection(mo_conn) 
-            else:
-                # we have seen this ioloop before, it may or may not have a pool 
-                pool = dict_item['pool'] 
-                if pool is None:  
-                    pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
-                                       ioloop=current_io_loop, 
-                                       size=options.get('cmsdb.neondata.pool_size'), 
+                # this is the first time we've seen this io_loop just 
+                # get them set up for a pool, and return the connection 
+                item = {}
+                item['pool'] = None 
+                self.io_loop_dict[io_loop_id] = item 
+ 
+                db = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
+                                       ioloop=current_io_loop,
                                        cursor_factory=psycopg2.extras.RealDictCursor)
-                    dict_item['pool'] = pool 
-                    
-                conn = yield self._get_momoko_connection(pool)
+                conn = yield self._get_momoko_connection(db) 
+            else:
+                # we have seen this ioloop before, it has a pool use it 
+                if dict_item['pool'] is None: 
+                    db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
+                                     ioloop=current_io_loop, 
+                                     size=1, 
+                                     max_size=options.get('cmsdb.neondata.pool_size'),
+                                     auto_shrink=True,  
+                                     cursor_factory=psycopg2.extras.RealDictCursor)
+                    dict_item['pool'] = yield db.connect()
+                
+                pool = dict_item['pool']
+                conn = yield self._get_momoko_connection(pool, True)
             raise tornado.gen.Return(conn)
-        
+
+        @tornado.gen.coroutine
+        def return_connection(self, conn): 
+            '''
+            call this to return connections you are done with 
+
+            this should still be called to ensure the 
+            connections are properly returned to the pool, or 
+            closed entirely assuming the connection was made 
+            without a pool 
+            '''  
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            io_loop_id = id(current_io_loop)
+            dict_item = self.io_loop_dict.get(io_loop_id)
+            pool = dict_item['pool']
+            if pool is None: 
+                conn.close()
+            else: 
+                pool.putconn(conn) 
+             
         @tornado.gen.coroutine 
-        def _get_momoko_connection(self, mo_conn):
+        def _get_momoko_connection(self, db, is_pool=False):
             conn = None 
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
             for i in range(int(num_of_tries)):
-                try: 
-                    conn = yield mo_conn.connect()
+                try:
+                    if is_pool: 
+                        conn = yield db.getconn()
+                    else: 
+                        conn = yield db.connect()
                     break
                 except psycopg2.OperationalError as e: 
                     time.sleep(0.3) 
@@ -1271,11 +1307,10 @@ class StoredObject(object):
             rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
-
             query = "INSERT INTO %s (_data, _type) \
-                     VALUES('%s', '%s')" % (self.__class__.__name__.lower(), 
+                     VALUES('%s', '%s')" % (self._baseclass_name().lower(), 
                                             value, 
-                                            self.__class__.__name__)
+                                            self._baseclass_name())
             
             try:  
                 result = yield conn.execute(query)
@@ -1284,7 +1319,7 @@ class StoredObject(object):
                 # we need to do an update here
                 query = "UPDATE %s \
                          SET _data = '%s' \
-                         WHERE _data->>'key' = '%s'" % (self.__class__.__name__.lower(), 
+                         WHERE _data->>'key' = '%s'" % (self._baseclass_name().lower(), 
                                                         value, 
                                                         self.account_id)
                 result = yield conn.execute(query) 
@@ -1294,7 +1329,7 @@ class StoredObject(object):
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
                 statemon.state.increment('postgres_unknown_errors')
             
-            conn.close()
+            db.return_connection(conn)
             raise tornado.gen.Return(rv)
         else: 
             db_connection = DBConnection.get(self)
@@ -1391,7 +1426,7 @@ class StoredObject(object):
             obj = None 
             query = "SELECT _data, _type \
                      FROM %s \
-                     WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+                     WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
             cursor = yield conn.execute(query)
             result = cursor.fetchone()
@@ -1403,7 +1438,7 @@ class StoredObject(object):
                 if create_default:
                     obj = cls(key)
 
-            conn.close()
+            db.return_connection(conn)
             raise tornado.gen.Return(obj)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1464,7 +1499,7 @@ class StoredObject(object):
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
                 results.append(obj) 
-            conn.close()
+            db.return_connection(conn)
             raise tornado.gen.Return(results)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1498,7 +1533,7 @@ class StoredObject(object):
                 obj = cls._create(result['_data']['key'], result)
                 results.append(obj) 
             
-            conn.close()
+            db.return_connection(conn)
             raise tornado.gen.Return(results)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1626,7 +1661,7 @@ class StoredObject(object):
                         sql_statements.append(query) 
     
                 cursor = yield conn.transaction(sql_statements)
-                conn.close()
+                db.return_connection(conn)
                 raise tornado.gen.Return(mappings) 
         else:  
             def _getandset(pipe):
@@ -1696,7 +1731,7 @@ class StoredObject(object):
                 sql_statements.append(query)
             #TODO figure out rv 
             cursor = yield conn.transaction(sql_statements)
-            conn.close()
+            db.return_connection(conn)
         else: 
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -2236,7 +2271,7 @@ class NeonApiKey(NamespacedStoredObject):
 
             cursor = yield conn.execute(query)
             result = cursor.fetchone()
-            conn.close()
+            db.return_connection(conn)
             if result:  
                 raise tornado.gen.Return(result['_data']['api_key']) 
             else: 
@@ -2436,7 +2471,6 @@ class NeonUserAccount(NamespacedStoredObject):
         '''Adds a platform object to the account.'''
         if len(self.integrations) == 0:
             self.integrations = {}
-        #import pdb; pdb.set_trace()
         self.integrations[platform.integration_id] = platform.get_ovp()
 
     @utils.sync.optional_sync

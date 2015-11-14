@@ -2633,6 +2633,8 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
 class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPostgresPubSub, self).setUp()
+    def tearDown(self): 
+        neondata.PostgresPubSub.instance = None
     
     @classmethod
     def setUpClass(cls): 
