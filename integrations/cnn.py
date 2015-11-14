@@ -91,10 +91,16 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             return None
 
     def _get_title(cnn_json_item):
-        if cnn_json_item.has_key("headline"):
-            return cnn_json_item["headline"]
-        else:
-            return ""
+        return cnn_json_item.get('has_key', "headline")
+
+    def _get_custom_data(cnn_json_item):
+        custom_data = cnn_json_item.get('topics', {})
+        custom_data['_cnn_topic_data'] = {
+            'cnn_class' : vid_obj['class'],
+            'cnn_label' : vid_obj['label'],
+            'cnn_topic_id' : vid_obj['id']
+            }
+        return custom_data
 
     def lookup_cnn_new_videos():
         thumb = ""
@@ -111,8 +117,11 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 existing_video = yield tornado.gen.Task(VideoMetadata.get, InternalVideoID.generate(api_key, videoID))
                 if existing_video is None:
                     title = _get_title(video)
-                    thumb = _get_best_image_info(data['relatedMedia'])
+                    thumb, thumb_id = _get_best_image_info(data['relatedMedia'])
                     vid_src = _get_video_url_to_download(data)
+
+                    custom_data = _get_custom_data(video)
+
                     if (thumb != "" and vid_src != "" and videoID != ""):
                         # The video hasn't been submitted before
                         job_id = None
@@ -120,8 +129,13 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                             response = yield self.submit_video(
                                 videoID,
                                 video_src,
+                                external_thumbnail_id=thumb_id,
+                                custom_data = custom_data,
+                                duration=video['duration'],
+                                publish_date=(video['firstPublishDate'].isoformat() if 
+                                              video['firstPublishDate'] is not None else None),
                                 video_title=unicode(title),
-                                default_thumbnail=thumb,
+                                default_thumbnail=thumb)
                             job_id = response['job_id']
                         except Exception as e:
                             statemon.state.increment('unexpected_submission_error')
@@ -132,12 +146,16 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
     @staticmethod
     def _get_best_image_info(relatedMedia_media_json):
         '''Returns the (url, {image_struct}) of the best image in the 
-        CNN related media  object
+        CNN related media object
         '''
-        if relatedMedia_media_json.has_key('cuts'):
-            cuts = data['cuts']
-            if cuts.has_key('exlarge16to9'):
-                return cuts['exlarge16to9'].url
+        if relatedMedia_json.has_key('media'):
+            #now we need to iter on the items as there could be multiple images here
+            for item in relatedMedia_media_json['media']:
+                if item.has_key('type') and item['type'] == 'image':
+                    cuts = data['cuts']
+                    thumb_id = data['imageId']
+                    if cuts.has_key('exlarge16to9'):
+                        return cuts['exlarge16to9'].url, thumb_id
         else:
             return None
     
