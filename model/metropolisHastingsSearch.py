@@ -146,6 +146,14 @@ class MonteCarloMetropolisHastings(object):
         explore_coef : a value between 0 and 1, the degree to which the
                    algorithm will favor exploration over exploitation.
         '''
+        self._reset()
+        self.search_interval = search_interval
+        self.base_sample_prob = base_sample_prob
+        explore_coef = max(0., explore_coef)
+        explore_coef = min(1., explore_coef)
+        self._ex_co = explore_coef
+
+    def _reset(self):
         self.N = None
         self.tot = None
         self.buffer = None
@@ -154,12 +162,7 @@ class MonteCarloMetropolisHastings(object):
         self.n_samples = 0
         self.tot_score = 0.
         self.mean = 1.
-        self.search_interval = search_interval
-        self.base_sample_prob = base_sample_prob
         self.max_interval = (self.N, 0, self.N)
-        explore_coef = max(0., explore_coef)
-        explore_coef = min(1., explore_coef)
-        self._ex_co = explore_coef
 
     def start(self, elements):
         '''
@@ -395,6 +398,16 @@ class MonteCarloMetropolisHastings(object):
         m = float(y2 - y1) / float(x2 - x1)
         return m * (x3 - x1) + y1
 
+    def __getstate__(self):
+        '''
+        While using dill drastically improves our ability to pickle the
+        objects involved in prediction, we need to reset the result object
+        when it attempts to serialize itself, otherwise we'll have a situation
+        in which the maximum recursion depth is exceeded due to the mutual
+        pointers between elements of the results list.
+        '''
+        self._reset()
+        return self.__dict__.copy()
 
 class MCMH_rpl(MonteCarloMetropolisHastings):
     '''
@@ -420,6 +433,13 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
 
     def start(self, elements):
         super(MCMH_rpl, self).start(elements)
+        self.searched = 0
+
+    def _reset(self):
+        '''
+        Removes knowledge about the video being processed.
+        '''
+        super(MCMH_rpl, self)._reset()
         self.searched = 0
 
     def get(self):
@@ -477,6 +497,9 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
             else:
                 return False
 
+    def __getstate__(self):
+        self._reset()
+        return self.__dict__.copy()
 
 
 

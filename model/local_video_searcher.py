@@ -426,7 +426,7 @@ class ResultsList(object):
 
         if dists[arg_srt_idx[0]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
-                        'seen in the video so far.'))
+                        'seen in the video so far.'res)%(res))
             return False
         # otherwise, iterate over the lowest scoring ones and replace the
         # lowest one that is 'less different' than you are from the 
@@ -555,12 +555,7 @@ class LocalSearcher(object):
         self.feats_to_cache = odict()
         self.combiner = combiner
         self.filters = filters
-        self.cur_frame = None
-        self.video = None
-        self.video_name = None
-        self.results = ResultsList(self.n_thumbs)
-        self.stats = dict()
-        self.fps = 0
+        self._reset()
 
         # determine the generators to cache.
         for f in feature_generators:
@@ -572,17 +567,20 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
 
+    def _reset(self):
+        self.cur_frame = None
+        self.video = None
+        self.video_name = None
+        self.results = None
+        self.stats = dict()
+        self.fps = None
+        self.col_stat = None
+        # it's not necessary to reset the search algo, since it will be reset
+        # internally when the self.__getstate__() method is called.
+
     @property
     def min_score(self):
         return self.results.min
-
-    @min_score.setter
-    def min_score(self, value):
-        pass # cannot be set, not sure if it's required
-
-    @min_score.deleter
-    def min_score(self):
-        pass # cannot be deleted
 
     def choose_thumbnails(self, video, n=1, video_name=''):
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
@@ -596,12 +594,11 @@ class LocalSearcher(object):
         self.stats['score'] = Statistics()
         self.col_stat = ColorStatistics()
         # define the variation measures and requirements
-        f_min_var_acc = lambda: self.col_stat.percentile(2.)
-        f_max_var_rej = lambda: self.col_stat.percentile(20.)
+        f_min_var_acc = lambda: max(0.05, self.col_stat.percentile(3.))
+        f_max_var_rej = lambda: max(0.10, self.col_stat.percentile(30.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej)
-        self.min_score = 0
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -842,3 +839,7 @@ class LocalSearcher(object):
                         start_frame + self.local_search_width + 1,
                         self.local_search_step)
         return frames, frameno
+    
+    def __getstate__(self):
+        self._reset()
+        return self.__dict__.copy()

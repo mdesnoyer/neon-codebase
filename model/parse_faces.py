@@ -111,6 +111,10 @@ class MultiStageFaceParser(object):
         self.get_seg(image)
         return self.fParse.get_all(['l eye', 'r eye'])
 
+    def __getstate__(self):
+        self.reset()
+        self.fParse.reset()
+        return self.__dict__.copy()
 
 class FindAndParseFaces(object):
     '''
@@ -122,10 +126,13 @@ class FindAndParseFaces(object):
         else:
             self.detector = detector
         self.predictor = predictor
+        self.reset()
+        self.prep = ImagePrep(convert_to_gray=True)
+
+    def reset(self):
         self._faceDets = []
         self._facePoints = []
-        self._image = None
-        self.prep = ImagePrep(convert_to_gray=True)
+        self._image = []
 
     def _check_valid(self, face=None, comp=None):
         '''
@@ -284,3 +291,7 @@ class FindAndParseFaces(object):
             for c in comp:
                 rcomps.append(self.get_comp(face, c))
         return rcomps
+
+    def __getstate__(self):
+        self.reset()
+        return self.__dict__.copy()
