@@ -1,19 +1,26 @@
 '''
+==============================================================================
 New video searcher. Implements:
     - local search (to circumvent closed-eyes, blurry, etc...)
     - Metropolis-Hastings sampling
     - Inverse filter / score order (3x speedup)
-
-NOTE:
+==============================================================================
+NOTES:
 This no longer inherits from the VideoSearcher() object, I'm not
 sure if we want to change how this works in the future.
 
-NOTE:
 While this initially used Statistics() objects to calculate running
 statistics, in principle even with a small search interval (32 frames)
 and a very long video (2 hours), we'd only have about 5,000 values to
 store, which we can easily manage. Thus we will hand-roll our own Statistics
 objects. 
+
+Some filters introduced in this iteration of the video searcher implements
+one filter, scene-change, that requires temporal information to be preserved
+and as such we shouldn't be filtering out frames before this can occur. What
+we're going to do when and if we have more than one temporal filter is an
+open question.
+==============================================================================
 '''
 
 import hashlib
@@ -594,7 +601,7 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
-        f_min_var_acc = lambda: max(0.015, self.col_stat.percentile(3.))
+        f_min_var_acc = lambda: max(0.015, self.col_stat.percentile(5.))
         f_max_var_rej = lambda: min(0.20, self.col_stat.percentile(50.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
