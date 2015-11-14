@@ -359,7 +359,7 @@ class LightnessGenerator(RegionFeatureGenerator):
         return np.array(feat_vec)
 
     def get_feat_name(self):
-        return 'lightness'
+        return 'light'
 
 class TextGenerator(RegionFeatureGenerator):
     '''
