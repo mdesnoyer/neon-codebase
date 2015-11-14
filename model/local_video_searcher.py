@@ -56,7 +56,6 @@ MINIMIZE = -1   # flag for statistics where better = smaller
 NORMALIZE = 0   # flag for statistics where better = closer to mean
 MAXIMIZE = 1    # flag for statistics where better = larger
 
-
 class Statistics(object):
     '''
     Replicates (to a degree) the functionality of the true running statistics
@@ -117,6 +116,54 @@ class Statistics(object):
         '''Returns the rank of x'''
         quant = np.sum(self._vals[:self._count] < x)
         return quant * 1./self._count
+
+class ColorStatistics(object):
+    '''
+    Similar to the Statistics object (defined below), but in lieu of storing
+    numeric values, it stores color histograms. This will allow us to 
+    establish a lower bound on the allowable distances--by empirically
+    establishing the mean and standard deviation of the pairwise distances
+    between frames in the video.
+
+    IMPORTANTLY, this flavor of the running statistic does NOT support
+    initialization with a set of ColorName objects.
+    '''
+    def __init__(self, max_size=150):
+        '''
+        Parameters:
+            max_size = the maximum number of color histograms to store.
+        '''
+        self._ColObjs = []
+        self._max_size = max_size
+        self._count = 0
+        self._dists = Statistics()
+
+    def push(self, img):
+        '''
+        Add an image into the statistics object. Unlike the vanilla Statistics
+        object, this does *not* support pushing multiple items simultaneously.
+        '''
+        cn = ColorName(img)
+        for pcn in self._ColObjs:
+            self._dists.push(pcn.dist(cn))
+        if self._count == self._max_size:
+            # randomly replace one
+            idx = np.random.choice(self._max_size)
+            self._ColObjs[idx] = cn
+        else:
+            self._ColObjs.append(cn)
+            self._count += 1
+
+        @property
+        def var(self):
+            return self._dists.var
+
+        @property
+        def mean(self):
+            return self._dists.mean
+
+        def rank(self, x):
+            return self._dists.rank(x)
 
 class Combiner(object):
     '''
@@ -257,8 +304,14 @@ class ResultsList(object):
     be added if the minimium pairwise distance between all results is
     decreased.
 
-    variety_thresh specifies the maximum threshold for image divergence; if
-    the new thumbnails is of distance at least variety_thresh, it is accepted.
+    There are two parameters that dictate whether or not an image should be
+    accepted or rejected based on its similarity. 
+        min_acceptable: a paramter that ensures that a thumbnail is *not*
+            accepted unless it is as least this different from the extant
+            pool.
+        max_rejectable: if the thumbnail is at least this different from the
+            other thumbnails, then it's not necessary to ensure that it still
+            increases the 'representativeness' of the top thumbnail.
     '''
     def __init__(self, n_thumbs=5, max_variety=True, variety_thresh=0.2):
         self._max_variety = max_variety
