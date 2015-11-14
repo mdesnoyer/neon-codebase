@@ -73,7 +73,7 @@ if __name__ == '__main__':
 
     # instantiate the combiner
     weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':MAXIMIZE}
+                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':NORMALIZE}
 
     ## ADD WEIGHTS TO THIS IF YOU WANT TO ADJUST THE RELATIVE IMPORTANCE OF
     ## THE FEATURES. 

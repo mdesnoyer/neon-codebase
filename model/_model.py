@@ -10,7 +10,7 @@ Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
 
-import cPickle as pickle
+import dill as pickle
 import cv2
 from . import features
 from . import filters
@@ -19,6 +19,7 @@ from . import predictor
 import utils.obj
 from utils import statemon
 from . import video_searcher
+from . import local_video_searcher
 
 _log = logging.getLogger(__name__)
 
