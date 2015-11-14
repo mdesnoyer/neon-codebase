@@ -100,6 +100,8 @@ class Statistics(object):
 
     @property
     def var(self):
+        if not self._count:
+            return 0
         if self._update_var:
             self._p_var = np.var(self._vals[:self._count])
             self._update_var = False
@@ -107,6 +109,8 @@ class Statistics(object):
 
     @property
     def mean(self):
+        if not self._count:
+            return 0
         if self._update_mean:
             self._p_mean = np.mean(self._vals[:self._count])
             self._update_mean = False
@@ -115,7 +119,14 @@ class Statistics(object):
     def rank(self, x):
         '''Returns the rank of x'''
         quant = np.sum(self._vals[:self._count] < x)
-        return quant * 1./self._count
+        return quant * 1./max(1, self._count)
+
+    def percentile(self, x):
+        '''Returns the xth percentile of the stored elements. x may be a float
+        between 0 and 100, inclusive. This is fairly computationally
+        expensive, however it's only being used when new thumbnails are being
+        added to the top thumbnails list.'''
+        return np.percentile(self._vals[:self._count], x)
 
 class ColorStatistics(object):
     '''
@@ -162,8 +173,13 @@ class ColorStatistics(object):
         def mean(self):
             return self._dists.mean
 
-        def rank(self, x):
-            return self._dists.rank(x)
+        def percentile(self, x):
+            '''
+            The notion of Rank doesnt have much meaning in this sense, since
+            we are measuring how different the thumbnails are from each other
+            in the aggregate.
+            '''
+            return self._dists.percentile(x)
 
 class Combiner(object):
     '''
@@ -312,12 +328,30 @@ class ResultsList(object):
         max_rejectable: if the thumbnail is at least this different from the
             other thumbnails, then it's not necessary to ensure that it still
             increases the 'representativeness' of the top thumbnail.
+
+        *** Both min_acceptable and max_rejectable may be functions.
     '''
-    def __init__(self, n_thumbs=5, max_variety=True, variety_thresh=0.2):
+    def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
+                 max_rejectable=0.2):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
-        self.variety_thresh = variety_thresh
+        self._min_acceptable = min_acceptable
+        self._max_rejectable = max_rejectable
+
+    @property
+    def self.min_acceptable(self):
+        try:
+            return self._min_acceptable()
+        except TypeError:
+            return self._min_acceptable
+
+    @property
+    def self.max_rejectable(self):
+        try:
+            return self._max_rejectable()
+        except TypeError:
+            return self._max_rejectable
 
     def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
@@ -382,8 +416,21 @@ class ResultsList(object):
         # get the distances of the candidate to the current results
         dists = self._compute_new_dist(res)
         arg_srt_idx = np.argsort(dists)
-        # iterate over the lowest scoring results, and see if you can
-        # replace them.
+        # if you are 'sufficiently different' then replace the lowest
+        # scoring one.
+        if dists[arg_srt_idx] > self.max_rejectable:
+            _log.debug(('%s thumbnail is sufficiently different from the '
+                        'other thumbnails given the variety seen in the '
+                        'video to be accepted')%(res))
+            return self._push_over_lowest(res)
+
+        if dists[arg_srt_idx] < self.min_acceptable:
+            _log.debug(('%s is insufficiently different given the variety '
+                        'seen in the video so far.'))
+            return False
+        # otherwise, iterate over the lowest scoring ones and replace the
+        # lowest one that is 'less different' than you are from the 
+        # remaining thumbnails
         sco_by_idx = np.argsort([x.score for x in self.results]) 
         for idx in sco_by_idx:
             if self.results[idx].score > res.score:
@@ -399,10 +446,6 @@ class ResultsList(object):
             # distance, you may replace it. 
             if c_min_dist >= np.min(self.dists[idx]):
                 break
-            # if you are 'sufficiently different' then replace the lowest
-            # scoring one.
-            if c_min_dist > self.variety_thresh:
-                return self._push_over_lowest(res)
         # replace the idx
         rep_score = self.results[idx].score
         _log.debug('%s replacing %s'%(res, self.results[idx]))
@@ -551,8 +594,13 @@ class LocalSearcher(object):
         for gen_name in self.feats_to_cache.keys():
             self.stats[gen_name] = Statistics()
         self.stats['score'] = Statistics()
+        self.col_stat = ColorStatistics()
+        # define the variation measures and requirements
+        f_min_var_acc = lambda: self.col_stat.percentile(2.)
+        f_max_var_rej = lambda: self.col_stat.percentile(20.)
         self.n_thumbs = n
-        self.results.reset(n)
+        self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
+                                   max_rejectable=f_max_var_rej)
         self.min_score = 0
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
