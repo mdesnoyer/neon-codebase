@@ -165,21 +165,21 @@ class ColorStatistics(object):
             self._ColObjs.append(cn)
             self._count += 1
 
-        @property
-        def var(self):
-            return self._dists.var
+    @property
+    def var(self):
+        return self._dists.var
 
-        @property
-        def mean(self):
-            return self._dists.mean
+    @property
+    def mean(self):
+        return self._dists.mean
 
-        def percentile(self, x):
-            '''
-            The notion of Rank doesnt have much meaning in this sense, since
-            we are measuring how different the thumbnails are from each other
-            in the aggregate.
-            '''
-            return self._dists.percentile(x)
+    def percentile(self, x):
+        '''
+        The notion of Rank doesnt have much meaning in this sense, since
+        we are measuring how different the thumbnails are from each other
+        in the aggregate.
+        '''
+        return self._dists.percentile(x)
 
 class Combiner(object):
     '''
@@ -340,14 +340,14 @@ class ResultsList(object):
         self._max_rejectable = max_rejectable
 
     @property
-    def self.min_acceptable(self):
+    def min_acceptable(self):
         try:
             return self._min_acceptable()
         except TypeError:
             return self._min_acceptable
 
     @property
-    def self.max_rejectable(self):
+    def max_rejectable(self):
         try:
             return self._max_rejectable()
         except TypeError:
@@ -418,13 +418,13 @@ class ResultsList(object):
         arg_srt_idx = np.argsort(dists)
         # if you are 'sufficiently different' then replace the lowest
         # scoring one.
-        if dists[arg_srt_idx] > self.max_rejectable:
+        if dists[arg_srt_idx[0]] > self.max_rejectable:
             _log.debug(('%s thumbnail is sufficiently different from the '
                         'other thumbnails given the variety seen in the '
                         'video to be accepted')%(res))
             return self._push_over_lowest(res)
 
-        if dists[arg_srt_idx] < self.min_acceptable:
+        if dists[arg_srt_idx[0]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
                         'seen in the video so far.'))
             return False
@@ -713,6 +713,8 @@ class LocalSearcher(object):
         for n, f in self.feats_to_cache.iteritems():
             vals = f.generate_many(frames, fonly=True)
             self.stats[n].push(vals[0])
+        # update the knowledge about its variance
+        self.col_stat.push(frames[0])
         self.stats['score'].push(frame_score)
         _log.debug('Took sample at %i, score is %.3f'%(frameno, frame_score))
         # update the search algo's knowledge
