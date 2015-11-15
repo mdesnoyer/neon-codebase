@@ -181,7 +181,7 @@ class ColorStatistics(object):
     def mean(self):
         return self._dists.mean
 
-    @property:
+    @property
     def median(self):
         return np.median(self._dists)
 
