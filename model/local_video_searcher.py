@@ -618,10 +618,10 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
-        f_min_var_acc = lambda: max(0.015, 
+        f_min_var_acc = lambda: min(0.015, 
                                         self.col_stat.percentile(
                                             1./self.n_thumbs))
-        f_max_var_rej = lambda: min(0.25, self.col_stat.percentile(60.))
+        f_max_var_rej = lambda: max(0.25, self.col_stat.percentile(60.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej)
