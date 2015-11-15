@@ -205,7 +205,7 @@ class PeriodicCoroutineTimer(object):
 
                 yield tornado.gen.maybe_future(self._callback())
             except Exception as e:
-                _log.error('Unexpected error when calling callback %s: %s'
-                           % (self._callback, e))
+                _log.exception('Unexpected error when calling callback %s: %s'
+                               % (self._callback, e))
             wait_time = self._callback_time - (time.time() - start_time)
             yield tornado.gen.sleep(max(wait_time, 0.0))
