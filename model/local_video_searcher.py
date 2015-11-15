@@ -60,9 +60,11 @@ statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
 
-MINIMIZE = -1   # flag for statistics where better = smaller
-NORMALIZE = 0   # flag for statistics where better = closer to mean
-MAXIMIZE = 1    # flag for statistics where better = larger
+MINIMIZE = -1     # flag for statistics where better = smaller
+NORMALIZE = 0     # flag for statistics where better = closer to mean
+MAXIMIZE = 1      # flag for statistics where better = larger
+PEN_LOW_HALF = -2 # flag for statistics where better > median
+PEN_HIGH_HALF = 2 # flag for statistics where better < median
 
 class Statistics(object):
     '''
@@ -86,6 +88,8 @@ class Statistics(object):
         self._p_var = None
         self._update_mean = False
         self._p_mean = None
+        self._update_median = False
+        self._p_median = None
         if init is not None:
             self.push(init)
 
@@ -123,6 +127,15 @@ class Statistics(object):
             self._p_mean = np.mean(self._vals[:self._count])
             self._update_mean = False
         return self._p_mean
+
+    @property
+    def median(self):
+        if not self._count:
+            return 0
+        if self._update_median:
+            self._p_median = np.median(self._dists)
+            self._update_median = False
+        return self._p_median
 
     def rank(self, x):
         '''Returns the rank of x'''
@@ -180,10 +193,6 @@ class ColorStatistics(object):
     @property
     def mean(self):
         return self._dists.mean
-
-    @property
-    def median(self):
-        return np.median(self._dists)
 
     def percentile(self, x):
         '''
@@ -246,6 +255,10 @@ class Combiner(object):
                     rank = 1. - rank
                 if valence == NORMALIZE:
                     rank = 1. - abs(0.5 - rank)*2
+                if valence == PEN_LOW_HALF:
+                    rank = 1. + min(0, rank - 0.5) * 2
+                if valence == PEN_HIGH_HALF:
+                    rank = 1. - max(0, rank - 0.5) * 2
                 vals.append(rank * self.weight_dict[feat_name])
             return vals
 
@@ -606,7 +619,8 @@ class LocalSearcher(object):
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
         f_min_var_acc = lambda: max(0.015, 
-                                    self.col_stat.percentile(1./self.n))
+                                        self.col_stat.percentile(
+                                            1./self.n_thumbs))
         f_max_var_rej = lambda: min(0.25, self.col_stat.percentile(60.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
