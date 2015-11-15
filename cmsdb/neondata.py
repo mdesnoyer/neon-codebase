@@ -1700,9 +1700,15 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify_many(cls, keys, func, create_missing=False, callback=None):
+        def _do_modify(raw_mappings):
+            # Need to convert the keys in the mapping to the ids of the objects
+            mod_mappings = dict(((v.get_id(), v) for v in 
+                                 raw_mappings.itervalues()))
+            return func(mod_mappings)
+        
         return super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
-            func,
+            _do_modify,
             create_missing=create_missing,
             callback=callback)
 
@@ -1742,6 +1748,11 @@ class DefaultedStoredObject(NamespacedStoredObject):
             create_default=True,
             log_missing=log_missing,
             callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=None, callback=None):
+        return super(DefaultedStoredObject, cls).modify_many(
+            keys, func, create_missing=True, callback=callback)
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -2272,7 +2283,7 @@ class ExperimentStrategy(DefaultedStoredObject):
                  baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT,
+                 experiment_type=SEQUENTIAL,
                  impression_type=MetricType.VIEWS,
                  conversion_type=MetricType.CLICKS,
                  max_neon_thumbs=None):
@@ -2294,8 +2305,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         self.min_conversion = min_conversion
 
         # Fraction adjusting power rate. When this number is 0, it is
-        # equivalent to standard t-test, when it is 1.0, it is the
-        # regular multi-bandit problem.
+        # equivalent to all the serving fractions being the same,
+        # while if it is 1.0, the serving fraction will be controlled
+        # by the strategy.
         self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
@@ -4124,14 +4136,36 @@ class ThumbnailMetadata(StoredObject):
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
-    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None,
+                 imp=None, conv=None, serving_history=None):
         super(ThumbnailStatus, self).__init__(thumbnail_id)
 
         # The fraction of traffic this thumbnail will get
         self.serving_frac = serving_frac
 
-        # The currently click through rate for this thumbnail
+        # List of (time, serving_frac) tuples
+        self.serving_history = serving_history or []
+
+        # The current click through rate for this thumbnail
         self.ctr = ctr
+
+        # The number of impressions this thumbnail received
+        self.imp = imp
+
+        # The number of conversions this thumbnail received
+        self.conv = conv
+
+    def set_serving_frac(self, serving_frac):
+        '''Sets the serving fraction. Returns true if it is new.'''
+        if (self.serving_frac is None or 
+            abs(serving_frac - self.serving_frac) > 1e-3):
+            self.serving_frac = serving_frac
+            self.serving_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 serving_frac))
+            return True
+        return False
+            
 
     @classmethod
     def _baseclass_name(cls):
