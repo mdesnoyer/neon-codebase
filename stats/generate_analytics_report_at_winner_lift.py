@@ -87,6 +87,9 @@ def get_video_objects():
 
     _log.info('Loading video info')
     videos = neondata.VideoMetadata.get_many(video_ids)
+    videos = [x for x in videos if x is not None]
+    requests = neondata.NeonApiRequest.get_many([(x.job_id, x.get_account_id())
+                                                 for x in videos])
     retval = []
     start_video_time = None
     end_video_time = None
@@ -94,18 +97,28 @@ def get_video_objects():
         start_video_time = dateutil.parser.parse(options.start_video_time)
     if options.end_video_time is not None:
         end_video_time = dateutil.parser.parse(options.end_video_time)
-    for video in videos:
-        if video is None:
+    for video, request in zip(videos, requests):
+        if video is None or request is None:
             continue
 
         if start_video_time:
-            if (video.publish_date is None or 
-                dateutil.parser.parse(video.publish_date) < start_video_time):
+            if video.publish_date is None:
+                if (request.publish_date is None or
+                    dateutil.parser.parse(request.publish_date) < 
+                    start_video_time):
+                    continue
+            elif (dateutil.parser.parse(video.publish_date) < 
+                  start_video_time):
                 continue
 
         if end_video_time:
-            if (video.publish_date is None or 
-                dateutil.parser.parse(video.publish_date) > end_video_time):
+            if video.publish_date is None:
+                if (request.publish_date is None or
+                    dateutil.parser.parse(request.publish_date) > 
+                    end_video_time):
+                    continue
+            elif (dateutil.parser.parse(video.publish_date) > 
+                  end_video_time):
                 continue
 
         retval.append(video)
@@ -206,8 +219,10 @@ def collect_stats(thumb_info, video_info,
                                         values='imp')
         conversions = hourly_data.pivot(index='hr', columns='thumbnail_id',
                                         values='conv')
+        
         cross_stats = stats.metrics.calc_lift_at_first_significant_hour(
-            impressions, conversions)
+            impressions, conversions, neondata.VideoStatus.get(video_id),
+            neondata.ThumbnailStatus.get_many(impressions.columns))
 
         windowed_impressions = impressions
         windowed_conversions = conversions
