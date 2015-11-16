@@ -225,6 +225,7 @@ class Combiner(object):
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         self._combine = combine
+        self._tot_pos = 1.
 
     def _set_stats_dict(self, stats_dict):
         '''
@@ -235,6 +236,8 @@ class Combiner(object):
         stats_dict is a dictionary of {'stat name': Statistics()}
         '''
         self._stats_dict = stats_dict
+        self._tot_pos = float(
+                            np.sum(weight_dict[x] for x in stats_dict.keys()))
 
     def _compute_stat_score(self, feat_name, feat_vec):
         '''
@@ -277,8 +280,8 @@ class Combiner(object):
         comb_scores = []
         for x in zip(*stat_scores):
             comb_score = self._combine(x)
-            comb_score /= (1. * len(x)) # normalize
-            comb_scores.append(self._combine(x))
+            comb_score /= self._tot_pos # normalize
+            comb_scores.append(comb_score)
         return comb_scores
 
 class _Result(object):
