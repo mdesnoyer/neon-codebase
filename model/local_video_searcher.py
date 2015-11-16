@@ -515,7 +515,7 @@ class ResultsList(object):
             else:
                 # convert to HSV, apply to last channel
                 img = cv2.cvtColor(res.image, cv2.cv.CV_BGR2HSV)
-                img = self.clahe.apply(img[:,:,2])
+                img[:,:,2] = self.clahe.apply(img[:,:,2])
                 res.image = cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
         self._update_dists(idx)
         self._update_min()
