@@ -134,8 +134,8 @@ class MonteCarloMetropolisHastings(object):
     draw that sample.
     '''
 
-    def __init__(self, search_interval=64,
-                 base_sample_prob=0.1, explore_coef=0.1):
+    def __init__(self, search_interval=64, base_sample_prob=0.1,
+                 explore_coef=0.1, clip=None):
         '''
         min_dist : the search interval. This won't actually sample from the
                    frames individually, but rather from 'search frames', which
@@ -152,6 +152,13 @@ class MonteCarloMetropolisHastings(object):
         explore_coef = max(0., explore_coef)
         explore_coef = min(1., explore_coef)
         self._ex_co = explore_coef
+        if clip == None:
+            clip = 0.
+        if not type(clip) == float:
+            clip = 0.
+        if (clip < 0.) or (clip > 1.):
+            clip = 0.
+        self.clip = clip
 
     def _reset(self):
         self.N = None
@@ -166,23 +173,34 @@ class MonteCarloMetropolisHastings(object):
         self._l_bound = None
         self._r_bound = None
 
-    def start(self, elements):
+    def start(self, elements, search_interval=None):
         '''
         Re-initializes the search.
 
         elements : the maximum number of elements over which we will search.
+        search_interval : a new search interval that, if you wish, will
+                          override the previous one defined.
         '''
+        if search_interval != None:
+            self.search_interval = search_interval
         self.tot = elements
-        self.N = int(elements) / self.search_interval
+        self.N = 1+((int(elements - 1) - 2*int(elements * self.clip)) / 
+                        self.search_interval)
         self.results = []
         self.max_score = 0.
         self.n_samples = 0
         self.tot_score = 0.
         self.mean = 1.
         # compute the buffer
-        self.buffer = ((elements
-                        % self.search_interval)
-                       / 2)
+        self.buffer = (elements - ((self.N - 1) * self.search_interval))/2
+        # self.buffer = (((elements
+        #                 % self.search_interval)
+        #                / 2) + int(elements * self.clip))
+        _log.info(('Search interval starting over %i frames, %i removed, '
+                   'with %i search frames')%(self.tot, 
+                                             ((self.N - 1)*
+                                                self.search_interval), 
+                                             self.N))
         self._l_bound = ThumbnailResultObject(
                             -1, score=self.mean,
                             dummy_frame=True)
@@ -196,7 +214,9 @@ class MonteCarloMetropolisHastings(object):
         '''
         Returns true if frameno is not a search frame.
         '''
-        return (frameno - self.buffer) % self.search_interval
+        not_search_interval = (frameno - self.buffer) % self.search_interval
+        too_high = frameno > (self.tot-1)
+        return not_search_interval or too_high
 
     def _insert_result_at(self, frameno, score=None, bad=False):
         '''
@@ -427,17 +447,17 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
     Instead, what it's going to do is replace samples and check if they can be
     sampled versus searched.
     '''
-    def __init__(self, search_interval=64,
-                 base_sample_prob=0.1, explore_coef=0.):
+    def __init__(self, search_interval=48,
+                 base_sample_prob=0.1, explore_coef=0., clip=None):
         # the search parameters are the same as for the
         # vanilla MCMH.
         super(MCMH_rpl, self).__init__(search_interval,
                                        base_sample_prob,
-                                       explore_coef)
+                                       explore_coef, clip=clip)
         self.searched = 0
 
-    def start(self, elements):
-        super(MCMH_rpl, self).start(elements)
+    def start(self, elements, search_interval=None):
+        super(MCMH_rpl, self).start(elements, search_interval)
         self.searched = 0
 
     def _reset(self):

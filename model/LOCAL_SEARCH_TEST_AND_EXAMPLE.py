@@ -199,7 +199,7 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    filters=filters,
                    feats_to_cache=feats_to_cache,
                    testing=True,
-                   comb_score_weight=1.0,
+                   feat_score_weight=2.0,
                    processing_time_ratio=1.5,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
@@ -239,7 +239,7 @@ def test(LS):
         from cPickle import dump
         with open('/data/discovery_pres/extracted_thumb_data/%s'%video_name, 'w') as f:
             dump(thumbs, f)
-        #break
+        break
     print 'Total time: %.2f'%(time()-start)
 
 if __name__ == '__main__':
