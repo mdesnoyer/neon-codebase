@@ -953,7 +953,7 @@ class LocalSearcher(object):
         # we need to be able to compute the SAD, so we need to
         # also insert local search steps
         for frameno in samples:
-            self._take_sample(framemno)
+            self._take_sample(frameno)
 
     def _get_frame(self, f):
         try:
