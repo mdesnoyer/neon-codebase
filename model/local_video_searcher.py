@@ -431,7 +431,7 @@ class ResultsList(object):
         if res._feat_score == None:
             fname += 'NA_'
         else:
-            fname += '%04.2f'%(res._feat_score)
+            fname += '%04.2f_'%(res._feat_score)
         fname += '%04.2f_'%(res.comb_score)
         if reason == 'accept':
             fname += 'accepted_replacing_%i.jpg'%(idx)
@@ -591,7 +591,7 @@ class LocalSearcher(object):
                  local_search_width=32,
                  local_search_step=4,
                  n_thumbs=5,
-                 comb_score_weight=0.5,
+                 comb_score_weight=0.,
                  mixing_samples=10,
                  search_algo=MCMH_rpl,
                  max_variety=True,
