@@ -335,8 +335,10 @@ class _Result(object):
     def _comp_comb_score(self, comb_score_weight):
         if comb_score_weight == None:
             self.comb_score = self.score
+            return
         if self._feat_score == None:
             self.comb_score = self.score
+            return
         self.comb_score = self.score + self._feat_score * comb_score_weight
 
     def dist(self, other):
@@ -718,7 +720,8 @@ class LocalSearcher(object):
         f_max_var_rej = lambda: max(0.25, self.col_stat.percentile(40.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
-                                   max_rejectable=f_max_var_rej)
+                                   max_rejectable=f_max_var_rej,
+                                   comb_score_weight=comb_score_weight)
         if self._testing:
             self._set_up_testing()
         # maintain results as:
