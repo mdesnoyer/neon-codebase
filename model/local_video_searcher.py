@@ -944,10 +944,11 @@ class LocalSearcher(object):
         _log.info('Mixing before search begins for %i frames'%(
                                                     self.mixing_samples))
         num_frames = self.mixing_samples
-        samples = np.linspace(0, num_frames,
+        samples = np.linspace(0, self.num_frames,
                               self.mixing_samples+2).astype(int)
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
+        _log.info('Taking %i initial samples'%(len(samples)))
         # we need to be able to compute the SAD, so we need to
         # also insert local search steps
         for frameno in samples:
