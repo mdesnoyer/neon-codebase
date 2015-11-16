@@ -134,7 +134,7 @@ class MonteCarloMetropolisHastings(object):
     draw that sample.
     '''
 
-    def __init__(self, search_interval=64, base_sample_prob=0.1,
+    def __init__(self, search_interval, base_sample_prob=0.1,
                  explore_coef=0.1, clip=None):
         '''
         min_dist : the search interval. This won't actually sample from the
@@ -455,7 +455,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
     Instead, what it's going to do is replace samples and check if they can be
     sampled versus searched.
     '''
-    def __init__(self, search_interval=48,
+    def __init__(self, search_interval,
                  base_sample_prob=0.1, explore_coef=0., clip=None):
         # the search parameters are the same as for the
         # vanilla MCMH.
