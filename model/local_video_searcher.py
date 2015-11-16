@@ -655,6 +655,7 @@ class LocalSearcher(object):
         self.local_search_width = local_search_width
         self.local_search_step = local_search_step
         self.n_thumbs = n_thumbs
+        self._comb_score_weight = comb_score_weight
         self.mixing_samples = mixing_samples
         self.search_algo = search_algo(local_search_width)
         self.generators = odict()
