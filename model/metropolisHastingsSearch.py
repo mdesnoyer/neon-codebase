@@ -44,7 +44,7 @@ class ThumbnailResultObject(object):
         Checks to see if ether the forward or backward interval can be
         searched. If the forward interval can be searched, it is assumed that
         it *is* searched, and sets lead_int_srchd to True. If the backward
-        interval can be searched, it does the same but for the previous frame. 
+        interval can be searched, it does the same but for the previous frame.
 
         If either can be searched, it returns (startFrame, endFrame,
         startScore, endScore) else it returns False.
@@ -131,7 +131,7 @@ class MonteCarloMetropolisHastings(object):
 
     Note that this will has a min_dist for sampling, such that if the next
     largest sampled thumbnail by frameno is closer than min_dist, it will not
-    draw that sample. 
+    draw that sample.
     '''
 
     def __init__(self, search_interval=64,
@@ -168,7 +168,7 @@ class MonteCarloMetropolisHastings(object):
 
     def start(self, elements):
         '''
-        Re-initializes the search. 
+        Re-initializes the search.
 
         elements : the maximum number of elements over which we will search.
         '''
@@ -180,7 +180,7 @@ class MonteCarloMetropolisHastings(object):
         self.tot_score = 0.
         self.mean = 1.
         # compute the buffer
-        self.buffer = ((elements 
+        self.buffer = ((elements
                         % self.search_interval)
                        / 2)
         self._l_bound = ThumbnailResultObject(
@@ -292,7 +292,7 @@ class MonteCarloMetropolisHastings(object):
         '''
         Returns a search interval if the frameno participates in a searchable
         interval. Note, this does not check that the frameno is valid as a
-        search frame, it simply assumes it is. 
+        search frame, it simply assumes it is.
 
         If it's valid, it returns (start, end, start_score, end_score)
         otherwise it returns False
@@ -326,10 +326,10 @@ class MonteCarloMetropolisHastings(object):
     def get_nearest(self, frameno):
         '''
         Returns the search frame nearest to the location
-        sampled. 
+        sampled.
         '''
-        nframe = self._frameno_to_search_frame(self, frameno)
-        return self._search_frame_to_frameno(self, nframe)
+        nframe = self._frameno_to_search_frame(frameno)
+        return self._search_frame_to_frameno(nframe)
 
     def _get_result(self, frameno):
         '''
@@ -361,7 +361,7 @@ class MonteCarloMetropolisHastings(object):
         lt = self._find_lt(target)
         gt = self._find_gt(target)
         return (lt, gt)
-        
+
     def _accept_sample(self, sample):
         '''
         Returns true or false if the sample
@@ -383,12 +383,12 @@ class MonteCarloMetropolisHastings(object):
             ldiff = sample - lt.frameno
         min_dist = min(ldiff, rdiff)
         dist_prob = min_dist**0.5
-        comb_prob = ((dist_prob * self._ex_co) 
+        comb_prob = ((dist_prob * self._ex_co)
                      *(score_prob * (1 - self._ex_co)))
         thresh = self.base_sample_prob + comb_prob
         accept = np.random.rand() < thresh
         return accept
-        
+
     def _predict_score(self, neighbs, sample):
         '''
         Predicts the score of a sample given its neighbors. Currently only
@@ -428,7 +428,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
     def __init__(self, search_interval=64,
                  base_sample_prob=0.1, explore_coef=0.):
         # the search parameters are the same as for the
-        # vanilla MCMH. 
+        # vanilla MCMH.
         super(MCMH_rpl, self).__init__(search_interval,
                                        base_sample_prob,
                                        explore_coef)
