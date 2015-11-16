@@ -237,6 +237,8 @@ class MonteCarloMetropolisHastings(object):
             if score == None:
                 score = self.mean
             res_obj = self._insert_result_at(frameno, score, bad)
+            # update the number of samples because we now have one extra
+            self.n_samples += 1
         else:
             res_obj.score = score
         self.max_score = max(self.max_score, score)
