@@ -99,6 +99,7 @@ class Statistics(object):
         '''
         self._update_var = True
         self._update_mean = True
+        self._update_median = True
         if type(x) == list:
             for ix in x:
                 self.push(ix)
@@ -133,7 +134,7 @@ class Statistics(object):
         if not self._count:
             return 0
         if self._update_median:
-            self._p_median = np.median(self._dists)
+            self._p_median = np.median(self._vals[self._count])
             self._update_median = False
         return self._p_median
 
@@ -500,11 +501,11 @@ class ResultsList(object):
         The thumbnail at index idx is replaced by the thumbnail res.
         '''
         old = self.results[idx]
+        self.results[idx] = res
         _log.info('%s is replacing %s'%(res, old))
         self._update_dists(idx)
         if old.score == self.min:
             self._update_min()
-        self.results[idx] = res
         self._write_testing_frame(res, 'accept', idx)
         return True
 
