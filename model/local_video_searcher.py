@@ -694,7 +694,10 @@ class LocalSearcher(object):
 
     def _set_up_testing(self):
         vname = self.video_name
-        vdir = os.path.join(self._testing_dir, vname)
+        if vname == None:
+            vdir = os.path.join(self._testing_dir, 'default')
+        else:
+            vdir = os.path.join(self._testing_dir, vname)
         try:
             os.mkdir(vdir)
         except:
@@ -723,14 +726,14 @@ class LocalSearcher(object):
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
                                    comb_score_weight=self._comb_score_weight)
-        if self._testing:
-            self._set_up_testing()
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
         # where rtuple is the value to be returned.
         self.video = video
         self.video_name = video_name
+        if self._testing:
+            self._set_up_testing()
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
         video_time = float(num_frames) / fps
