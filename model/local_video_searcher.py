@@ -135,7 +135,7 @@ class Statistics(object):
         if not self._count:
             return 0
         if self._update_median:
-            self._p_median = np.median(self._vals[self._count])
+            self._p_median = np.median(self._vals[:self._count])
             self._update_median = False
         return self._p_median
 
@@ -625,7 +625,7 @@ class LocalSearcher(object):
                 poor-performing samples (akin to an L-2 norm). Additionally,
                 because of the normalization, the feature score is always
                 constrained to be between 0.0 and 1.0. Thus the maximum the
-
+                feat_score can add to the score is feat_score_weight
             mixing_samples:
                 The number of samples to draw to establish baseline
                 statistics.
@@ -648,7 +648,9 @@ class LocalSearcher(object):
                 sequential processing. Thus, an ordered dict is used.
             feats_to_cache:
                 The name of all features to save as running statistics.
-                (features are only cached during sampling)
+                (features are only cached during sampling). This also dictates
+                which features contribute to the combined score, since feature
+                scores individually are their ranks in the population sample.
             combiner:
                 Combines the feature scores. See class definition above. This
                 replaces the notion of a list of criteria objects, which
@@ -837,7 +839,8 @@ class LocalSearcher(object):
         for f in self.filters:
             fgen = self.generators[f.feature]
             feats = fgen.generate_many(frames)
-            frame_feats[f.feature] = feats
+            if f.feature in self.feats_to_cache:
+                frame_feats[f.feature] = feats
             accepted = f.filter(feats)
             n_rej = np.sum(np.logical_not(accepted))
             n_acc = np.sum(accepted)
@@ -861,7 +864,9 @@ class LocalSearcher(object):
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue
-            frame_feats[k] = f.generate_many(frames)
+            if k in self.feats_to_cache:
+                feats = f.generate_many(frames)
+                frame_feats[k] = f.generate_many(frames)
         # get the combined scores
         comb = self.combiner.combine_scores(frame_feats)
         comb = np.array(comb)

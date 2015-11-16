@@ -340,7 +340,7 @@ class MonteCarloMetropolisHastings(object):
         cand = (frameno - self.buffer) / self.search_interval
         # ensure it's within range
         cand = max(0, cand)
-        cand = min(self.N, cand)
+        cand = min(self.N-1, cand)
         return cand
 
     def _search_frame_to_frameno(self, frameno):
