@@ -781,6 +781,18 @@ class LocalSearcher(object):
             formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
                                 '')
             results.append(formatted_result)
+        try:
+            perc_samp = self.search_algo.n_samples * 100./self.search_algo.N
+            _log.info('%.2f%% of video sampled')
+        except:
+            _log.info('Unknown percentage of video sampled')
+        try:
+            perc_srch = self.search_algo.searched * 100./self.search_algo.N
+            _log.info('%.2f%% of video searched')
+        except:
+            _log.info('Unknown percentage of video searched')
+
+        _log.info()
         return results
 
     def _conduct_local_search(self, start_frame, end_frame,
