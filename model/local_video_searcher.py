@@ -588,7 +588,7 @@ class LocalSearcher(object):
     def __init__(self, predictor, face_finder,
                  eye_classifier,
                  processing_time_ratio=1.0,
-                 local_search_width=32,
+                 local_search_width=48,
                  local_search_step=4,
                  n_thumbs=5,
                  comb_score_weight=0.,
@@ -701,6 +701,7 @@ class LocalSearcher(object):
         return self.results.min
 
     def choose_thumbnails(self, video, n=1, video_name=''):
+        self.reset()
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
 
@@ -848,13 +849,19 @@ class LocalSearcher(object):
         comb = np.array(comb)
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
+        indi_framescore = self.predictor.predict(best_frame)
+        inter_framescore = (start_score + end_score) / 2
+        # interpolate the framescore
+        flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
+        inter_framescore = (1 - flambda) * start_score + flambda * end_score
+        framescore = (indi_framescore + inter_framescore) / 2
         _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
-                    ' is %i with feature score %.3f')%(start_frame,
+                    ' is %i with interp score %.3f and with feature score '
+                    '%.3f')%(start_frame,
                             start_score, end_frame, end_score, best_frameno,
-                            np.max(comb)))
+                            framescore, np.max(comb)))
         # the selected frame (whatever it may be) will be assigned
         # the score equal to mean of its boundary frames.
-        framescore = (start_score + end_score) / 2
         # push the frame into the results object.
         self.results.accept_replace(best_frameno, framescore, best_frame,
                                     np.max(comb), meta=frame_feats)
