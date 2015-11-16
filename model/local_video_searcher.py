@@ -236,8 +236,6 @@ class Combiner(object):
         stats_dict is a dictionary of {'stat name': Statistics()}
         '''
         self._stats_dict = stats_dict
-        self._tot_pos = float(np.sum(
-                            [self.weight_dict[x] for x in stats_dict.keys()]))
 
     def _compute_stat_score(self, feat_name, feat_vec):
         '''
@@ -275,12 +273,14 @@ class Combiner(object):
         dictionary {'feature name': feature_vector}
         '''
         stat_scores = []
+        tot_pos = float(np.sum(
+                            [self.weight_dict[x] for x in feat_dict.keys()]))
         for k, v in feat_dict.iteritems():
             stat_scores.append(self._compute_stat_score(k, v))
         comb_scores = []
         for x in zip(*stat_scores):
             comb_score = self._combine(x)
-            comb_score /= self._tot_pos # normalize
+            comb_score /= tot_pos # normalize
             comb_scores.append(comb_score)
         return comb_scores
 

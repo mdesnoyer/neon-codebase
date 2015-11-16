@@ -185,8 +185,8 @@ feature_generators = [pix_gen, sad_gen, text_gen, face_gen, eye_gen,
                       vibrance_gen]
 
 _log.info('Generating combiner')
-weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':PEN_LOW_HALF}
+weight_valence = {'blur':MAXIMIZE, 'sad':NORMALIZE, 'eyes':MAXIMIZE,
+                  'text':MINIMIZE, 'pixvar':PEN_LOW_HALF, 'vibrance':PEN_LOW_HALF}
 combiner = Combiner(weight_valence=weight_valence)
 
 
