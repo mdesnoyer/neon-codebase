@@ -2741,6 +2741,141 @@ class TestPGExperimentStrategy(test_utils.neontest.AsyncTestCase):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
+class TestPGNeonAPIKey(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGNeonAPIKey, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGNeonAPIRequest(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGNeonAPIRequest, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGNeonPlatform(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGNeonPlatform, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGThumbnailMetadata(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGThumbnailMetadata, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGThumbnailServingURLs(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGThumbnailServingURLs, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGThumbnailStatus(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGThumbnailStatus, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGThumbnailURLMapper(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGThumbnailURLMapper, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGVideoMetadata, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGVideoStatus(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGVideoStatus, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
 class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGPlatformAndIntegration, self).setUp()
