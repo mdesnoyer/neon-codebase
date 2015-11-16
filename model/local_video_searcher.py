@@ -701,7 +701,7 @@ class LocalSearcher(object):
         return self.results.min
 
     def choose_thumbnails(self, video, n=1, video_name=''):
-        self.reset()
+        self._reset()
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
 
