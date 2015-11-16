@@ -236,8 +236,8 @@ class Combiner(object):
         stats_dict is a dictionary of {'stat name': Statistics()}
         '''
         self._stats_dict = stats_dict
-        self._tot_pos = float(
-                            np.sum(weight_dict[x] for x in stats_dict.keys()))
+        self._tot_pos = float(np.sum(
+                            [self.weight_dict[x] for x in stats_dict.keys()]))
 
     def _compute_stat_score(self, feat_name, feat_vec):
         '''

@@ -240,3 +240,6 @@ def test(LS):
             dump(thumbs, f)
         #break
     print 'Total time: %.2f'%(time()-start)
+
+if __name__ == '__main__':
+    test(LS)
