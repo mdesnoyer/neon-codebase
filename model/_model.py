@@ -30,6 +30,12 @@ class Model(object):
         self.predictor = predictor
         self.filt = filt
         if video_searcher is None:
+            # while it's tempting to modify this to use the LocalSearcher,
+            # this would require adding numerous arguments to the
+            # instantiation of the Model class, and as such convention will
+            # now become that BisectSearcher is the default video searcher,
+            # and is what will be adopted in the event there is insufficient
+            # information available.
             self.video_searcher = video_searcher.BisectSearcher(
                 predictor, filt)
         else:
