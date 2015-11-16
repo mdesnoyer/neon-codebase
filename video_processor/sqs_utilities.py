@@ -1,5 +1,6 @@
 import boto.exception
 import boto.sqs
+import boto.sqs.queue
 from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 from collections import deque
@@ -98,7 +99,6 @@ class VideoProcessingQueue(object):
         priority = random.uniform(0, self.max_priority)
         for index in range(len(self.cumulative_priorities)):
             if priority < self.cumulative_priorities[index]:
-                _log.info("Priority index is: %s" % str(index))
                 return index
    
     @run_on_executor
@@ -111,11 +111,10 @@ class VideoProcessingQueue(object):
            Returns:
            The queue object that corresponds to the queue of the given priority
         '''
-        _log.info("getting queue with priority: %s" % str(priority))
         return self.queue_list[priority]
 
     @run_on_executor    
-    def _add_priority_attribute(self, priority, message, timeout):
+    def _add_attributes(self, priority, message, timeout):
         '''Adds priority information to the message. This way, the client that
            reads the message does not need to know about the priority information
            of the queue it comes from, or even that such information exists.
@@ -154,15 +153,14 @@ class VideoProcessingQueue(object):
             Returns:
             Void
         '''
-        _log.info(queue)
         self.conn.change_message_visibility(queue, message.receipt_handle,
                                             timeout)
 
     @tornado.gen.coroutine
     def write_message(self, priority, message, timeout=300):
-        '''Writes a message to the specified priority queue. The priority
-           attribute is written to the message first by calling 
-           _add_priority_attribute
+        '''Writes a message to the specified priority queue. The priority and
+           durations attributes are written to the message first by calling 
+           _add_attributes
 
            Inputs:
            priority - the priority of the queue to be written to
@@ -171,12 +169,11 @@ class VideoProcessingQueue(object):
                                 default is 300 seconds (5 minutes)
 
            Returns:
-           True if successful, False otherwise
+           The message if successful, False otherwise
         '''
         queue = yield self._get_queue(priority)
-        message = yield self._add_priority_attribute(priority, message, timeout)
+        message = yield self._add_attributes(priority, message, timeout)
         final_message = queue.write(message)
-        _log.info("writing message")
         raise tornado.gen.Return(final_message)
 
     @tornado.gen.coroutine
@@ -192,23 +189,19 @@ class VideoProcessingQueue(object):
            Returns:
            A message if successful, None otherwise
         '''
+        _log.info("Reading message")
         priority = yield self._get_priority_qindex()
         message = None
         while priority < options.num_queues and message == None:
             queue = yield self._get_queue(priority)
-            _log.info("queue received")
             message = queue.read(message_attributes=['All'])
-            _log.info("message read")    
             priority += 1
 
         timeout = 300
         if(message):
-            _log.info("message exists")
             if(message.message_attributes['duration']['string_value']):
                 timeout = int(message.message_attributes['duration']['string_value'])
-            _log.info("timeout ensured")
             yield self._change_message_visibility(message, queue, timeout)
-            _log.info("visibility changed")
         raise tornado.gen.Return(message)
 
     @tornado.gen.coroutine

@@ -70,7 +70,6 @@ class SQSQueueMock(object):
         try:
             self.out_stream.close()
         except OSError:
-            # What happens here?
             return False
         return True
       
@@ -79,11 +78,9 @@ class SQSQueueMock(object):
         in_stream = cStringIO.StringIO(self.queue_list[priority].getvalue())
         with self.lock:
             prev_data = pickle.load(in_stream)
-        #for data in prev_data:
         if prev_data.get_body() == message.get_body():
             try:
                 prev_data.delete()
-                #break
             except ValueError:
                 return False
 
@@ -115,8 +112,7 @@ class SQSQueueMock(object):
             i += 1
         return messages
        
-    def read(self, visibility_timeout=None, message_attributes=None):
-        #random_index = randrange(0, self.num_queues)
+    def read(self, visibility_timeout=None):
         random_index = 0
         while(random_index < self.num_queues):
             self.out_stream = self.queue_list[random_index]
@@ -141,10 +137,9 @@ class SQSQueueMock(object):
         except IOError:
             return False
             
-        return True
+        return message
     
-class SQSConnectionMock(object):
-    #TODO: Have a way of checking for already existing queues    
+class SQSConnectionMock(object):   
     def get_queue(self, queue):
         try:
             return SQSQueueMock(queue)
@@ -156,7 +151,6 @@ class SQSConnectionMock(object):
         
     def delete_queue(self, queue, force_deletion=False):
         q = self.get_queue(queue)
-        #print 'type', type(q)
         if q.count() != 0:
             # Can only delete empty queues
             return False
