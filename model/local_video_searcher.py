@@ -291,7 +291,7 @@ class _Result(object):
     the combiner) and the score, as a function of the comb_score_weight)
     '''
     def __init__(self, frameno=None, score=-np.inf, image=None,
-                 feat_score=None, meta=None, comb_score=None,
+                 feat_score=None, meta=None,
                  comb_score_weight=None):
         self._defined = False
         if score and frameno:
@@ -334,9 +334,11 @@ class _Result(object):
 
     def _comp_comb_score(self, comb_score_weight):
         if comb_score_weight == None:
+            _log.debug('comb_score_weight not set!')
             self.comb_score = self.score
             return
         if self._feat_score == None:
+            _log.debug('_feat_score not set!')
             self.comb_score = self.score
             return
         self.comb_score = self.score + self._feat_score * comb_score_weight
@@ -430,6 +432,8 @@ class ResultsList(object):
         fname += '%04.2f_'%(res.comb_score)
         if reason == 'accept':
             fname += 'accepted_replacing_%i.jpg'%(idx)
+        elif reason != None:
+            fname += '%s.jpg'%(reason)
         else:
             fname += 'rejected.jpg'
         fname = os.path.join(self._testing_dir, fname)
@@ -455,13 +459,14 @@ class ResultsList(object):
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
         '''
-        res = _Result(frameno, score, image, feat_score, meta,
-                      self._comb_score_weight)
+        res = _Result(frameno=frameno, score=score, image=image,
+                      feat_score=feat_score, meta=meta,
+                      comb_score_weight=self._comb_score_weight)
         self._considered_thumbs += 1
         if score < self.min:
             _log.warn('Frame %i [%.3f] rejected due to score'%(frameno,
                                                                    score))
-            self._write_testing_frame(res)
+            self._write_testing_frame(res, 'score_too_low')
             return False
         if not self._max_variety:
             return self._push_over_lowest(res)
@@ -502,7 +507,10 @@ class ResultsList(object):
 
     def _maxvar_replace(self, res):
         '''
-        Replaces the lowest scoring result possible while maximizing variance.
+        Replaces the lowest scoring result possible while maximizing variance,
+        up to self.max_rejectable. Results whose similarity distance to the
+        'closest' thumbnail is less than self.min_acceptable are automatically
+        rejected.
         '''
         repl_idx = [x for x in range(len(self.results)) if
                         self.results[x] < res]
@@ -522,7 +530,7 @@ class ResultsList(object):
         if dists[arg_srt_idx[0]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
                         'seen in the video so far.')%(res))
-            self._write_testing_frame(res)
+            self._write_testing_frame(res, 'below_sim_threshold')
             return False
         # otherwise, iterate over the lowest scoring ones and replace the
         # lowest one that is 'less different' than you are from the
@@ -532,7 +540,7 @@ class ResultsList(object):
             if self.results[idx].comb_score > res.comb_score:
                 # none of the current thumbnails can be replaced
                 _log.debug('There are no low-scoring less-varied thumbnails for %s'%(res))
-                self._write_testing_frame(res)
+                self._write_testing_frame(res, 'none_replaceable')
                 return False
             # see if you can replace it
             if idx == arg_srt_idx[0]:
