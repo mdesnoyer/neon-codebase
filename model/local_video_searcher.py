@@ -771,6 +771,7 @@ class LocalSearcher(object):
         max_processing_time = self.processing_time_ratio * video_time
         _log.info('Starting search of %s with %i frames, for %s seconds'%(
                         video_name, num_frames, max_processing_time))
+        self._mix()
         while (time() - start_time) < max_processing_time:
             r = self._step()
             if r == False:
