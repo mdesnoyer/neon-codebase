@@ -386,7 +386,8 @@ class ResultsList(object):
         *** Both min_acceptable and max_rejectable may be functions.
     '''
     def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
-                 max_rejectable=0.2, feat_score_weight=0.):
+                 max_rejectable=0.2, feat_score_weight=0.,
+                 adapt_improve=False):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
@@ -396,6 +397,9 @@ class ResultsList(object):
         self._testing = False
         self._testing_dir = None
         self._considered_thumbs = 0
+        self._adapt_improve = adapt_improve
+        if adapt_improve:
+            self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
 
     @property
     def min_acceptable(self):
@@ -469,7 +473,7 @@ class ResultsList(object):
                       feat_score_weight=self._feat_score_weight)
         self._considered_thumbs += 1
         if score < self.min:
-            _log.warn('Frame %i [%.3f] rejected due to score'%(frameno,
+            _log.debug('Frame %i [%.3f] rejected due to score'%(frameno,
                                                                    score))
             self._write_testing_frame(res, 'score_too_low')
             return False
@@ -504,6 +508,9 @@ class ResultsList(object):
         old = self.results[idx]
         self.results[idx] = res
         _log.info('%s is replacing %s'%(res, old))
+        if self._adapt_improve:
+            _log.debug('Adaptively improving %s'%(res))
+            res.image = self.clahe.apply(res.image)
         self._update_dists(idx)
         self._update_min()
         self._write_testing_frame(res, 'accept', idx)
@@ -601,6 +608,7 @@ class LocalSearcher(object):
                  combiner=None,
                  filters=None,
                  startend_clip=0.1,
+                 adapt_improve=False,
                  testing=False,
                  testing_dir='/tmp'):
         '''
@@ -666,6 +674,9 @@ class LocalSearcher(object):
                 The fraction of the start and the end of the video to clip
                 off. A value of 0.1 means that 10% of the start and 10% of the
                 end of the video are removed.
+            adapt_improve:
+                Adaptively improves the brightness / contrast / etc of an
+                image via the CLAHE algorithm.
             testing:
                 If true, saves the sequence of considered thumbnails to the
                 directory specified by testing_dir as
@@ -688,6 +699,7 @@ class LocalSearcher(object):
         self.combiner = combiner
         self.startend_clip = startend_clip
         self.filters = filters
+        self.adapt_improve = adapt_improve
         self._testing = testing
         self._testing_dir = testing_dir
         self._reset()
@@ -755,7 +767,8 @@ class LocalSearcher(object):
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
-                                   feat_score_weight=self._feat_score_weight)
+                                   feat_score_weight=self._feat_score_weight,
+                                   adapt_improve=self.adapt_improve)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
