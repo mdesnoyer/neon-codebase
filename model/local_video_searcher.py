@@ -508,6 +508,12 @@ class ResultsList(object):
         old = self.results[idx]
         self.results[idx] = res
         _log.info('%s is replacing %s'%(res, old))
+        self._update_dists(idx)
+        self._update_min()
+        self._write_testing_frame(res, 'accept', idx)
+        return True
+
+    def _improve_img(self, res):
         if self._adapt_improve:
             _log.debug('Adaptively improving %s'%(res))
             if len(res.image.shape) < 3:
@@ -517,10 +523,6 @@ class ResultsList(object):
                 img = cv2.cvtColor(res.image, cv2.cv.CV_BGR2HSV)
                 img[:,:,2] = self.clahe.apply(img[:,:,2])
                 res.image = cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
-        self._update_dists(idx)
-        self._update_min()
-        self._write_testing_frame(res, 'accept', idx)
-        return True
 
     def _maxvar_replace(self, res):
         '''
@@ -595,6 +597,7 @@ class ResultsList(object):
             if not res_obj._defined:
                 statemon.state.increment('low_number_of_frames_seen')
                 break
+            self._improve_img(res)
             res.append([res_obj.image, res_obj.score, res_obj.frameno])
         return res
 
