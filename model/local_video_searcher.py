@@ -491,7 +491,7 @@ class ResultsList(object):
         '''
         The thumbnail at index idx is replaced by the thumbnail res.
         '''
-        old = self.results[sco_by_idx[0]]
+        old = self.results[idx]
         _log.info('%s is replacing %s'%(res, old))
         self._update_dists(idx)
         if old.score == self.min:
