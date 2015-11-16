@@ -789,7 +789,7 @@ class LocalSearcher(object):
         except:
             _log.info('Unknown percentage of video sampled')
         try:
-            perc_srch = self.search_algo.searched * 100./self.search_algo.N
+            perc_srch = self.search_algo.searched * 100./(self.search_algo.N-1)
             _log.info('%.2f%% of video searched'%perc_srch)
         except:
             _log.info('Unknown percentage of video searched')
