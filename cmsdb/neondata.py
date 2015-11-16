@@ -193,16 +193,6 @@ class PostgresDB(tornado.web.RequestHandler):
             self.port = options.get('cmsdb.neondata.db_port')
             self.name = options.get('cmsdb.neondata.db_name')
             self.user = options.get('cmsdb.neondata.db_user')
-            
-            # a base pool to draw connnections from, this will be 
-            # the pool you get a connection from when the first call is made
-            #self.base_io_loop = tornado.ioloop.IOLoop.current() 
-            #self.base_pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
-            #                           ioloop=tornado.ioloop.IOLoop.current(),
-            #                           size=options.get('cmsdb.neondata.pool_size'),
-            #                           cursor_factory=psycopg2.extras.RealDictCursor)
-            self.base_pool = None 
-            #self.base_pool.connect()
             # keeps track of the io_loops we have seen, mapped from 
             # id -> pool
             self.io_loop_dict = {}
@@ -251,7 +241,7 @@ class PostgresDB(tornado.web.RequestHandler):
             '''
             call this to return connections you are done with 
 
-            this should still be called to ensure the 
+            this should always be called to ensure the 
             connections are properly returned to the pool, or 
             closed entirely assuming the connection was made 
             without a pool 
@@ -1627,10 +1617,10 @@ class StoredObject(object):
             mappings = {}
             orig_objects = {}
             key_sets = collections.defaultdict(list)
-            for key in keys: 
+            for key in keys:
                 query = "SELECT _data \
                          FROM %s \
-                         WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+                         WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), key)
 
                 cursor = yield conn.execute(query)
                 item = cursor.fetchone()
@@ -1655,7 +1645,7 @@ class StoredObject(object):
                         obj.updated = str(datetime.datetime.utcnow()) 
                         query = "UPDATE %s \
                                  SET _data = '%s' \
-                                 WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
+                                 WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), 
                                                                 obj.to_json(), 
                                                                 key) 
                         sql_statements.append(query) 
@@ -3122,6 +3112,8 @@ class AbstractPlatform(NamespacedStoredObject):
             return super(AbstractPlatform, cls)._create(cls.format_key(key),
                                                         obj_dict)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def save(self, callback=None):
         raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 

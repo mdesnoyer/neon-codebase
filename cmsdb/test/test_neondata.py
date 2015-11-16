@@ -2695,6 +2695,94 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         yield tornado.gen.sleep(0.01) 
         cb.assert_called_once_with(so.key, ANY, ANY)
         cb2.assert_called_once_with(so.key, ANY, ANY)
+
+class TestPGNeonApiKey(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGNeonApiKey, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGCDNHostingMetadatalist(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGCDNHostingMetadatalist, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGExperimentStrategy(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGExperimentStrategy, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPGPlatformAndIntegration, self).setUp()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/test/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_modify_brightcove_platform(self):
+        def _initialize_bc_plat(x):
+            x.account_id = '123'
+            x.publisher_id = '123'
+            x.read_token = 'abc'
+            x.write_token = 'def'
+            x.last_process_date = time.time()
+        bc = yield tornado.gen.Task(
+              neondata.BrightcovePlatform.modify,
+              '45', '82',
+              _initialize_bc_plat, create_missing=True)
+        #print bc
+ 
+    @tornado.testing.gen_test 
+    def test_modify_brightcove_integration(self):
+        def _initialize_bc_plat(x):
+            x.account_id = '123'
+            x.publisher_id = '123'
+            x.read_token = 'abc'
+            x.write_token = 'def'
+            x.last_process_date = time.time()
+        bc = yield tornado.gen.Task(
+              neondata.BrightcoveIntegration.modify,
+              '45', '82',
+              _initialize_bc_plat)
+        #print bc 
             
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 

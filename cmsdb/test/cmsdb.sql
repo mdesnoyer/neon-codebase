@@ -33,13 +33,37 @@ SET default_with_oids = false;
 -- Name: brightcoveintegration; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
 --
 
-CREATE TABLE brightcoveintegration (
+CREATE TABLE brightcoveplatform (
     _data jsonb,
     _type character varying(128) NOT NULL
 );
 
 
-ALTER TABLE brightcoveintegration OWNER TO postgres;
+ALTER TABLE brightcoveplatform OWNER TO postgres;
+
+--
+-- Name: abstractintegration; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE abstractintegration (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE abstractintegration OWNER TO postgres;
+
+--
+-- Name: abstractplatform; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
+--
+
+CREATE TABLE abstractplatform (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE abstractplatform OWNER TO postgres;
 
 --
 -- Name: cdnhostingmetadatalist; Type: TABLE; Schema: public; Owner: postgres; Tablespace: 
@@ -197,11 +221,23 @@ CREATE TABLE videostatus (
 
 ALTER TABLE videostatus OWNER TO postgres;
 
---
--- Data for Name: brightcoveintegration; Type: TABLE DATA; Schema: public; Owner: postgres
+-- Data for Name: abstractintegration; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY brightcoveintegration (_data, _type) FROM stdin;
+COPY abstractintegration (_data, _type) FROM stdin;
+\.
+
+-- Data for Name: abstractplatform; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY abstractplatform (_data, _type) FROM stdin;
+\.
+
+--
+-- Data for Name: brightcoveplatform; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY brightcoveplatform (_data, _type) FROM stdin;
 \.
 
 
@@ -346,6 +382,21 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER neonuseraccount_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON neonuseraccount
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER neonapikey_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON neonapikey
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER abstractplatform_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON abstractplatform
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER abstractintegration_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON abstractintegration
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
