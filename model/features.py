@@ -243,6 +243,37 @@ class SADGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'sad'
 
+class ActionGenerator(RegionFeatureGenerator):
+    '''
+    Scores scenes based on whether or not they are at a relative action peak
+    by computing the cross-correlation. In other words, we want frames that
+    occur are local minima in the action. Let's see if it works.
+    '''
+    def __init__(self, action_vec=[1, 0, -1, 0, 1], SAD_gen):
+        '''
+        action_vec is the description of a valid action type. The default, for
+        instance, finds troughs in the action as measured by the sum of
+        absolute differences and surrounded by comparatively more 'action.'
+
+        SAD_gen is a region feature generator for SAD.
+        '''
+        self._action_vec = action_vec
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.action_vec, other.action_vec)
+
+    def __hash__(self):
+        return hash(self.action_vec)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        SADs = SAD_gen.compute_many(images)
+        return np.correlate(SADs, self._action_vec, mode='same')
+
 class FaceGenerator(RegionFeatureGenerator):
     '''
     Returns a boolean which indicates whether or not a face
