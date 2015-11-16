@@ -692,6 +692,7 @@ class LocalSearcher(object):
         self.stats = dict()
         self.fps = None
         self.col_stat = None
+        self.num_frames = None
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
@@ -747,6 +748,7 @@ class LocalSearcher(object):
             self._set_up_testing()
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        self.num_frames = num_frames
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /
                             self._orig_local_search_step)
