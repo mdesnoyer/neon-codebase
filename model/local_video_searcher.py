@@ -13,7 +13,7 @@ While this initially used Statistics() objects to calculate running
 statistics, in principle even with a small search interval (32 frames)
 and a very long video (2 hours), we'd only have about 5,000 values to
 store, which we can easily manage. Thus we will hand-roll our own Statistics
-objects. 
+objects.
 
 Some filters introduced in this iteration of the video searcher implements
 one filter, scene-change, that requires temporal information to be preserved
@@ -70,8 +70,8 @@ class Statistics(object):
     '''
     Replicates (to a degree) the functionality of the true running statistics
     objects (which are in the utils folder under runningstat). This is because
-    it is unlikely that we will ever need to maintain a very large number of 
-    measurements. 
+    it is unlikely that we will ever need to maintain a very large number of
+    measurements.
 
     If init is not None, it initializes with the values provided.
     '''
@@ -152,7 +152,7 @@ class Statistics(object):
 class ColorStatistics(object):
     '''
     Similar to the Statistics object (defined below), but in lieu of storing
-    numeric values, it stores color histograms. This will allow us to 
+    numeric values, it stores color histograms. This will allow us to
     establish a lower bound on the allowable distances--by empirically
     establishing the mean and standard deviation of the pairwise distances
     between frames in the video.
@@ -240,9 +240,9 @@ class Combiner(object):
         '''
         Computes the statistics score for a feature vector. If it has a
         defined weight, then we simply return the product of this weight with
-        the value of the feature. 
+        the value of the feature.
         '''
-        
+
         if self._stats_dict.has_key(feat_name):
             vals = []
             if self.weight_valence.has_key(feat_name):
@@ -276,6 +276,8 @@ class Combiner(object):
             stat_scores.append(self._compute_stat_score(k, v))
         comb_scores = []
         for x in zip(*stat_scores):
+            comb_score = self._combine(x)
+            comb_score /= (1. * len(x)) # normalize
             comb_scores.append(self._combine(x))
         return comb_scores
 
@@ -283,9 +285,14 @@ class _Result(object):
     '''
     Private class to be used by the ResultsList object. Represents an
     invidiual top-result image in the top results list.
+
+    Note: comb_score is not the score output by the combiner, but rather
+    the combination of the feature score (feat_score, which is output by
+    the combiner) and the score, as a function of the comb_score_weight)
     '''
-    def __init__(self, frameno=None, score=-np.inf, image=None, 
-                 feat_score=None, meta=None):
+    def __init__(self, frameno=None, score=-np.inf, image=None,
+                 feat_score=None, meta=None, comb_score=None,
+                 comb_score_weight=None):
         self._defined = False
         if score and frameno:
             self._defined = True
@@ -301,12 +308,13 @@ class _Result(object):
         else:
             self._color_name = None
         self.meta = meta
+        self._comp_comb_score(comb_score_weight)
 
     def __cmp__(self, other):
         if type(self) is not type(other):
             return cmp(self.score, other)
         # undefined result objects are always 'lower' than defined
-        # result objects. 
+        # result objects.
         if not self._defined:
             return -1
         if not other._defined:
@@ -316,8 +324,20 @@ class _Result(object):
     def __str__(self):
         if not self._defined:
             return 'Undefined Top Result object'
-        return 'Top Result object at %i, score %.2f'%(self.frameno, 
-                                                      self.score)
+        if self._feat_score:
+            return 'Result fr:%i sc:%.2f feat sc:%.2f comb sc:%.2f'%(
+                        self.frameno, self.score, self._feat_score,
+                        self.comb_score)
+        else:
+            return 'Result fr:%i sc:%.2f feat sc:N/A comb sc:%.2f'%(
+                        self.frameno, self.score, self.comb_score)
+
+    def _comp_comb_score(self, comb_score_weight):
+        if comb_score_weight == None:
+            self.comb_score = self.score
+        if self._feat_score == None:
+            self.comb_score = self.score
+        self.comb_score = self.score + self._feat_score * comb_score_weight
 
     def dist(self, other):
         if type(self) is not type(other):
@@ -335,18 +355,18 @@ class _Result(object):
 
 class ResultsList(object):
     '''
-    The ResultsList class represents the sorted list of current best results. 
-    This also handles the updating of the results list. 
+    The ResultsList class represents the sorted list of current best results.
+    This also handles the updating of the results list.
 
     If the 'max_variety' parameter is set to true (default), inserting a new
-    result is not guaranteed to kick out the lowest current scoring result; 
-    instead, it's also designed to maximize variety as represented by the 
+    result is not guaranteed to kick out the lowest current scoring result;
+    instead, it's also designed to maximize variety as represented by the
     histogram of the colorname. Thus, new results added to the pile will not
     be added if the minimium pairwise distance between all results is
     decreased.
 
     There are two parameters that dictate whether or not an image should be
-    accepted or rejected based on its similarity. 
+    accepted or rejected based on its similarity.
         min_acceptable: a paramter that ensures that a thumbnail is *not*
             accepted unless it is as least this different from the extant
             pool.
@@ -357,12 +377,16 @@ class ResultsList(object):
         *** Both min_acceptable and max_rejectable may be functions.
     '''
     def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
-                 max_rejectable=0.2):
+                 max_rejectable=0.2, comb_score_weight=0.):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
         self._min_acceptable = min_acceptable
         self._max_rejectable = max_rejectable
+        self._comb_score_weight = comb_score_weight
+        self._testing = False
+        self._testing_dir = None
+        self._considered_thumbs = 0
 
     @property
     def min_acceptable(self):
@@ -377,6 +401,37 @@ class ResultsList(object):
             return self._max_rejectable()
         except TypeError:
             return self._max_rejectable
+
+    def _set_testing(self, testing_dir):
+        '''
+        Sets up the testing directory.
+        '''
+        self._testing = True
+        self._testing_dir = testing_dir
+
+    def _write_testing_frame(self, res, reason=None, idx=None):
+        '''
+        Creates a filename for the current result object. Reason
+        is either 'accept' or 'reject'. If accept, must provide
+        an index for the position in the results list.
+        '''
+        if not self._testing:
+            return
+        _log.debug('TESTING ENABLED: saving %s'%res)
+        fname = '%04i_'%(self._considered_thumbs)
+        fname += '%05i_'%(res.frameno)
+        fname += '%04.2f_'%(res.score)
+        if res._feat_score == None:
+            fname += 'NA_'
+        else:
+            fname += '%04.2f'%(res._feat_score)
+        fname += '%04.2f_'%(res.comb_score)
+        if reason == 'accept':
+            fname += 'accepted_replacing_%i.jpg'%(idx)
+        else:
+            fname += 'rejected.jpg'
+        fname = os.path.join(self._testing_dir, fname)
+        cv2.imwrite(fname, res.image)
 
     def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
@@ -398,12 +453,14 @@ class ResultsList(object):
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
         '''
+        res = _Result(frameno, score, image, feat_score, meta,
+                      self._comb_score_weight)
+        self._considered_thumbs += 1
         if score < self.min:
             _log.warn('Frame %i [%.3f] rejected due to score'%(frameno,
                                                                    score))
-            _log.warn('This frame should never have been submitted!')
+            self._write_testing_frame(res)
             return False
-        res = _Result(frameno, score, image, feat_score, meta)
         if not self._max_variety:
             return self._push_over_lowest(res)
         else:
@@ -425,16 +482,27 @@ class ResultsList(object):
         this does not check that res's score > the min score. It's assumed
         that this is done in accept_replace.
         '''
-        sco_by_idx = np.argsort([x.score for x in self.results])
-        self.results[sco_by_idx[0]] = res
-        self._update_min()
+        sco_by_idx = np.argsort([x.comb_score for x in self.results])
+        return self._replace(sco_by_idx[0], res)
+
+    def _replace(self, idx, res):
+        '''
+        The thumbnail at index idx is replaced by the thumbnail res.
+        '''
+        old = self.results[sco_by_idx[0]]
+        _log.info('%s is replacing %s'%(res, old))
+        self._update_dists(idx)
+        if old.score == self.min:
+            self._update_min()
+        self.results[idx] = res
+        self._write_testing_frame(res, 'accept', idx)
         return True
 
     def _maxvar_replace(self, res):
         '''
         Replaces the lowest scoring result possible while maximizing variance.
         '''
-        repl_idx = [x for x in range(len(self.results)) if 
+        repl_idx = [x for x in range(len(self.results)) if
                         self.results[x] < res]
         # get dists as they are now
         mdists = np.min(self.dists[repl_idx], 1)
@@ -452,33 +520,29 @@ class ResultsList(object):
         if dists[arg_srt_idx[0]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
                         'seen in the video so far.')%(res))
+            self._write_testing_frame(res)
             return False
         # otherwise, iterate over the lowest scoring ones and replace the
-        # lowest one that is 'less different' than you are from the 
+        # lowest one that is 'less different' than you are from the
         # remaining thumbnails
-        sco_by_idx = np.argsort([x.score for x in self.results]) 
+        sco_by_idx = np.argsort([x.comb_score for x in self.results])
         for idx in sco_by_idx:
-            if self.results[idx].score > res.score:
+            if self.results[idx].comb_score > res.comb_score:
                 # none of the current thumbnails can be replaced
-                _log.debug('%s rejected due to similarity'%(res))
+                _log.debug('There are no low-scoring less-varied thumbnails for %s'%(res))
+                self._write_testing_frame(res)
                 return False
             # see if you can replace it
             if idx == arg_srt_idx[0]:
                 c_min_dist = dists[arg_srt_idx[1]]
             else:
                 c_min_dist = dists[arg_srt_idx[0]]
-            # if the resulting minimum distance is >= the results minimum 
-            # distance, you may replace it. 
+            # if the resulting minimum distance is >= the results minimum
+            # distance, you may replace it.
             if c_min_dist >= np.min(self.dists[idx]):
                 break
         # replace the idx
-        rep_score = self.results[idx].score
-        _log.debug('%s replacing %s'%(res, self.results[idx]))
-        self.results[idx] = res
-        self._update_dists(idx)
-        if rep_score == self.min:
-            self._update_min()
-        return True
+        return self._replace(idx, res)
 
     def _update_min(self):
         '''
@@ -509,20 +573,23 @@ class ResultsList(object):
 
 class LocalSearcher(object):
     def __init__(self, predictor, face_finder,
-                 eye_classifier, 
+                 eye_classifier,
                  processing_time_ratio=1.0,
                  local_search_width=32,
                  local_search_step=4,
                  n_thumbs=5,
+                 comb_score_weight=0.5,
                  mixing_samples=10,
                  search_algo=MCMH_rpl,
                  max_variety=True,
                  feature_generators=None,
                  feats_to_cache=None,
                  combiner=None,
-                 filters=None):
+                 filters=None,
+                 testing=False,
+                 testing_dir='/tmp'):
         '''
-        Inputs: 
+        Inputs:
             predictor:
                 computes the score for a given image
             local_search_width:
@@ -531,15 +598,19 @@ class LocalSearcher(object):
                 The step size between adjacent frames.
                 ===> for instance, if local_search_width = 6 and
                      local_search_step = 2, then it will obtain 6 frames
-                     across 12 frames (about 0.5 sec) 
+                     across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
+            comb_score_weight:
+                The degree to which the combined feature score should effect
+                the rank of the frames. New frames are added to results
+                according to score + comb_score * comb_score_weight
             mixing_samples:
                 The number of samples to draw to establish baseline
                 statistics.
             search_algo:
                 Selects the thumbnails to try; accepts the number of elements
-                over which to search. Should support asynchronous result 
+                over which to search. Should support asynchronous result
                 updating, so it is easy to switch the predictor between
                 sequential (CPU-based) and non-sequential (GPU-based)
                 predictor methods. Further, it must be able to accept an
@@ -562,12 +633,20 @@ class LocalSearcher(object):
                 replaces the notion of a list of criteria objects, which
                 proved too abstract to implement.
             filters:
-                A list of filters which accept feature vectors and return 
+                A list of filters which accept feature vectors and return
                 which frames need to be filtered. Each filter should surface
                 the name of the feature generator whose vector is to be used,
                 via an attribute that is simply named "feature."
                 Filters are applied in-order, and only non-filtered frames
-                have their features extracted per-filter. 
+                have their features extracted per-filter.
+            testing:
+                If true, saves the sequence of considered thumbnails to the
+                directory specified by testing_dir as
+                testing_dir/<video name>/<image> with <image> specified as
+                <number>_<frame>_<score>_<feat_score>_<comb_score>_<reason>
+            testing_dir:
+                Specifies where to save the images, if testing is enabled.
+
         '''
         self.predictor = predictor
         self.processing_time_ratio = processing_time_ratio
@@ -580,6 +659,8 @@ class LocalSearcher(object):
         self.feats_to_cache = odict()
         self.combiner = combiner
         self.filters = filters
+        self._testing = testing
+        self._testing_dir = testing_dir
         self._reset()
 
         # determine the generators to cache.
@@ -608,6 +689,19 @@ class LocalSearcher(object):
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
 
+    def _set_up_testing(self):
+        vname = self.video_name
+        vdir = os.path.join(self._testing_dir, vname)
+        try:
+            os.mkdir(vdir)
+        except:
+            pass
+        if os.path.exists(vdir):
+            self.results._set_testing(vdir)
+            return vdir
+        else:
+            raise Exception("Could not create testing dir!")
+
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
         # instantiate the statistics objects required
         # for computing the running stats.
@@ -618,13 +712,15 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
-        f_min_var_acc = lambda: min(0.015, 
+        f_min_var_acc = lambda: min(0.015,
                                         self.col_stat.percentile(
                                             1./self.n_thumbs))
         f_max_var_rej = lambda: max(0.25, self.col_stat.percentile(40.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej)
+        if self._testing:
+            self._set_up_testing()
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -654,11 +750,11 @@ class LocalSearcher(object):
             results.append(formatted_result)
         return results
 
-    def _conduct_local_search(self, start_frame, end_frame, 
+    def _conduct_local_search(self, start_frame, end_frame,
                               start_score, end_score):
         '''
         Given the frames that are already the best, determine whether it makes
-        sense to proceed with local search. 
+        sense to proceed with local search.
         '''
         _log.debug('Local search of %i [%.3f] <---> %i [%.3f]'%(
                     start_frame, start_score, end_frame, end_score))
@@ -673,7 +769,7 @@ class LocalSearcher(object):
         frame_feats = dict()
         allowed_frames = np.ones(len(frames)).astype(bool)
         # obtain the features required for the filter.
-        
+
         for f in self.filters:
             fgen = self.generators[f.feature]
             feats = fgen.generate_many(frames)
@@ -708,11 +804,11 @@ class LocalSearcher(object):
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
         _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
-                    ' is %i with feature score %.3f')%(start_frame, 
+                    ' is %i with feature score %.3f')%(start_frame,
                             start_score, end_frame, end_score, best_frameno,
                             np.max(comb)))
         # the selected frame (whatever it may be) will be assigned
-        # the score equal to mean of its boundary frames. 
+        # the score equal to mean of its boundary frames.
         framescore = (start_score + end_score) / 2
         # push the frame into the results object.
         self.results.accept_replace(best_frameno, framescore, best_frame,
@@ -763,7 +859,7 @@ class LocalSearcher(object):
         else:
             _log.debug('Interval cannot be admitted to results')
         return False
-        
+
     def _step(self):
         r = self.search_algo.get()
         if r == None:
@@ -787,16 +883,16 @@ class LocalSearcher(object):
         self._tot_colorname_val[1] = len(dists)
         self._colorname_stat = (self._tot_colorname_val[0] * 1./
                                 self._tot_colorname_val[1])
-            
+
     def _mix(self):
         '''
         'mix' takes a number of equispaced samples from the video. This is
-        inspired from the notion of mixing for a Markov chain. 
+        inspired from the notion of mixing for a Markov chain.
         '''
         _log.info('Mixing before search begins for %i frames'%(
                                                     self.mixing_samples))
         num_frames = self.mixing_samples
-        samples = np.linspace(0, num_frames, 
+        samples = np.linspace(0, num_frames,
                               self.mixing_samples+2).astype(int)
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
@@ -808,13 +904,13 @@ class LocalSearcher(object):
     def _get_frame(self, f):
         try:
             more_data, self.cur_frame = pycvutils.seek_video(
-                                        self.video, f, 
+                                        self.video, f,
                                         cur_frame=self.cur_frame)
             if not more_data:
                 if self.cur_frame is None:
                     raise model.errors.VideoReadError(
                         "Could not read the video")
-            more_data, frame = self.video.read() 
+            more_data, frame = self.video.read()
         except model.errors.VideoReadError:
             statemon.state.increment('cv_video_read_error')
             frame = None
@@ -855,17 +951,17 @@ class LocalSearcher(object):
 
     def get_search_frame(self, start_frame):
         '''
-        Obtains a search region from the video. 
+        Obtains a search region from the video.
         '''
         num = (self.local_search_width /
                self.local_search_step)
         frames = self.get_region_frames(start_frame, num,
                                         self.local_search_step)
-        frameno = range(start_frame, 
+        frameno = range(start_frame,
                         start_frame + self.local_search_width + 1,
                         self.local_search_step)
         return frames, frameno
-    
+
     def __getstate__(self):
         self._reset()
         return self.__dict__.copy()
