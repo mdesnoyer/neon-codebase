@@ -17,7 +17,7 @@ from model.score_eyes import ScoreEyes
 import dlib
 from sklearn.externals import joblib
 from local_video_searcher import (LocalSearcher, Combiner, MINIMIZE, MAXIMIZE,
-                                    NORMALIZE)
+                                    NORMALIZE, PEN_LOW_HALF, PEN_HIGH_HALF)
 
 from model.filters import (ThreshFilt, SceneChangeFilter, FaceFilter,
                            EyeFilter)
@@ -185,7 +185,7 @@ feature_generators = [pix_gen, sad_gen, text_gen, face_gen, eye_gen,
 
 _log.info('Generating combiner')
 weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':MAXIMIZE}
+                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':PEN_LOW_HALF}
 combiner = Combiner(weight_valence=weight_valence)
 
 
@@ -197,7 +197,7 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    combiner=combiner,
                    filters=filters,
                    feats_to_cache=feats_to_cache,
-                   testing=True
+                   testing=True,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
 # _log.info('Testing DILL')
