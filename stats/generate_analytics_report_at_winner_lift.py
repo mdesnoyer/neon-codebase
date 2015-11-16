@@ -55,6 +55,9 @@ define("do_mobile", default=0, type=int,
        help="Only collect mobile data if 1")
 define("do_desktop", default=0, type=int,
        help="Only collect desktop data if 1")
+define("page_url", default=None, type=str,
+       help=('Page url to examine data for. Can include wildcards to get '
+             'multiple validi pages'))
 
 _log = logging.getLogger(__name__)
 
@@ -171,6 +174,7 @@ def collect_stats(thumb_info, video_info,
             %s
             %s
             %s
+            %s
             group by thumbnail_id, hr""" %
             (col_map[impression_metric], options.pub_id,
              col_map[impression_metric],
@@ -178,7 +182,8 @@ def collect_stats(thumb_info, video_info,
              statutils.get_time_clause(options.start_time,
                                        options.end_time),
              statutils.get_mobile_clause(options.do_mobile),
-             statutils.get_desktop_clause(options.do_desktop)))
+             statutils.get_desktop_clause(options.do_desktop),
+             statutils.get_page_clause(options.page_url, impression_metric)))
     else:
         query = (
             """select 
@@ -192,6 +197,7 @@ def collect_stats(thumb_info, video_info,
             %s
             %s
             %s
+            %s
             group by thumbnail_id, hr
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
@@ -199,7 +205,9 @@ def collect_stats(thumb_info, video_info,
                    statutils.get_time_clause(options.start_time,
                                              options.end_time),
                    statutils.get_mobile_clause(options.do_mobile),
-                   statutils.get_desktop_clause(options.do_desktop)))
+                   statutils.get_desktop_clause(options.do_desktop),
+                   statutils.get_page_clause(options.page_url,
+                                             impression_metric)))
     cursor.execute(query)
 
     impala_cols = [metadata[0] for metadata in cursor.description]

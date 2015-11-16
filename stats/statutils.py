@@ -59,3 +59,26 @@ def get_desktop_clause(do_desktop):
                 "('Windows', 'MacOS', 'Ubuntu', 'Linux') ")
 
     return ''
+
+def get_page_clause(page, impression_metric):
+    '''Returns a clause to only select results from a given page.
+
+    page - The page where events must have occured.
+           A * will be treated like a wildcard.
+    '''
+    if page:
+        _log.info('Only collecting data from page(s): %s' % page)
+        col_map = {
+            'loads' : 'imloadpageurl',
+            'views' : 'imloadpageurl',
+            'clicks' : 'imclickpageurl',
+            'plays' : 'videopageurl'
+            }
+        if '*' in page:
+            # It's a wildcard
+            return (" and %s like '%s' " %
+                    (col_map[impression_metric],
+                     page.replace('%', '\%').replace('*', '%')))
+        else:
+            return (" and %s = '%s' " % (col_map[impression_metric], page))
+    return ''
