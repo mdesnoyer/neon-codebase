@@ -510,7 +510,13 @@ class ResultsList(object):
         _log.info('%s is replacing %s'%(res, old))
         if self._adapt_improve:
             _log.debug('Adaptively improving %s'%(res))
-            res.image = self.clahe.apply(res.image)
+            if len(res.image.shape) < 3:
+                res.image = self.clahe.apply(res.image)
+            else:
+                # convert to HSV, apply to last channel
+                img = cv2.cvtColor(res.image, cv2.cv.CV_BGR2HSV)
+                img = self.clahe.apply(img[:,:,2])
+                res.image = cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
         self._update_dists(idx)
         self._update_min()
         self._write_testing_frame(res, 'accept', idx)
@@ -699,6 +705,9 @@ class LocalSearcher(object):
         self.combiner = combiner
         self.startend_clip = startend_clip
         self.filters = filters
+        if adapt_improve:
+            _log.warn(('WARNING: adaptive improvement is enabled, but is '
+                       'an experimental feature'))
         self.adapt_improve = adapt_improve
         self._testing = testing
         self._testing_dir = testing_dir
