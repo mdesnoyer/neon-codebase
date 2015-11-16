@@ -755,7 +755,7 @@ class LocalSearcher(object):
         #                                     self.num_frames/search_divsor)/
         #                                     self.n_thumbs) *
         #                                     search_divisor)))
-        self.local_search_width = min(self.orig_local_search_width,
+        self.local_search_width = min(self._orig_local_search_width,
                                         max(search_divisor,
                                             self.num_frames / self.n_thumbs))
         self.local_search_step = max(1, self.local_search_width /
