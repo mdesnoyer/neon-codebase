@@ -445,7 +445,7 @@ class ResultsList(object):
     def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
         self.results = [_Result() for x in range(self.n_thumbs)]
-        self.min = 0
+        self.min = self.results[0].score
         if n_thumbs != None:
             self.n_thumbs = n_thumbs
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
