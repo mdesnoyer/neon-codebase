@@ -504,8 +504,7 @@ class ResultsList(object):
         self.results[idx] = res
         _log.info('%s is replacing %s'%(res, old))
         self._update_dists(idx)
-        if old.score == self.min:
-            self._update_min()
+        self._update_min()
         self._write_testing_frame(res, 'accept', idx)
         return True
 
