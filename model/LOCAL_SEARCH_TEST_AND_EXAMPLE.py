@@ -199,8 +199,8 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    filters=filters,
                    feats_to_cache=feats_to_cache,
                    testing=True,
-                   comb_score_weight=1.5,
-                   processing_time_ratio=1.0,
+                   comb_score_weight=1.0,
+                   processing_time_ratio=1.5,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
 # _log.info('Testing DILL')
