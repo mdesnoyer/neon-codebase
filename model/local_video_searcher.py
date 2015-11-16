@@ -721,7 +721,7 @@ class LocalSearcher(object):
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
-                                   comb_score_weight=comb_score_weight)
+                                   comb_score_weight=self._comb_score_weight)
         if self._testing:
             self._set_up_testing()
         # maintain results as:
