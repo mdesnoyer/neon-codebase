@@ -592,7 +592,7 @@ class LocalSearcher(object):
                  local_search_step=4,
                  n_thumbs=5,
                  comb_score_weight=0.,
-                 mixing_samples=10,
+                 mixing_samples=20,
                  search_algo=MCMH_rpl,
                  max_variety=True,
                  feature_generators=None,
@@ -946,7 +946,7 @@ class LocalSearcher(object):
                                                     self.mixing_samples))
         num_frames = self.mixing_samples
         samples = np.linspace(0, self.num_frames,
-                              self.mixing_samples+2).astype(int)
+                              self.mixing_samples).astype(int)
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
         _log.info('Taking %i initial samples'%(len(samples)))
