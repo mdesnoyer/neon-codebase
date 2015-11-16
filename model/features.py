@@ -249,13 +249,13 @@ class ActionGenerator(RegionFeatureGenerator):
     by computing the cross-correlation. In other words, we want frames that
     occur are local minima in the action. Let's see if it works.
     '''
-    def __init__(self, action_vec=[1, 0, -1, 0, 1], SAD_gen):
+    def __init__(self, SAD_gen, action_vec=[1, 0, -1, 0, 1]):
         '''
+        SAD_gen is a region feature generator for SAD.
+
         action_vec is the description of a valid action type. The default, for
         instance, finds troughs in the action as measured by the sum of
         absolute differences and surrounded by comparatively more 'action.'
-
-        SAD_gen is a region feature generator for SAD.
         '''
         self._action_vec = action_vec
 
@@ -362,7 +362,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
 
 class VibranceGenerator(RegionFeatureGenerator):
     '''
-    Returns the mean darkness in an image.
+    Returns the mean "vibrance" (average of saturation + value) of an image.
     '''
     def __init__(self, max_height=480):
         super(VibranceGenerator, self).__init__()
@@ -392,11 +392,13 @@ class VibranceGenerator(RegionFeatureGenerator):
                 return np.mean(img)
             # convert to HSV
             feat_vec.append(np.mean(cv2.cvtColor(
-                                        img, cv2.cv.CV_BGR2HSV)[:,:,2]))
+                                        img, cv2.cv.CV_BGR2HSV)[:,:,1:]))
         return np.array(feat_vec)
 
     def get_feat_name(self):
         return 'vibrance'
+
+
 
 class TextGenerator(RegionFeatureGenerator):
     '''
