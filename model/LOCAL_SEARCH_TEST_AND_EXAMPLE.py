@@ -185,8 +185,8 @@ feature_generators = [pix_gen, sad_gen, text_gen, face_gen, eye_gen,
                       vibrance_gen]
 
 _log.info('Generating combiner')
-weight_valence = {'blur':MAXIMIZE, 'sad':NORMALIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':PEN_LOW_HALF, 'vibrance':PEN_LOW_HALF}
+weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
+                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':PEN_LOW_HALF}
 combiner = Combiner(weight_valence=weight_valence)
 
 
@@ -200,7 +200,7 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    feats_to_cache=feats_to_cache,
                    testing=True,
                    comb_score_weight=1.,
-                   processing_time_ratio=2.0,
+                   processing_time_ratio=1.0,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
 # _log.info('Testing DILL')
