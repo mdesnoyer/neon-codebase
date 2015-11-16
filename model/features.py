@@ -398,9 +398,50 @@ class VibranceGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'vibrance'
 
-
-
 class TextGenerator(RegionFeatureGenerator):
+    '''
+    New implementation, which relies on MSER
+    '''
+    def __init__(self, max_height=480, crop_frac=None, max_variation=0.025):
+        super(TextGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=crop_frac)
+        self._max_variation = max_variation
+        self.mser = cv2.MSER(_max_variation=0.05)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            feat_vec.append(self._text_quant(img))
+        return np.array(feat_vec)
+
+    def _text_quant(self, img):
+        '''quantifies the amount of text in an image (approx) by area'''
+        regions = self.mser.detect(img, None)
+        area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
+        area /= (1. * img.shape[0] * img.shape[1])
+        return area
+
+    def get_feat_name(self):
+        return 'text'
+
+class TextGeneratorOld(RegionFeatureGenerator):
     '''
     Returns the quantity of text per frame given a sequence
     of frames.
