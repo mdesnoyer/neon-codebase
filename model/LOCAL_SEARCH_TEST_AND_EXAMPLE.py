@@ -3,6 +3,7 @@
 '''
 Tests the Local Video Searcher
 '''
+import sys
 if '/repos/neon/model' not in sys.path:
     sys.path.insert(0, '/repos/neon/model')
 from model.features import (BlurGenerator, SADGenerator, FaceGenerator,
@@ -28,7 +29,6 @@ import random
 
 from glob import glob
 from cPickle import dumps
-import sys
 if '/usr/local/lib/python2.7/dist-packages/' not in sys.path:
     sys.path.insert(0, '/usr/local/lib/python2.7/dist-packages/')
 import dill
