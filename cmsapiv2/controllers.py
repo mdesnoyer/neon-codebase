@@ -906,9 +906,9 @@ class VideoHandler(APIV2Handler):
 
         account = neondata.NeonUserAccount.get(account_id)
 
-        message = self.sqs_queue.write_message(account.get_processing_priority(), 
+        message = yield self.sqs_queue.write_message(account.get_processing_priority(), 
                                                message)
-        
+
         #if response and response.code is ResponseCode.HTTP_OK: 
         if message:
             job_info = {} 

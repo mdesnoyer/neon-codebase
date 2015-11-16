@@ -920,8 +920,6 @@ if __name__ == "__main__":
     # Register a function that will shutdown the workers
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
 
-    tornado.ioloop.IOLoop.instance().start()
-
     cv_slots = max(multiprocessing.cpu_count() - 1, 1)
     cv_semaphore = multiprocessing.BoundedSemaphore(cv_slots)
 

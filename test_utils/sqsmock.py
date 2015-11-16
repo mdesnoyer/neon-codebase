@@ -12,8 +12,6 @@ Modified by Hmaidan
 
 '''
 from boto.sqs.message import Message
-import cStringIO
-import pickle
 import random
 from random import randrange
 import threading
@@ -31,20 +29,19 @@ class SQSQueueMock(object):
 
         self.attributes = {}
         self.queue_list = []
-        self.out_stream = cStringIO.StringIO()
+        #self.out_stream = cStringIO.StringIO()
+        self.message_queue = []
         self.num_queues = num_queues
 
         for x in range(0, num_queues):
-            self.out_stream = cStringIO.StringIO()
-            self.queue_list.append(self.out_stream)
+            self.queue_list.append(self.message_queue)
 
-        self.message = Message()
         self.name = filename
         
     #Deprecated function           
     def clear(self, page_size=10, vtimeout=10):
         try:
-            self.out_stream.close()
+            del self.message_queue[:]
         except EOFError:
             return False
         return True
@@ -52,55 +49,47 @@ class SQSQueueMock(object):
     def count(self, page_size=10, vtimeout=10):
         count = 0
         for x in range(0, self.num_queues):
-            in_stream = cStringIO.StringIO(self.queue_list[x].getvalue())
-            try:
-                with self.lock:
-                    prev_data = pickle.load(in_stream)
-                    count += len(prev_data)
-            except EOFError:
-                return 0
-            return count
+            #in_stream = cStringIO.StringIO(self.queue_list[x].getvalue())
+            self.message_queue = self.queue_list[x]
+            count += len(self.message_queue)
+        return count
                
     def count_slow(self, page_size=10, vtimeout=10):
         return self.count(page_size=10, vtimeout=10)
-      
 
     #Assumption: delete is only called to delete the current queue          
     def delete(self):
         try:
-            self.out_stream.close()
+            del self.message_queue[:]
         except OSError:
             return False
         return True
       
     def delete_message(self, message):
-        priority = int(message.message_attributes['priority']['string_value'])
-        in_stream = cStringIO.StringIO(self.queue_list[priority].getvalue())
+        priority = 0
+        if(message.message_attributes):
+            priority = int(message.message_attributes['priority']['string_value'])
+        self.message_queue = self.queue_list[priority]
         with self.lock:
-            prev_data = pickle.load(in_stream)
-        if prev_data.get_body() == message.get_body():
             try:
-                prev_data.delete()
+                for x in range(0, len(self.message_queue)):
+                    if(message.get_body() == self.message_queue[x].get_body()):
+                        message = self.message_queue.pop(x)
+                        return True
             except ValueError:
                 return False
-
-        return True
+        return False
        
     def get_messages(self, num_messages=1, visibility_timeout=None, attributes=None):
         attributes_to_return = []
         if attributes is not None:
             attributes_to_return = attributes.split(',')
         messages = []
-        in_stream = cStringIO.StringIO(self.out_stream.getvalue())
-        try:
-            with self.lock:
-                prev_data = pickle.load(in_stream)
-        except EOFError:
-            prev_data = []
+
         i = 0
         while i < num_messages and len(prev_data) > 0:
             try:
-                msg = prev_data[i]
+                msg = self.message_queue(i)
                 for attr in attributes_to_return:
                     try:
                         msg.attributes[attr] = self.attributes[attr]
@@ -112,29 +101,28 @@ class SQSQueueMock(object):
             i += 1
         return messages
        
-    def read(self, visibility_timeout=None):
+    def read(self, visibility_timeout=None, message_attributes=['All']):
         random_index = 0
         while(random_index < self.num_queues):
-            self.out_stream = self.queue_list[random_index]
-            in_stream = cStringIO.StringIO(self.out_stream.getvalue())
+            self.message_queue = self.queue_list[random_index]
             with self.lock:
                 try:
-                    prev_data = pickle.load(in_stream)
-                    return prev_data
-                except EOFError:
+                    message = self.message_queue[0]
+                    return message
+                except IndexError:
                     #Do nothing, loop again
                     random_index += 1
         return None
     
     def write(self, message):
-        # Should do some error checking
-        priority = int(message.message_attributes['priority']['string_value'])
+        priority = 0
+        if(message.message_attributes):
+            priority = int(message.message_attributes['priority']['string_value'])
         try:
             with self.lock:
-                self.out_stream =  self.queue_list[priority]
-                pickle.dump(message, self.out_stream)
-                self.out_stream.flush()
-        except IOError:
+                self.message_queue = self.queue_list[priority]
+                self.message_queue.append(message)
+        except IndexError:
             return False
             
         return message

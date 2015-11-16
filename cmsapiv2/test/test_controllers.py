@@ -879,10 +879,21 @@ class TestVideoHandler(TestControllersBase):
         self.mock_queue = sqsmock.SQSQueueMock('Priority_0', True)
         self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
                                  'connect_to_region')
-        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.mock_sqs_future = self._future_wrap_mock(self.sqs_patcher.start(),
+                                                      require_async_kw=True)
+       
+        self.mock_sqs_future.return_value = self.mock_sqs
+
+        #self.sqs_patcher.start().return_value = self.mock_sqs
         self.queue_patcher = patch('video_processor.sqs_utilities.' \
                                     'VideoProcessingQueue._create_queue')
-        self.queue_patcher.start().return_value = self.mock_queue
+        self.mock_queue_future = self._future_wrap_mock(
+            self.queue_patcher.start(),
+            require_async_kw=True)
+
+        self.mock_queue_future.return_value = self.mock_queue
+
+        #self.queue_patcher.start().return_value = self.mock_queue
 
         super(TestVideoHandler, self).setUp()
 
@@ -1494,10 +1505,21 @@ class TestHealthCheckHandler(TestControllersBase):
         self.mock_queue = sqsmock.SQSQueueMock('Priority_0', True)
         self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
                                  'connect_to_region')
-        self.sqs_patcher.start().return_value = self.mock_sqs
+        self.mock_sqs_future = self._future_wrap_mock(self.sqs_patcher.start(),
+                                                      require_async_kw=True)
+       
+        self.mock_sqs_future.return_value = self.mock_sqs
+
+        #self.sqs_patcher.start().return_value = self.mock_sqs
         self.queue_patcher = patch('video_processor.sqs_utilities.' \
                                     'VideoProcessingQueue._create_queue')
-        self.queue_patcher.start().return_value = self.mock_queue
+        self.mock_queue_future = self._future_wrap_mock(
+            self.queue_patcher.start(),
+            require_async_kw=True)
+
+        self.mock_queue_future.return_value = self.mock_queue
+
+        #self.queue_patcher.start().return_value = self.mock_queue
 
         super(TestHealthCheckHandler, self).setUp()
 

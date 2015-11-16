@@ -1010,7 +1010,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                 neondata.RequestState.FINISHED)
 
         
-class SmokeTest(test_utils.neontest.TestCase):
+class SmokeTest(test_utils.neontest.AsyncTestCase):
     ''' 
     Smoke test for the video processing client
     '''
@@ -1148,6 +1148,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.queue_patcher.stop()
         super(SmokeTest, self).tearDown()
 
+    @tornado.testing.gen_test(timeout=70)
     def _run_job(self, job, message=None):
         '''Runs the job'''
         if(message is not None):
@@ -1185,6 +1186,7 @@ class SmokeTest(test_utils.neontest.TestCase):
                                                   [self.video_client.pid])
                     self.fail('The subprocess did not die cleanly')
 
+    @tornado.testing.gen_test(timeout=70)
     def test_smoke_test(self):
         message = Message()
         message.message_attributes = {
@@ -1579,3 +1581,4 @@ class SmokeTest(test_utils.neontest.TestCase):
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()
+    tornado.ioloop.IOLoop.current().start()

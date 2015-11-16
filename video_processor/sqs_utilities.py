@@ -189,7 +189,6 @@ class VideoProcessingQueue(object):
            Returns:
            A message if successful, None otherwise
         '''
-        _log.info("Reading message")
         priority = yield self._get_priority_qindex()
         message = None
         while priority < options.num_queues and message == None:
