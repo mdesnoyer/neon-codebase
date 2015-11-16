@@ -207,34 +207,35 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
 #     LS = dill.loads(x)
 # except:
 #     _log.warn('Dill pickling failed!')
-_log.info('Reading in video')
-video_file = '/data/rank_centrality/starwars.mp4'
-videos = [video_file] + glob('/data/discovery_pres/videos/*')
-from time import time
-start = time()
-for video_file in videos:
-    #video_file=videos[1]
-    random.seed(1337)
-    np.random.seed(1337)
-    video = cv2.VideoCapture(video_file)
-    video_name = video_file.split('/')[-1].split('.')[0]
-    #video_name = 'star wars'
-    n = 5
+def test(LS):
+    _log.info('Reading in video')
+    video_file = '/data/rank_centrality/starwars.mp4'
+    videos = [video_file] + glob('/data/discovery_pres/videos/*')
+    from time import time
+    start = time()
+    for video_file in videos:
+        #video_file=videos[1]
+        random.seed(1337)
+        np.random.seed(1337)
+        video = cv2.VideoCapture(video_file)
+        video_name = video_file.split('/')[-1].split('.')[0]
+        #video_name = 'star wars'
+        n = 5
 
-    thumbs = LS.choose_thumbnails(video, n, video_name)
-    # _log.info('Testing DILL')
-    # try:
-    #     x = dill.dumps(LS)
-    #     LS = dill.loads(x)
-    # except:
-    #     _log.warn('Dill pickling failed!')
-    # if 'Giant_Shark_Stakes_Her_Claim' in video_file:
-    #     break
-    #break
-    for n,t in enumerate(thumbs):
-        cv2.imwrite('/data/discovery_pres/extracted_thumbs/%s_%i.jpg'%(video_name, n), t[0])
-    from cPickle import dump
-    with open('/data/discovery_pres/extracted_thumb_data/%s'%video_name, 'w') as f:
-        dump(thumbs, f)
-    #break
-print 'Total time: %.2f'%(time()-start)
+        thumbs = LS.choose_thumbnails(video, n, video_name)
+        # _log.info('Testing DILL')
+        # try:
+        #     x = dill.dumps(LS)
+        #     LS = dill.loads(x)
+        # except:
+        #     _log.warn('Dill pickling failed!')
+        # if 'Giant_Shark_Stakes_Her_Claim' in video_file:
+        #     break
+        #break
+        for n,t in enumerate(thumbs):
+            cv2.imwrite('/data/discovery_pres/extracted_thumbs/%s_%i.jpg'%(video_name, n), t[0])
+        from cPickle import dump
+        with open('/data/discovery_pres/extracted_thumb_data/%s'%video_name, 'w') as f:
+            dump(thumbs, f)
+        #break
+    print 'Total time: %.2f'%(time()-start)
