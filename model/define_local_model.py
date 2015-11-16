@@ -25,7 +25,7 @@ from model.score_eyes import ScoreEyes
 import dlib
 from sklearn.externals import joblib
 from local_video_searcher import (LocalSearcher, Combiner, MINIMIZE, MAXIMIZE,
-                                    NORMALIZE)
+                                    NORMALIZE, PEN_LOW_HALF, PEN_HIGH_HALF)
 
 from optparse import OptionParser
 
@@ -39,6 +39,9 @@ if __name__ == '__main__':
                             'as a compressed file via the scikit-learn '
                             'joblib function; must have as an attribute '
                             'a scaler that can scale the data appropriately'))
+    parser.add_option('--feat_score_weight', '-fs', default=0.0,
+                      help=('The combined feature score weight, which is used'
+                            ' to compute the final combined score.'))
     parser.add_option('--output', '-o', default='neon.model',
                       help='File to output the model definition')
     
@@ -73,7 +76,8 @@ if __name__ == '__main__':
 
     # instantiate the combiner
     weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':NORMALIZE}
+                      'text':MINIMIZE, 'pixvar':NORMALIZE,
+                      'vibrance':PEN_LOW_HALF}
 
     ## ADD WEIGHTS TO THIS IF YOU WANT TO ADJUST THE RELATIVE IMPORTANCE OF
     ## THE FEATURES. 
@@ -100,7 +104,8 @@ if __name__ == '__main__':
                                    feature_generators=feature_generators,
                                    combiner=combiner,
                                    filters=filters,
-                                   feats_to_cache=feats_to_cache)
+                                   feats_to_cache=feats_to_cache,
+                                   feat_score_weight=options.feat_score_weight)
 
     mod = model.Model(predictor, filt, video_searcher)
 

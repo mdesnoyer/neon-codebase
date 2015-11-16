@@ -36,6 +36,7 @@ from itertools import permutations
 from collections import OrderedDict as odict
 from collections import defaultdict as ddict
 from random import getrandbits
+import shutil
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -265,7 +266,7 @@ class Combiner(object):
             return vals
 
         else:
-            return [x * self.weight_dict[feat_name] for x in feat_vec]
+            return [(x * self.weight_dict[feat_name])**2 for x in feat_vec]
         return feat_vec
 
     def combine_scores(self, feat_dict):
@@ -292,11 +293,11 @@ class _Result(object):
 
     Note: comb_score is not the score output by the combiner, but rather
     the combination of the feature score (feat_score, which is output by
-    the combiner) and the score, as a function of the comb_score_weight)
+    the combiner) and the score, as a function of the feat_score_weight)
     '''
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
-                 comb_score_weight=None):
+                 feat_score_weight=None):
         self._defined = False
         if score and frameno:
             self._defined = True
@@ -312,7 +313,7 @@ class _Result(object):
         else:
             self._color_name = None
         self.meta = meta
-        self._comp_comb_score(comb_score_weight)
+        self._comp_comb_score(feat_score_weight)
 
     def __cmp__(self, other):
         if type(self) is not type(other):
@@ -336,16 +337,16 @@ class _Result(object):
             return 'Result fr:%i sc:%.2f feat sc:N/A comb sc:%.2f'%(
                         self.frameno, self.score, self.comb_score)
 
-    def _comp_comb_score(self, comb_score_weight):
-        if comb_score_weight == None:
-            _log.debug('comb_score_weight not set!')
+    def _comp_comb_score(self, feat_score_weight):
+        if feat_score_weight == None:
+            _log.debug('feat_score_weight not set!')
             self.comb_score = self.score
             return
         if self._feat_score == None:
             _log.debug('_feat_score not set!')
             self.comb_score = self.score
             return
-        self.comb_score = self.score + self._feat_score * comb_score_weight
+        self.comb_score = self.score + self._feat_score * feat_score_weight
 
     def dist(self, other):
         if type(self) is not type(other):
@@ -385,13 +386,13 @@ class ResultsList(object):
         *** Both min_acceptable and max_rejectable may be functions.
     '''
     def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
-                 max_rejectable=0.2, comb_score_weight=0.):
+                 max_rejectable=0.2, feat_score_weight=0.):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
         self._min_acceptable = min_acceptable
         self._max_rejectable = max_rejectable
-        self._comb_score_weight = comb_score_weight
+        self._feat_score_weight = feat_score_weight
         self._testing = False
         self._testing_dir = None
         self._considered_thumbs = 0
@@ -465,7 +466,7 @@ class ResultsList(object):
         '''
         res = _Result(frameno=frameno, score=score, image=image,
                       feat_score=feat_score, meta=meta,
-                      comb_score_weight=self._comb_score_weight)
+                      feat_score_weight=self._feat_score_weight)
         self._considered_thumbs += 1
         if score < self.min:
             _log.warn('Frame %i [%.3f] rejected due to score'%(frameno,
@@ -591,7 +592,7 @@ class LocalSearcher(object):
                  local_search_width=48,
                  local_search_step=4,
                  n_thumbs=5,
-                 comb_score_weight=0.,
+                 feat_score_weight=0.,
                  mixing_samples=20,
                  search_algo=MCMH_rpl,
                  max_variety=True,
@@ -599,6 +600,7 @@ class LocalSearcher(object):
                  feats_to_cache=None,
                  combiner=None,
                  filters=None,
+                 startend_clip=0.1,
                  testing=False,
                  testing_dir='/tmp'):
         '''
@@ -614,10 +616,16 @@ class LocalSearcher(object):
                      across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
-            comb_score_weight:
+            feat_score_weight:
                 The degree to which the combined feature score should effect
                 the rank of the frames. New frames are added to results
-                according to score + comb_score * comb_score_weight
+                according to score + comb_score * feat_score_weight. Note that
+                the values of feat_score_weight can be fairly high, as it it
+                is exponentially weighted to more greatly penalize
+                poor-performing samples (akin to an L-2 norm). Additionally,
+                because of the normalization, the feature score is always
+                constrained to be between 0.0 and 1.0. Thus the maximum the
+
             mixing_samples:
                 The number of samples to draw to establish baseline
                 statistics.
@@ -652,6 +660,10 @@ class LocalSearcher(object):
                 via an attribute that is simply named "feature."
                 Filters are applied in-order, and only non-filtered frames
                 have their features extracted per-filter.
+            startend_clip:
+                The fraction of the start and the end of the video to clip
+                off. A value of 0.1 means that 10% of the start and 10% of the
+                end of the video are removed.
             testing:
                 If true, saves the sequence of considered thumbnails to the
                 directory specified by testing_dir as
@@ -666,12 +678,13 @@ class LocalSearcher(object):
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
         self.n_thumbs = n_thumbs
-        self._comb_score_weight = comb_score_weight
+        self._feat_score_weight = feat_score_weight
         self.mixing_samples = mixing_samples
-        self.search_algo = search_algo(local_search_width)
+        self.search_algo = search_algo(local_search_width, clip=startend_clip)
         self.generators = odict()
         self.feats_to_cache = odict()
         self.combiner = combiner
+        self.startend_clip = startend_clip
         self.filters = filters
         self._testing = testing
         self._testing_dir = testing_dir
@@ -711,6 +724,8 @@ class LocalSearcher(object):
             vdir = os.path.join(self._testing_dir, 'default')
         else:
             vdir = os.path.join(self._testing_dir, vname)
+        if os.path.exists(vdir):
+            shutil.rmtree(vdir)
         try:
             os.mkdir(vdir)
         except:
@@ -733,12 +748,14 @@ class LocalSearcher(object):
         # define the variation measures and requirements
         f_min_var_acc = lambda: min(0.015,
                                         self.col_stat.percentile(
+                                            1./(3*self.n_thumbs)))
+        f_max_var_rej = lambda: min(0.05,
+                                        self.col_stat.percentile(
                                             1./self.n_thumbs))
-        f_max_var_rej = lambda: min(0.15, self.col_stat.percentile(40.))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
-                                   comb_score_weight=self._comb_score_weight)
+                                   feat_score_weight=self._feat_score_weight)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -766,7 +783,7 @@ class LocalSearcher(object):
         _log.info('Search width: %i'%(self.local_search_width))
         _log.info('Search step: %i'%(self.local_search_step))
         video_time = float(num_frames) / fps
-        self.search_algo.start(num_frames)
+        self.search_algo.start(num_frames, self.local_search_width)
         start_time = time()
         max_processing_time = self.processing_time_ratio * video_time
         _log.info('Starting search of %s with %i frames, for %s seconds'%(
@@ -946,7 +963,7 @@ class LocalSearcher(object):
                                                     self.mixing_samples))
         num_frames = self.mixing_samples
         samples = np.linspace(0, self.num_frames,
-                              self.mixing_samples+1).astype(int)
+                              self.mixing_samples+2).astype(int)
         samples = samples[1:-1] # trim off ends
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
