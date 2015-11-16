@@ -593,7 +593,7 @@ class LocalSearcher(object):
                  local_search_step=4,
                  n_thumbs=5,
                  feat_score_weight=0.,
-                 mixing_samples=20,
+                 mixing_samples=40,
                  search_algo=MCMH_rpl,
                  max_variety=True,
                  feature_generators=None,
@@ -748,12 +748,10 @@ class LocalSearcher(object):
         # instantiate the combiner
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
-        f_min_var_acc = lambda: min(0.015,
+        f_min_var_acc = 0.015
+        f_max_var_rej = lambda: max(0.05,
                                         self.col_stat.percentile(
-                                            1./(3*self.n_thumbs)))
-        f_max_var_rej = lambda: min(0.05,
-                                        self.col_stat.percentile(
-                                            1./self.n_thumbs))
+                                            100./self.n_thumbs))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
