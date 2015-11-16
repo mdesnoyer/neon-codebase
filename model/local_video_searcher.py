@@ -946,7 +946,8 @@ class LocalSearcher(object):
                                                     self.mixing_samples))
         num_frames = self.mixing_samples
         samples = np.linspace(0, self.num_frames,
-                              self.mixing_samples).astype(int)
+                              self.mixing_samples+1).astype(int)
+        samples = samples[1:-1] # trim off ends
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
         _log.info('Taking %i initial samples'%(len(samples)))
