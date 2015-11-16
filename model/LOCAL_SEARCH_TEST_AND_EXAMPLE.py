@@ -186,7 +186,7 @@ feature_generators = [pix_gen, sad_gen, text_gen, face_gen, eye_gen,
 
 _log.info('Generating combiner')
 weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
-                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':PEN_LOW_HALF}
+                  'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':MAXIMIZE}
 combiner = Combiner(weight_valence=weight_valence)
 
 
@@ -201,6 +201,7 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    testing=True,
                    feat_score_weight=2.0,
                    processing_time_ratio=1.5,
+                   adapt_improve=True,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
 # _log.info('Testing DILL')
@@ -239,7 +240,6 @@ def test(LS):
         from cPickle import dump
         with open('/data/discovery_pres/extracted_thumb_data/%s'%video_name, 'w') as f:
             dump(thumbs, f)
-        break
     print 'Total time: %.2f'%(time()-start)
 
 if __name__ == '__main__':
