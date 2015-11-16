@@ -28,7 +28,7 @@ class ThumbnailResultObject(object):
         self.frameno = frameno
         self.score = score
         # next frame won't induce a memory leak, right?
-        if next_gap == None:
+        if next_gap is None:
             next_gap = self
         self.next_frame = next_frame
         self.prev_frame = prev_frame
@@ -64,11 +64,11 @@ class ThumbnailResultObject(object):
         ef = self.next_frame.frameno
         if abs(sf - ef) != 1:
             return False
-        if self.score == None:
+        if self.score is None:
             return False
         if self.lead_int_srchd:
             return False
-        if self.next_frame.score == None:
+        if self.next_frame.score is None:
             return False
         if self.next_frame.dummy_frame:
             return False
@@ -85,11 +85,11 @@ class ThumbnailResultObject(object):
         sf = self.prev_frame.frameno
         if abs(sf - ef) != 1:
             return False
-        if self.score == None:
+        if self.score is None:
             return False
         if self.prev_frame.lead_int_srchd:
             return False
-        if self.prev_frame.score == None:
+        if self.prev_frame.score is None:
             return False
         if self.prev_frame.dummy_frame:
             return False
@@ -152,9 +152,9 @@ class MonteCarloMetropolisHastings(object):
         explore_coef = max(0., explore_coef)
         explore_coef = min(1., explore_coef)
         self._ex_co = explore_coef
-        if clip == None:
+        if clip is None:
             clip = 0.
-        if not type(clip) == float:
+        if type(clip) != float:
             clip = 0.
         if (clip < 0.) or (clip > 1.):
             clip = 0.
@@ -253,8 +253,8 @@ class MonteCarloMetropolisHastings(object):
         # compute the frameno
         frameno = (frameno - self.buffer) / self.search_interval
         res_obj = self._get_result(frameno)
-        if res_obj == None:
-            if score == None:
+        if res_obj is None:
+            if score is None:
                 score = self.mean
             res_obj = self._insert_result_at(frameno, score, bad)
             # update the number of samples because we now have one extra
@@ -321,7 +321,7 @@ class MonteCarloMetropolisHastings(object):
         '''
         frameno = self._frameno_to_search_frame(frameno)
         res_obj = self._get_result(frameno)
-        if res_obj == None:
+        if res_obj is None:
             return False
         can_srch = res_obj._can_search()
         if can_srch:
@@ -337,13 +337,21 @@ class MonteCarloMetropolisHastings(object):
         '''
         Converts a frameno into a search frame.
         '''
-        return (frameno - self.buffer) / self.search_interval
+        cand = (frameno - self.buffer) / self.search_interval
+        # ensure it's within range
+        cand = max(0, cand)
+        cand = min(self.N, cand)
+        return cand
 
     def _search_frame_to_frameno(self, frameno):
         '''
         Converts a search frame into a frameno.
         '''
-        return (frameno * self.search_interval) + self.buffer
+        cand = (frameno * self.search_interval) + self.buffer
+        # ensure it's within range
+        cand = max(0, cand)
+        cand = min(self.tot - 1, cand)
+        return cand
 
     def get_nearest(self, frameno):
         '''
@@ -496,7 +504,7 @@ class MCMH_rpl(MonteCarloMetropolisHastings):
         '''
         frameno = np.random.choice(self.N)
         result = self._get_result(frameno)
-        if result == None:
+        if result is None:
             if not len(self.results):
                 # handle the case when the first sample is taken
                 self.n_samples += 1
