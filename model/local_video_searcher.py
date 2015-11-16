@@ -663,8 +663,8 @@ class LocalSearcher(object):
         '''
         self.predictor = predictor
         self.processing_time_ratio = processing_time_ratio
-        self.local_search_width = local_search_width
-        self.local_search_step = local_search_step
+        self._orig_local_search_width = local_search_width
+        self._orig_local_search_step = local_search_step
         self.n_thumbs = n_thumbs
         self._comb_score_weight = comb_score_weight
         self.mixing_samples = mixing_samples
@@ -747,6 +747,21 @@ class LocalSearcher(object):
             self._set_up_testing()
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        # account for the case where the video is very short
+        search_divisor = (self._orig_local_search_width /
+                            self._orig_local_search_step)
+        # self.local_search_width = min(self.orig_local_search_width,
+        #                                 max(search_divisor, (((
+        #                                     self.num_frames/search_divsor)/
+        #                                     self.n_thumbs) *
+        #                                     search_divisor)))
+        self.local_search_width = min(self.orig_local_search_width,
+                                        max(search_divisor,
+                                            self.num_frames / self.n_thumbs))
+        self.local_search_step = max(1, self.local_search_width /
+                                            search_divisor)
+        _log.info('Search width: %i'%(self.local_search_width))
+        _log.info('Search step: %i'%(self.local_search_step))
         video_time = float(num_frames) / fps
         self.search_algo.start(num_frames)
         start_time = time()
