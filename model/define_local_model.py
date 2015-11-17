@@ -34,8 +34,8 @@ if __name__ == '__main__':
 
     parser.add_option('--landmark_file', '-l',
                       help='The file storing facial landmark data')
-    parser.add_option('--eye_classifier', '-e', default='eye_linear_model'
-                      help=('The stored classifier file. Must be stored ',
+    parser.add_option('--eye_classifier', '-e', default='eye_linear_model',
+                      help=('The stored classifier file. Must be stored '
                             'as a compressed file via the scikit-learn '
                             'joblib function; must have as an attribute '
                             'a scaler that can scale the data appropriately'))
@@ -86,7 +86,8 @@ if __name__ == '__main__':
     ## is a float.
     ## TODO: ADD THIS IN AS AN OPTION, ALTHOUGH THE FORMAT IS NOT CLEAR.
     weight_dict = ddict(lambda: 1.)
-    combiner = Combiner(weight_valence=weight_valence)
+    combiner = Combiner(weight_valence=weight_valence,
+                        weight_dict=weight_dict)
 
 
     # instantiate the predictor

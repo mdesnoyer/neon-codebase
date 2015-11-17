@@ -45,7 +45,7 @@ class Filter(object):
 
         Returns: True of the image passed the filter, False otherwise
         '''
-        return self._accept_impl(self._resize_image(image), frameno, video)
+        return self.accept_score(self._resize_image(image), frameno, video)[0]
 
     def _resize_image(self, image):
         '''Resizes the image according to max_height.'''
