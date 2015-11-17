@@ -402,14 +402,14 @@ class TextGenerator(RegionFeatureGenerator):
     '''
     New implementation, which relies on MSER
     '''
-    def __init__(self, max_height=480, crop_frac=None, max_variation=0.025):
+    def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
         self.prep = utils.pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
         self._max_variation = max_variation
-        self.mser = cv2.MSER(_max_variation=0.05)
+        self.mser = cv2.MSER(_max_variation=self._max_variation)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -420,7 +420,13 @@ class TextGenerator(RegionFeatureGenerator):
     def __hash__(self):
         return hash(self.max_height)
 
+    def __getstate__(self):
+        self.mser = None
+        return self.__dict__.copy()
+
     def generate_many(self, images, fonly=False):
+        if self.mser is None:
+            self.mser = cv2.MSER(_max_variation=self._max_variation)
         if not type(images) == list:
             images = [images]
         if fonly:
