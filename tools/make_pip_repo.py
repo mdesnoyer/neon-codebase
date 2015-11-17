@@ -74,7 +74,7 @@ def main():
                 mime = 'application/zip'
             elif pkg_match.group(2) == 'tar.gz':
                 mime = 'application/x-gzip'
-            elif pkg_match.group(2) == '.tgz':
+            elif pkg_match.group(2) == 'tgz':
                 mime = 'application/x-gzip'
             elif pkg_match.group(2) == 'tar.bz2':
                 mime = 'application/x-bzip2'

@@ -400,7 +400,7 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
-            self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            self.clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
 
     @property
     def min_acceptable(self):
@@ -606,7 +606,6 @@ class ResultsList(object):
             if not res_obj._defined:
                 statemon.state.increment('low_number_of_frames_seen')
                 break
-            self._improve_img(res_obj)
             image = self._improve_raw_img(res_obj.image)
             res.append([image, res_obj.score, res_obj.frameno])
         return res
