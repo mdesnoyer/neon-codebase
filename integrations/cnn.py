@@ -37,99 +37,76 @@ _log = logging.getLogger(__name__)
 class CNNIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, integration):
         super(CNNIntegration, self).__init__(account_id, integration)
-        self.api = api.cnn_api.CNNApi(integration.api_key)
+        # this is the user.neon_api_key, but properly named here
+        self.account_id = account_id 
+        self.api = api.cnn_api.CNNApi(integration.api_key_ref)
         self.last_process_date = integration.last_process_date
+        # to correspond with the inherited class 
+        self.platform = integration
+        self.platform.neon_api_key = account_id
 
-    def _get_video_url_to_download(cnn_json_item):
-        '''
-        Return a video url to download from a the CNN json item 
-        '''
-        try:
-            d_urls  = cnn_json_item['cdnUrls']
-        except KeyError, e:
-            _log.error("missing urls %s" % cnn_json_item)
-            return None
-
-    def _get_video_id(cnn_json_item):
-        '''
-        Return a video ID for 1 item in the json
-        '''
-        if cnn_json_item.has_key('video_id'):
-            #since we aren't sure if we can handle slashes in video_id, replace with -
-            no_slash_id = cnn_json_item['video_id'].replace("/", "-")
-            return no_slash_id
-        else:
-            return None
-
-    def _get_title(cnn_json_item):
-        return cnn_json_item.get('has_key', "headline")
-
-    def _get_custom_data(cnn_json_item):
-        custom_data = cnn_json_item.get('topics', {})
-        custom_data['_cnn_topic_data'] = {
-            'cnn_class' : vid_obj['class'],
-            'cnn_label' : vid_obj['label'],
-            'cnn_topic_id' : vid_obj['id']
-            }
-        return custom_data
-    
     @tornado.gen.coroutine 
     def submit_new_videos(self):
-        thumb = ""
-        vid_src = ""
-        video_id = ""
-        
         search_results = yield self.api.search(self.last_process_date)
-        data = json.loads(search_results) 
-
-        if data.has_key('docs'):
-            for video in data['docs']:
-                video_id = _get_video_id(data)
-
-                existing_video = yield tornado.gen.Task(VideoMetadata.get, InternalVideoId.generate(api_key, video_id))
-                if existing_video is None:
-                    title = _get_title(video)
-                    thumb, thumb_id = _get_best_image_info(data['relatedMedia'])
-                    vid_src = _get_video_url_to_download(data)
-
-                    custom_data = _get_custom_data(video)
-
-                    if (thumb != "" and vid_src != "" and video_id != ""):
-                        # The video hasn't been submitted before
-                        job_id = None
-                        try:
-                            response = yield self.submit_video(
-                                video_id,
-                                video_src,
-                                external_thumbnail_id=thumb_id,
-                                custom_data = custom_data,
-                                duration=video['duration'],
-                                publish_date=(video['firstPublishDate'].isoformat() if 
-                                              video['firstPublishDate'] is not None else None),
-                                video_title=unicode(title),
-                                default_thumbnail=thumb)
-                            job_id = response['job_id']
-                        except Exception as e:
-                            statemon.state.increment('unexpected_submission_error')
-                        finally:
-                            _set_last_video(video['firstPublishDate'])
-
-
+        videos = json.loads(search_results)['docs'] 
+        last_processed_date = None 
+        for video in videos:
+            try:
+                video_id = video.get('videoId').replace('/', '-') 
+                publish_date = last_processed_date = video.get('firstPublishDate')
+                title = video.get('title')
+                duration = video.get('duration')
+                thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
+                custom_data = self._build_custom_data_from_topics(video['topics']) 
+                video_src = video['cdnUrls']['1920x1080_5500k_mp4'] 
+                existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                        neondata.InternalVideoID.generate(self.account_id, video_id))
+                if not existing_video:
+                    response = yield self.submit_video(video_id, 
+                                                       video_src, 
+                                                       external_thumbnail_id=thumb_id, 
+                                                       custom_data=custom_data, 
+                                                       duration=duration, 
+                                                       publish_date=publish_date, 
+                                                       video_title=unicode(title), 
+                                                       default_thumbnail=thumb) 
+            except KeyError as e:
+                # let's continue here, we do not have enough to submit 
+                continue 
+            except Exception as e: 
+                statemon.state.increment('unexpected_submission_error')
+                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e)) 
+         
+        if last_processed_date:
+            self.internal_integration.last_process_date = last_processed_date
+            yield self.internal_integration.save() 
+                
     @staticmethod
-    def _get_best_image_info(relatedMedia_media_json):
+    def _get_best_image_info(media_json):
         '''Returns the (url, {image_struct}) of the best image in the 
         CNN related media object
         '''
-        if relatedMedia_json.has_key('media'):
+        if media_json.has_key('media'):
             #now we need to iter on the items as there could be multiple images here
-            for item in relatedMedia_media_json['media']:
-                if item.has_key('type') and item['type'] == 'image':
-                    cuts = data['cuts']
-                    thumb_id = data['imageId']
-                    if cuts.has_key('exlarge16to9'):
-                        return cuts['exlarge16to9'].url, thumb_id
+            for item in media_json['media']:
+                try: 
+                    if item['type'] == 'image':
+                        cuts = item['cuts']
+                        thumb_id = item['imageId']
+                        if cuts.has_key('exlarge16to9'):
+                            return cuts['exlarge16to9']['url'], thumb_id
+                except KeyError as e: 
+                    continue 
         else:
             return None
+
+    @staticmethod 
+    def _build_custom_data_from_topics(topics):
+        custom_data = {} 
+        custom_data['topics'] = [] 
+        for t in topics: 
+           custom_data['topics'].append(t)  
+        return custom_data
     
     @tornado.gen.coroutine
     def process_publisher_stream(self):

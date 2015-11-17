@@ -21,10 +21,16 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         super(TestSubmitVideo, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.integration = neondata.CNNIntegration('acct1', 'i1', last_process_date='2015-10-29T23:59:59Z', api_key='c2vfn5fb8gubhrmd67x7bmv9')
+        user_id = '134234adfs' 
+        self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
+        self.user.save()
+        self.integration = neondata.CNNIntegration(self.user.neon_api_key,  
+                                                   last_process_date='2015-10-29T23:59:59Z', 
+                                                   api_key_ref='c2vfn5fb8gubhrmd67x7bmv9')
         self.integration.save()
+
         self.external_integration = integrations.cnn.CNNIntegration(
-            'a1', self.integration)
+            self.user.neon_api_key, self.integration)
    
     def tearDown(self):
         self.redis.stop()

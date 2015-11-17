@@ -3023,9 +3023,8 @@ class CNNIntegration(AbstractIntegration):
     ''' CNN Integration class '''
 
     def __init__(self, 
-                 a_id='',
-                 i_id='', 
-                 api_key='', 
+                 account_id='',
+                 api_key_ref='', 
                  enabled=True, 
                  last_process_date=None):  
 
@@ -3034,10 +3033,10 @@ class CNNIntegration(AbstractIntegration):
         super(CNNIntegration, self).__init__(enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
-        # neon account_id this integration belongs to 
-        self.account_id = a_id
-        # the api_key required to make requests to cnn api 
-        self.api_key = api_key
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the api_key required to make requests to cnn api - external
+        self.api_key_ref = api_key_ref
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
