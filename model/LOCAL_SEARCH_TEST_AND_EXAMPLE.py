@@ -187,7 +187,9 @@ feature_generators = [pix_gen, sad_gen, text_gen, face_gen, eye_gen,
 _log.info('Generating combiner')
 weight_valence = {'blur':MAXIMIZE, 'sad':MINIMIZE, 'eyes':MAXIMIZE,
                   'text':MINIMIZE, 'pixvar':NORMALIZE, 'vibrance':MAXIMIZE}
-combiner = Combiner(weight_valence=weight_valence)
+weight_dict = ddict(lambda: 1.)
+weight_dict['eyes'] = 2.5
+combiner = Combiner(weight_valence=weight_valence, weight_dict=weight_dict)
 
 
 feats_to_cache = ['pixvar', 'blur', 'sad', 'eyes', 'text', 'vibrance']
@@ -200,8 +202,9 @@ LS = LocalSearcher(predictor, face_finder, eye_scorer,
                    feats_to_cache=feats_to_cache,
                    testing=True,
                    feat_score_weight=2.0,
+                   local_search_width=32,
                    processing_time_ratio=1.5,
-                   adapt_improve=True,
+                   adapt_improve=False,
                    testing_dir='/data/local_search/testing')
 # this shouldn't be warning but I want to test it out
 # _log.info('Testing DILL')
@@ -214,6 +217,7 @@ def test(LS):
     _log.info('Reading in video')
     video_file = '/data/rank_centrality/starwars.mp4'
     videos = [video_file] + glob('/data/discovery_pres/videos/*')
+    #videos = ['/data/discovery_pres/videos/Alien_Crustacean_Invasion.mp4']
     from time import time
     start = time()
     for video_file in videos:
