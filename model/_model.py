@@ -95,7 +95,11 @@ class Model(object):
         it requires so long as it knows where model_data is, which it
         can determine based on where the model pickle is.
         '''
-        if self.filt is not None:
+        if self.filt is None:
+            return
+        elif not len(self.filt):
+            return
+        else:
             self.filt.restore_additional_data(filename)
 
 

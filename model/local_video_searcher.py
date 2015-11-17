@@ -400,7 +400,7 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
-            self.clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
+            self.clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
 
     @property
     def min_acceptable(self):
