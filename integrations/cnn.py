@@ -23,14 +23,7 @@ from utils import http
 from utils.options import options, define
 from utils import statemon
 
-statemon.define('cnn_apiserver_errors', int)
 statemon.define('unexpected_submission_error', int)
-statemon.define('new_images_found', int)
-statemon.define('cant_get_image', int)
-statemon.define('cant_get_refid', int)
-statemon.define('cant_get_custom_id', int)
-statemon.define('video_not_found', int)
-statemon.define('old_videos_skipped', int)
 
 _log = logging.getLogger(__name__)
 
@@ -48,8 +41,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine 
     def submit_new_videos(self):
         search_results = yield self.api.search(self.last_process_date)
+        added_jobs = 0
         videos = json.loads(search_results)['docs'] 
         last_processed_date = None 
+        _log.info('Processing %d videos for cnn' % (len(videos)) 
         for video in videos:
             try:
                 video_id = video.get('videoId').replace('/', '-') 
@@ -70,6 +65,8 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                                                        publish_date=publish_date, 
                                                        video_title=unicode(title), 
                                                        default_thumbnail=thumb) 
+                    if response['job_id']: 
+                        added_jobs += 1
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
                 continue 
@@ -79,7 +76,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
          
         if last_processed_date:
             self.internal_integration.last_process_date = last_processed_date
-            yield self.internal_integration.save() 
+            yield self.internal_integration.save()
+ 
+        _log.info('Added %d jobs for cnn integration' % added_jobs) 
+        raise tornado.gen.Return(True)
                 
     @staticmethod
     def _get_best_image_info(media_json):
