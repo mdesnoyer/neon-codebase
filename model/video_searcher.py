@@ -22,7 +22,7 @@ import model.colorname
 import numpy as np
 import time
 import utils.obj
-from utils import pycvutils
+from cvutils import pycvutils
 from utils import statemon
 
 _log = logging.getLogger(__name__)
