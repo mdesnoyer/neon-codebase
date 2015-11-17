@@ -45,4 +45,4 @@ PyJWT==1.4.0
 xlwt==1.0.0
 dill==0.2.4
 dlib==18.17.100
-skimage==0.11.3
+scikit-image==0.11.3
