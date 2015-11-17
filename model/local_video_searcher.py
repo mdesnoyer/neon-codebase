@@ -141,7 +141,7 @@ class Statistics(object):
 
     def rank(self, x):
         '''Returns the rank of x'''
-        quant = np.sum(self._vals[:self._count] < x)
+        quant = np.sum(self._vals[:self._count] <= x)
         return quant * 1./max(1, self._count)
 
     def percentile(self, x):
@@ -171,13 +171,14 @@ class ColorStatistics(object):
         self._max_size = max_size
         self._count = 0
         self._dists = Statistics()
+        self._prep = pycvutils.ImagePrep(max_side=480)
 
     def push(self, img):
         '''
         Add an image into the statistics object. Unlike the vanilla Statistics
         object, this does *not* support pushing multiple items simultaneously.
         '''
-        cn = ColorName(img)
+        cn = ColorName(self._prep(img))
         for pcn in self._ColObjs:
             self._dists.push(pcn.dist(cn))
         if self._count == self._max_size:
@@ -309,7 +310,7 @@ class _Result(object):
         self._hash = getrandbits(128)
         self.image = image
         if self.image != None:
-            self._color_name = ColorName(image)
+            self._color_name = ColorName(self.image)
         else:
             self._color_name = None
         self.meta = meta
@@ -514,15 +515,23 @@ class ResultsList(object):
         return True
 
     def _improve_img(self, res):
+        '''auto-improves the main image of a result object via
+        _improve_raw_img'''
         if self._adapt_improve:
             _log.debug('Adaptively improving %s'%(res))
-            if len(res.image.shape) < 3:
-                res.image = self.clahe.apply(res.image)
+            res.image = self._improve_raw_img(res.image)
+
+    def _improve_raw_img(self, image):
+        '''auto-improves an image'''
+        if self._adapt_improve:
+            if len(image.shape) < 3:
+                image = self.clahe.apply(image)
+                return image
             else:
                 # convert to HSV, apply to last channel
-                img = cv2.cvtColor(res.image, cv2.cv.CV_BGR2HSV)
+                img = cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)
                 img[:,:,2] = self.clahe.apply(img[:,:,2])
-                res.image = cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
+                return cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
 
     def _maxvar_replace(self, res):
         '''
@@ -598,14 +607,15 @@ class ResultsList(object):
                 statemon.state.increment('low_number_of_frames_seen')
                 break
             self._improve_img(res_obj)
-            res.append([res_obj.image, res_obj.score, res_obj.frameno])
+            image = self._improve_raw_img(res_obj.image)
+            res.append([image, res_obj.score, res_obj.frameno])
         return res
 
 class LocalSearcher(object):
     def __init__(self, predictor, face_finder,
                  eye_classifier,
                  processing_time_ratio=1.0,
-                 local_search_width=48,
+                 local_search_width=32,
                  local_search_step=4,
                  n_thumbs=5,
                  feat_score_weight=0.,
@@ -773,7 +783,7 @@ class LocalSearcher(object):
         self.combiner._set_stats_dict(self.stats)
         # define the variation measures and requirements
         f_min_var_acc = 0.015
-        f_max_var_rej = lambda: max(0.05,
+        f_max_var_rej = lambda: min(0.1,
                                         self.col_stat.percentile(
                                             100./self.n_thumbs))
         self.n_thumbs = n
@@ -948,7 +958,7 @@ class LocalSearcher(object):
         '''
         mean_score = (start_score + end_score) / 2.
         if mean_score > self.min_score:
-            if mean_score > self.stats['score'].median:
+            if mean_score > self.stats['score'].percentile(35.):
                 _log.debug('Interval should be searched')
                 return True
             else:
