@@ -3022,17 +3022,22 @@ class BrightcoveIntegration(AbstractIntegration):
 class CNNIntegration(AbstractIntegration):
     ''' CNN Integration class '''
 
-    LAST_PROCESSED = ''
-    
-    def __init__(self, i_id=None, a_id='', p_id=None):
+    def __init__(self, 
+                 a_id='',
+                 i_id='', 
+                 api_key='', 
+                 enabled=True, 
+                 last_process_date=None):  
 
-        ''' On every successful processing, the last video processed is saved '''
+        ''' On every successful processing, the last video processed date is saved '''
 
         super(CNNIntegration, self).__init__(enabled)
-
-    def _set_last_video(x):
-        self.LAST_PROCESSED = x
-
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # neon account_id this integration belongs to 
+        self.account_id = a_id
+        # the api_key required to make requests to cnn api 
+        self.api_key = api_key
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):

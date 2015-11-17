@@ -10,17 +10,18 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import api.cnn_api
 from cmsdb import neondata
 import datetime
 import dateutil.parser
 import integrations.ovp
+import json
 import logging
 import re
 import tornado.gen
 from utils import http
 from utils.options import options, define
 from utils import statemon
-
 
 statemon.define('cnn_apiserver_errors', int)
 statemon.define('unexpected_submission_error', int)
@@ -33,22 +34,11 @@ statemon.define('old_videos_skipped', int)
 
 _log = logging.getLogger(__name__)
 
-
 class CNNIntegration(integrations.ovp.OVPIntegration):
-    def __init__(self, account_id, platform):
-        super(CNNIntegration, self).__init__(account_id, platform)
-
-    @staticmethod
-    def get_submit_video_fields():
-        '''Return a list of CNN feed fields needed to be able to
-        submit a video.
-        '''
-        return ['sourceId',
-                'exlarge16to9',
-                '1920x1080_5500k_mp4']
-
-    def _get_api_key():
-        return "12345"
+    def __init__(self, account_id, integration):
+        super(CNNIntegration, self).__init__(account_id, integration)
+        self.api = api.cnn_api.CNNApi(integration.api_key)
+        self.last_process_date = integration.last_process_date
 
     def _get_video_url_to_download(cnn_json_item):
         '''
@@ -60,34 +50,15 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             _log.error("missing urls %s" % cnn_json_item)
             return None
 
-        #If we get a broken response from brightcove api
-        if d_urls.has_key('1920x1080_5500k_mp4'):
-            return d_urls['1920x1080_5500k_mp4']
-        else:
-            return None
-
-    @tornado.gen.coroutine
-    def _make_CNN_feed_request(request_url):
+    def _get_video_id(cnn_json_item):
         '''
-        Make the pre-formatted call to the CNN feed to get videos
-        '''
-        res = yield http.send_request(request_url)
-        if res.error is not None:
-            return json.loads(res.body)
-        else:
-            _log.error_n("Error fetching CNN feed")
-            return None
-
-
-    def _get_videoID(cnn_json_item):
-         '''
         Return a video ID for 1 item in the json
         '''
-        if cnn_json_item.has_key('videoId'):
-            #since we aren't sure if we can handle slashes in videoID, replace with -
-            no_slash_id = cnn_json_item['videoId'].replace("/", "-")
+        if cnn_json_item.has_key('video_id'):
+            #since we aren't sure if we can handle slashes in video_id, replace with -
+            no_slash_id = cnn_json_item['video_id'].replace("/", "-")
             return no_slash_id
-        else
+        else:
             return None
 
     def _get_title(cnn_json_item):
@@ -101,20 +72,21 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             'cnn_topic_id' : vid_obj['id']
             }
         return custom_data
-
-    def lookup_cnn_new_videos():
+    
+    @tornado.gen.coroutine 
+    def submit_new_videos(self):
         thumb = ""
         vid_src = ""
-        videoID = ""
-
-        request_url = _get_CNN_feed_url()
-        data = _make_CNN_feed_request(request_url)
+        video_id = ""
+        
+        search_results = yield self.api.search(self.last_process_date)
+        data = json.loads(search_results) 
 
         if data.has_key('docs'):
             for video in data['docs']:
-                videoID = _get_videoID(data)
+                video_id = _get_video_id(data)
 
-                existing_video = yield tornado.gen.Task(VideoMetadata.get, InternalVideoID.generate(api_key, videoID))
+                existing_video = yield tornado.gen.Task(VideoMetadata.get, InternalVideoId.generate(api_key, video_id))
                 if existing_video is None:
                     title = _get_title(video)
                     thumb, thumb_id = _get_best_image_info(data['relatedMedia'])
@@ -122,12 +94,12 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
                     custom_data = _get_custom_data(video)
 
-                    if (thumb != "" and vid_src != "" and videoID != ""):
+                    if (thumb != "" and vid_src != "" and video_id != ""):
                         # The video hasn't been submitted before
                         job_id = None
                         try:
                             response = yield self.submit_video(
-                                videoID,
+                                video_id,
                                 video_src,
                                 external_thumbnail_id=thumb_id,
                                 custom_data = custom_data,
@@ -159,16 +131,6 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         else:
             return None
     
-    # Assemble feed URL to use at this point in time
-    def _get_CNN_feed_url():
-        '''
-        Figure out the last video ID processed based on timestamp
-        '''
-        last_processeds_timestamp = yield tornado.gen.Task(neondata.CNNIntegration.get, LAST_PROCESSED)
-        return "https://services.cnn.com/newsgraph/search/type:video/firstPublishDate:2015-10-29T00:00:00Z~2015-10-29T23:59:59Z/rows:50/start:0/sort:lastPublishDate,desc?api_key=c2vfn5fb8gubhrmd67x7bmv9"
-
-
-
     @tornado.gen.coroutine
     def process_publisher_stream(self):
-        yield self.lookup_cnn_new_videos()
+        yield self.submit_new_videos()
