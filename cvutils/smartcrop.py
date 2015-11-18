@@ -8,7 +8,6 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
-from model import TextDetectionPy
 from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
@@ -25,170 +24,17 @@ define("haarFileProfile",
        type=str,
        help="Profile face detector haar cascade file.")
 
-def normalize_range(src, begin=0, end=255):
-    dst = np.zeros((len(src), len(src[0])))
-    amin, amax = np.amin(src), np.amax(src)
-    for y, x in itertools.product(xrange(len(src)), xrange(len(src[0]))):
-        if amin != amax:
-            dst[y][x] = (src[y][x] - amin) * (end - begin) / (amax - amin) + begin
-        else:
-            dst[y][x] = (end + begin) / 2
-    return dst
+define("textClassifier1",
+       default=os.path.join(os.path.dirname(__file__),
+                           'data/trained_classifierNM1.xml'),
+       type=str,
+       help="Trained text classifier for step 1.")
 
-def normalize(src):
-    src = normalize_range(src, 0., 1.)
-    amax = np.amax(src)
-    maxs = []
-
-    for y in xrange(1, len(src) - 1):
-        for x in xrange(1, len(src[0]) - 1):
-            val = src[y][x]
-            if val == amax:
-                continue
-            if val > src[y - 1][x] and val > src[y + 1][x] and \
-               val > src[y][x - 1] and val > src[y][x + 1]:
-                maxs.append(val)
-
-    if len(maxs) != 0:
-        src *= math.pow(amax - (np.sum(maxs) / np.float64(len(maxs))), 2.)
-
-    return src
-
-class GaussianPyramid(object):
-    def __init__(self, src):
-        # maps calculated using Gaussian Pyramid for intensity
-        # colors and orientations.
-        self.maps = self._make_gaussian_pyramid(src)
-
-    def _make_gaussian_pyramid(self, src):
-        ''' gaussian pyramid | 0 ~ 8(1/256) . not use 0 and 1.
-        Calcuate saliency map using Gaussian pyramid.
-        Using intensity, colors and orientations.
-        '''
-        maps = {'intensity': [],
-                'colors': {'b': [], 'g': [], 'r': [], 'y': []},
-                'orientations': {'0': [], '45': [], '90': [], '135': []}}
-        amax = np.amax(src)
-        b, g, r = cv2.split(src)
-        for x in xrange(1, 9):
-            b, g, r = map(cv2.pyrDown, [b, g, r])
-            if x < 2:
-                continue
-            buf_its = np.zeros(b.shape)
-            buf_colors = map(lambda _: np.zeros(b.shape), range(4))  # b, g, r, y
-            for y, x in itertools.product(xrange(len(b)), xrange(len(b[0]))):
-                buf_its[y][x] = self._get_intensity(b[y][x], g[y][x], r[y][x])
-                buf_colors[0][y][x], \
-                buf_colors[1][y][x], \
-                buf_colors[2][y][x], \
-                buf_colors[3][y][x] = \
-                    self._get_colors(b[y][x], 
-                                      g[y][x],
-                                      r[y][x],
-                                      buf_its[y][x],
-                                      amax)
-            maps['intensity'].append(buf_its)
-            for (color, index) in zip(sorted(maps['colors'].keys()), xrange(4)):
-                maps['colors'][color].append(buf_colors[index])
-            for (orientation, index) in zip(sorted(maps['orientations'].keys()),
-                                            xrange(4)):
-                maps['orientations'][orientation].append(
-                    self._conv_gabor(buf_its, np.pi * index / 4))
-        return maps
-
-    def _get_intensity(self, b, g, r):
-        return (np.float64(b) + np.float64(g) + np.float64(r)) / 3.
-
-    def _get_colors(self, b, g, r, i, amax):
-        ''' Get the color channels of blue, green, red and yellow hues.
-        '''
-        b, g, r = map(lambda x: np.float64(x) if (x > 0.1 * amax) else 0., [b, g, r])
-        nb, ng, nr = map(lambda x, y, z: max(x - (y + z) / 2., 0.), [b, g, r], [r, r, g], [g, b, b])
-        ny = max(((r + g) / 2. - math.fabs(r - g) / 2. - b), 0.)
-
-        if i != 0.0:
-            return map(lambda x: x / np.float64(i), [nb, ng, nr, ny])
-        else:
-            return nb, ng, nr, ny
-
-    def _conv_gabor(self, src, theta):
-        kernel = cv2.getGaborKernel((8, 8), 4, theta, 8, 1)
-        return cv2.filter2D(src, cv2.CV_32F, kernel)
-
-
-class FeatureMap(object):
-    def __init__(self, srcs):
-        self.maps = self._make_feature_map(srcs)
-
-    def _make_feature_map(self, srcs):
-        ''' scale index for center-surround calculation | (center, surround)
-        index of 0 ~ 6 is meaned 2 ~ 8 in thesis (Ich)
-        '''
-        cs_index = ((0, 3), (0, 4), (1, 4), (1, 5), (2, 5), (2, 6))
-        maps = {'intensity': [],
-                'colors': {'bg': [], 'ry': []},
-                'orientations': {'0': [], '45': [], '90': [], '135': []}}
-
-        for c, s in cs_index:
-            maps['intensity'].append(self._scale_diff(srcs['intensity'][c],
-                                     srcs['intensity'][s]))
-            for key in maps['orientations'].keys():
-                maps['orientations'][key].append(
-                self._scale_diff(srcs['orientations'][key][c], srcs['orientations'][key][s]))
-            for key in maps['colors'].keys():
-                maps['colors'][key].append(self._scale_color_diff(
-                    (srcs['colors'][key[0]][c], srcs['colors'][key[0]][s]),
-                    (srcs['colors'][key[1]][c], srcs['colors'][key[1]][s])
-                ))
-        return maps
-
-    def _scale_diff(self, c, s):
-        c_size = tuple(reversed(c.shape))
-        return cv2.absdiff(c, cv2.resize(s, c_size, None, 0, 0, cv2.INTER_NEAREST))
-
-    def _scale_color_diff(self, (c1, s1), (c2, s2)):
-        c_size = tuple(reversed(c1.shape))
-        return cv2.absdiff(c1 - c2, cv2.resize(s2 - s1, c_size, None, 0, 0,
-                                               cv2.INTER_NEAREST))
-
-
-class ConspicuityMap(object):
-    def __init__(self, srcs):
-        self.maps = self._make_conspicuity_map(srcs)
-
-    def _make_conspicuity_map(self, srcs):
-        ''' Combine feature map into a single conspicuity map.
-        '''
-        intensity = self._scale_add(map(normalize, srcs['intensity']))
-        for key in srcs['colors'].keys():
-            srcs['colors'][key] = map(normalize, srcs['colors'][key])
-        color = self._scale_add([srcs['colors']['bg'][x] + srcs['colors']['ry'][x] \
-                for x in xrange(len(srcs['colors']['bg']))])
-        orientation = np.zeros(intensity.shape)
-        for key in srcs['orientations'].keys():
-            orientation += self._scale_add(map(normalize, srcs['orientations'][key]))
-        return {'intensity': intensity,
-                'color': color,
-                'orientation': orientation}
-
-    def _scale_add(self, srcs):
-        buf = np.zeros(srcs[0].shape)
-        for x in srcs:
-            buf += cv2.resize(x, tuple(reversed(buf.shape)))
-        return buf
-
-
-class SaliencyMap(object):
-    def __init__(self, src):
-        self.gp = GaussianPyramid(src)
-        self.fm = FeatureMap(self.gp.maps)
-        self.cm = ConspicuityMap(self.fm.maps)
-        self.map = cv2.resize(self._make_saliency_map(self.cm.maps),
-                              tuple(reversed(src.shape[0:2])))
-
-    def _make_saliency_map(self, srcs):
-        srcs = map(normalize, [srcs[key] for key in srcs.keys()])
-        return srcs[0] / 3. + srcs[1] / 3. + srcs[2] / 3.
+define("textClassifier2",
+       default=os.path.join(os.path.dirname(__file__),
+                           'data/trained_classifierNM2.xml'),
+       type=str,
+       help="Trained text classifier for step 2.")
 
 class ImageSignatureSaliency(object):
     def __init__(self, src, map_size = 640):
@@ -236,6 +82,8 @@ class SmartCrop(object):
     def __init__(self):
         self.haarFileFront = options.haarFileFront
         self.haarFileProfile = options.haarFileProfile
+        self.textClassifier1 = options.textClassifier1
+        self.textClassifier2 = options.textClassifier2
         self.front_face_cascade = cv2.CascadeClassifier()
         self.profile_face_cascade = cv2.CascadeClassifier()
         self.front_face_cascade.load(self.haarFileFront)
@@ -256,8 +104,23 @@ class SmartCrop(object):
 
 
     def detect_face(self, im):
-        front_faces = self.front_face_cascade.detectMultiScale(im, **self.haarParams)
-        profile_faces = self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
+        front_faces = \
+            self.front_face_cascade.detectMultiScale(im, **self.haarParams)
+        profile_faces = \
+            self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
+        im_flip = cv2.flip(im, 1)
+        flip_profile_faces = \
+            self.profile_face_cascade.detectMultiScale(im_flip, **self.haarParams)
+
+        if len(flip_profile_faces) != 0:
+            flip_profile_faces[0:, 0] = im.shape[1] - (flip_profile_faces[0:, 0] +
+                                                       flip_profile_faces[0:, 2])
+            if len(profile_faces) == 0:
+                profile_faces = flip_profile_faces
+            else:
+                profile_faces = np.append(profile_faces, flip_profile_faces, axis=0)
+
+
         if len(front_faces) == 0:
             return profile_faces
         elif len(profile_faces) == 0:
@@ -266,28 +129,42 @@ class SmartCrop(object):
             faces = np.append(front_faces, profile_faces, axis=0)
             return faces
 
-    def text_crop(self, im):
+    def text_crop(self, im, draw_im = None):
         # Downsize the image first. Make the longest edge to be 360 pixels.
+        height = im.shape[0]
+        width = im.shape[1]
         ratio = max(im.shape[0]/600.0, im.shape[1]/600.0)
         im_resized = cv2.resize(im, (int(im.shape[1]/ratio),
                                      int(im.shape[0]/ratio)))
+        # Text detector is defined in erfilter.cpp in neon version of opencv3
+        # textDetect(InputArray _src, const String &model_1, const String &model_2,
+        #         int thresholdDelta,
+        #         float minArea, float maxArea, float minProbability,
+        #         bool nonMaxSuppression, float minProbabilityDiff,
+        #         float minProbablity_2,
+        #         vector<Rect> &groups_boxes, OutputArray _dst)
+
         boxes, mask = cv2.text.textDetect(im_resized,
-            '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM1.xml',
-            '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM2.xml',
+            self.textClassifier1,
+            self.textClassifier2,
             16,0.00015,0.003,0.8,True,0.5, 0.9)
-        # (height, width, elem) = im.shape
-        # text_image = TextDetectionPy.TextDetection(im)
-        # Get the bottom 1/3 of the image.
-        # Then find where the line separate the text part of the image, but
-        # the line is not going to be bigger than the bottom part of the image.
-        # text_contours, hierarchy = cv2.findContours(text_image,
-                                                     # cv2.RETR_LIST,
-                                                     # cv2.CHAIN_APPROX_TC89_L1)
-        bottom = im.shape[1] * 3 / 4
+
+        # draw on it if it is provided, for debugging purpose.
+        # Assuming the draw_im is a copy of im.
+        if len(boxes) == 0:
+            return im
+        boxes *= ratio
+        boxes = boxes.astype(int)
+        if draw_im is not None:
+            for box in boxes:
+                tl = (box[0], box[1])
+                br = (box[0] + box[2], box[1] + box[3])
+                cv2.rectangle(draw_im, tl, br, ( 0, 255, 255 ), 3, 8)
+
+        bottom = height * 0.7
 
         top_height_array = []
         for box in boxes:
-            box = box * ratio
             if box[1] < bottom:
                 continue
             top_height_array.append(box[1])
@@ -295,13 +172,13 @@ class SmartCrop(object):
         if not top_height_array:
             return im
         top_height = min(top_height_array) - 3
-        new_width = top_height * im_resized.shape[1] / im_resized.shape[0]
+        new_width = top_height * width / height
         x = (width - new_width)/2
         cropped_im = im[0 : top_height, x:x+new_width]
         return cropped_im
 
 
-    def crop(self, src, w, h):
+    def crop_and_resize(self, src, w, h):
         ''' Find the cropped area maximizes the summation of the saliency
         value
         '''

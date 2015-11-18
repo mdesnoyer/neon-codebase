@@ -87,37 +87,24 @@ def draw_text():
     image_files.sort()
     print "Total number of files:", len(image_files)
     count = 0
+    smart_crop = smartcrop.SmartCrop.get_cropper()
+
     for im_file in image_files:
         # if '_center' in im_file or '_smart' in im_file:
             # continue
         count += 1
         print '(%d) %s' % (count, im_file)
-        # if count == 10:
+        # if count == 20:
         #   break
         im = cv2.imread(im_file)
-        ratio = max(im.shape[0]/600.0, im.shape[1]/600.0)
-        im_resized = cv2.resize(im, (int(im.shape[1]/ratio),
-                                     int(im.shape[0]/ratio)))
-        text_im = im_resized
-
-        boxes, mask = cv2.text.textDetect(im_resized,
-            '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM1.xml',
-            '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM2.xml',
-            32,0.00015,0.003,0.8,True,0.5, 0.9)
-        for box in boxes:
-            tl = (box[0], box[1])
-            br = (box[0] + box[2], box[1] + box[3])
-            cv2.rectangle(text_im, tl, br, ( 0, 255, 255 ), 3, 8)
+        draw_im = im.copy()
+        cropped_im = smart_crop.text_crop(im, draw_im)
         text_file = os.path.join(text_dst_dir, os.path.basename(im_file))
-        cv2.imwrite(text_file, text_im)
+        cropped_file = text_file.replace('.jpg', '_crop.jpg')
+        cv2.imwrite(text_file, draw_im)
+        cv2.imwrite(cropped_file, cropped_im)
 
-def main():
-    # draw_faces()
-    # draw_saliency()
-    draw_text()
-    return
-    # return
-
+def full_test():
     target_dir = '/home/wiley/src/data/bad_images'
     image_files = glob.glob(os.path.join(target_dir, '*.jpg'))
     image_files.sort()
@@ -131,7 +118,7 @@ def main():
         #   break
         im = cv2.imread(im_file)
         smart_crop = smartcrop.SmartCrop.get_cropper()
-        cropped_im = smart_crop.crop(im, 600, 600)
+        cropped_im = smart_crop.crop_and_resize(im, 600, 600)
         centered_im = resize_and_crop(im, 600, 600)
         cropped_file = im_file.replace('.jpg', '_smart.jpg')
         cv2.imwrite(cropped_file, cropped_im)
@@ -141,7 +128,16 @@ def main():
         # cv2.imshow('cropped', cropped_im)
         # cv2.imshow('centered', centered_im)
         # cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # cv2.destroyAllWindows()
+
+
+def main():
+    # draw_faces()
+    # draw_saliency()
+    # draw_text()
+    full_test()
+    return
+
 
 if __name__ == "__main__":
     main()
