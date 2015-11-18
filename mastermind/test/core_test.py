@@ -1792,8 +1792,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertLess(turned_off['acct1_vid1_n2'], 0.01*N_SIMS)
         self.assertGreater(turned_off['acct1_vid1_n3'], 0.5*N_SIMS)
         self.assertEquals(turned_off['acct1_vid1_rand'], 0)
-        self.assertEquals(np.max(turned_back_on), 0)
-        
+        self.assertEquals(np.max(turned_back_on), 0)        
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -2207,6 +2206,21 @@ class TestStatUpdating(test_utils.neontest.TestCase):
             self.mastermind.update_stats_info([
                 ('acct1_vid1', 'v1t_where', 1000, None, 5, None)
                 ])
+
+    def test_unexpected_strategy_error(self):
+        self.mastermind._calculate_new_serving_directive = MagicMock()
+        self.mastermind._calculate_new_serving_directive.side_effect = [
+            Exception('Ooops')]
+
+        with self.assertLogExists(logging.ERROR, 'Unexpected exception'):
+            self.mastermind.update_experiment_strategy(
+                'acct1',
+                ExperimentStrategy(
+                    'acct1',
+                    experiment_type=ExperimentStrategy.SEQUENTIAL,
+                    frac_adjust_rate=1.0,
+                    holdback_frac=0.0,
+                    exp_frac=1.0))
 
 class TestExperimentState(test_utils.neontest.TestCase):
     def setUp(self):
@@ -2780,6 +2794,17 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                               [('acct1_vid1_bc', 1./3),
                                ('acct1_vid1_n1', 1./3),
                                ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+
+        # Finally remove an off thumb from the list and make sure it's
+        # handled properly.
+        del self.thumbnails[1]
+        self.mastermind.update_video_info(self.video_metadata,
+                                          self.thumbnails)
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
                                ('acct1_vid1_ctr', 1./3)])
 
     def test_sequential_strategy_found_winner(self):
