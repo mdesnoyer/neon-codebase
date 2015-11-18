@@ -59,7 +59,7 @@ class CNNApi(object):
                                                  method='GET',
                                                  request_timeout = 60.0)
         
-        respone = None  
+        response = None  
         for r in range(retries):
             response = yield utils.http.send_request(request,
                                                      ntries=1,
