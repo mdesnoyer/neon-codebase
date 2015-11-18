@@ -399,7 +399,7 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
-            self._clipLimit = 2.0
+            self._clipLimit = 1.0
             self._tileGridSize = (8,8)
             self.clahe = cv2.createCLAHE(clipLimit=self._clipLimit,
                                          tileGridSize=self._tileGridSize)
