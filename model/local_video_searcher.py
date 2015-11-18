@@ -977,9 +977,17 @@ class LocalSearcher(object):
             return False
         action, meta = r
         if action == 'sample':
-            self._take_sample(meta)
+            try:
+                self._take_sample(meta)
+            except Exception e:
+                log._exception(('Problem obtaining sample of %s! '
+                                'Error: %s')%(str(meta), e))
         else:
-            self._conduct_local_search(*meta)
+            try:
+                self._conduct_local_search(*meta)
+            except Exception e:
+                log._exception(('Problem conducting local search of %s! '
+                                'Error: %s')%(str(meta), e))
         return True
 
     def _update_color_stats(self, images):
