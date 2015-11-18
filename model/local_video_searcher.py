@@ -93,6 +93,27 @@ class Statistics(object):
         self._p_median = None
         if init is not None:
             self.push(init)
+        self._obj_params = {'max_size':max_size}
+
+    def get_my_params(self):
+        '''
+        Returns a dictioary of parameters for this module. It can be largely
+        copied across different parts of the model, but it must define the
+        attributes that get_my_param functions.
+        '''
+        param_dict = [k:v for key, value in self._obj_params.iteritems()]
+        return param_dict
+
+    def _print_params(self, dict, hierarchy=[]):
+        for k, v in cdict.iteritems():
+            if type(v) == dict:
+                self._print_params(v, hierarchy + [k])
+            cstr = ' '.join(['%12s'%x for x in hierarchy])
+            print cstr, k, ':', v
+
+    def print_my_params_mod(self):
+        params = self.get_my_params()
+        self._print_params(params)
 
     def push(self, x):
         '''
@@ -228,7 +249,6 @@ class Combiner(object):
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         self._combine = combine
-        self._tot_pos = 1.
 
     def _set_stats_dict(self, stats_dict):
         '''
@@ -400,7 +420,10 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
-            self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            self._clipLimit = 2.0
+            self._tileGridSize = (8,8)
+            self.clahe = cv2.createCLAHE(clipLimit=self._clipLimit,
+                                         tileGridSize=self._tileGridSize)
 
     @property
     def min_acceptable(self):
