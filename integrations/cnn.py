@@ -47,45 +47,45 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         _log.info('Processing %d videos for cnn' % (len(videos))) 
         for video in videos:
             try:
-                video_id = video.get('videoId').replace('/', '-') 
-                publish_date = last_processed_date = video.get('firstPublishDate')
-                title = video.get('title')
-                duration = video.get('duration')
+                video_id = video['videoId'].replace('/', '-') 
+                publish_date = last_processed_date = video['firstPublishDate']
+                title = video.get('title', 'no title')
+                duration = video.get('duration', None)
                 thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
-                custom_data = self._build_custom_data_from_topics(video['topics']) 
-                video_src = video['cdnUrls']['1920x1080_5500k_mp4'] 
+                custom_data = self._build_custom_data_from_topics(video['topics'])
+                video_src = self._find_best_cdn_url(video['cdnUrls'])
                 existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
                                                         neondata.InternalVideoID.generate(self.account_id, video_id))
                 if not existing_video:
-                    response = yield self.submit_video(video_id, 
-                                                       video_src, 
+                    response = yield self.submit_video(video_id=video_id, 
+                                                       video_url=video_src, 
                                                        external_thumbnail_id=thumb_id, 
                                                        custom_data=custom_data, 
                                                        duration=duration, 
                                                        publish_date=publish_date, 
                                                        video_title=unicode(title), 
-                                                       default_thumbnail=thumb) 
-                    if response['job_id']: 
+                                                       default_thumbnail=thumb)
+                    if response['job_id']:
                         added_jobs += 1
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
-                continue 
+                pass 
             except Exception as e: 
                 statemon.state.increment('unexpected_submission_error')
                 _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e))
                 pass
          
         if last_processed_date:
-            self.internal_integration.last_process_date = last_processed_date
-            yield self.internal_integration.save()
- 
+            self.platform.last_process_date = last_processed_date
+            yield tornado.gen.Task(neondata.CNNIntegration.save, self.platform)
+
         _log.info('Added %d jobs for cnn integration' % added_jobs) 
-        raise tornado.gen.Return(True)
+        raise tornado.gen.Return(self.platform)
                 
     @staticmethod
     def _get_best_image_info(media_json):
         '''Returns the (url, {image_struct}) of the best image in the 
-        CNN related media object
+           CNN related media object
         '''
         if media_json.has_key('media'):
             #now we need to iter on the items as there could be multiple images here
@@ -100,7 +100,11 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                     continue 
         else:
             return None
-
+    
+    @staticmethod 
+    def _find_best_cdn_url(cdn_urls): 
+        return 'woo'
+ 
     @staticmethod 
     def _build_custom_data_from_topics(topics):
         custom_data = {} 

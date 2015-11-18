@@ -58,7 +58,6 @@ class CNNApi(object):
         request = tornado.httpclient.HTTPRequest(url, 
                                                  method='GET',
                                                  request_timeout = 60.0)
-        
         response = None  
         for r in range(retries):
             response = yield utils.http.send_request(request,
@@ -71,7 +70,7 @@ class CNNApi(object):
             delay = (1 << r) * base_delay * random.random()
             yield tornado.gen.sleep(delay)
 
-        if response: 
+        if response:
             raise tornado.gen.Return(response)
         else: 
             raise Exception('unable to fetch cnn feed') 
