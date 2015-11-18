@@ -44,7 +44,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         added_jobs = 0
         videos = json.loads(search_results)['docs'] 
         last_processed_date = None 
-        _log.info('Processing %d videos for cnn' % (len(videos)) 
+        _log.info('Processing %d videos for cnn' % (len(videos))) 
         for video in videos:
             try:
                 video_id = video.get('videoId').replace('/', '-') 
@@ -72,7 +72,8 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 continue 
             except Exception as e: 
                 statemon.state.increment('unexpected_submission_error')
-                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e)) 
+                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e))
+                pass
          
         if last_processed_date:
             self.internal_integration.last_process_date = last_processed_date
