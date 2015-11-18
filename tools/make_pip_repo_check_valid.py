@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 '''
 Replicates the function of make_pip_repo, but checks that every link that
-points to a S3 resource is valid (i.e., is not a dead link)
+points to a S3 resource is valid (i.e., is not a dead link). This can occur
+when a modified repo is uploaded but with a different extension (i.e., zip -->
+.tar.gz) but the same repo name (as happened with dlib). 
 
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
