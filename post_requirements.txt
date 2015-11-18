@@ -1,0 +1,4 @@
+# requirements that come *after* pre_requirements but before requirements.
+
+scikit-image==0.11.3
+dlib==18.17.100
