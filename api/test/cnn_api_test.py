@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.cnn_api
+from dateutil.parser import parse
 import json
 import logging
 from mock import patch, MagicMock
@@ -30,5 +31,6 @@ class TestCNNApi(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_base_search(self):
         c = api.cnn_api.CNNApi('c2vfn5fb8gubhrmd67x7bmv9')
-        yield c.search('2015-10-29T00:00:00Z') 
+        blah = yield c.search(parse('2015-10-29T00:00:00Z')) 
+        import pdb; pdb.set_trace()
         

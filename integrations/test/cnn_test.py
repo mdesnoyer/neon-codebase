@@ -59,7 +59,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                                         {"job_id": "job2"}] 
         yield self.external_integration.submit_new_videos()
         cargs_list = self.submit_mock.call_args_list
-        videos = json.loads(response)['docs'] 
+        videos = response['docs'] 
         video_one = videos[0]  
         video_two = videos[1]
         call_one = cargs_list[0][1] 
@@ -93,7 +93,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                                         {"job_id": "job2"}] 
         yield self.external_integration.submit_new_videos()
         integration = neondata.CNNIntegration.get(self.integration.integration_id) 
-        videos = json.loads(response)['docs'] 
+        videos = response['docs'] 
         video_one = videos[1]
         video_two = videos[1]
         self.assertEquals(video_two['firstPublishDate'], integration.last_process_date) 
@@ -160,4 +160,4 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         response['generated'] = "2015-11-16T21:36:25.369Z" 
         response['results'] = num_of_results
         response['docs'] = _generate_docs()
-        return json.dumps(response)  
+        return response

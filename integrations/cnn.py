@@ -40,14 +40,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
     @tornado.gen.coroutine 
     def submit_new_videos(self):
-        search_results = yield self.api.search(self.last_process_date)
+        search_results = yield self.api.search(dateutil.parser.parse(self.last_process_date))
         added_jobs = 0
-        videos = json.loads(search_results)['docs'] 
+        videos = search_results['docs'] 
         last_processed_date = None 
         _log.info('Processing %d videos for cnn' % (len(videos))) 
         for video in videos:
             try:
-                video_id = video['videoId'].replace('/', '-') 
+                video_id = video['videoId'].replace('/', '~') 
                 publish_date = last_processed_date = video['firstPublishDate']
                 title = video.get('title', 'no title')
                 duration = video.get('duration', None)
@@ -76,8 +76,9 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 pass
          
         if last_processed_date:
-            self.platform.last_process_date = last_processed_date
-            yield tornado.gen.Task(neondata.CNNIntegration.save, self.platform)
+            def _modify_me(x): 
+                x.last_process_date = last_processed_date 
+            yield tornado.gen.Task(neondata.CNNIntegration.modify, self.platform.integration_id, _modify_me)
 
         _log.info('Added %d jobs for cnn integration' % added_jobs) 
         raise tornado.gen.Return(self.platform)
