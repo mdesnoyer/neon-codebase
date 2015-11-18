@@ -19,12 +19,16 @@ from cmsdb.neondata import ThumbnailMetadata, ExperimentStrategy, VideoMetadata
 import decimal
 import fake_filesystem
 import fake_tempfile
+import json
 import logging
 from mock import patch, MagicMock
 import multiprocessing.pool
 import numpy.random
+import numpy as np
+import pandas
 import test_utils.neontest
 import test_utils.redis
+import tornado.httpclient
 import utils.neon
 import unittest
 
@@ -88,8 +92,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_patcher.start()
+        self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        logging.getLogger('cmsdb.neondata').propagate = False
 
         # TODO(wiley): Once we actually listen to the priors but keep
         # serving fractions constant, set frac_adjust_rate to the
@@ -102,6 +108,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        logging.getLogger('cmsdb.neondata').propagate = True
 
     def test_serving_directives_with_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -251,8 +258,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                  score_type=ScoreType.CLASSICAL))[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
-        self.assertAlmostEqual(directive['n1'], 0.9)
-        self.assertAlmostEqual(directive['bc'], 0.1)
+        self.assertGreater(directive['n1'], 0.0)
+        self.assertGreater(directive['bc'], 0.0)
 
     def test_inf_model_score(self):
         self.mastermind.update_experiment_strategy(
@@ -294,59 +301,77 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                             ]) }
         self.mastermind.video_info['testacct123_4324552316001'] = VideoInfo(
                 'testacct123', True,
-                [build_thumb(ThumbnailMetadata('d6dfa36d8431e795b573263bed0a71e8', '4324552316001', ctr=None,rank=1,height=720,width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=4437922592898527388,
-                                               ttype='neon', model_score=5.654004413457463),
-                                               phash=14285162934004088064L,
-                                               incremental_impressions=0,
-                                               base_impressions=234234234,
-                                               incremental_conversions=234234234,
-                                               base_conversions=-1),
-                 build_thumb(ThumbnailMetadata('1e10632ba402134d74bef2eb47ae51af', '4324552316001', rank=3, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=11159919755030691327L,
-                                               ttype='neon',
-                                               model_score=5.009933999821487)),
-                 build_thumb(ThumbnailMetadata('bb0dbd191853aa5ce998121e1b6d54d6', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               phash=4438202951250849932,
-                                               ttype='random',
-                                               model_score=None)),
-                 build_thumb(ThumbnailMetadata('050c67f1b38449ea254f1eb3024b999e', '4324552316001', rank=2, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=1949432825026632815,
-                                               ttype='neon',
-                                               model_score=5.037118012144308)),
-                 build_thumb(ThumbnailMetadata('ec480d6634dadbae513e9a4fc28e84eb', '4324552316001', rank=0, height=360, width=740,
-                                               ctr=None,
-                                               model_version=None,
-                                               phash=10216194004065988127L,
-                                               ttype='brightcove',
-                                               model_score=None)),
-                 build_thumb(ThumbnailMetadata('4dd194c4c4a082bba85a4f3bd57dc854', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=4438202951275983004,
-                                               ttype='neon',
-                                               model_score=5.666209793655988)),
-                 build_thumb(ThumbnailMetadata('7833f53877497433fed22ee030a534a8', '4324552316001', rank=0, height=720, width=1280,
-                                               ctr=None,
-                                               model_version=None,
-                                               phash=4437921476290916540,
-                                               filtered=None,
-                                               ttype='centerframe',
-                                               model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'd6dfa36d8431e795b573263bed0a71e8', '4324552316001', 
+                    ctr=None,rank=1,height=720,width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash=4437922592898527388,
+                    ttype='neon', model_score=5.654004413457463),
+                    phash=14285162934004088064L,
+                    incremental_impressions=0,
+                    base_impressions=234234234,
+                    incremental_conversions=234234234,
+                    base_conversions=-1),
+                 build_thumb(ThumbnailMetadata(
+                     '1e10632ba402134d74bef2eb47ae51af',
+                     '4324552316001', rank=3, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=11159919755030691327L,
+                     ttype='neon',
+                     model_score=5.009933999821487)),
+                 build_thumb(ThumbnailMetadata(
+                     'bb0dbd191853aa5ce998121e1b6d54d6',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     phash=4438202951250849932,
+                     ttype='random',
+                     model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     '050c67f1b38449ea254f1eb3024b999e',
+                     '4324552316001', rank=2, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=1949432825026632815,
+                     ttype='neon',
+                     model_score=5.037118012144308)),
+                 build_thumb(ThumbnailMetadata(
+                     'ec480d6634dadbae513e9a4fc28e84eb',
+                     '4324552316001', rank=0, height=360, width=740,
+                     ctr=None,
+                     model_version=None,
+                     phash=10216194004065988127L,
+                     ttype='brightcove',
+                     model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     '4dd194c4c4a082bba85a4f3bd57dc854',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     model_version='20130924_crossfade_withalg',
+                     phash=4438202951275983004,
+                     ttype='neon',
+                     model_score=5.666209793655988)),
+                 build_thumb(ThumbnailMetadata(
+                     '7833f53877497433fed22ee030a534a8',
+                     '4324552316001', rank=0, height=720, width=1280,
+                     ctr=None,
+                     model_version=None,
+                     phash=4437921476290916540,
+                     filtered=None,
+                     ttype='centerframe',
+                     model_score=None))],
                  score_type=ScoreType.CLASSICAL)
 
-        self.mastermind._calculate_new_serving_directive('testacct123_4324552316001')
-        self.assertEquals(len(self.mastermind.serving_directive['testacct123_4324552316001'][1]), 7)
+        self.mastermind._calculate_new_serving_directive(
+            'testacct123_4324552316001')
+        self.assertEquals(len(
+            self.mastermind.serving_directive['testacct123_4324552316001'][1]),
+            7)
 
     def test_ign_breaker_one(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2,
+                                        baseline_type='brightcove'))
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
@@ -362,51 +387,60 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                             ]) }
         self.mastermind.video_info['acct1_vid1'] = VideoInfo(
                 'acct1', True,
-                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash=14285162934004088064L,
-                                               urls=['http://blah.invalid.com'],
-                                               ttype='neon', model_score=5.406484635388814)),
-                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='random', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='brightcove', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859715',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.292761188458726)),
-                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859716',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.330244313549762)),
-                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859717',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.390517351344677)),
-                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859718',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='centerframe', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859719',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.3649998500954)),
-                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859720',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'n1', 'vid1', rank=0, height=720, width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash=14285162934004088064L,
+                    urls=['http://blah.invalid.com'],
+                    ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata(
+                     'n2', 'vid1', rank=0, height=720, width=1280,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n3', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n4', 'vid1', rank=4, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859715',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata(
+                     'n5', 'vid1', rank=3, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859716',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata(
+                     'n6', 'vid1', rank=1, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859717',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata(
+                     'n7', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859718',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n8', 'vid1', rank=2, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859719',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata(
+                     'n9', 'vid1', rank=0, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859720',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=None))],
                  score_type=ScoreType.CLASSICAL)
 
         self.mastermind._calculate_new_serving_directive('acct1_vid1')
@@ -414,7 +448,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_ign_breaker_two(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=0.2, baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.2,
+                                        baseline_type='brightcove'))
         self.serving_directive = {
             'acct1_vid1': (('acct1', 'vid1'),
                            [
@@ -431,51 +466,60 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         directive = self.mastermind._calculate_current_serving_directive(
             VideoInfo(
                 'acct1', True,
-                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859712',
-                                               urls=['http://blah.invalid.com'],
-                                               ttype='neon', model_score=5.406484635388814)),
-                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0, height=720, width=1280,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='random', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n3', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859713',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='brightcove', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n4', 'vid1', rank=4, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859715',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.292761188458726)),
-                 build_thumb(ThumbnailMetadata('n5', 'vid1', rank=3, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859716',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.330244313549762)),
-                 build_thumb(ThumbnailMetadata('n6', 'vid1', rank=1, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859717',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.390517351344677)),
-                 build_thumb(ThumbnailMetadata('n7', 'vid1', rank=0, height=360, width=640,
-                                               model_version=None,
-                                               phash='4576300592785859718',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='centerframe', model_score=None)),
-                 build_thumb(ThumbnailMetadata('n8', 'vid1', rank=2, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859719',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=5.3649998500954)),
-                 build_thumb(ThumbnailMetadata('n9', 'vid1', rank=0, height=720, width=1280,
-                                               model_version='20130924_crossfade_withalg',
-                                               phash='4576300592785859720',
-                                               urls=['http://blah.invalid2.jpg'],
-                                               ttype='neon', model_score=None))],
+                [build_thumb(ThumbnailMetadata(
+                    'n1', 'vid1', rank=0, height=720, width=1280,
+                    model_version='20130924_crossfade_withalg',
+                    phash='4576300592785859712',
+                    urls=['http://blah.invalid.com'],
+                    ttype='neon', model_score=5.406484635388814)),
+                 build_thumb(ThumbnailMetadata(
+                     'n2', 'vid1', rank=0, height=720, width=1280,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='random', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n3', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859713',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='brightcove', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n4', 'vid1', rank=4, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859715',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.292761188458726)),
+                 build_thumb(ThumbnailMetadata(
+                     'n5', 'vid1', rank=3, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859716',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.330244313549762)),
+                 build_thumb(ThumbnailMetadata(
+                     'n6', 'vid1', rank=1, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859717',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.390517351344677)),
+                 build_thumb(ThumbnailMetadata(
+                     'n7', 'vid1', rank=0, height=360, width=640,
+                     model_version=None,
+                     phash='4576300592785859718',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='centerframe', model_score=None)),
+                 build_thumb(ThumbnailMetadata(
+                     'n8', 'vid1', rank=2, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859719',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=5.3649998500954)),
+                 build_thumb(ThumbnailMetadata(
+                     'n9', 'vid1', rank=0, height=720, width=1280,
+                     model_version='20130924_crossfade_withalg',
+                     phash='4576300592785859720',
+                     urls=['http://blah.invalid2.jpg'],
+                     ttype='neon', model_score=None))],
                  score_type=ScoreType.CLASSICAL))[1]
 
         self.assertEquals(len(directive), 9)
@@ -817,7 +861,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.assertAlmostEqual(directive['n2'], 0.99)
         self.assertAlmostEqual(directive['bc'], 0.0)
-        self.assertGreater(directive['n1'], directive['ctr'])
+        self.assertAlmostEqual(directive['n1'], directive['ctr'])
         self.assertGreater(directive['ctr'], 0.0)
         self.assertAlmostEqual(sum(directive.values()), 1.0)
 
@@ -937,39 +981,6 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             self.assertIsNone(
                 self.mastermind._calculate_current_serving_directive(
                     video_info))
-
-    def test_sequential_strategy(self):
-        # The sequential strategy is currently not implemented, so we
-        # should log a fatal and then fallback on the multi-armed
-        # bandit.
-        self.mastermind.update_experiment_strategy(
-            'acct1',
-            ExperimentStrategy('acct1',
-                               experiment_type=ExperimentStrategy.SEQUENTIAL))
-
-        video_info = VideoInfo(
-            'acct1', True,
-            [build_thumb(ThumbnailMetadata('n1', 'vid1',
-                                           ttype='neon', model_score=5.8)),
-             build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5)),
-             build_thumb(ThumbnailMetadata('ctr', 'vid1',
-                                           ttype='random')),
-             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
-                                           ttype='brightcove'))],
-             score_type=ScoreType.CLASSICAL)
-
-        with self.assertLogExists(logging.ERROR, 'not implemented'):
-            directive = self.mastermind._calculate_current_serving_directive(
-                video_info)[1]
-
-        self.assertItemsEqual(sorted(directive.keys(),
-                                     key=lambda x: directive[x]),
-                         ['n2', 'ctr', 'n1', 'bc'])
-        self.assertAlmostEqual(sum(directive.values()), 1.0)
-        for val in directive.values():
-            self.assertGreater(val, 0.0)
-        self.assertEqual(directive['bc'], 0.99)
 
     def test_invalid_strategy(self):
         self.mastermind.update_experiment_strategy(
@@ -1158,7 +1169,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # high serving percentages for high score thumbnails.
         # Chosen one gets 5% lift. 
         self.assertEqual(sorted(directive.keys(), key=lambda x: directive[x]),
-                         ['ctr', 'n2', 'bc', 'n1'])
+                         ['ctr', 'bc', 'n1', 'n2'])
         self.assertAlmostEqual(sum(directive.values()), 1.0)
         for val in directive.values():
             self.assertGreater(val, 0.0)
@@ -1167,7 +1178,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # There needs to be 500 impressions of the winner in order to declare
         # it
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+            'acct1', ExperimentStrategy(
+                'acct1', exp_frac=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -1261,23 +1274,24 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1', True,
             [build_thumb(ThumbnailMetadata('n1', 'vid1',
                                            ttype='neon', model_score=5.8),
-                         base_impressions=3000, base_conversions=900),
+                         base_impressions=3000, base_conversions=700),
              build_thumb(ThumbnailMetadata('n2', 'vid1',
-                                           ttype='neon', model_score=3.5)),
+                                           ttype='neon', model_score=3.5),
+                         base_impressions=400, base_conversions=1),
              build_thumb(ThumbnailMetadata('ctr', 'vid1',
                                            ttype='random'),
-                         base_impressions=10, base_conversions=4),
+                         base_impressions=100, base_conversions=40),
              build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
                                            ttype='brightcove'),
-                         base_impressions=1200, base_conversions=150)],
+                         base_impressions=100, base_conversions=40)],
              score_type=ScoreType.CLASSICAL)
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
 
         self.assertAlmostEqual(sum(directive.values()), 1.0)
-        self.assertAlmostEqual(max(directive.values()), directive['n1'])
-        self.assertGreater(0.001, directive['bc'])
+        self.assertGreater(0.001, directive['n1'])
         self.assertGreater(directive['ctr'], 0.05)
+        self.assertGreater(directive['bc'], 0.05)
         self.assertGreater(directive['n2'], 0.05)
 
     def test_much_worse_than_prior(self):
@@ -1285,8 +1299,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # that we don't know anything about, we drive a lot of
         # traffice there.
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
-                                        frac_adjust_rate=1.0))
+            'acct1', ExperimentStrategy(
+                'acct1', exp_frac=1.0, frac_adjust_rate=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -1337,7 +1352,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEquals(experiment_state, 'running')
         self.assertLess(value_left, Mastermind.VALUE_THRESHOLD)
 
-        # deduce the min_conversion to 0
+        # reduce the min_conversion to 0
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', exp_frac=1.0, min_conversion = 0))
@@ -1400,7 +1415,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # result, frac_adjust_rate = 0.0, then equally distributed.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=1.0))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=1.0,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1417,7 +1434,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1435,7 +1454,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.5))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.5,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1454,7 +1475,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Testing frac_adjust_rate=0.0, but there are a baseline thumbnail.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.,
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1478,8 +1501,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.0,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1506,8 +1531,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # leads to higher serving frac.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy('acct1',
+                               frac_adjust_rate=1.0,
+                               exp_frac='1.0'))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1515,18 +1541,18 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 5.0),
-                                               base_conversions=100,
-                                               base_impressions=2000),
+                                               base_conversions=10,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
                                                ttype='neon',
-                                               model_score = 3.0),
-                                               base_conversions=110,
-                                               base_impressions=2000),
+                                               model_score = 0.3),
+                                               base_conversions=12,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
                                                ttype='random',
-                                               model_score = 0.2),
-                                               base_conversions=110,
-                                               base_impressions=2000)],
+                                               model_score = 0.1),
+                                               base_conversions=11,
+                                               base_impressions=200)],
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
@@ -1537,8 +1563,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # The fractions will still be determined by the model scores.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=0.5,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=0.5,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1546,18 +1574,18 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                 [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 5.0),
-                                               base_conversions=110,
-                                               base_impressions=2000),
+                                               base_conversions=11,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('n2', 'vid1', rank=0,
                                                ttype='neon',
                                                model_score = 3.0),
-                                               base_conversions=110,
-                                               base_impressions=2000),
+                                               base_conversions=11,
+                                               base_impressions=200),
                  build_thumb(ThumbnailMetadata('b1', 'vid1', rank=0,
                                                ttype='random',
                                                model_score = 0.2),
-                                               base_conversions=110,
-                                               base_impressions=2000)],
+                                               base_conversions=11,
+                                               base_impressions=200)],
                 score_type = ScoreType.RANK_CENTRALITY))
         self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
                          ['b1', 'n2', 'n1'])
@@ -1569,8 +1597,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # The winner should be the higher conversion ones, not the higher score ones.
         self.mastermind.update_experiment_strategy(
             'acct1',
-            ExperimentStrategy('acct1', frac_adjust_rate=1.0,
-                               exp_frac = '1.0'))
+            ExperimentStrategy(
+                'acct1', frac_adjust_rate=1.0,
+                exp_frac = '1.0',
+                experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
             VideoInfo(
@@ -1620,10 +1650,150 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_conversions=110,
                                                base_impressions=2000)],
                 score_type = ScoreType.RANK_CENTRALITY))
-        # _get_prior_conversions returns [ 2.2, 1.6, 1.0], sum is 4.8
-        # b1 is the default, and it will take 0.5 server frac.
-        self.assertEqual(sorted(run_frac.keys(), key=lambda x: run_frac[x]),
-                         ['n2', 'n1', 'b1'])
+        # All the serving fractions should be the same because prior
+        # is ignored in this case.
+        self.assertAlmostEqual(run_frac['b1'], 0.5)
+        self.assertAlmostEqual(run_frac['n1'], 0.25)
+        self.assertAlmostEqual(run_frac['n2'], 0.25)
+
+    def test_sequential_strategy_priors(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=1.0,
+                               exp_frac=0.20))
+
+        video_info = VideoInfo(
+            'acct1', True,
+            [build_thumb(ThumbnailMetadata('n1', 'vid1',
+                                           ttype='neon', model_score=5.8)),
+             build_thumb(ThumbnailMetadata('n2', 'vid1',
+                                           ttype='neon', model_score=3.5)),
+             build_thumb(ThumbnailMetadata('ctr', 'vid1',
+                                           ttype='random')),
+             build_thumb(ThumbnailMetadata('bc', 'vid1', chosen=True,
+                                           ttype='brightcove'))],
+             score_type=ScoreType.CLASSICAL)
+
+        # The priors should give precendence to the higher model scores
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        self.assertItemsEqual(sorted(directive.keys(),
+                                     key=lambda x: directive[x]),
+                                     ['n2', 'ctr', 'n1', 'bc'])
+        self.assertAlmostEqual(sum(directive.values()), 1.0)
+        for val in directive.values():
+            self.assertGreater(val, 0.0)
+        self.assertEqual(directive['bc'], 0.80)
+
+        # With frac_adjust_rate=0.0, all the thumbs in the experiment
+        # should run the same serving fraction
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=0.20))
+        directive = self.mastermind._calculate_current_serving_directive(
+            video_info)[1]
+        self.assertEqual({'bc': 0.80, 'n1': 0.2/3, 'n2': 0.2/3, 'ctr': 0.2/3},
+                         directive)
+
+    def test_monte_carlo_sequential_strategy(self):
+        # Runs a monte carlo test on the sequential strategy where we
+        # simulate the experiment running and make sure we don't make
+        # the wrong decision too often.
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=1.0,
+                               holdback_frac=0.0,
+                               exp_frac=1.0))
+        self.mastermind.update_video_info(
+            VideoMetadata('acct1_vid1'),
+            [ThumbnailMetadata('acct1_vid1_rand', 'acct1_vid1',
+                               ttype='random'),
+             ThumbnailMetadata('acct1_vid1_n1', 'acct1_vid1',
+                               ttype='neon', rank=0),
+             ThumbnailMetadata('acct1_vid1_n2', 'acct1_vid1',
+                               ttype='neon', rank=1),
+             ThumbnailMetadata('acct1_vid1_n3', 'acct1_vid1',
+                               ttype='neon', rank=0),
+                               ], True)
+
+        TRUE_CTRS = pandas.Series({
+            'acct1_vid1_rand' : 0.04,
+            'acct1_vid1_n1' : 0.05,
+            'acct1_vid1_n2' : 0.03,
+            'acct1_vid1_n3' : 0.01
+            })
+        N_SIMS = 100
+        IMP_PER_STEP = 500
+        CTR_DECAY_RATE = 0.98
+        turned_off = pandas.Series(0.0, index=TRUE_CTRS.index)
+        turned_back_on = pandas.Series(0.0, index=TRUE_CTRS.index)
+        winner = pandas.Series(0.0, index=TRUE_CTRS.index)
+        exp_finished = 0
+        
+        for sim in range(N_SIMS):
+            impressions = pandas.Series(0, index=TRUE_CTRS.index)
+            clicks = pandas.Series(0, index=TRUE_CTRS.index)
+            ctrs = TRUE_CTRS.copy()
+            last_directive = None
+        
+            for i in range(150):
+                cur_directive = self.mastermind.get_directives(
+                    ['acct1_vid1']).next()
+                cur_directive = pandas.Series(dict(cur_directive[1]))
+                # Check for the experiment being done
+                if (self.mastermind.experiment_state['acct1_vid1'] == 
+                    neondata.ExperimentState.COMPLETE):
+                    exp_finished +=1
+                    winner[np.argmax(cur_directive)] += 1 
+                    break
+
+                # Check for a thumb being turned off
+                if last_directive is None:
+                    turned_off[cur_directive == 0.0] += 1
+                else:
+                    turned_off[(cur_directive == 0.0) & 
+                               (last_directive > 0.0)] += 1
+                    turned_back_on[(cur_directive > 0.0) & 
+                                   (last_directive == 0.0)] += 1
+                last_directive = cur_directive                
+
+                # Simulate the next bunch of impressions
+                new_impressions = np.round(IMP_PER_STEP * cur_directive)
+                impressions += new_impressions
+                for tid in new_impressions.index:
+                    clicks[tid] += np.sum(np.random.random(
+                        new_impressions[tid]) < ctrs[tid])
+                
+                self.mastermind.update_stats_info([
+                    ('acct1_vid1', tid, impressions[tid], 0, clicks[tid], 0)
+                    for tid in TRUE_CTRS.index])
+
+                ctrs *= CTR_DECAY_RATE
+
+            # Reset mastermind
+            self.mastermind.experiment_state['acct1_vid1'] = \
+              neondata.ExperimentState.RUNNING
+            self.mastermind.update_stats_info([
+                    ('acct1_vid1', tid, 0, 0, 0, 0)
+                    for tid in TRUE_CTRS.index])
+
+        # Check the results finished is a statistically valid way from
+        # what we would expect.
+        self.assertGreater(exp_finished, 0.90*N_SIMS)
+        self.assertGreater(winner['acct1_vid1_n1'], 0.95*exp_finished)
+        self.assertEquals(turned_off['acct1_vid1_n1'], 0)
+        self.assertLess(turned_off['acct1_vid1_n2'], 0.01*N_SIMS)
+        self.assertGreater(turned_off['acct1_vid1_n3'], 0.5*N_SIMS)
+        self.assertEquals(turned_off['acct1_vid1_rand'], 0)
+        self.assertEquals(np.max(turned_back_on), 0)
+        
 
 class TestUpdatingFuncs(test_utils.neontest.TestCase):
     def setUp(self):
@@ -1634,6 +1804,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind = Mastermind()
@@ -1918,7 +2089,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         directive_dict = dict((x, y) for x, y in directives[0][1])
         self.assertAlmostEqual(directive_dict['acct1_vid1_tid1'], 
                                directive_dict['acct1_vid1_tid2'])
-        self.assertGreater(directive_dict['acct1_vid1_tid3'],
+        self.assertAlmostEqual(directive_dict['acct1_vid1_tid3'],
                                directive_dict['acct1_vid1_tid2'])
 
         updated_state = self.mastermind.experiment_state['acct1_vid1']
@@ -1934,6 +2105,7 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.redis_patcher = patch(
             'cmsdb.neondata.blockingRedis.StrictRedis')
         self.redis_mock = self.redis_patcher.start()
+        self.redis_mock().get.return_value = None
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         self.mastermind = Mastermind()
@@ -2219,8 +2391,8 @@ class TestExperimentState(test_utils.neontest.TestCase):
 
         # run the update
         self.mastermind.update_stats_info([
-            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 0, 100, 0),
-            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 0, 135, 0)])
+            ('acct1_vid1', 'acct1_vid1_v1t1', 2000, 10, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_v1t2', 2000, 10, 135, 0)])
         self.mastermind.wait_for_pending_modifies()
         
         directives = dict([x for x in self.mastermind.get_directives()])
@@ -2362,6 +2534,14 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.redis.start()
         self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
+        # Mock out the http callback
+        self.http_patcher = patch('mastermind.core.utils.http')
+        self.http_mock = self._future_wrap_mock(
+            self.http_patcher.start().send_request,
+            require_async_kw=True)
+        self.http_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(x, 200)
+
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
 
@@ -2382,13 +2562,21 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
         ThumbnailMetadata.save_all(self.thumbnails)
         self.video_metadata = VideoMetadata(
-            'acct1_vid1', tids=[x.key for x in self.thumbnails])
+            'acct1_vid1', request_id='job1',
+            tids=[x.key for x in self.thumbnails])
         self.video_metadata.save()
+        self.request = neondata.NeonApiRequest('job1', 'acct1', 'vid1')
+        self.request.state = neondata.RequestState.FINISHED
+        self.request.save()
+        
         self.mastermind.update_video_info(self.video_metadata, self.thumbnails)
         self._wait_for_db_updates()
 
+        self.http_mock.reset_mock()
+
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
+        self.http_patcher.stop()
         self.redis.stop()
         super(TestStatusUpdatesInDb, self).tearDown()
 
@@ -2430,6 +2618,24 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
                          neondata.ExperimentState.DISABLED)
         self.assertIsNone(video.winner_tid)
 
+    def test_experiment_state_no_change(self):
+        video = neondata.VideoStatus.get('acct1_vid1')
+        video.experiment_state = neondata.ExperimentState.RUNNING
+        video.save()
+
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_n1', 100, None, 1, None),
+            ('acct1_vid1', 'acct1_vid1_bc', 110, None, 1, None),
+            ])
+        self._wait_for_db_updates()
+
+        video = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEqual(video.experiment_state,
+                         neondata.ExperimentState.RUNNING)
+
+        # Make sure no callback was sent
+        self.assertEquals(self.http_mock.call_count, 0)
+
     def test_db_remove_video(self):
         # Remove a video that is there
         self.assertTrue(self.mastermind.is_serving_video('acct1_vid1'))
@@ -2450,6 +2656,8 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(video.winner_tid)
 
     def test_db_experiment_finished(self):
+        self.request.callback_url = 'http://some_callback.url'
+        self.request.save()
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'n2', 5000, 0, 200, 0),
             ('acct1_vid1', 'n1', 5000, 0, 50, 0),
@@ -2477,6 +2685,17 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertAlmostEqual(ctrs['acct1_vid1_n2'], 200./5000)
         self.assertAlmostEqual(ctrs['acct1_vid1_ctr'], 20./5000)
 
+        # Check the callback was sent
+        self.assertEquals(self.http_mock.call_count, 1)
+        cargs, kwargs = self.http_mock.call_args
+        cb_request = cargs[0]
+        self.assertEquals(cb_request.url, 'http://some_callback.url')
+        self.assertDictContainsSubset(
+            { 'experiment_state' : neondata.ExperimentState.COMPLETE,
+              'winner_thumbnail' : 'acct1_vid1_n2'
+              },
+            json.loads(cb_request.body))
+
     def test_db_override_thumb(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', exp_frac=1.0,
@@ -2494,6 +2713,149 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
         self.assertEqual(video_status.experiment_state,
                          neondata.ExperimentState.OVERRIDE)
         self.assertIsNone(video_status.winner_tid)
+
+    def test_sequential_strategy_turn_off_bad_thumbs(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=1.0))
+
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 90, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 80, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+        self.mastermind.wait_for_pending_modifies()
+
+        # Now, if more stats come in that drop the CTR of the running
+        # thumbs, we should not turn on the thumbnail that was turned
+        # off.
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 1000, 90, 45),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 1000, 100, 50),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 1000, 80, 40),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+
+        self.mastermind.wait_for_pending_modifies()
+
+        # Now check the thumbnail status
+        tstatus1 = neondata.ThumbnailStatus.get('acct1_vid1_n1')
+        self.assertAlmostEquals(tstatus1.serving_frac, 1./3)
+        self.assertAlmostEquals(tstatus1.ctr, 0.075)
+        self.assertEquals(tstatus1.imp, 2000)
+        self.assertEquals(tstatus1.conv, 150)
+        self.assertEquals([x[1] for x in tstatus1.serving_history],
+                          [0.25, 1./3])
+        tstatus2 = neondata.ThumbnailStatus.get('acct1_vid1_n2')
+        self.assertAlmostEquals(tstatus2.serving_frac, 0.0)
+        self.assertAlmostEquals(tstatus2.ctr, 0.069)
+        self.assertEquals(tstatus2.imp, 1000)
+        self.assertEquals(tstatus2.conv, 69)
+        self.assertEquals([x[1] for x in tstatus2.serving_history],
+                          [0.25, 0.0])
+
+        # Next, make another thumb bad. It shouldn't turn off because
+        # we want to keep 3 thumbs running.
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 1000, 90, 45),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 1000, 100, 50),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 69, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 2000, 80, 40),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 1./3),
+                               ('acct1_vid1_n1', 1./3),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 1./3)])
+
+    def test_sequential_strategy_found_winner(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1',
+                               experiment_type=ExperimentStrategy.SEQUENTIAL,
+                               frac_adjust_rate=0.0,
+                               exp_frac=1.0))
+
+        # This should not have a winner. Pairwise it would, but on
+        # aggregate, we don't hit a p-value of 0.95
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1000, 0, 100, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 78, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 0.25),
+                               ('acct1_vid1_n1', 0.25),
+                               ('acct1_vid1_n2', 0.25),
+                               ('acct1_vid1_ctr', 0.25)])
+        self.mastermind.wait_for_pending_modifies()
+
+        vstatus = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(vstatus.experiment_state,
+                          neondata.ExperimentState.RUNNING)
+        self.assertIsNone(vstatus.winner_tid)
+        self.assertEquals(len(vstatus.state_history), 1)
+
+        # Now we will have a winner
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'acct1_vid1_bc', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_n1', 1100, 0, 120, 0),
+            ('acct1_vid1', 'acct1_vid1_n2', 1000, 0, 78, 0),
+            ('acct1_vid1', 'acct1_vid1_ctr', 1000, 0, 78, 0),])
+        directives = dict([x for x in self.mastermind.get_directives()])
+        self.assertItemsEqual(directives[('acct1', 'acct1_vid1')],
+                              [('acct1_vid1_bc', 0.00),
+                               ('acct1_vid1_n1', 0.99),
+                               ('acct1_vid1_n2', 0.0),
+                               ('acct1_vid1_ctr', 0.01)])
+        self.mastermind.wait_for_pending_modifies()
+
+        vstatus = neondata.VideoStatus.get('acct1_vid1')
+        self.assertEquals(vstatus.experiment_state,
+                          neondata.ExperimentState.COMPLETE)
+        self.assertEquals(vstatus.winner_tid, 'acct1_vid1_n1')
+        self.assertEquals([x[1] for x in vstatus.state_history], 
+                          [neondata.ExperimentState.RUNNING,
+                           neondata.ExperimentState.COMPLETE])
+
+        # Check the thumbnail status
+        tstatus_bc = neondata.ThumbnailStatus.get('acct1_vid1_bc')
+        self.assertAlmostEqual(tstatus_bc.serving_frac, 0.00)
+        self.assertAlmostEqual(tstatus_bc.ctr, 0.078)
+        self.assertEqual(tstatus_bc.imp, 1000)
+        self.assertEqual(tstatus_bc.conv, 78)
+        self.assertEqual(zip(*tstatus_bc.serving_history)[1],
+                         (0.25, 0.00))
+        tstatus_n1 = neondata.ThumbnailStatus.get('acct1_vid1_n1')
+        self.assertAlmostEqual(tstatus_n1.serving_frac, 0.99)
+        self.assertAlmostEqual(tstatus_n1.ctr, 120./1100)
+        self.assertEqual(tstatus_n1.imp, 1100)
+        self.assertEqual(tstatus_n1.conv, 120)
+        self.assertEqual(zip(*tstatus_n1.serving_history)[1],
+                         (0.25, 0.99))
+        tstatus_ctr = neondata.ThumbnailStatus.get('acct1_vid1_ctr')
+        self.assertAlmostEqual(tstatus_ctr.serving_frac, 0.01)
+        self.assertAlmostEqual(tstatus_ctr.ctr, 0.078)
+        self.assertEqual(tstatus_ctr.imp, 1000)
+        self.assertEqual(tstatus_ctr.conv, 78)
+        self.assertEqual(zip(*tstatus_ctr.serving_history)[1],
+                         (0.25, 0.01))
+        
 
 class TestModifyDatabase(test_utils.neontest.TestCase):
     def setUp(self):
@@ -2518,7 +2880,7 @@ class TestModifyDatabase(test_utils.neontest.TestCase):
                                                    None)
 
     def test_unexpected_exception_serving_frac_modify(self):
-        self.datamock.ThumbnailStatus.save_all.side_effect = [
+        self.datamock.ThumbnailStatus.modify_many.side_effect = [
             IOError('Some weird error')]
         with self.assertLogExists(logging.ERROR,
                                   'Unhandled exception when updating thumbs'):

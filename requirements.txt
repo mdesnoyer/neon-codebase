@@ -44,3 +44,4 @@ scikit-learn==0.16.1
 PyJWT==1.4.0
 xlwt==1.0.0
 dill==0.2.4
+passlib==1.6.5

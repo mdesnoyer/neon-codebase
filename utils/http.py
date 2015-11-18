@@ -20,6 +20,7 @@ import tornado.gen
 import tornado.httpclient
 import tornado.ioloop
 import tornado.locks
+import urlparse
 import utils.logs
 from utils import statemon
 import utils.sync
@@ -49,6 +50,16 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2):
     base_delay - Time in seconds for the first delay on the retry
 
     '''
+    # Verify the request url
+    parsed = urlparse.urlsplit(unicode(request.url))
+    if parsed.scheme not in ("http", "https"):
+        msg = ('Invalid url to request because the scheme is %s: %s' %
+               (parsed.scheme, request.url))
+        if do_logging:
+            _log.error(msg)
+        raise tornado.gen.Return(tornado.httpclient.HTTPResponse(
+            request, 400, error=tornado.httpclient.HTTPError(400, msg)))
+    
     cur_try = 0
     response = None
     while cur_try < ntries:

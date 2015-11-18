@@ -110,6 +110,7 @@ statemon.define('job_creation_fail', int)
 statemon.define('content_type_missing', int)
 statemon.define('integration_id_missing', int)
 statemon.define('thumbnail_args_missing', int)
+statemon.define('invalid_custom_upload', int)
 statemon.define('invalid_json', int)
 statemon.define('malformed_request', int)
 statemon.define('not_supported', int)
@@ -548,6 +549,16 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                             thumbs = json.loads(self.get_argument('thumbnails'))
                             thumb_urls = [x['urls'][0] for x in thumbs 
                                           if x['type'] == 'custom_upload'] 
+                            if len(thumb_urls) == 0:
+                                _log.warn('No valid thumbnail to upload in %s'
+                                           % thumbs)
+                                statemon.state.increment(
+                                    'invalid_custom_upload')
+                                self.send_json_response(
+                                    '{"error": "no valid thumbnail found. '
+                                    'Only a type of \'custom_upload\' is '
+                                    'currently allowed"}', 400)
+                                return
                             yield self.upload_video_custom_thumbnails(
                                 i_id, i_vid,
                                 thumb_urls)
@@ -952,6 +963,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             neondata.RequestState.REQUEUED, neondata.RequestState.REPROCESS]
         
         failed_states = [neondata.RequestState.INT_ERROR, 
+                         neondata.RequestState.CUSTOMER_ERROR,
                          neondata.RequestState.FAILED]
         
         # single video state, if video not found return an error
@@ -1420,7 +1432,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         @i_vid: Internal video id
         @thumb_urls: List of image urls that will be ingested
         '''
-
         p_vid = neondata.InternalVideoID.to_external(i_vid)
         
         # Get the video object

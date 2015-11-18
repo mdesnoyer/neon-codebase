@@ -81,9 +81,6 @@ define('serving_update_delay', type=int, default=30,
 define('isp_wait_timeout', type=float, default=1800.0,
        help='Timeout when waiting for the ISP to serve a new video')
 
-# Callback options
-define('send_callbacks', default=1, help='If 1, callbacks are sent')
-
 # Script running options
 define('tmp_dir', default='/tmp', help='Temp directory to work in')
 
@@ -748,6 +745,9 @@ class StatsDBWatcher(threading.Thread):
                                      base_conv,
                                      incr_counts[1]))
 
+                    # Group the data by video id
+                    data = sorted(data, key=lambda x: x[0])
+
                     self.mastermind.update_stats_info(data)
                 _log.info('Finished processing batch stats update')
                 statemon.state.has_newest_statsdata = 1
@@ -756,7 +756,8 @@ class StatsDBWatcher(threading.Thread):
         else:
             _log.info('Looking for incremental stats update from host %s' %
                       options.incr_stats_host)
-            self.mastermind.update_stats_info([
+            
+            data = [
                 (self.video_id_cache.find_video_id(thumb_id),
                  thumb_id,
                  None, # base impression
@@ -764,8 +765,10 @@ class StatsDBWatcher(threading.Thread):
                  None, # base conversions
                  counts[1]) # incr conversions
                  for thumb_id, counts in 
-                 self._get_incremental_stat_data(strategy_cache)
-                 .iteritems()])
+                 self._get_incremental_stat_data(strategy_cache).iteritems()]
+            data = sorted(data, key=lambda x:x[0])
+            self.mastermind.update_stats_info(data)
+            
                     
         self.is_loaded.set()
 
@@ -1522,8 +1525,7 @@ class DirectivePublisher(threading.Thread):
             if (request is not None and 
                 request.callback_state == 
                 neondata.CallbackState.NOT_SENT and 
-                request.callback_url and
-                options.send_callbacks):
+                request.callback_url):
 
                 statemon.state.increment('pending_callbacks')
                 self._send_callback(request)
