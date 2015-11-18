@@ -190,6 +190,10 @@ class FindAndParseFaces(object):
         '''
         points = self._get_points(shape, comp)
         top, left, height, width = self._getSquareBB(points)
+        top = max(0, top)   # account for the top of the screen
+        left = max(0, left)  # account for the left of the screen
+        # the other directions (bottom, right) will be handled implicitly
+        # by the way numpy deals with indices.
         return self._image[left:left+width, top:top+height]
 
     def ingest(self, image):
