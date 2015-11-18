@@ -51,7 +51,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.cnn_api_mocker.stop() 
         super(TestSubmitVideo, self).tearDown()
 
-    @tornado.testing.gen_test(timeout=500)
+    @tornado.testing.gen_test
     def test_submit_success(self):
         response = self.create_search_response(2)
         self.cnn_api_mock.side_effect = [response]
@@ -69,7 +69,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(video_one['videoId'], call_one['video_id'])  
         self.assertEquals(video_two['videoId'], call_two['video_id']) 
  
-    @tornado.testing.gen_test(timeout=500)
+    @tornado.testing.gen_test
     def test_submit_one_failure(self):
         response = self.create_search_response(2)
         self.cnn_api_mock.side_effect = [response]
@@ -78,6 +78,25 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.INFO, 'Added 1 jobs'): 
             yield self.external_integration.submit_new_videos()
         self.assertEquals(self.submit_mock.call_count, 2)
+
+    @tornado.testing.gen_test
+    def test_last_processed_date(self):
+        ''' the way we query for the data, should sort_by 
+              publish_date asc, meaning the most recent date 
+              would be the last video we process
+            assert that integration.last_process_date is equal
+              to firstPublishDate of the last video we see
+        ''' 
+        response = self.create_search_response(2)
+        self.cnn_api_mock.side_effect = [response]
+        self.submit_mock.side_effect = [{"job_id": "job1"}, 
+                                        {"job_id": "job2"}] 
+        yield self.external_integration.submit_new_videos()
+        integration = neondata.CNNIntegration.get(self.integration.integration_id) 
+        videos = json.loads(response)['docs'] 
+        video_one = videos[1]
+        video_two = videos[1]
+        self.assertEquals(video_two['firstPublishDate'], integration.last_process_date) 
 
     #TODO move this to a mock class 
     def create_search_response(self, num_of_results=random.randint(5,10)): 
