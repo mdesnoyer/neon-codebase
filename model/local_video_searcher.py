@@ -93,27 +93,6 @@ class Statistics(object):
         self._p_median = None
         if init is not None:
             self.push(init)
-        self._obj_params = {'max_size':max_size}
-
-    def get_my_params(self):
-        '''
-        Returns a dictioary of parameters for this module. It can be largely
-        copied across different parts of the model, but it must define the
-        attributes that get_my_param functions.
-        '''
-        param_dict = [k:v for key, value in self._obj_params.iteritems()]
-        return param_dict
-
-    def _print_params(self, dict, hierarchy=[]):
-        for k, v in cdict.iteritems():
-            if type(v) == dict:
-                self._print_params(v, hierarchy + [k])
-            cstr = ' '.join(['%12s'%x for x in hierarchy])
-            print cstr, k, ':', v
-
-    def print_my_params_mod(self):
-        params = self.get_my_params()
-        self._print_params(params)
 
     def push(self, x):
         '''

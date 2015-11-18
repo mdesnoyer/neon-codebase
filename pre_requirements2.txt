@@ -1,0 +1,3 @@
+# requirements that come *after* pre_requirements but before requirements.
+
+scipy==0.9.0
