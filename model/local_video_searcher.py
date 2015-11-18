@@ -400,7 +400,7 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
-            self.clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
 
     @property
     def min_acceptable(self):
@@ -532,6 +532,8 @@ class ResultsList(object):
                 img = cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)
                 img[:,:,2] = self.clahe.apply(img[:,:,2])
                 return cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
+        else:
+            return image
 
     def _maxvar_replace(self, res):
         '''
