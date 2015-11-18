@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 import api.cnn_api
 from cmsdb import neondata
 import integrations.cnn
+from mock import patch, MagicMock
 import test_utils.redis
 import test_utils.neontest
 import tornado.gen
@@ -21,6 +22,12 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         super(TestSubmitVideo, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
+        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mock.side_effect = \
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
+              x, 201, buffer=StringIO('{"job_id": "job1"}'))
+
         user_id = '134234adfs' 
         self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
         self.user.save()
@@ -31,6 +38,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
 
         self.external_integration = integrations.cnn.CNNIntegration(
             self.user.neon_api_key, self.integration)
+        mock_api = MagicMock() 
+        self.external_integration.api = lambda: mock_api
    
     def tearDown(self):
         self.redis.stop()
