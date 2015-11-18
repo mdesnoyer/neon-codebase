@@ -187,8 +187,6 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
                 self.user.neon_api_key, self.integration.integration_id)
 
         self.assertEquals(self.process_mock.call_count, 2)
-
-        
             
 if __name__ == '__main__':
     utils.neon.InitNeon()
