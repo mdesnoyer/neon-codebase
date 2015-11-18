@@ -745,6 +745,9 @@ class StatsDBWatcher(threading.Thread):
                                      base_conv,
                                      incr_counts[1]))
 
+                    # Group the data by video id
+                    data = sorted(data, key=lambda x: x[0])
+
                     self.mastermind.update_stats_info(data)
                 _log.info('Finished processing batch stats update')
                 statemon.state.has_newest_statsdata = 1
@@ -753,7 +756,8 @@ class StatsDBWatcher(threading.Thread):
         else:
             _log.info('Looking for incremental stats update from host %s' %
                       options.incr_stats_host)
-            self.mastermind.update_stats_info([
+            
+            data = [
                 (self.video_id_cache.find_video_id(thumb_id),
                  thumb_id,
                  None, # base impression
@@ -761,8 +765,10 @@ class StatsDBWatcher(threading.Thread):
                  None, # base conversions
                  counts[1]) # incr conversions
                  for thumb_id, counts in 
-                 self._get_incremental_stat_data(strategy_cache)
-                 .iteritems()])
+                 self._get_incremental_stat_data(strategy_cache).iteritems()]
+            data = sorted(data, key=lambda x:x[0])
+            self.mastermind.update_stats_info(data)
+            
                     
         self.is_loaded.set()
 
