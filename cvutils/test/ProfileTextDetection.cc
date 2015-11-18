@@ -2,8 +2,8 @@
 
 #include <gflags/gflags.h>
 #include <gperftools/profiler.h>
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
 #include <iomanip>
 #include <iostream>
 #include <time.h>
@@ -23,7 +23,7 @@ int mainTextDetection(int argc, char **argv ) {
   }
   for (int i = 1; i < argc; ++i) {
     // Open the image
-    Mat image = imread(argv[i]);
+    Mat image = cv::imread(argv[i]);
     if (image.empty()) {
       cerr << "Could not open " << argv[i] << endl;
       continue;

@@ -17,11 +17,11 @@
 #include <boost/graph/connected_components.hpp>
 #include <math.h>
 #include <limits>
-#include <opencv2/features2d/features2d.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/features2d.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include "cvutils-inl.h"
-#include "connectedcomponents.hpp"
+// #include "connectedcomponents.hpp"
 
 using boost::adjacency_list;
 using namespace cv;
@@ -142,13 +142,15 @@ void TextDetector::EdgeEnhancedMSER(const cv::Mat& image,
 
   // First do the normal MSER
   int imageSize = image.rows * image.cols;
-  vector<Region> mserRegions;
-  MSER mser(5, // Delta (find regions where the pixels are the same +- delta intensity)
+  Ptr<MSER> mser;
+  mser = MSER::create(5, // Delta (find regions where the pixels are the same +- delta intensity)
             imageSize * minTextSize_,
             imageSize * maxTextSize_,
             0.10, // Max variation
             0.7); // min diversity
-  mser(image, mserRegions);
+  vector<Region> mserRegions;
+  vector<Rect> bboxes;
+  mser->detectRegions(image, mserRegions, bboxes);
 
   // TODO(mdesnoyer): Use edge detection to minimize blurred edges of
   // the MSER regions.
@@ -223,7 +225,7 @@ void TextDetector::ClusterTextCandidates(
 
       // Are the two letters a similar color
       Scalar colorDiff = letters[i]->meanColor() - letters[j]->meanColor();
-      double nm = norm(colorDiff);
+      // double nm = norm(colorDiff);
       if (norm(colorDiff) > 20) {
         continue;
       }
