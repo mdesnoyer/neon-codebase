@@ -103,8 +103,23 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             return None
     
     @staticmethod 
-    def _find_best_cdn_url(cdn_urls): 
-        return 'woo'
+    def _find_best_cdn_url(cdn_urls):
+        max_reso = 0 
+        current_url = None 
+        p = re.compile('(\d*)x(\d*)_\d*k_mp4')
+        for key in cdn_urls.keys():
+            match = re.match(key) 
+            if match:  
+                groups = match.groups() 
+                cur_reso = groups[0] * groups[1] 
+                if cur_reso > max_reso 
+                    max_reso = cur_reso 
+                    current_url = cdn_urls[key]
+ 
+        if current_url: 
+            return current_url 
+        else: 
+            raise Exception('unable to find a suitable url for processing') 
  
     @staticmethod 
     def _build_custom_data_from_topics(topics):
