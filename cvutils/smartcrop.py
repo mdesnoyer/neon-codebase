@@ -266,9 +266,9 @@ class SmartCrop(object):
             faces = np.append(front_faces, profile_faces, axis=0)
             return faces
 
-    def text_crop(self, im, left, right):
+    def text_crop(self, im):
         # Downsize the image first. Make the longest edge to be 360 pixels.
-        ratio = max(im.shape[0]/480.0, im.shape[1]/480.0)
+        ratio = max(im.shape[0]/600.0, im.shape[1]/600.0)
         im_resized = cv2.resize(im, (int(im.shape[1]/ratio),
                                      int(im.shape[0]/ratio)))
         boxes, mask = cv2.text.textDetect(im_resized,
@@ -290,16 +290,14 @@ class SmartCrop(object):
             box = box * ratio
             if box[1] < bottom:
                 continue
-            l = box[0]
-            r = box[0] + box[2] - 1
-            if (l > left and l < right) or (r > left and r < right):
-                top_height_array.append[box[1]]
             top_height_array.append(box[1])
         # leave 3 pixels for cushion.
         if not top_height_array:
             return im
         top_height = min(top_height_array) - 3
-        cropped_im = im[0 : top_height, 0 : width]
+        new_width = top_height * im_resized.shape[1] / im_resized.shape[0]
+        x = (width - new_width)/2
+        cropped_im = im[0 : top_height, x:x+new_width]
         return cropped_im
 
 
@@ -308,7 +306,7 @@ class SmartCrop(object):
         value
         '''
         saliency_threshold = 50
-        im = self.text_crop(src, src.shape[1]-w/2, src.shape[1]+w/2)
+        im = src
 
         (height, width, elem) = im.shape
 
@@ -386,6 +384,9 @@ class SmartCrop(object):
             else:
                 new_x = face_right_bound - new_width + 1
 
-        cropped_im = src[new_x:new_x+new_width, new_y:new_y+new_height]
-        resized_im = cv2.resize(cropped_im, (w, h))
+        cropped_im = src[new_y:new_y+new_height, new_x:new_x+new_width]
+
+        text_cropped_im = self.text_crop(cropped_im)
+
+        resized_im = cv2.resize(text_cropped_im, (w, h))
         return resized_im

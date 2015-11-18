@@ -80,21 +80,22 @@ def draw_saliency():
         cv2.imwrite(saliency_file, saliency.get_saliency_map())
         cv2.imwrite(resized_file, saliency.get_resized_im())
 
-def text():
+def draw_text():
     target_dir = '/home/wiley/src/data/bad_images'
     text_dst_dir = os.path.join(target_dir, 'text')
-    image_files = glob.glob(os.path.join(target_dir, '*.jpg'))
+    image_files = glob.glob(os.path.join(target_dir, '*_smart.jpg'))
     image_files.sort()
+    print "Total number of files:", len(image_files)
     count = 0
     for im_file in image_files:
-        if '_center' in im_file or '_smart' in im_file:
-            continue
+        # if '_center' in im_file or '_smart' in im_file:
+            # continue
         count += 1
         print '(%d) %s' % (count, im_file)
         # if count == 10:
         #   break
         im = cv2.imread(im_file)
-        ratio = max(im.shape[0]/480.0, im.shape[1]/480.0)
+        ratio = max(im.shape[0]/600.0, im.shape[1]/600.0)
         im_resized = cv2.resize(im, (int(im.shape[1]/ratio),
                                      int(im.shape[0]/ratio)))
         text_im = im_resized
@@ -102,7 +103,7 @@ def text():
         boxes, mask = cv2.text.textDetect(im_resized,
             '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM1.xml',
             '/home/wiley/src/opencv_contrib/modules/text/samples/trained_classifierNM2.xml',
-            16,0.00015,0.003,0.8,True,0.5, 0.9)
+            32,0.00015,0.003,0.8,True,0.5, 0.9)
         for box in boxes:
             tl = (box[0], box[1])
             br = (box[0] + box[2], box[1] + box[3])
@@ -113,6 +114,8 @@ def text():
 def main():
     # draw_faces()
     # draw_saliency()
+    draw_text()
+    return
     # return
 
     target_dir = '/home/wiley/src/data/bad_images'

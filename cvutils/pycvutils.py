@@ -10,8 +10,8 @@ Copyright 2014 Neon Labs
 import cv2
 import logging
 import numpy as np
-from . import imageutils
-from model import smartcrop
+from cvutils import imageutils
+from cvutils import smartcrop
 
 _log = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
 
     grab_sucess = True
     if (cur_frame is not None and cur_frame > 0 and 
-        video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES) == 0):
+        video.get(cv2.CAP_PROP_POS_FRAMES) == 0):
         if do_log:
             _log.warn('Cannot read the current frame location.'
                       'Resorting to manual advancing')
@@ -76,12 +76,12 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
         if (cur_frame is None or not (
                 (frame_no - cur_frame) < 4 and (frame_no - cur_frame) >= 0) ):
             # Seeking to a place in the video that's a ways away, so JUMP
-            video.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, frame_no)
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
             
-        cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
+        cur_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
         while grab_sucess and cur_frame < frame_no:
             grab_sucess = video.grab()
-            cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
+            cur_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
             if cur_frame == 0:
                 _log.error('Cannot read the current frame location. '
                            'This probably means that we cannot walk '
