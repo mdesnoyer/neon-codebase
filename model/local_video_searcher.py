@@ -979,14 +979,14 @@ class LocalSearcher(object):
         if action == 'sample':
             try:
                 self._take_sample(meta)
-            except Exception e:
-                log._exception(('Problem obtaining sample of %s! '
+            except Exception as e:
+                _log.exception(('Problem obtaining sample of %s! '
                                 'Error: %s')%(str(meta), e))
         else:
             try:
                 self._conduct_local_search(*meta)
-            except Exception e:
-                log._exception(('Problem conducting local search of %s! '
+            except Exception as e:
+                _log.exception(('Problem conducting local search of %s! '
                                 'Error: %s')%(str(meta), e))
         return True
 
