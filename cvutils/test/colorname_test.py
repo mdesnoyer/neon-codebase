@@ -8,12 +8,11 @@ if sys.path[0] != __base_path__:
 
 import cv2
 import unittest
-import model
 import numpy as np
 import sys
 import random
-from model.colorname import JSD
-from model.colorname import ColorName
+from cvutils.colorname import JSD
+from cvutils.colorname import ColorName
 from model.video_searcher import VideoSearcher
 
 class TestColorName(unittest.TestCase):
