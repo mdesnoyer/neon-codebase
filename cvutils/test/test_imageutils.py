@@ -14,7 +14,7 @@ import test_utils.neontest
 import tornado.ioloop
 import tornado.httpclient
 import unittest
-from utils import imageutils
+from cvutils import imageutils
 
 class TestPILImageUtils(unittest.TestCase):
     def setUp(self):

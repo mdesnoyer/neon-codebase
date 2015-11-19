@@ -5,6 +5,7 @@ import itertools
 import cv2
 import numpy as np
 import sys
+import dlib
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
@@ -95,6 +96,7 @@ class SmartCrop(object):
         self.profile_face_cascade = cv2.CascadeClassifier()
         self.front_face_cascade.load(self.haarFileFront)
         self.profile_face_cascade.load(self.haarFileProfile)
+        self.dlib_face_detector = dlib.get_frontal_face_detector()
         self.haarParams = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
 
     @classmethod
@@ -110,10 +112,16 @@ class SmartCrop(object):
         full_sm = cv2.resize(half_sm.map, (width, height))
         return full_sm
 
+    def detect_front_faces(self, im):
+        faces = self.dlib_face_detector(im)
+        face_array = np.zeros((len(faces), 4), int)
+        for i, face in enumerate(faces):
+            face_array[i, 0:] = np.array([face.left(), face.top(),
+                                          face.width(), face.height()])
+        return face_array
 
     def detect_faces(self, im):
-        front_faces = \
-            self.front_face_cascade.detectMultiScale(im, **self.haarParams)
+        front_faces = self.detect_front_faces(im)
         profile_faces = \
             self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
         im_flip = cv2.flip(im, 1)

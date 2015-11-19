@@ -132,10 +132,10 @@ def full_test():
 
 
 def main():
-    # draw_faces()
+    draw_faces()
     # draw_saliency()
     # draw_text()
-    full_test()
+    # full_test()
     return
 
 
