@@ -20,6 +20,7 @@ import logging
 import re
 import tornado.gen
 from utils import http
+from utils.inputsanitizer import InputSanitizer
 from utils.options import options, define
 from utils import statemon
 
@@ -47,9 +48,9 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         _log.info('Processing %d videos for cnn' % (len(videos))) 
         for video in videos:
             try:
-                video_id = video['videoId'].replace('/', '~') 
-                publish_date = last_processed_date = video['firstPublishDate']
-                title = video.get('title', 'no title')
+                video_id = InputSanitizer.sanitize_string(video['videoId'].replace('/', '~')) 
+                publish_date = last_processed_date = InputSanitizer.sanitize_string(video['firstPublishDate'])
+                title = InputSanitizer.sanitize_string(video.get('title', 'no title'))
                 duration = video.get('duration', None)
                 thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
                 custom_data = self._build_custom_data_from_topics(video['topics'])
