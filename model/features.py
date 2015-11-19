@@ -18,7 +18,7 @@ import numpy as np
 import os
 import os.path
 import utils.obj
-from cvutils import pycvutils
+from utils import pycvutils
 from model.colorname import ColorName
 from model.parse_faces import DetectFaces, FindAndParseFaces
 from model.score_eyes import ScoreEyes
@@ -391,7 +391,7 @@ class VibranceGenerator(RegionFeatureGenerator):
                 return np.mean(img)
             # convert to HSV
             feat_vec.append(np.mean(cv2.cvtColor(
-                                        img, cv2.cv.CV_BGR2HSV)[:,:,1:]))
+                                        img, cv2.COLOR_BGR2HSV)[:,:,1:]))
         return np.array(feat_vec)
 
     def get_feat_name(self):
@@ -408,7 +408,7 @@ class TextGenerator(RegionFeatureGenerator):
                         max_height=self.max_height,
                         crop_frac=crop_frac)
         self._max_variation = max_variation
-        self.mser = cv2.MSER(_max_variation=self._max_variation)
+        self.mser = cv2.MSER_create(_max_variation=self._max_variation)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -425,7 +425,7 @@ class TextGenerator(RegionFeatureGenerator):
 
     def generate_many(self, images, fonly=False):
         if self.mser is None:
-            self.mser = cv2.MSER(_max_variation=self._max_variation)
+            self.mser = cv2.MSER_create(_max_variation=self._max_variation)
         if not type(images) == list:
             images = [images]
         if fonly:
@@ -438,7 +438,7 @@ class TextGenerator(RegionFeatureGenerator):
 
     def _text_quant(self, img):
         '''quantifies the amount of text in an image (approx) by area'''
-        regions = self.mser.detect(img, None)
+        regions = self.mser.detectRegions(img, None)
         area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
         area /= (1. * img.shape[0] * img.shape[1])
         return area

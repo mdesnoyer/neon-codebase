@@ -15,7 +15,7 @@ from sklearn import svm
 from sklearn.externals import joblib
 import tempfile 
 import utils.obj
-import cvutils.pycvutils
+from utils import pycvutils
 import dlib
 from score_eyes import ScoreEyes
 from parse_faces import FindAndParseFaces
@@ -503,7 +503,7 @@ class DeltaStdDevFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
  
         # get one after frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno+1)
+        sucess, cur_frame = pycvutils.seek_video(video, frameno+1)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
             return True
@@ -511,7 +511,7 @@ class DeltaStdDevFilter(VideoFilter):
         std_devs[2] = np.std(frame) if moreData else 0.
         
         # get one before frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno-1,
+        sucess, cur_frame = pycvutils.seek_video(video, frameno-1,
                                                        cur_frame=cur_frame)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -519,7 +519,7 @@ class DeltaStdDevFilter(VideoFilter):
         moreData,frame = video.read() 
         std_devs[0] = np.std(frame) if moreData else 0.
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame,
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame,
                                                        cur_frame=cur_frame)
    
         # compute stats
@@ -577,7 +577,7 @@ class CrossFadeFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
 
         # Get the frame in the future of this one
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno + self.dframe)
         if not sucess:
             return float('inf'), float('inf')
@@ -587,7 +587,7 @@ class CrossFadeFilter(VideoFilter):
         future_frame = self._resize_image(future_frame)
 
         # Get the frame in the past
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno - self.dframe)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -597,7 +597,7 @@ class CrossFadeFilter(VideoFilter):
             return float('inf'), float('inf')
         past_frame = self._resize_image(past_frame)
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame)
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame)
 
         A = np.transpose(np.vstack((np.ravel(past_frame),
                                     np.ravel(future_frame))))

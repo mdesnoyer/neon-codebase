@@ -51,7 +51,7 @@ import urllib2
 import urlparse
 from utils.imageutils import PILImageUtils
 import utils.neon
-from cvutils import pycvutils
+from utils import pycvutils
 import utils.http
 from utils import statemon
 

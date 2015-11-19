@@ -50,8 +50,8 @@ import numpy as np
 import utils.obj
 from model.colorname import ColorName
 from utils import statemon
-from cvutils import pycvutils
-from cvutils.pycvutils import seek_video
+from utils import pycvutils
+from utils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject
 from model.metropolisHastingsSearch import MCMH_rpl
 
@@ -532,9 +532,9 @@ class ResultsList(object):
                 return image
             else:
                 # convert to HSV, apply to last channel
-                img = cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)
+                img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
                 img[:,:,2] = self.clahe.apply(img[:,:,2])
-                return cv2.cvtColor(img, cv2.cv.CV_HSV2BGR)
+                return cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
         else:
             return image
 
@@ -803,8 +803,8 @@ class LocalSearcher(object):
         self.video_name = video_name
         if self._testing:
             self._set_up_testing()
-        fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
-        num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        fps = video.get(cv2.CAP_PROP_FPS) or 30.0
+        num_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         self.num_frames = num_frames
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /

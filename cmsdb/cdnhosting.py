@@ -31,7 +31,7 @@ from poster.encode import multipart_encode
 from StringIO import StringIO
 import utils.botoutils
 from utils.imageutils import PILImageUtils
-from cvutils import pycvutils
+from utils import pycvutils
 from utils import statemon 
 import utils.sync
 
