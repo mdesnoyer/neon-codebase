@@ -10,6 +10,7 @@ import model.filters
 import model.features
 import numpy as np
 import cv2
+from glob import glob
 
 IMG_DIR = os.path.join(os.path.dirname(__file__), 'test_filter_images')
 SCENE_CHANGE_DIR = os.path.join(os.path.dirname(__file__),
@@ -122,11 +123,11 @@ class TestPixelVarianceFilter(unittest.TestCase):
 
     def test_pixvar_filter(self):
         self.assertFalse(self.filter.filter(
-            cv2.imread(os.path.join(IMG_DIR, 'white_middle_garbage.jpg'))))
+            cv2.imread(os.path.join(IMG_DIR, 'white_middle_garbage.jpg'))[0]))
         self.assertFalse(self.filter.filter(
-            cv2.imread(os.path.join(IMG_DIR, 'black.jpg'))))
+            cv2.imread(os.path.join(IMG_DIR, 'black.jpg')))[0])
         self.assertFalse(self.filter.filter(
-            cv2.imread(os.path.join(IMG_DIR, 'white_logo.jpg'))))
+            cv2.imread(os.path.join(IMG_DIR, 'white_logo.jpg')))[0])
 
 # add tests for SceneChange
 class TestSceneChangeDetection(unittest.TestCase):
