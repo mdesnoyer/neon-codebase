@@ -78,7 +78,32 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.INFO, 'Added 1 jobs'): 
             yield self.external_integration.submit_new_videos()
         self.assertEquals(self.submit_mock.call_count, 2)
-
+  
+    @tornado.testing.gen_test
+    def test_cdn_urls_one_valid(self):
+        cdn_urls = {} 
+        cdn_urls['1920x1080_5500k_mp4'] = 'http://5500k-url.com'
+        url = integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+        self.assertEquals(url, 'http://5500k-url.com')
+   
+    @tornado.testing.gen_test
+    def test_cdn_urls_multiple_valid(self):
+        cdn_urls = {} 
+        cdn_urls['1920x1080_5500k_mp4'] = 'http://5500k-url.com'
+        cdn_urls['1920x500_3000k_mp4'] = 'http://3000k-url.com'
+        cdn_urls['720x100_1000k_mp4'] = 'http://100k-url.com'
+        url = integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+        self.assertEquals(url, 'http://5500k-url.com')
+   
+    @tornado.testing.gen_test
+    def test_cdn_urls_no_valid(self):
+        cdn_urls = {} 
+        cdn_urls['1_5500k_mp4'] = 'http://5500k-url.com'
+        cdn_urls['2_3000k_mp4'] = 'http://3000k-url.com'
+        cdn_urls['3_1000k_mp4'] = 'http://100k-url.com'
+        with self.assertRaises(Exception): 
+            integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+          
     @tornado.testing.gen_test
     def test_last_processed_date(self):
         ''' the way we query for the data, should sort_by 

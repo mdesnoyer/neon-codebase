@@ -108,11 +108,11 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         current_url = None 
         p = re.compile('(\d*)x(\d*)_\d*k_mp4')
         for key in cdn_urls.keys():
-            match = re.match(key) 
+            match = p.match(key) 
             if match:  
                 groups = match.groups() 
-                cur_reso = groups[0] * groups[1] 
-                if cur_reso > max_reso 
+                cur_reso = int(groups[0]) * int(groups[1]) 
+                if cur_reso > max_reso: 
                     max_reso = cur_reso 
                     current_url = cdn_urls[key]
  
