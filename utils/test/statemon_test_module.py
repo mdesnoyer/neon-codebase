@@ -26,6 +26,9 @@ def run_increments(finished, kill):
 def define(state, *args, **kwargs):
     state.define(*args, **kwargs)
 
+def define_and_increment(state, *args, **kwargs):
+    state.define_and_increment(*args, **kwargs)
+
 def get(state, name):
     return state.__getattr__(name)
 

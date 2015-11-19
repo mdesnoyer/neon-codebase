@@ -41,6 +41,7 @@ statemon.define('invalid_experiment_type', int)
 statemon.define('db_update_error', int) # error updating database
 statemon.define('no_valid_thumbnails', int) # no valid thumbnails for a video
 statemon.define('critical_error', int)
+statemon.define('unexpected_error_calculating_directive', int)
 
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
@@ -586,7 +587,15 @@ class Mastermind(object):
             # Now update all the serving directives
             for video_id, video_info in self.video_info.items():
                 if video_info.account_id == account_id:
-                    self._calculate_new_serving_directive(video_id)
+                    try:
+                        self._calculate_new_serving_directive(video_id)
+                    except Exception as e:
+                        _log.exception_n('Unexpected exception calculating '
+                                         'new serving directive for video '
+                                         '%s: %s' % (video_id, e))
+                        statemon.state.increment(
+                            'unexpected_error_calculating_directive')
+                        
 
     def _calculate_new_serving_directive(self, video_id):
         '''Decide the amount of time each thumb should show for each video.
@@ -1074,7 +1083,8 @@ class Mastermind(object):
                 off_thumbs = [x[0] for x in old_directive if (
                     x[1] < 1e-7 and
                     x[0] != baseline.id and
-                    (non_exp_thumb is None or x[0] != non_exp_thumb.id))]
+                    (non_exp_thumb is None or x[0] != non_exp_thumb.id) and
+                    x[0] in data.index)]
             except KeyError:
                 pass
 
@@ -1262,7 +1272,13 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
             if vmeta is not None:
                 request = neondata.NeonApiRequest.get(vmeta.job_id,
                                                       vmeta.get_account_id())
-                if request is not None:
+                # Only send the callback if we're serving because it's
+                # too likely that a customer will implement a callback
+                # handler that inserts our serving url on any callback
+                # they receive. So, they will just get an update once
+                # it's actually serving.
+                if (request is not None and 
+                    request.state == neondata.RequestState.SERVING):
                     request.send_callback()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)
