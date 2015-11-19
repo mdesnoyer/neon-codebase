@@ -78,7 +78,7 @@ def draw_saliency():
         saliency_file = saliency_file.replace('.jpg', '_saliency.jpg')
         resized_file = os.path.join(saliency_dst_dir, os.path.basename(im_file))
         cv2.imwrite(saliency_file, saliency.get_saliency_map())
-        cv2.imwrite(resized_file, saliency.get_resized_im())
+        cv2.imwrite(resized_file, saliency.draw_resized_im())
 
 def draw_text():
     target_dir = '/home/wiley/src/data/bad_images'

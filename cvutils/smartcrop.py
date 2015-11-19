@@ -37,10 +37,16 @@ define("textClassifier2",
        help="Trained text classifier for step 2.")
 
 class ImageSignatureSaliency(object):
+    ''' Image signature saliency implementation.
+    Based on paper: Image signature: Highlighting sparse salient regions.
+    X Hou, J Harel, C Koch. 2012
+    '''
     def __init__(self, src, map_size = 640):
         # self.lab_im = cv2.cvtColor(src, cv2.COLOR_BGR2LAB)
         # l_channel, a_channel, b_channel = cv2.split(self.lab_im)
         # Resize the image to the longest edge 64.
+        if len(src.shape) == 2:
+            src = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
         self.src = src
         ratio = max(src.shape[0]/64.0, src.shape[1]/64.0)
         im = cv2.resize(src, (int(src.shape[1]/ratio), int(src.shape[0]/ratio)))
@@ -62,7 +68,8 @@ class ImageSignatureSaliency(object):
         return cv2.resize(self.smooth_map,
                           (self.src.shape[1], self.src.shape[0]))
 
-    def get_resized_im(self):
+    def draw_resized_im(self):
+        ''' This function is to show the bounderies of the saliency. '''
         resized_im = cv2.resize(self.src, (self.map_width, self.map_height))
         w = resized_im.shape[1]
         h = resized_im.shape[0]
@@ -92,6 +99,7 @@ class SmartCrop(object):
 
     @classmethod
     def get_cropper(cls):
+        ''' Return a singlton instance. '''
         cls._instance_ = cls._instance_ or SmartCrop()
         return cls._instance_
 
@@ -155,6 +163,7 @@ class SmartCrop(object):
             return im
         boxes *= ratio
         boxes = boxes.astype(int)
+        # Draw im is used purely for display purposes.
         if draw_im is not None:
             for box in boxes:
                 tl = (box[0], box[1])
@@ -191,9 +200,6 @@ class SmartCrop(object):
         saliency_map = saliency.get_saliency_map()
         faces = self.detect_faces(im)
 
-        # cv2.imshow('saliency', saliency_map)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
         # Saliency Map is calculated then trimmed to along the boundaries
         # to remove low saliency area.
         if float(h) / height > float(w) / width:
