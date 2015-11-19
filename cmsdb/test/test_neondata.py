@@ -1834,7 +1834,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
     def test_callback_with_experiment_state(self, http_mock):
       fetch_mock = self._future_wrap_mock(http_mock.send_request,
                                           require_async_kw=True)
-      fetch_mock.side_effect = lambda x: HTTPResponse(x, 200)
+      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
       request = NeonApiRequest('j1', 'key1', 'vid1',
                                http_callback='http://some.where')
       request.state = neondata.RequestState.SERVING

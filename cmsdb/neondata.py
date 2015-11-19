@@ -3631,7 +3631,6 @@ The video metadata for this request must be in the database already.
                 # Send the callback
                 self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
-                send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
                     method='PUT',
@@ -3639,14 +3638,21 @@ The video metadata for this request must be in the database already.
                     body=response.to_json(),
                     request_timeout=20.0,
                     connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(cb_request,
-                                                            **send_kwargs)
+                cb_response = yield utils.http.send_request(
+                    cb_request,
+                    no_retry_codes=[405],
+                    async=True,
+                    **send_kwargs)
                 if cb_response.error:
                     # Now try a POST for backwards compatibility
                     cb_request.method='POST'
                     cb_response = yield utils.http.send_request(cb_request,
+                                                                async=True,
                                                                 **send_kwargs)
                     if cb_response.error:
+                        statemon.state.define_and_increment(
+                            'callback_error.%s' % self.api_key)
+                                                            
                         statemon.state.increment('callback_error')
                         _log.warn('Error when sending callback to %s for '
                                   'video %s: %s' %

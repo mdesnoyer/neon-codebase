@@ -38,6 +38,13 @@ class TestStatemonObj(unittest.TestCase):
         self.state.a_default_int = 5
         self.assertEqual(self.state.a_default_int, 5)
 
+    def test_define_and_increment(self):
+        self.state.define_and_increment('an_int', 6)
+        self.assertEqual(self.state.an_int, 6)
+
+        self.state.define_and_increment('a_float', 6.6, float)
+        self.assertAlmostEqual(self.state.a_float, 6.6, 5)
+
     def test_proper_increment(self):
         self.state.define('an_int', int)
         self.assertEqual(self.state.an_int, 0)
@@ -98,6 +105,9 @@ class TestStatemonObj(unittest.TestCase):
         test_mod.define(self.state, 'an_int', int)
         test_mod.set(self.state, 'an_int', 56)
         self.assertEqual(test_mod.get(self.state, 'an_int'), 56)
+
+        test_mod.define_and_increment(self.state, 'a_dynamic_int', 31)
+        self.assertEqual(test_mod.get(self.state, 'a_dynamic_int'), 31)
 
     def test_invalid_types(self):
         with self.assertRaises(statemon.Error):

@@ -1272,7 +1272,13 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
             if vmeta is not None:
                 request = neondata.NeonApiRequest.get(vmeta.job_id,
                                                       vmeta.get_account_id())
-                if request is not None:
+                # Only send the callback if we're serving because it's
+                # too likely that a customer will implement a callback
+                # handler that inserts our serving url on any callback
+                # they receive. So, they will just get an update once
+                # it's actually serving.
+                if (request is not None and 
+                    request.state == neondata.RequestState.SERVING):
                     request.send_callback()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)

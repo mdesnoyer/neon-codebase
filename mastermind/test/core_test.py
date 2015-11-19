@@ -2554,7 +2554,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
             self.http_patcher.start().send_request,
             require_async_kw=True)
         self.http_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(x, 200)
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
 
         numpy.random.seed(1984934)
         self.mastermind = Mastermind()
@@ -2671,6 +2671,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
 
     def test_db_experiment_finished(self):
         self.request.callback_url = 'http://some_callback.url'
+        self.request.state = neondata.RequestState.SERVING
         self.request.save()
         self.mastermind.update_stats_info([
             ('acct1_vid1', 'n2', 5000, 0, 200, 0),
@@ -2709,6 +2710,41 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
               'winner_thumbnail' : 'acct1_vid1_n2'
               },
             json.loads(cb_request.body))
+
+    def test_db_experiment_finished_not_serving(self):
+        self.request.callback_url = 'http://some_callback.url'
+        self.request.state = neondata.RequestState.FINISHED
+        self.request.save()
+        self.mastermind.update_stats_info([
+            ('acct1_vid1', 'n2', 5000, 0, 200, 0),
+            ('acct1_vid1', 'n1', 5000, 0, 50, 0),
+            ('acct1_vid1', 'bc', 5000, 0, 10, 0),
+            ('acct1_vid1', 'ctr', 5000, 0, 20, 0)])
+        self._wait_for_db_updates()
+
+        video = VideoMetadata.get('acct1_vid1')
+        thumbs = neondata.ThumbnailStatus.get_many(video.thumbnail_ids)
+        directive = dict([(x.get_id(), x.serving_frac) for x in thumbs])
+        self.assertEqual(directive, {'acct1_vid1_bc':0.0,
+                                     'acct1_vid1_n1':0.0,
+                                     'acct1_vid1_n2':0.98,
+                                     'acct1_vid1_ctr':0.02})
+
+        video_status = neondata.VideoStatus.get(video.key)
+        self.assertEqual(video_status.experiment_state,
+                         neondata.ExperimentState.COMPLETE)
+        self.assertLess(video_status.experiment_value_remaining,
+                        0.05)
+        self.assertEqual(video_status.winner_tid, 'acct1_vid1_n2')
+        ctrs = dict([(x.get_id(), x.ctr) for x in thumbs])
+        self.assertAlmostEqual(ctrs['acct1_vid1_bc'], 10./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_n1'], 50./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_n2'], 200./5000)
+        self.assertAlmostEqual(ctrs['acct1_vid1_ctr'], 20./5000)
+
+        # Check the callback was not sent
+        self.assertEquals(self.http_mock.call_count, 0)
+        
 
     def test_db_override_thumb(self):
         self.mastermind.update_experiment_strategy(
