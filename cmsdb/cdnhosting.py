@@ -209,7 +209,7 @@ class CDNHosting(object):
             headers={'Accept': 'image/*'})
         response = yield utils.http.send_request(
             request,
-            base_delay=4.0,
+            base_delay=10.0,
             async=True)
         if response.error:
             raise tornado.gen.Return(False)

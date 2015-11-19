@@ -102,8 +102,6 @@ class Model(object):
         '''
         if self.filt is None:
             return
-        elif not len(self.filt):
-            return
         else:
             self.filt.restore_additional_data(filename)
 
