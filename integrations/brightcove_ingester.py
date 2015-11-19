@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import atexit
 from cmsdb import neondata
 import datetime
+import functools
 import logging
 import integrations.brightcove
 import integrations.exceptions
@@ -21,6 +22,7 @@ import signal
 import multiprocessing
 import os.path
 import re
+import time
 import tornado.ioloop
 import tornado.gen
 import urlparse
@@ -28,6 +30,7 @@ import utils.neon
 from utils.options import define, options
 import utils.ps
 from utils import statemon
+import utils.sync
 
 define("poll_period", default=300.0, help="Period (s) to poll brightcove",
        type=float)
@@ -84,10 +87,11 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
     log_func('Finished processing account %s, integration %s. Time was %f' %
              (platform.neon_api_key, platform.integration_id, runtime))
 
+
 class Manager(object):
     def __init__(self):
         self._timers = {} # (api_key, integration_id) -> periodic callback timer
-        self.integration_checker = tornado.ioloop.PeriodicCallback(
+        self.integration_checker = utils.sync.PeriodicCoroutineTimer(
             self.check_integration_list,
             options.poll_period * 1000.)
 
@@ -96,7 +100,7 @@ class Manager(object):
 
     def stop(self):
         self.integration_checker.stop()
-
+                
     @tornado.gen.coroutine
     def check_integration_list(self):
         '''Polls the database for the active integrations.'''
@@ -111,8 +115,8 @@ class Manager(object):
         new_keys = cur_keys - orig_keys
         for key in new_keys:
             _log.info('Turning on integration (%s,%s)' % key)
-            timer = tornado.ioloop.PeriodicCallback(
-                lambda: process_one_account(*key),
+            timer = utils.sync.PeriodicCoroutineTimer(
+                functools.partial(process_one_account, *key),
                 options.poll_period * 1000.)
             timer.start()
             self._timers[key] = timer
@@ -127,12 +131,13 @@ class Manager(object):
 
         statemon.state.n_integrations = len(self._timers)
 
-def main():
+def main():    
+    ioloop = tornado.ioloop.IOLoop.current()
     manager = Manager()
     manager.start()
     
-    ioloop = tornado.ioloop.IOLoop.current()
     atexit.register(ioloop.stop)
+    atexit.register(manager.stop)
     _log.info('Starting Brightcove ingester')
     ioloop.start()
 

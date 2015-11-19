@@ -167,6 +167,9 @@ class VideoSearcher(object):
             return (self.predictor.predict(image), '')
         return (float('-inf'), self.filt.short_description())
 
+    def get_name(self):
+        return 'AbstractSearcher'
+
 
 class BisectSearcher(VideoSearcher):
     '''A video searcher that uses bisection search.'''
@@ -419,6 +422,9 @@ class BisectSearcher(VideoSearcher):
                                         hashlib.md5(str(x[2])).digest()))
         return results
 
+    def get_name(self):
+        return 'BisectSearcher'
+
 class UniformSamplingSearcher(VideoSearcher):
     '''Searches through the video using uniform sampling.'''
     def __init__(self,
@@ -524,3 +530,6 @@ class UniformSamplingSearcher(VideoSearcher):
                            attr))
             
         return retval
+
+    def get_name(self):
+        return 'UniformSamplingSearcher'

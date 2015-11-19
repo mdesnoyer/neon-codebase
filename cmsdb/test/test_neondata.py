@@ -1831,6 +1831,42 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
     @patch('cmsdb.neondata.utils.http')
     @tornado.testing.gen_test
+    def test_callback_with_experiment_state(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, 200)
+      request = NeonApiRequest('j1', 'key1', 'vid1',
+                               http_callback='http://some.where')
+      request.state = neondata.RequestState.SERVING
+      request.response['framenos'] = [34, 61]
+      request.response['serving_url'] = 'http://some_serving_url.com'
+      request.save()
+      neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
+                           winner_tid='key1_vid1_t2').save()
+
+      yield request.send_callback(async=True)
+
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.SUCESS)
+
+      # Check the callback
+      self.assertTrue(fetch_mock.called)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      response_dict = json.loads(found_request.body)
+      self.assertDictContainsSubset(
+        {'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.RequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.COMPLETE,
+         'winner_thumbnail' : 'key1_vid1_t2'},
+        response_dict)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
     def test_image_in_isp(self, http_mock):
       fetch_mock = self._future_wrap_mock(http_mock.send_request,
                                           require_async_kw=True)
@@ -1842,39 +1878,37 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
       # Check when isp returns a 204 because it doesn't have the video
       fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      with self.assertLogExists(logging.DEBUG, 'Image not available in '):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
       cargs, kwargs = fetch_mock.call_args
       found_request = cargs[0]
-      self.assertEqual(found_request.method, 'HEAD')
       self.assertTrue(found_request.follow_redirects)
 
       # Check when the image is there
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200, effective_url="http://www.where.com/neontntid.jpg")
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=200)
       is_avail = yield video.image_available_in_isp(async=True)
       self.assertTrue(is_avail)
 
-      # Check when the image is the default url
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200,
-          effective_url="http://www.where.com/neontnacct1_default_thumb.jpg")
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
-
-      # Check when the redirect url is invalid
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200, effective_url="http://www.where.com/badthumb.jpg")
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      # Check when there was an http error that was not raised
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=500)
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
 
       # Check on a raised http error
       fetch_mock.side_effect = [tornado.httpclient.HTTPError(400, 'Bad error')]
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
+
+    @tornado.testing.gen_test
+    def test_account_missing_when_checking_isp(self):
+      video = VideoMetadata('acct1_v1')
+      with self.assertLogExists(logging.ERROR,
+                                'Cannot find the neon user account'):
+        with self.assertRaises(neondata.DBStateError):
+          yield video.image_available_in_isp()
       
       
             
