@@ -198,8 +198,8 @@ class MonteCarloMetropolisHastings(object):
         #                / 2) + int(elements * self.clip))
         _log.info(('Search interval starting over %i frames, %i removed, '
                    'with %i search frames')%(self.tot, 
-                                             ((self.N - 1)*
-                                                self.search_interval), 
+                                             tot - (((self.N - 1)*
+                                              self.search_interval)), 
                                              self.N))
         self._l_bound = ThumbnailResultObject(
                             -1, score=self.mean,
