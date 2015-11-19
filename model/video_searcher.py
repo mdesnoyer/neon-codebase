@@ -17,8 +17,8 @@ import ffvideo
 import logging
 import math
 import model.errors
-from cvutils import features
-from cvutils import colorname
+from model import features
+from model import colorname
 import numpy as np
 import time
 import utils.obj

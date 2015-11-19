@@ -45,10 +45,10 @@ if sys.path[0] != __base_path__:
 import cv2
 import ffvideo
 import model.errors
-import cvutils.features as feat
+import model.features as feat
 import numpy as np
 import utils.obj
-from cvutils.colorname import ColorName
+from model.colorname import ColorName
 from utils import statemon
 from cvutils import pycvutils
 from cvutils.pycvutils import seek_video

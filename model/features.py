@@ -19,9 +19,9 @@ import os
 import os.path
 import utils.obj
 from cvutils import pycvutils
-from cvutils.colorname import ColorName
-from cvutils.parse_faces import DetectFaces, FindAndParseFaces
-from cvutils.score_eyes import ScoreEyes
+from model.colorname import ColorName
+from model.parse_faces import DetectFaces, FindAndParseFaces
+from model.score_eyes import ScoreEyes
 
 _log = logging.getLogger(__name__)
 
@@ -152,7 +152,7 @@ class BlurGenerator(RegionFeatureGenerator):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
 
@@ -197,7 +197,7 @@ class SADGenerator(RegionFeatureGenerator):
         super(SADGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
 
@@ -366,7 +366,7 @@ class VibranceGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480):
         super(VibranceGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(max_height=self.max_height)
+        self.prep = pycvutils.ImagePrep(max_height=self.max_height)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -404,7 +404,7 @@ class TextGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
         self._max_variation = max_variation
@@ -457,7 +457,7 @@ class TextGeneratorOld(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=None):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
 
@@ -495,7 +495,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=.8):
         super(PixelVarGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
 

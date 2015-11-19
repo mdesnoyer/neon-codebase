@@ -17,7 +17,7 @@ if sys.path[0] != __base_path__:
 
 import dill as pickle
 import cv2
-from cvutils import features
+from model import features
 from model import filters
 import logging
 from model import predictor

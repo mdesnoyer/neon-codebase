@@ -11,8 +11,8 @@ sys.path.insert(0,  os.path.abspath(
 import unittest
 from cvutils import smartcrop
 from utils import imageutils
-from cvutils import features
-from cvutils.colorname import JSD
+from model import features
+from model.colorname import JSD
 
 class TestSmartCrop(unittest.TestCase):
     def setUp(self):
