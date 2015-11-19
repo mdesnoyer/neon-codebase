@@ -8,6 +8,7 @@ include(Top.cmake)
 # properly. Need to figure out how to fix this.
 add_subdirectory(externalLibs)
 add_subdirectory(utils)
+add_subdirectory(model)
 add_subdirectory(stats)
 add_subdirectory(mastermind)
 add_subdirectory(clickTracker)

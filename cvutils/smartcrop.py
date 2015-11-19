@@ -113,7 +113,7 @@ class SmartCrop(object):
         return full_sm
 
     def detect_front_faces(self, im):
-        prep_im = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        prep_im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         faces = self.dlib_face_detector(prep_im)
         face_array = np.zeros((len(faces), 4), int)
         for i, face in enumerate(faces):
