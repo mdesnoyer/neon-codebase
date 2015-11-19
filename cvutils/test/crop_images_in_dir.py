@@ -50,7 +50,7 @@ def draw_faces():
         #   break
         im = cv2.imread(im_file)
         face_im = im
-        faces = smart_crop.detect_face(im)
+        faces = smart_crop.detect_faces(im)
 
         for box in faces:
             tl = (box[0], box[1])

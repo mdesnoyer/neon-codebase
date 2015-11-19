@@ -28,19 +28,9 @@ def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
 
     Returns: The resized and cropped image.
     '''
-    scaling = max(float(h) / image.shape[0],
-                  float(w) / image.shape[1])
-
-    newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
-                           interpolation=interpolation)
-
-    sr = int(np.floor((newsize[0] - h)/2))
-    sc = int(np.floor((newsize[1] - w)/2))
-    if len(big_image.shape) > 2:
-        return big_image[sr:sr + h, sc:sc + w, :]
-    else:
-        return big_image[sr:sr + h, sc:sc + w]
+    sc = smartcrop.SmartCrop.get_cropper()
+    cropped_im = sc.crop_and_resize(image, w, h)
+    return cropped_im
 
 def to_pil(im):
     '''Converts an OpenCV image to a PIL image.'''
@@ -73,7 +63,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
 
     grab_sucess = True
     if (cur_frame is not None and cur_frame > 0 and 
-        video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES) == 0):
+        video.get(cv2.CAP_PROP_POS_FRAMES) == 0):
         if do_log:
             _log.warn('Cannot read the current frame location.'
                       'Resorting to manual advancing')
@@ -86,12 +76,12 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
         if (cur_frame is None or not (
                 (frame_no - cur_frame) < 4 and (frame_no - cur_frame) >= 0) ):
             # Seeking to a place in the video that's a ways away, so JUMP
-            video.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, frame_no)
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
             
-        cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
+        cur_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
         while grab_sucess and cur_frame < frame_no:
             grab_sucess = video.grab()
-            cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
+            cur_frame = video.get(cv2.CAP_PROP_POS_FRAMES)
             if cur_frame == 0:
                 _log.error('Cannot read the current frame location. '
                            'This probably means that we cannot walk '

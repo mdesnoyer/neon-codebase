@@ -15,7 +15,7 @@ import imagehash
 import matplotlib.pyplot as plt
 import numpy as np
 import PIL.Image
-from utils import pycvutils
+from cvutils import pycvutils
 import random
 import scipy as sp
 from StringIO import StringIO

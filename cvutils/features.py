@@ -20,8 +20,8 @@ import os.path
 import utils.obj
 from cvutils import pycvutils
 from cvutils.colorname import ColorName
-from model.parse_faces import DetectFaces, FindAndParseFaces
-from score_eyes import ScoreEyes
+from cvutils.parse_faces import DetectFaces, FindAndParseFaces
+from cvutils.score_eyes import ScoreEyes
 
 _log = logging.getLogger(__name__)
 

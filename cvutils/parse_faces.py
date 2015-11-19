@@ -10,7 +10,7 @@ import numpy as np
 import cv2
 import os
 import dlib
-from utils.pycvutils import ImagePrep
+from cvutils.pycvutils import ImagePrep
 
 comp_dict = {}
 comp_dict['face'] = range(17)

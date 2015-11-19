@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import model
 import numpy as np
 import time
-from utils import pycvutils
+from cvutils import pycvutils
 from optparse import OptionParser
 
 _log = logging.getLogger(__name__)

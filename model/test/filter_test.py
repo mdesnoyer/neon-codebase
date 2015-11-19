@@ -55,64 +55,64 @@ class TestUniformColorFilter(unittest.TestCase):
         pink[:,:,2] = 255
         self.assertFalse(self.filter.accept(pink))
 
-class TestTextFilter(unittest.TestCase):
-    def setUp(self):
-        self.filter = model.filters.TextFilter(0.025)
+# class TestTextFilter(unittest.TestCase):
+#     def setUp(self):
+#         self.filter = model.filters.TextFilter(0.025)
 
-    def test_natural_images_no_text(self):
-        #self.assertTrue(self.filter.accept(
-        #    cv2.imread("/data/neon/imdb/staging/images/8pMJhXpcqFoxeEh5djLYFc.jpg")))
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, '200m.jpg'))))
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'pens_buins.jpg'))))
-        #self.assertTrue(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'black_face.jpg'))))
+#     def test_natural_images_no_text(self):
+#         #self.assertTrue(self.filter.accept(
+#         #    cv2.imread("/data/neon/imdb/staging/images/8pMJhXpcqFoxeEh5djLYFc.jpg")))
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, '200m.jpg'))))
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'pens_buins.jpg'))))
+#         #self.assertTrue(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'black_face.jpg'))))
 
-    def test_natural_images_with_text(self):
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'ctv_scroller.png'))))
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'has_ticker.jpg'))))
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'podium.jpg'))))
-        self.assertTrue(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'cbs_newsroom.jpg'))))
-        #self.assertTrue(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'title_in_background.jpg'))))
+#     def test_natural_images_with_text(self):
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'ctv_scroller.png'))))
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'has_ticker.jpg'))))
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'podium.jpg'))))
+#         self.assertTrue(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'cbs_newsroom.jpg'))))
+#         #self.assertTrue(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'title_in_background.jpg'))))
 
-    #@unittest.skip("Skipping because these examples are too hard for the algorithm now.")
-    def test_title_cards(self):
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'stack_title.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'stack_title2.jpg'))))
-        #self.assertFalse(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'stack_title4.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'splash_title.jpg'))))
-        #self.assertFalse(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'small_white_text.jpg'))))
-        #self.assertFalse(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'angled_title_card.jpg'))))
-        #self.assertFalse(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'white_text_faded_background.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'slide.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'transition_slide.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'text_and_pics.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'pink_back_white_text.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'sim_city_title_card.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'blue_text_white_back.jpg'))))
-        #self.assertFalse(self.filter.accept(
-        #    cv2.imread(os.path.join(IMG_DIR, 'hgtv.jpg'))))
-        self.assertFalse(self.filter.accept(
-            cv2.imread(os.path.join(IMG_DIR, 'text_and_pics.jpg'))))
+#     #@unittest.skip("Skipping because these examples are too hard for the algorithm now.")
+#     def test_title_cards(self):
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'stack_title.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'stack_title2.jpg'))))
+#         #self.assertFalse(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'stack_title4.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'splash_title.jpg'))))
+#         #self.assertFalse(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'small_white_text.jpg'))))
+#         #self.assertFalse(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'angled_title_card.jpg'))))
+#         #self.assertFalse(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'white_text_faded_background.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'slide.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'transition_slide.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'text_and_pics.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'pink_back_white_text.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'sim_city_title_card.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'blue_text_white_back.jpg'))))
+#         #self.assertFalse(self.filter.accept(
+#         #    cv2.imread(os.path.join(IMG_DIR, 'hgtv.jpg'))))
+#         self.assertFalse(self.filter.accept(
+#             cv2.imread(os.path.join(IMG_DIR, 'text_and_pics.jpg'))))
 
 # add tests for PixVar
 class TestPixelVarianceFilter(unittest.TestCase):

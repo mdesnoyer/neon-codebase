@@ -103,7 +103,7 @@ class SmartCrop(object):
         return full_sm
 
 
-    def detect_face(self, im):
+    def detect_faces(self, im):
         front_faces = \
             self.front_face_cascade.detectMultiScale(im, **self.haarParams)
         profile_faces = \
@@ -189,7 +189,7 @@ class SmartCrop(object):
 
         saliency = ImageSignatureSaliency(im)
         saliency_map = saliency.get_saliency_map()
-        faces = self.detect_face(im)
+        faces = self.detect_faces(im)
 
         # cv2.imshow('saliency', saliency_map)
         # cv2.waitKey(0)

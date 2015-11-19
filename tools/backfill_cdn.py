@@ -21,7 +21,7 @@ from cmsdb import neondata
 import multiprocessing
 from PIL import Image
 from utils.imageutils import PILImageUtils
-from utils import pycvutils
+from cvutils import pycvutils
 import signal
 from StringIO import StringIO
 import utils.http

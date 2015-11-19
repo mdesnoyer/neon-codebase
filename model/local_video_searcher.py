@@ -45,12 +45,13 @@ if sys.path[0] != __base_path__:
 import cv2
 import ffvideo
 import model.errors
-import model.features as feat
+import cvutils.features as feat
 import numpy as np
 import utils.obj
-from model.colorname import ColorName
-from utils import pycvutils, statemon
-from utils.pycvutils import seek_video
+from cvutils.colorname import ColorName
+from utils import statemon
+from cvutils import pycvutils
+from cvutils.pycvutils import seek_video
 from model.metropolisHastingsSearch import ThumbnailResultObject
 from model.metropolisHastingsSearch import MCMH_rpl
 
