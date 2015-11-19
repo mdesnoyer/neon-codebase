@@ -12,28 +12,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 from cvutils import smartcrop
 
-def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
-    '''Resizes the image and then crops to a new size.
-    The resize preserves the aspect ratio and then the crop forces the
-    image into the desired size.
-    Inputs:
-    image - Image to resize. Image in OpenCV format
-    h - desired height
-    w - desired width
-    Returns: The resized and cropped image.
-    '''
-    scaling = max(float(h) / image.shape[0],
-                  float(w) / image.shape[1])
-
-    newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
-    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
-                           interpolation=interpolation)
-
-    sr = np.floor((newsize[0] - h)/2)
-    sc = np.floor((newsize[1] - w)/2)
-
-    return big_image[sr:sr + h, sc:sc + w, :]
-
 def draw_faces():
     target_dir = '/home/wiley/src/data/bad_images'
     face_dst_dir = os.path.join(target_dir, 'face')
@@ -132,10 +110,10 @@ def full_test():
 
 
 def main():
-    draw_faces()
+    # draw_faces()
     # draw_saliency()
     # draw_text()
-    # full_test()
+    full_test()
     return
 
 

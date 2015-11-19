@@ -28,9 +28,19 @@ def resize_and_crop(image, h, w, interpolation=cv2.INTER_AREA):
 
     Returns: The resized and cropped image.
     '''
-    sc = smartcrop.SmartCrop.get_cropper()
-    cropped_im = sc.crop_and_resize(image, w, h)
-    return cropped_im
+    scaling = max(float(h) / image.shape[0],
+                  float(w) / image.shape[1])
+
+    newsize = np.round(np.array([image.shape[0], image.shape[1]])*scaling)
+    big_image = cv2.resize(image, (int(newsize[1]), int(newsize[0])),
+                           interpolation=interpolation)
+
+    sr = int(np.floor((newsize[0] - h)/2))
+    sc = int(np.floor((newsize[1] - w)/2))
+    if len(big_image.shape) > 2:
+        return big_image[sr:sr + h, sc:sc + w, :]
+    else:
+        return big_image[sr:sr + h, sc:sc + w]
 
 def to_pil(im):
     '''Converts an OpenCV image to a PIL image.'''

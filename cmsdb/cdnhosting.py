@@ -34,6 +34,7 @@ from utils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon 
 import utils.sync
+from cvutils import smartcrop
 
 import logging
 _log = logging.getLogger(__name__)
@@ -152,7 +153,8 @@ class CDNHosting(object):
             if self.resize:
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                    sc = smartcrop.SmartCrop.get_cropper()
+                    cv_im_r = sc.crop_and_resize(cv_im, sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
                     cdn_val = yield self._upload_and_check_image(
                         im, tid, url, overwrite)
