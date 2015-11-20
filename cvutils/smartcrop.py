@@ -201,7 +201,7 @@ class SmartCrop(object):
         value
         '''
         saliency_threshold = 50
-        im = src
+        im = src.copy()
 
         (height, width, elem) = im.shape
 
