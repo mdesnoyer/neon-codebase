@@ -30,7 +30,7 @@ from boto.s3.connection import S3Connection
 from poster.encode import multipart_encode
 from StringIO import StringIO
 import utils.botoutils
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon 
 import utils.sync

@@ -25,7 +25,7 @@ import tornado.testing
 import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import urlparse
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 
 _log = logging.getLogger(__name__)
