@@ -73,7 +73,7 @@ def reprocess_videos(video_ids):
             video_id = neondata.InternalVideoID.generate(options.api_key,
                                                          video_id)
 
-        video = VideoMetadata.get(video_id)
+        video = neondata.VideoMetadata.get(video_id)
         if video is None:
             continue
 
@@ -126,7 +126,7 @@ def main():
         exec('test_video_func = lambda vid, job: %s' % options.test_video_func)
         reprocess_valid_jobs(test_video_func)
     else:
-        reprocess_videos(open(options.video_list))
+        reprocess_videos([x.strip() for x in open(options.video_list)])
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
