@@ -94,15 +94,15 @@ class SmartCrop(object):
     @classmethod
     def get_cropper(cls):
         ''' Return a singlton instance. '''
-        # Check if options have changed.
-        if self.haarFileProfile != options.haarFileProfile:
-            self.haarFileProfile = options.haarFileProfile
-            self.profile_face_cascade = cv2.CascadeClassifier()
-            self.profile_face_cascade.load(self.haarFileProfile)
-
-        self.textClassifier1 = options.textClassifier1
-        self.textClassifier2 = options.textClassifier2
         cls._instance_ = cls._instance_ or SmartCrop()
+        # Check if options have changed.
+        if cls._instance_.haarFileProfile != options.haarFileProfile:
+            cls._instance_.haarFileProfile = options.haarFileProfile
+            cls._instance_.profile_face_cascade = cv2.CascadeClassifier()
+            cls._instance_.profile_face_cascade.load(cls._instance_.haarFileProfile)
+
+        cls._instance_.textClassifier1 = options.textClassifier1
+        cls._instance_.textClassifier2 = options.textClassifier2
         return cls._instance_
 
     def generate_saliency_map(self, im):
