@@ -45,11 +45,11 @@ class TestSmartCrop(unittest.TestCase):
                                           'test_crop_images/right_face.jpg'))
         smart_crop = smartcrop.SmartCrop.get_cropper()
         # Crop horizontally
-        cropped_im = smart_crop.crop_and_resize(face_im, 300, 280)
+        cropped_im = smart_crop.crop_and_resize(face_im, 280, 300)
         faces = smart_crop.detect_faces(cropped_im)
         self.assertEqual(len(faces), 1)
         # Crop vertically
-        cropped_im = smart_crop.crop_and_resize(face_im,300, 130)
+        cropped_im = smart_crop.crop_and_resize(face_im, 130, 300)
         faces = smart_crop.detect_faces(cropped_im)
         self.assertEqual(len(faces), 1)
 

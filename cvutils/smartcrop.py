@@ -202,7 +202,7 @@ class SmartCrop(object):
         return cropped_im
 
 
-    def crop_and_resize(self, src, w, h):
+    def crop_and_resize(self, src, h, w):
         ''' Find the cropped area maximizes the summation of the saliency
         value
         '''
