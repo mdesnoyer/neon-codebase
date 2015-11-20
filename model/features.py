@@ -602,7 +602,7 @@ Inputs:
         # When setting cache dir to None, we revert to an in-memory
         # shared class.
         self._cache_dir = cache_dir
-        if self._cache_dir == None:
+        if self._cache_dir is None:
             _log.warning('Using an in memory cache instead of a disk cache.')
             mem_cache = MemCachedFeatures.create_shared_cache(
                 self.feature_generator)

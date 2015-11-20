@@ -354,7 +354,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         if rtoken is None: rtoken = self.rtoken
         if wtoken is None: wtoken = self.wtoken
-        if autoupdate == None: autoupdate = False
+        if autoupdate is None: autoupdate = False
 
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s' \
                             %(self.a_id, self.b_id))

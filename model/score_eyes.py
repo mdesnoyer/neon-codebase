@@ -17,7 +17,7 @@ def _get_split_r(arr, n_splt=2, axis=None):
     all but the last axis. (Recursive)
     '''
     splts = []
-    if axis == None:
+    if axis is None:
         axis = 0
     psplt = np.array_split(arr, 2, axis=axis)
     if axis == (arr.shape[-1] - 1):
