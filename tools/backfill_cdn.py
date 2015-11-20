@@ -25,7 +25,7 @@ from utils import pycvutils
 import signal
 from StringIO import StringIO
 import utils.http
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon 
 import utils.ps
 import utils.sync

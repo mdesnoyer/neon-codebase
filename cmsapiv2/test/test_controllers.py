@@ -27,7 +27,7 @@ from mock import patch
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
 from StringIO import StringIO
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 from utils.options import options

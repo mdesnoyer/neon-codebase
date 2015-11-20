@@ -24,7 +24,7 @@ import tornado.testing
 import unittest
 from tools import backfill_cdn
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 
 _log = logging.getLogger(__name__)
 
