@@ -146,7 +146,11 @@ class SmartCrop(object):
             faces = np.append(front_faces, profile_faces, axis=0)
             return faces
 
-    def text_crop(self, im, draw_im = None):
+    def text_crop(self, im, draw_im=None):
+        ''' Detect the text in the lower part of the image and remove it
+        draw_im is used to mark the text box area, it can be the copy of im.
+        When draw_im is used, yellow boxes are drawn to show the text area.
+        '''
         # Downsize the image first. Make the longest edge to be 360 pixels.
         height = im.shape[0]
         width = im.shape[1]

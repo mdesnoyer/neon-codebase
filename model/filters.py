@@ -457,35 +457,6 @@ class InterlaceFilter(Filter):
     def short_description(self):
         return 'interlace'
 
-# class TextFilter(Filter):
-#     '''Filters on large amounts of text in the image.'''
-
-#     def __init__(self, frac_thresh=0.03, max_height=480):
-#         super(TextFilter, self).__init__(max_height)
-#         self.frac_thresh = frac_thresh
-
-#     def _accept_impl(self, image, frameno, video):
-#         return self.score(image) < self.frac_thresh
-
-#     def score(self, image):
-
-#         # Cut out the bottom 20% of the image because it often has tickers
-#         cut_image = image[0:int(image.shape[0]*.82), :, :]
-    
-#         text_image = TextDetectionPy.TextDetection(cut_image)
-        
-
-#         return (float(np.count_nonzero(text_image)) /
-#                 (text_image.shape[0] * text_image.shape[1]))
-
-#     def accept_score(self, image, frameno=None, video=None):
-#         score = self.score(image)
-#         accepted = score < self.frac_thresh
-#         return (accepted, score)
-
-#     def short_description(self):
-#         return 'text'
-
 class DeltaStdDevFilter(VideoFilter):
     def __init__(self, upper_thresh = 0.76, lower_thresh=-0.74):
         super(DeltaStdDevFilter,self).__init__()
