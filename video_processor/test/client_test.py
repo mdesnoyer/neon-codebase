@@ -55,7 +55,7 @@ import urlparse
 import urllib2
 import unittest
 import utils
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
 import utils.ps
@@ -451,7 +451,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'PILImageUtils.download_image')
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start(),
             require_async_kw=True)
@@ -489,19 +489,19 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                         model_version='model1',
                                         frameno=6,
                                         filtered=''),
-             utils.imageutils.PILImageUtils.create_random_image(480, 640)),
+             PILImageUtils.create_random_image(480, 640)),
              (neondata.ThumbnailMetadata(None,
                                          ttype=neondata.ThumbnailType.NEON,
                                          rank=1,
                                          model_score=2.1,
                                          model_version='model1',
                                          frameno=69),
-             utils.imageutils.PILImageUtils.create_random_image(480, 640)),
+             PILImageUtils.create_random_image(480, 640)),
              (neondata.ThumbnailMetadata(None,
                                          ttype=neondata.ThumbnailType.RANDOM,
                                          rank=0,
                                          frameno=67),
-              utils.imageutils.PILImageUtils.create_random_image(480, 640))]
+              PILImageUtils.create_random_image(480, 640))]
 
         
     def tearDown(self):
@@ -1036,7 +1036,7 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'PILImageUtils.download_image')
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start(),
             require_async_kw=True)

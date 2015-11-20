@@ -29,7 +29,7 @@ import tornado.ioloop
 import test_utils.redis
 import urlparse
 import unittest
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 
 _log = logging.getLogger(__name__)

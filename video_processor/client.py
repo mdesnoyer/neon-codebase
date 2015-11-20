@@ -49,7 +49,7 @@ import time
 import urllib
 import urllib2
 import urlparse
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils import pycvutils
 import utils.http

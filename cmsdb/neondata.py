@@ -4318,7 +4318,7 @@ class VideoMetadata(StoredObject):
     @tornado.gen.coroutine
     def download_image_from_url(self, image_url): 
         try:
-            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+            image = yield PILImageUtils.download_image(image_url,
                     async=True)
         except IOError, e:
             msg = "IOError while downloading image %s: %s" % (
