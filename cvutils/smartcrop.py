@@ -13,12 +13,6 @@ from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
 
-define("haarFileFront",
-       default=os.path.join(os.path.dirname(__file__),
-                           'data/haarcascade_frontalface_alt2.xml'),
-       type=str,
-       help="Front face detector haar cascade file.")
-
 define("haarFileProfile",
        default=os.path.join(os.path.dirname(__file__),
                            'data/haarcascade_profileface.xml'),
@@ -88,13 +82,11 @@ class ImageSignatureSaliency(object):
 class SmartCrop(object):
     _instance_ = None
     def __init__(self):
-        self.haarFileFront = options.haarFileFront
+        ''' This function should not be called by directly.
+        Using the get_cropper to get the singlton instead.
+        '''
         self.haarFileProfile = options.haarFileProfile
-        self.textClassifier1 = options.textClassifier1
-        self.textClassifier2 = options.textClassifier2
-        self.front_face_cascade = cv2.CascadeClassifier()
         self.profile_face_cascade = cv2.CascadeClassifier()
-        self.front_face_cascade.load(self.haarFileFront)
         self.profile_face_cascade.load(self.haarFileProfile)
         self.dlib_face_detector = dlib.get_frontal_face_detector()
         self.haarParams = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
@@ -102,6 +94,14 @@ class SmartCrop(object):
     @classmethod
     def get_cropper(cls):
         ''' Return a singlton instance. '''
+        # Check if options have changed.
+        if self.haarFileProfile != options.haarFileProfile:
+            self.haarFileProfile = options.haarFileProfile
+            self.profile_face_cascade = cv2.CascadeClassifier()
+            self.profile_face_cascade.load(self.haarFileProfile)
+
+        self.textClassifier1 = options.textClassifier1
+        self.textClassifier2 = options.textClassifier2
         cls._instance_ = cls._instance_ or SmartCrop()
         return cls._instance_
 
