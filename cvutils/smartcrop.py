@@ -47,7 +47,8 @@ class ImageSignatureSaliency(object):
         im = cv2.resize(src, (int(src.shape[1]/ratio), int(src.shape[0]/ratio)))
         sal_map = np.zeros(im.shape)
         for i in xrange(0, im.shape[2]):
-            sal_map[0:, 0:, i] = np.power(idct(np.sign(dct(im[0:,0:, i]))), 2)
+            sal_map[0:, 0:, i] = np.power(idct(np.sign(dct(
+                                    im[0:,0:, i].astype(float)))), 2)
         out_map = np.sum(sal_map, 2)
         self.map_width = int(im.shape[1] * map_size / 64.0)
         self.map_height = int(im.shape[0] * map_size / 64.0)
@@ -75,7 +76,8 @@ class ImageSignatureSaliency(object):
         for x_end in xrange(w-1, 0, -1):
             if max(self.smooth_map[0:, x_end] > saliency_threshold):
                 break
-        cv2.rectangle(resized_im, (x_begin, 0), (x_end, h), (0, 255, 255), 3, 8)
+        cv2.rectangle(resized_im.astype(uint8), (x_begin, 0), (x_end, h),
+                      (0, 255, 255), 3, 8)
         return resized_im
 
 
