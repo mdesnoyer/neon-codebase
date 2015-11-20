@@ -11,6 +11,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 from cvutils import smartcrop
+from utils import pycvutils
 
 def draw_faces():
     target_dir = '/home/wiley/src/data/bad_images'
@@ -97,7 +98,7 @@ def full_test():
         im = cv2.imread(im_file)
         smart_crop = smartcrop.SmartCrop.get_cropper()
         cropped_im = smart_crop.crop_and_resize(im, 600, 600)
-        centered_im = resize_and_crop(im, 600, 600)
+        centered_im = pycvutils.resize_and_crop(im, 600, 600)
         cropped_file = im_file.replace('.jpg', '_smart.jpg')
         cv2.imwrite(cropped_file, cropped_im)
         centered_file = im_file.replace('.jpg', '_center.jpg')
