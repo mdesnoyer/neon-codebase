@@ -36,6 +36,8 @@ define('test_video_func', default=None,
              'reprocessed. If the function returns true, the video will be '
              'reprocessed. It will be of the form lambda vid, job: '
              '<some expression>. This option replaces <some expression>'))
+define('video_list', default=None,
+       help='file containing a list of video ids to reprocess. one per line.')
 define('max_submit_rate', default=60.0,
        help='Maximum number of jobs to submit per hour')
 
@@ -62,11 +64,32 @@ def send_reprocess_request(job):
         
     return True
 
-def main():
-    if options.test_video_func is None:
-        raise ValueError('Need to specify test_video_func')
-    exec('test_video_func = lambda vid, job: %s' % options.test_video_func)
+def reprocess_videos(video_ids):
+    n_reprocessed = 0
+    n_failures = 0
+    vids_processed = 0
+    for video_id in video_ids:
+        if '_' not in video_id:
+            video_id = neondata.InternalVideoID.generate(options.api_key,
+                                                         video_id)
 
+        video = VideoMetadata.get(video_id)
+        if video is None:
+            continue
+
+        job = neondata.NeonApiRequest.get(video.job_id, options.api_key)
+        if job:
+            if not send_reprocess_request(job):
+                n_failures += 1
+            n_reprocessed += 1
+
+        vids_processed += 1
+        if vids_processed % 50 == 0:
+            _log.info('Processed %i videos' % (vids_processed))
+
+    _log.info('Submitted %i jobs. %i failures' % (n_reprocessed, n_failures))
+
+def reproecess_valid_jobs(test_video_func):
     n_reprocessed = 0
     n_failures = 0
     
@@ -92,6 +115,18 @@ def main():
                           (vids_processed, len(plat.videos)))
 
     _log.info('Submitted %i jobs. %i failures' % (n_reprocessed, n_failures))
+    
+
+def main():
+    if not ((options.test_video_func is None) ^ (options.video_list is None)):
+        raise ValueError('Exactly one of test_video_func or video_list must '
+                         'be set')
+    
+    if options.test_video_func:
+        exec('test_video_func = lambda vid, job: %s' % options.test_video_func)
+        reprocess_valid_jobs(test_video_func)
+    else:
+        reprocess_videos(open(options.video_list))
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
