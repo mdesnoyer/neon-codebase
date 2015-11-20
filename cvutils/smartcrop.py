@@ -83,47 +83,67 @@ class ImageSignatureSaliency(object):
 
 class SmartCrop(object):
     _instance_ = None
-    def __init__(self):
+    def __init__(self, image):
         ''' This function should not be called by directly.
         Using the get_cropper to get the singlton instead.
         '''
         self.haarFileProfile = options.haarFileProfile
         self.profile_face_cascade = cv2.CascadeClassifier()
         self.profile_face_cascade.load(self.haarFileProfile)
+        self.textClassifier1 = options.textClassifier1
+        self.textClassifier2 = options.textClassifier2
+
         self.dlib_face_detector = dlib.get_frontal_face_detector()
         self.haarParams = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
+        self._saliency_map = None
+        self._faces = None
+        self._text_boxes = None
+        self.image = image
+        self.text_count = 0
 
-    @classmethod
-    def get_cropper(cls):
-        ''' Return a singlton instance. '''
-        cls._instance_ = cls._instance_ or SmartCrop()
-        # Check if options have changed.
-        if cls._instance_.haarFileProfile != options.haarFileProfile:
-            cls._instance_.haarFileProfile = options.haarFileProfile
-            cls._instance_.profile_face_cascade = cv2.CascadeClassifier()
-            cls._instance_.profile_face_cascade.load(cls._instance_.haarFileProfile)
+    # @classmethod
+    # def get_cropper(cls):
+    #     ''' Return a singlton instance. '''
+    #     cls._instance_ = cls._instance_ or SmartCrop()
+    #     # Check if options have changed.
+    #     if cls._instance_.haarFileProfile != options.haarFileProfile:
+    #         cls._instance_.haarFileProfile = options.haarFileProfile
+    #         cls._instance_.profile_face_cascade = cv2.CascadeClassifier()
+    #         cls._instance_.profile_face_cascade.load(cls._instance_.haarFileProfile)
 
-        cls._instance_.textClassifier1 = options.textClassifier1
-        cls._instance_.textClassifier2 = options.textClassifier2
-        return cls._instance_
+    #     cls._instance_.textClassifier1 = options.textClassifier1
+    #     cls._instance_.textClassifier2 = options.textClassifier2
+    #     return cls._instance_
 
-    def generate_saliency_map(self, im):
-        (height, width, elem) = im.shape
-        half_im = cv2.resize(im, (width / 4, height / 4))
-        half_sm = SaliencyMap(half_im)
-        full_sm = cv2.resize(half_sm.map, (width, height))
-        return full_sm
+    def get_saliency_map(self):
+        if self._saliency_map is None:
+            saliency = ImageSignatureSaliency(self.image)
+            self._saliency_map = saliency.get_saliency_map()
+        return self._saliency_map
 
     def detect_front_faces(self, im):
         prep_im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-        faces = self.dlib_face_detector(prep_im)
+        height = self.image.shape[0]
+        width = self.image.shape[1]
+        ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
+        im_resized = cv2.resize(prep_im, (int(self.image.shape[1]/ratio),
+                                          int(self.image.shape[0]/ratio)))
+        faces = self.dlib_face_detector(im_resized)
         face_array = np.zeros((len(faces), 4), int)
         for i, face in enumerate(faces):
             face_array[i, 0:] = np.array([face.left(), face.top(),
                                           face.width(), face.height()])
+        face_array *= ratio
+        face_array = face_array.astype(int)
+
         return face_array
 
-    def detect_faces(self, im):
+    def detect_faces(self):
+        if self._faces is None:
+            self._faces = self._detect_faces(self.image)
+        return self._faces
+
+    def _detect_faces(self, im):
         front_faces = self.detect_front_faces(im)
         profile_faces = \
             self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
@@ -148,36 +168,51 @@ class SmartCrop(object):
             faces = np.append(front_faces, profile_faces, axis=0)
             return faces
 
-    def text_crop(self, im, draw_im=None):
+    def get_text_boxes(self):
+        if self._text_boxes is None:
+            # Downsize the image first. Make the longest edge to be 360 pixels.
+            height = self.image.shape[0]
+            width = self.image.shape[1]
+            ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
+            im_resized = cv2.resize(self.image, (int(self.image.shape[1]/ratio),
+                                                 int(self.image.shape[0]/ratio)))
+            # Text detector is defined in erfilter.cpp in neon version of opencv3
+            # textDetect(InputArray _src, const String &model_1, const String &model_2,
+            #         int thresholdDelta,
+            #         float minArea, float maxArea, float minProbability,
+            #         bool nonMaxSuppression, float minProbabilityDiff,
+            #         float minProbablity_2,
+            #         vector<Rect> &groups_boxes, OutputArray _dst)
+
+            boxes, mask = cv2.text.textDetect(im_resized,
+                self.textClassifier1,
+                self.textClassifier2,
+                16,0.00015,0.003,0.8,True,0.5, 0.9)
+            if len(boxes) == 0:
+                return np.array([])
+            boxes *= ratio
+            boxes = boxes.astype(int)
+
+            self._text_boxes = boxes
+            self.text_count += 1
+            print "text_count", self.text_count
+
+        return self._text_boxes
+
+    def text_crop(self, x, y, width, height, draw_im=None):
         ''' Detect the text in the lower part of the image and remove it
         draw_im is used to mark the text box area, it can be the copy of im.
         When draw_im is used, yellow boxes are drawn to show the text area.
+        x, y, w, h is the cut off region of the image. We will only concern
+        the images in the rectangle.
         '''
-        # Downsize the image first. Make the longest edge to be 360 pixels.
-        height = im.shape[0]
-        width = im.shape[1]
-        ratio = max(im.shape[0]/600.0, im.shape[1]/600.0)
-        im_resized = cv2.resize(im, (int(im.shape[1]/ratio),
-                                     int(im.shape[0]/ratio)))
-        # Text detector is defined in erfilter.cpp in neon version of opencv3
-        # textDetect(InputArray _src, const String &model_1, const String &model_2,
-        #         int thresholdDelta,
-        #         float minArea, float maxArea, float minProbability,
-        #         bool nonMaxSuppression, float minProbabilityDiff,
-        #         float minProbablity_2,
-        #         vector<Rect> &groups_boxes, OutputArray _dst)
-
-        boxes, mask = cv2.text.textDetect(im_resized,
-            self.textClassifier1,
-            self.textClassifier2,
-            16,0.00015,0.003,0.8,True,0.5, 0.9)
-
+        
+        boxes = self.get_text_boxes()
         # draw on it if it is provided, for debugging purpose.
         # Assuming the draw_im is a copy of im.
         if len(boxes) == 0:
-            return im
-        boxes *= ratio
-        boxes = boxes.astype(int)
+            return self.image[y:y+height, x:x+width]
+
         # Draw im is used purely for display purposes.
         if draw_im is not None:
             for box in boxes:
@@ -185,35 +220,57 @@ class SmartCrop(object):
                 br = (box[0] + box[2], box[1] + box[3])
                 cv2.rectangle(draw_im, tl, br, ( 0, 255, 255 ), 3, 8)
 
-        bottom = height * 0.7
+        bottom = height * 0.7 + y
 
-        top_height_array = []
+        upper_text_y_array = []
         for box in boxes:
             if box[1] < bottom:
                 continue
-            top_height_array.append(box[1])
+            upper_text_y_array.append(box[1])
         # leave 3 pixels for cushion.
-        if not top_height_array:
-            return im
-        top_height = min(top_height_array) - 3
-        new_width = top_height * width / height
-        x = (width - new_width)/2
-        cropped_im = im[0 : top_height, x:x+new_width]
-        return cropped_im
+        if not upper_text_y_array:
+            return self.image[y:y+height, x:x+width]
+        upper_text_y = min(upper_text_y_array) - 3
+        new_height = upper_text_y - y
+        new_width = new_height * width / height
+        new_x = x + (width - new_width)/2
+        new_x_end = x + new_width
+        cropped_im = self.image[y:upper_text_y, x:x+new_width]
+        faces = self.detect_faces()
+        face_cut_left = 0
+        face_cut_right = 0
+        for face in faces:
+            if face[0] < new_x and face[0] + face[2] - 1 >= new_x:
+                face_cut_left = face[3]
+                face_left_bound = x
+            if face[0] < new_x_end and face[0] + face[2] - 1 >= new_x_end:
+                face_cut_right = face[3]
+                face_right_bound = x + width - 1
+        if face_cut_left > face_cut_right:
+            new_x = face_left_bound
+        if face_cut_right > face_cut_left:
+            new_x = face_right_bound - new_width + 1
+
+        return self.image[y:y+new_height, new_x:new_x+new_width]
 
 
-    def crop_and_resize(self, src, h, w):
+    def crop_and_resize(self, h, w):
         ''' Find the cropped area maximizes the summation of the saliency
         value
         '''
+        text_boxes = self.get_text_boxes()
+        if len(text_boxes) == 0:
+            neutral_width = float(self.image.shape[1]) * h / self.image.shape[0]
+            if abs(neutral_width - w) <= 5.0:
+                return cv2.resize(self.image, (w, h))
+
         saliency_threshold = 50
-        im = src.copy()
+        im = self.image.copy()
 
-        (height, width, elem) = im.shape
+        (height, width, elem) = self.image.shape
 
-        saliency = ImageSignatureSaliency(im)
-        saliency_map = saliency.get_saliency_map()
-        faces = self.detect_faces(im)
+        saliency_map = self.get_saliency_map()
+        faces = self.detect_faces()
 
         # Saliency Map is calculated then trimmed to along the boundaries
         # to remove low saliency area.
@@ -282,9 +339,9 @@ class SmartCrop(object):
             else:
                 new_x = face_right_bound - new_width + 1
 
-        cropped_im = src[new_y:new_y+new_height, new_x:new_x+new_width]
+        # cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
 
-        text_cropped_im = self.text_crop(cropped_im)
+        text_cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
 
         resized_im = cv2.resize(text_cropped_im, (w, h))
         return resized_im

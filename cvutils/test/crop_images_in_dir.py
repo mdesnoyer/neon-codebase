@@ -19,7 +19,6 @@ def draw_faces():
     image_files = glob.glob(os.path.join(target_dir, '*.jpg'))
     image_files.sort()
     count = 0
-    smart_crop = smartcrop.SmartCrop.get_cropper()
     for im_file in image_files:
         if '_center' in im_file or '_smart' in im_file:
             continue
@@ -29,7 +28,8 @@ def draw_faces():
         #   break
         im = cv2.imread(im_file)
         face_im = im
-        faces = smart_crop.detect_faces(im)
+        smart_crop = smartcrop.SmartCrop(face_im)
+        faces = smart_crop.detect_faces()
 
         for box in faces:
             tl = (box[0], box[1])
@@ -66,7 +66,6 @@ def draw_text():
     image_files.sort()
     print "Total number of files:", len(image_files)
     count = 0
-    smart_crop = smartcrop.SmartCrop.get_cropper()
 
     for im_file in image_files:
         # if '_center' in im_file or '_smart' in im_file:
@@ -77,7 +76,8 @@ def draw_text():
         #   break
         im = cv2.imread(im_file)
         draw_im = im.copy()
-        cropped_im = smart_crop.text_crop(im, draw_im)
+        smart_crop = smartcrop.SmartCrop()
+        cropped_im = smart_crop.text_crop(0, 0, im.shape[1], im.shape[0], draw_im)
         text_file = os.path.join(text_dst_dir, os.path.basename(im_file))
         cropped_file = text_file.replace('.jpg', '_crop.jpg')
         cv2.imwrite(text_file, draw_im)
@@ -96,8 +96,8 @@ def full_test():
         # if count == 2:
         #   break
         im = cv2.imread(im_file)
-        smart_crop = smartcrop.SmartCrop.get_cropper()
-        cropped_im = smart_crop.crop_and_resize(im, 600, 600)
+        smart_crop = smartcrop.SmartCrop(im)
+        cropped_im = smart_crop.crop_and_resize(600, 600)
         centered_im = pycvutils.resize_and_crop(im, 600, 600)
         cropped_file = im_file.replace('.jpg', '_smart.jpg')
         cv2.imwrite(cropped_file, cropped_im)

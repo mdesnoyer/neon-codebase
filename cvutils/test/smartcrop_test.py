@@ -33,8 +33,8 @@ class TestSmartCrop(unittest.TestCase):
         
         # text_im = cv2.imread(os.path.join(os.path.dirname(__file__),
         #                                   'test_crop_images/lower_text.jpg'))
-        smart_crop = smartcrop.SmartCrop.get_cropper()
-        cropped_im = smart_crop.text_crop(text_im)
+        smart_crop = smartcrop.SmartCrop(text_im)
+        cropped_im = smart_crop.text_crop(0, 0, text_im.shape[1], text_im.shape[0])
         # Assert to make sure there are less residual pixels. It is allowed to
         # have some.
         self.assertLess(cropped_im.shape[0], text_im.shape[0])
@@ -43,21 +43,21 @@ class TestSmartCrop(unittest.TestCase):
     def test_face_crop(self):
         face_im = cv2.imread(os.path.join(os.path.dirname(__file__),
                                           'test_crop_images/right_face.jpg'))
-        smart_crop = smartcrop.SmartCrop.get_cropper()
+        smart_crop = smartcrop.SmartCrop(face_im)
         # Crop horizontally
-        cropped_im = smart_crop.crop_and_resize(face_im, 280, 300)
-        faces = smart_crop.detect_faces(cropped_im)
+        cropped_im = smart_crop.crop_and_resize(280, 300)
+        faces = smart_crop.detect_faces()
         self.assertEqual(len(faces), 1)
         # Crop vertically
-        cropped_im = smart_crop.crop_and_resize(face_im, 130, 300)
-        faces = smart_crop.detect_faces(cropped_im)
+        cropped_im = smart_crop.crop_and_resize(130, 300)
+        faces = smart_crop.detect_faces()
         self.assertEqual(len(faces), 1)
 
     def test_saliency_crop(self):
         saliency_im = cv2.imread(os.path.join(os.path.dirname(__file__),
                                           'test_crop_images/pens_buins.jpg'))
-        smart_crop = smartcrop.SmartCrop.get_cropper()
-        cropped_im = smart_crop.crop_and_resize(saliency_im, 300, 300)
+        smart_crop = smartcrop.SmartCrop(saliency_im)
+        cropped_im = smart_crop.crop_and_resize(300, 300)
         expected_crop = saliency_im[0:saliency_im.shape[0], \
                                     saliency_im.shape[1] - saliency_im.shape[0] + 1:saliency_im.shape[1]]
         expected_resize = cv2.resize(expected_crop, (300, 300))

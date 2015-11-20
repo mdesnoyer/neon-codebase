@@ -151,10 +151,11 @@ class CDNHosting(object):
         # list of serving URLs
         try:
             if self.resize:
+                cv_im = pycvutils.from_pil(image)
+                sc = smartcrop.SmartCrop(cv_im)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    sc = smartcrop.SmartCrop.get_cropper()
-                    cv_im_r = sc.crop_and_resize(cv_im, sz[1], sz[0])
+                    cv_im_r = sc.crop_and_resize(sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
                     cdn_val = yield self._upload_and_check_image(
                         im, tid, url, overwrite)
