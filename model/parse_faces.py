@@ -121,7 +121,7 @@ class FindAndParseFaces(object):
     Detects faces, and segments them.
     '''
     def __init__(self, predictor, detector=None):
-        if detector == None:
+        if detector is None:
             self.detector = dlib.get_frontal_face_detector()
         else:
             self.detector = detector
@@ -138,18 +138,18 @@ class FindAndParseFaces(object):
         '''
         Generally checks to see if a request is valid
         '''
-        if self._image == None:
+        if self._image is None:
             raise ParseStateError(0)
         if not len(self._faceDets):
             return False
-        if face != None:
+        if face is not None:
             if type(face) != int:
                 raise ValueError("Face index must be an integer")
             if face >= len(self._faceDets):
                 raise ParseStateError(1) 
             if face < 0:
                 raise ParseStateError(1)
-        if comp != None:
+        if comp is not None:
             if type(comp) != str:
                 raise ValueError("Component key must be string")
             if not comp_dict.has_key(comp):
