@@ -681,18 +681,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
-        '''http_client = tornado.httpclient.AsyncHTTPClient()
-        hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
-        req = tornado.httpclient.HTTPRequest(url=client_url,
-                                             method="POST",
-                                             headers=hdr,
-                                             body=body,
-                                             request_timeout=300.0,
-                                             connect_timeout=30.0)
-        
-        result = yield tornado.gen.Task(utils.http.send_request, req)'''
-        
-        #TODO (hmaidan): implement SQS
         server = video_processor.sqs_utilities
         self.sqs_queue = server.VideoProcessingQueue()
 
@@ -703,19 +691,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         #I'm not sure how to get the priority here
         message = yield self.sqs_queue.write_message(0, body)
         
-        '''if result.code == 409:
-            job_id = json.loads(result.body)["job_id"]
-            data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
-                    % (video_id, job_id)
-            self.send_json_response(data, 409)
-            return
-
-        if result.code == 400:
-            data = '{"error":"bad request. check api specs","video_id":"%s"}' %\
-                        video_id
-            self.send_json_response(data, 400)
-            return
-        '''
         if not message:
             #_log.error("key=create_neon_thumbnail_api_request "
             #        "msg=thumbnail api error %s" %result.error)

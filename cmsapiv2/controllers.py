@@ -814,13 +814,6 @@ class VideoHelper():
                 api_request = neondata.NeonApiRequest.get(video.job_id, account_id_api_key)
                 
                 # send the request to the video server
-                '''request = tornado.httpclient.HTTPRequest(url=reprocess_url,
-                                                         method="POST",
-                                                         body=api_request.to_json(),
-                                                         request_timeout=30.0,
-                                                         connect_timeout=15.0)
-                response = yield tornado.gen.Task(utils.http.send_request, request)'''
-
                 server = video_processor.sqs_utilities
                 sqs_queue = server.VideoProcessingQueue()
 
@@ -895,16 +888,6 @@ class VideoHandler(APIV2Handler):
                                _set_serving_enabled)
             
         # add the job
-        '''vs_job_url = 'http://%s:%s/job' % (options.video_server, 
-                                           options.video_server_port)'''
-        '''request = tornado.httpclient.HTTPRequest(url=vs_job_url,
-                                                 method="POST",
-                                                 body=api_request.to_json(),
-                                                 request_timeout=30.0,
-                                                 connect_timeout=10.0)
-
-        response = yield tornado.gen.Task(utils.http.send_request, request)'''
-        
         server = video_processor.sqs_utilities
         self.sqs_queue = server.VideoProcessingQueue()
 
