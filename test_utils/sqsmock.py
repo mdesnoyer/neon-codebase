@@ -24,19 +24,17 @@ class SQSQueueMock(object):
     SQS Mock Queue class
     '''
     name = None  
-    def __init__(self, filename, create=False, num_queues=3):
+    def __init__(self, num_queues=3):
         self.lock = threading.RLock()
 
         self.attributes = {}
         self.queue_list = []
-        #self.out_stream = cStringIO.StringIO()
         self.message_queue = []
         self.num_queues = num_queues
 
         for x in range(0, num_queues):
             self.queue_list.append(self.message_queue)
 
-        self.name = filename
         
     #Deprecated function           
     def clear(self, page_size=10, vtimeout=10):
@@ -148,7 +146,7 @@ class SQSConnectionMock(object):
         return queue.delete_message(message)
                
     def create_queue(self, name, visibility_timeout=None):
-        q = SQSQueueMock(name, create=True)
+        q = SQSQueueMock()
         return q
 
     #As the memory streams aren't meant to be persistent, this should always

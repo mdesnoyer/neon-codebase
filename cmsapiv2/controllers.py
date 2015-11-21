@@ -7,8 +7,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import boto.exception
-import boto.sqs
-from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 
 import traceback
@@ -816,13 +814,24 @@ class VideoHelper():
                 api_request = neondata.NeonApiRequest.get(video.job_id, account_id_api_key)
                 
                 # send the request to the video server
-                request = tornado.httpclient.HTTPRequest(url=reprocess_url,
+                '''request = tornado.httpclient.HTTPRequest(url=reprocess_url,
                                                          method="POST",
                                                          body=api_request.to_json(),
                                                          request_timeout=30.0,
                                                          connect_timeout=15.0)
-                response = yield tornado.gen.Task(utils.http.send_request, request)
-                if response and response.code is ResponseCode.HTTP_OK: 
+                response = yield tornado.gen.Task(utils.http.send_request, request)'''
+
+                server = video_processor.sqs_utilities
+                sqs_queue = server.VideoProcessingQueue()
+
+                yield sqs_queue.connect_to_server(options.region,
+                                                       options.aws_key,
+                                                       options.secret_key)
+
+                #Need the priority. Also, I'm assuming that the api_request is the body of the message
+                message = yield sqs_queue.write_message(0, 
+                                                api_request.to_json())
+                if message: 
                     raise tornado.gen.Return((video,api_request))
                 else:  
                     raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
@@ -881,9 +890,9 @@ class VideoHandler(APIV2Handler):
         # modify the video if there is a thumbnail set serving_enabled 
         def _set_serving_enabled(v):
             v.serving_enabled = len(v.thumbnail_ids) > 0
-        '''yield tornado.gen.Task(neondata.VideoMetadata.modify,
+        yield tornado.gen.Task(neondata.VideoMetadata.modify,
                                new_video.key,
-                               _set_serving_enabled)'''
+                               _set_serving_enabled)
             
         # add the job
         '''vs_job_url = 'http://%s:%s/job' % (options.video_server, 
@@ -897,17 +906,17 @@ class VideoHandler(APIV2Handler):
         response = yield tornado.gen.Task(utils.http.send_request, request)'''
         
         server = video_processor.sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue(options.region,
-                                                     options.aws_key,
-                                                     options.secret_key)
+        self.sqs_queue = server.VideoProcessingQueue()
 
-        message = Message()
-        message.set_body(api_request.to_json())
+        yield self.sqs_queue.connect_to_server(options.region,
+                                               options.aws_key,
+                                               options.secret_key)
 
         account = neondata.NeonUserAccount.get(account_id)
 
-        message = yield self.sqs_queue.write_message(account.get_processing_priority(), 
-                                               message)
+        message = yield self.sqs_queue.write_message(
+                                        account.get_processing_priority(), 
+                                        api_request.to_json())
 
         #if response and response.code is ResponseCode.HTTP_OK: 
         if message:

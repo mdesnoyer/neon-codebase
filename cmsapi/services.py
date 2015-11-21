@@ -14,7 +14,6 @@ if sys.path[0] != __base_path__:
 import api.brightcove_api
 import boto.exception
 import boto.sqs
-from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 import datetime
 import json
@@ -695,16 +694,15 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         #TODO (hmaidan): implement SQS
         server = video_processor.sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue(options.region,
-                                                     options.aws_key,
-                                                     options.secret_key)
+        self.sqs_queue = server.VideoProcessingQueue()
 
-        message = Message()
-        message.set_body(body)
-
-        message = yield self.sqs_queue.write_message(0, message)
+        yield self.sqs_queue.connect_to_server(options.region,
+                                               options.aws_key,
+                                               options.secret_key)
+ 
+        #I'm not sure how to get the priority here
+        message = yield self.sqs_queue.write_message(0, body)
         
-
         '''if result.code == 409:
             job_id = json.loads(result.body)["job_id"]
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
@@ -717,17 +715,19 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                         video_id
             self.send_json_response(data, 400)
             return
-
-        if result.error:
-            _log.error("key=create_neon_thumbnail_api_request "
-                    "msg=thumbnail api error %s" %result.error)
+        '''
+        if not message:
+            #_log.error("key=create_neon_thumbnail_api_request "
+            #        "msg=thumbnail api error %s" %result.error)
+            _log.error("Failed to write message")
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            return'''
+            return
 
         #Success
         if message:
-            self.send_json_response(message.get_body(), 201)
+            _log.info(message)
+            self.send_json_response(message, 201)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self, integration_id):

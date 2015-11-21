@@ -46,7 +46,6 @@ import tornado.gen
 import tornado.escape
 import tornado.httpclient
 import tornado.httputil
-import tornado.ioloop
 import time
 import urllib
 import urllib2
@@ -505,7 +504,7 @@ class VideoProcessor(object):
 
     def finalize_response(self):
         '''
-        Finalize the respon after video has been processed.
+        Finalize the response after video has been processed.
 
         This updates the database and does any callbacks necessary.
         '''
@@ -762,17 +761,17 @@ class VideoClient(multiprocessing.Process):
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
         server = sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue(options.region,
-                                                     options.aws_key,
-                                                     options.secret_key)
+        self.sqs_queue = server.VideoProcessingQueue()
+
+        yield self.sqs_queue.connect_to_server(options.region,
+                                               options.aws_key,
+                                               options.secret_key)
 
         _log.info("Connected to SQS server")
-
-        message = Message()
         message = yield self.sqs_queue.read_message()
-        _log.info("Read a message")
         if message:
             result = message.get_body()
+            _log.info(result)
             if result is not None and result != "{}":
                 try:
                     job_params = tornado.escape.json_decode(result)
@@ -806,8 +805,6 @@ class VideoClient(multiprocessing.Process):
                         raise tornado.gen.Return(False)
                     _log.info("key=worker [%s] msg=processing request %s for "
                               "%s." % (self.pid, job_id, api_key))
-                    #self.sqs_queue.delete_message(message)
-                    #raise tornado.gen.Return(job_params)
                 except tornado.gen.Return:
                     raise tornado.gen.Return(False)
                 except Exception,e:
@@ -815,7 +812,7 @@ class VideoClient(multiprocessing.Process):
                         self.pid, e.message))
                     raise tornado.gen.Return(False)
             if(job_params):
-                #self.sqs_queue.delete_message(message)
+                self.sqs_queue.delete_message(message)
                 raise tornado.gen.Return(job_params)
  
             raise tornado.gen.Return(result)
@@ -839,7 +836,6 @@ class VideoClient(multiprocessing.Process):
             _log.error('Error loading the Model from %s' % self.model_file)
             raise IOError('Error loading model from %s' % self.model_file)
 
-    @tornado.gen.coroutine
     def run(self):
         ''' run/start method '''
         _log.info("starting worker [%s] " % (self.pid))
@@ -848,15 +844,17 @@ class VideoClient(multiprocessing.Process):
         atexit.register(self.stop)
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
-            yield self.do_work()
+            self.do_work()
  
         _log.info("stopping worker [%s] " % (self.pid))
 
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def do_work(self):   
         ''' do actual work here'''
         try:
             job = yield self.dequeue_job()
+            _log.info(job)
             if not job or job == "{}": #string match
                 raise Queue.Empty
 
@@ -922,6 +920,7 @@ if __name__ == "__main__":
 
     cv_slots = max(multiprocessing.cpu_count() - 1, 1)
     cv_semaphore = multiprocessing.BoundedSemaphore(cv_slots)
+
 
     # Manage the workers 
     try:
