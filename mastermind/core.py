@@ -830,9 +830,19 @@ class Mastermind(object):
             if winner is None:
                 # Normalize the serving percentages
                 sum_fracs = sum(exp_frac.itervalues())
-                for tid in exp_frac.iterkeys():
-                    exp_frac[tid] *= experiment_frac / sum_fracs 
-                run_frac.update(exp_frac)
+                if sum_fracs > 0:
+                    for tid in exp_frac.iterkeys():
+                        exp_frac[tid] *= experiment_frac / sum_fracs 
+                    run_frac.update(exp_frac)
+                else:
+                    _log.warn('Thumb fractions is 0 for video %s' %
+                              video_id)
+                    sum_fracs = sum(run_frac.values())
+                    if sum_fracs == 0.0:
+                        return None
+                    # Normalize to sum to 1
+                    for tid in run_frac.iterkeys():
+                        run_frac[tid] /= sum_fracs
             else:
                 # The experiment is done
                 run_frac = dict((thumb.id, 0.0) 
@@ -1134,6 +1144,9 @@ class Mastermind(object):
             # Normalize the running fractions to sum to 1.0
             if non_exp_thumb is not None:
                 run_frac = run_frac[run_frac.index != non_exp_thumb.id]
+
+            # Fill in any nans
+            run_frac.fillna(0.0)
             run_frac = (run_frac / np.sum(run_frac)).to_dict()
             
         return (experiment_state,

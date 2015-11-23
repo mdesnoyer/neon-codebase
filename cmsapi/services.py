@@ -195,7 +195,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     self.send_json_response('{"error": "invalid json request"}', 400)
 
         self.api_key = self.request.headers.get('X-Neon-API-Key') 
-        if self.api_key == None:
+        if self.api_key is None:
             if self.request.uri.split('/')[-1] == "accounts" \
                     and self.request.method == 'POST':
                 #only account creation call can lack this header

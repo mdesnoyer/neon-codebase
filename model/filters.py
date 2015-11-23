@@ -307,7 +307,7 @@ class CachedCascadeFilter(CascadeFilter):
         for filt in self.filters:
             accepted, score = filt.accept_score(image, frameno, video)
             self.last_scores.append((accepted, score))
-            if (not accepted) and (self.last_failed == None):
+            if (not accepted) and (self.last_failed is None):
                 self.last_failed = filt
                 if not force:
                     return False

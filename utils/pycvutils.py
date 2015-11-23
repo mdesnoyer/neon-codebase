@@ -179,26 +179,26 @@ class ImagePrep(object):
         # ipdb.set_trace()
         if self.convert_to_gray:
             image = _convert_to_gray(image)
-        if self.max_height != None:
+        if self.max_height is not None:
             image = self._resize_to_max(image, 0)
-        if self.max_width != None:
+        if self.max_width is not None:
             image = self._resize_to_max(image, 1)
-        if self.max_side != None:
+        if self.max_side is not None:
             image = self._resize_to_max(image, None)
-        if self.scale_height != None:
+        if self.scale_height is not None:
             image = self._resize_side(image, 0)
-        if self.scale_width != None:
+        if self.scale_width is not None:
             image = self._resize_side(image, 1)
-        if self.image_size != None:
+        if self.image_size is not None:
             image = cv2.resize(image,
                                (self.image_size[1],
                                self.image_size[0]))
-        if self.crop_image_size != None:
+        if self.crop_image_size is not None:
             #image = self._resize_and_crop(image, self.crop_image_size)
             image = self._resize_and_crop(image)
-        if self.image_area != None:
+        if self.image_area is not None:
             image = self._resize_to_area(image)
-        if self.crop_frac != None:
+        if self.crop_frac is not None:
             image = self._center_crop(image)
         return image
 
@@ -216,7 +216,7 @@ class ImagePrep(object):
         '''
         # import ipdb
         # ipdb.set_trace()
-        if self.crop_frac == None:
+        if self.crop_frac is None:
             return image
         if len(image.shape) == 3:
             x, y, w = image.shape
@@ -267,13 +267,13 @@ class ImagePrep(object):
         does not exceed max_size. If dim is None, the constraint
         is applied across all dimensions.
         '''
-        if dim == None:
+        if dim is None:
             max_size = self.max_side
         if dim == 0:
             max_size = self.max_height
         if dim == 1:
             max_size = self.max_width
-        if dim != None:
+        if dim is not None:
             if image.shape[dim] > max_size:
                 scaleF = max_size * 1./image.shape[dim]
                 x, y = image.shape[:2]

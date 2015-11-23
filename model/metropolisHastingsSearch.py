@@ -181,7 +181,7 @@ class MonteCarloMetropolisHastings(object):
         search_interval : a new search interval that, if you wish, will
                           override the previous one defined.
         '''
-        if search_interval != None:
+        if search_interval is not None:
             self.search_interval = search_interval
         self.tot = elements
         self.N = 1+((int(elements - 1) - 2*int(elements * self.clip)) / 

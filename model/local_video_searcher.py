@@ -309,7 +309,7 @@ class _Result(object):
         self._feat_score = feat_score
         self._hash = getrandbits(128)
         self.image = image
-        if self.image != None:
+        if self.image is not None:
             self._color_name = ColorName(self.image)
         else:
             self._color_name = None
@@ -339,11 +339,11 @@ class _Result(object):
                         self.frameno, self.score, self.comb_score)
 
     def _comp_comb_score(self, feat_score_weight):
-        if feat_score_weight == None:
+        if feat_score_weight is None:
             _log.debug('feat_score_weight not set!')
             self.comb_score = self.score
             return
-        if self._feat_score == None:
+        if self._feat_score is None:
             _log.debug('_feat_score not set!')
             self.comb_score = self.score
             return
@@ -438,14 +438,14 @@ class ResultsList(object):
         fname = '%04i_'%(self._considered_thumbs)
         fname += '%05i_'%(res.frameno)
         fname += '%04.2f_'%(res.score)
-        if res._feat_score == None:
+        if res._feat_score is None:
             fname += 'NA_'
         else:
             fname += '%04.2f_'%(res._feat_score)
         fname += '%04.2f_'%(res.comb_score)
         if reason == 'accept':
             fname += 'accepted_replacing_%i.jpg'%(idx)
-        elif reason != None:
+        elif reason is not None:
             fname += '%s.jpg'%(reason)
         else:
             fname += 'rejected.jpg'
@@ -456,7 +456,7 @@ class ResultsList(object):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
         self.results = [_Result() for x in range(self.n_thumbs)]
         self.min = self.results[0].score
-        if n_thumbs != None:
+        if n_thumbs is not None:
             self.n_thumbs = n_thumbs
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
 
@@ -760,7 +760,7 @@ class LocalSearcher(object):
 
     def _set_up_testing(self):
         vname = self.video_name
-        if vname == None:
+        if vname is None:
             vdir = os.path.join(self._testing_dir, 'default')
         else:
             vdir = os.path.join(self._testing_dir, vname)
@@ -864,7 +864,7 @@ class LocalSearcher(object):
         if not self._should_search(start_score, end_score):
             return
         frames, framenos = self.get_search_frame(start_frame)
-        if frames == None:
+        if frames is None:
             # uh-oh, something went wrong! In this case, the search region
             # will not be searched again, and so we don't have to worry about
             # updating the knowledge of the search algo.
@@ -933,7 +933,7 @@ class LocalSearcher(object):
         '''
         frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])
-        if frames == None:
+        if frames is None:
             # uh-oh, something went wrong! Update the knowledge state of the
             # search algo with the knowledge that the frame is bad.
             self.search_algo.update(frameno, bad=True)
@@ -974,7 +974,7 @@ class LocalSearcher(object):
 
     def _step(self):
         r = self.search_algo.get()
-        if r == None:
+        if r is None:
             return False
         action, meta = r
         if action == 'sample':
@@ -1055,7 +1055,7 @@ class LocalSearcher(object):
         frames = []
         for frameno in framenos:
             frame = self._get_frame(frameno)
-            if frame == None:
+            if frame is None:
                 return None
             frames.append(frame)
         return frames
