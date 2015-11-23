@@ -12,7 +12,7 @@ if sys.path[0] != __base_path__:
 from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
-
+import time
 define("haarFileProfile",
        default=os.path.join(os.path.dirname(__file__),
                            'data/haarcascade_profileface.xml'),
@@ -30,6 +30,20 @@ define("textClassifier2",
                            'data/trained_classifierNM2.xml'),
        type=str,
        help="Trained text classifier for step 2.")
+
+
+def tic():
+    #Homemade version of matlab tic and toc functions
+    global startTime_for_tictoc
+    startTime_for_tictoc = time.time()
+    return startTime_for_tictoc
+
+def toc():
+    if 'startTime_for_tictoc' in globals():
+        print "Elapsed time is " + str(time.time() - startTime_for_tictoc) + " seconds."
+    else:
+        print "Toc: start time not set"
+    return time.time()
 
 class ImageSignatureSaliency(object):
     ''' Image signature saliency implementation.
@@ -99,7 +113,7 @@ class SmartCrop(object):
         self._faces = None
         self._text_boxes = None
         self.image = image
-        self.text_count = 0
+        self._bottom_percent = 0.7
 
     # @classmethod
     # def get_cropper(cls):
@@ -145,6 +159,7 @@ class SmartCrop(object):
 
     def _detect_faces(self, im):
         front_faces = self.detect_front_faces(im)
+        return front_faces
         profile_faces = \
             self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
         im_flip = cv2.flip(im, 1)
@@ -176,6 +191,9 @@ class SmartCrop(object):
             ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
             im_resized = cv2.resize(self.image, (int(self.image.shape[1]/ratio),
                                                  int(self.image.shape[0]/ratio)))
+            cut_top = int(self._bottom_percent * im_resized.shape[0])
+            bottom_image = im_resized[cut_top:, 0:]
+
             # Text detector is defined in erfilter.cpp in neon version of opencv3
             # textDetect(InputArray _src, const String &model_1, const String &model_2,
             #         int thresholdDelta,
@@ -184,18 +202,17 @@ class SmartCrop(object):
             #         float minProbablity_2,
             #         vector<Rect> &groups_boxes, OutputArray _dst)
 
-            boxes, mask = cv2.text.textDetect(im_resized,
+            boxes, mask = cv2.text.textDetect(bottom_image,
                 self.textClassifier1,
                 self.textClassifier2,
                 16,0.00015,0.003,0.8,True,0.5, 0.9)
             if len(boxes) == 0:
                 return np.array([])
+            boxes[0:, 1] += cut_top
             boxes *= ratio
             boxes = boxes.astype(int)
 
             self._text_boxes = boxes
-            self.text_count += 1
-            print "text_count", self.text_count
 
         return self._text_boxes
 
@@ -206,7 +223,6 @@ class SmartCrop(object):
         x, y, w, h is the cut off region of the image. We will only concern
         the images in the rectangle.
         '''
-        
         boxes = self.get_text_boxes()
         # draw on it if it is provided, for debugging purpose.
         # Assuming the draw_im is a copy of im.
@@ -258,7 +274,11 @@ class SmartCrop(object):
         ''' Find the cropped area maximizes the summation of the saliency
         value
         '''
+        # t_begin = tic()
         text_boxes = self.get_text_boxes()
+        # print "get_text_boxes"
+        # toc()
+        # tic()
         if len(text_boxes) == 0:
             neutral_width = float(self.image.shape[1]) * h / self.image.shape[0]
             if abs(neutral_width - w) <= 5.0:
@@ -268,9 +288,17 @@ class SmartCrop(object):
         im = self.image.copy()
 
         (height, width, elem) = self.image.shape
-
+        # print "before saliency"
+        # toc()
+        # tic()
         saliency_map = self.get_saliency_map()
+        # print "after saliency"
+        # toc()
+        # tic()
         faces = self.detect_faces()
+        # print "after face"
+        # toc()
+        # tic()
 
         # Saliency Map is calculated then trimmed to along the boundaries
         # to remove low saliency area.
@@ -341,7 +369,16 @@ class SmartCrop(object):
 
         # cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
 
+        # print "before text"
+        # toc()
+        # tic()
         text_cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
 
+        # print "after text"
+        # toc()
+        # tic()
         resized_im = cv2.resize(text_cropped_im, (w, h))
+        # "end"
+        # t_end = toc()
+        # print "total", (t_end-t_begin), "seconds"
         return resized_im
