@@ -13,19 +13,19 @@ from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
 import time
-define("haarFileProfile",
+define("haar_profile",
        default=os.path.join(os.path.dirname(__file__),
                            'data/haarcascade_profileface.xml'),
        type=str,
        help="Profile face detector haar cascade file.")
 
-define("textClassifier1",
+define("text_classifier1",
        default=os.path.join(os.path.dirname(__file__),
                            'data/trained_classifierNM1.xml'),
        type=str,
        help="Trained text classifier for step 1.")
 
-define("textClassifier2",
+define("text_classifier2",
        default=os.path.join(os.path.dirname(__file__),
                            'data/trained_classifierNM2.xml'),
        type=str,
@@ -101,14 +101,14 @@ class SmartCrop(object):
         ''' This function should not be called by directly.
         Using the get_cropper to get the singlton instead.
         '''
-        self.haarFileProfile = options.haarFileProfile
+        self.haar_profile = options.haar_profile
         self.profile_face_cascade = cv2.CascadeClassifier()
-        self.profile_face_cascade.load(self.haarFileProfile)
-        self.textClassifier1 = options.textClassifier1
-        self.textClassifier2 = options.textClassifier2
+        self.profile_face_cascade.load(self.haar_profile)
+        self.text_classifier1 = options.text_classifier1
+        self.text_classifier2 = options.text_classifier2
 
         self.dlib_face_detector = dlib.get_frontal_face_detector()
-        self.haarParams = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
+        self.haar_params = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
         self._saliency_map = None
         self._faces = None
         self._text_boxes = None
@@ -120,13 +120,13 @@ class SmartCrop(object):
     #     ''' Return a singlton instance. '''
     #     cls._instance_ = cls._instance_ or SmartCrop()
     #     # Check if options have changed.
-    #     if cls._instance_.haarFileProfile != options.haarFileProfile:
-    #         cls._instance_.haarFileProfile = options.haarFileProfile
+    #     if cls._instance_.haar_profile != options.haar_profile:
+    #         cls._instance_.haar_profile = options.haar_profile
     #         cls._instance_.profile_face_cascade = cv2.CascadeClassifier()
-    #         cls._instance_.profile_face_cascade.load(cls._instance_.haarFileProfile)
+    #         cls._instance_.profile_face_cascade.load(cls._instance_.haar_profile)
 
-    #     cls._instance_.textClassifier1 = options.textClassifier1
-    #     cls._instance_.textClassifier2 = options.textClassifier2
+    #     cls._instance_.text_classifier1 = options.text_classifier1
+    #     cls._instance_.text_classifier2 = options.text_classifier2
     #     return cls._instance_
 
     def get_saliency_map(self):
@@ -159,12 +159,12 @@ class SmartCrop(object):
 
     def _detect_faces(self, im):
         front_faces = self.detect_front_faces(im)
-        return front_faces
+        tic()
         profile_faces = \
-            self.profile_face_cascade.detectMultiScale(im, **self.haarParams)
+            self.profile_face_cascade.detectMultiScale(im, **self.haar_params)
         im_flip = cv2.flip(im, 1)
         flip_profile_faces = \
-            self.profile_face_cascade.detectMultiScale(im_flip, **self.haarParams)
+            self.profile_face_cascade.detectMultiScale(im_flip, **self.haar_params)
 
         if len(flip_profile_faces) != 0:
             flip_profile_faces[0:, 0] = im.shape[1] - (flip_profile_faces[0:, 0] +
@@ -203,9 +203,16 @@ class SmartCrop(object):
             #         vector<Rect> &groups_boxes, OutputArray _dst)
 
             boxes, mask = cv2.text.textDetect(bottom_image,
-                self.textClassifier1,
-                self.textClassifier2,
-                16,0.00015,0.003,0.8,True,0.5, 0.9)
+                self.text_classifier1,
+                self.text_classifier2,
+                16, # thresholdDelta, steps for MSER
+                0.00015, # min area, ratio to the total area
+                0.003, # max area, ratio to the total area
+                0.8, # min probablity for step 1
+                True, # bool nonMaxSuppression
+                0.5, # min probability differernce
+                0.9 # min probability for step 2
+                )
             if len(boxes) == 0:
                 return np.array([])
             boxes[0:, 1] += cut_top

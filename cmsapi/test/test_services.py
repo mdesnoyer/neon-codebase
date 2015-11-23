@@ -78,7 +78,7 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
         video_map[video_id] = job_id
         thumbnails = []
         for t in range(N_THUMBS):
-            image =  utils.imageutils.PILImageUtils.create_random_image(360,
+            image =  PILImageUtils.create_random_image(360,
                                                                         480)
             filestream = StringIO()
             image.save(filestream, "JPEG", quality=100) 
@@ -1494,7 +1494,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(res['data'][0]['width'], 800)
         self.assertEqual(res['data'][0]['height'], 600)
 
-    @patch('utils.imageutils.utils.http')
+    @patch('cvutils.imageutils.utils.http')
     @patch('cmsdb.cdnhosting.S3Connection')
     @patch('cmsapi.services.neondata.cmsdb.cdnhosting.utils.http')
     def test_upload_video_custom_thumbnail(self, mock_cloudinary,
