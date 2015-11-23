@@ -166,7 +166,7 @@ class BlurGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -211,7 +211,7 @@ class SADGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
@@ -268,7 +268,7 @@ class ActionGenerator(RegionFeatureGenerator):
         return hash(self.action_vec)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         SADs = SAD_gen.compute_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
@@ -302,7 +302,7 @@ class FaceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -341,7 +341,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -378,7 +378,7 @@ class VibranceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -426,7 +426,7 @@ class TextGenerator(RegionFeatureGenerator):
     def generate_many(self, images, fonly=False):
         if self.mser is None:
             self.mser = cv2.MSER_create(_max_variation=self._max_variation)
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -471,7 +471,7 @@ class TextGeneratorOld(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -509,7 +509,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
