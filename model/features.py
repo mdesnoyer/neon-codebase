@@ -248,7 +248,7 @@ class ActionGenerator(RegionFeatureGenerator):
     by computing the cross-correlation. In other words, we want frames that
     occur are local minima in the action. Let's see if it works.
     '''
-    def __init__(self, SAD_gen, action_vec=[1, 0, -1, 0, 1]):
+    def __init__(self, SAD_gen=None, action_vec=[1, 0, -1, 0, 1]):
         '''
         SAD_gen is a region feature generator for SAD.
 
@@ -257,6 +257,9 @@ class ActionGenerator(RegionFeatureGenerator):
         absolute differences and surrounded by comparatively more 'action.'
         '''
         self._action_vec = action_vec
+        if SAD_gen is None:
+            SAD_gen = SADGenerator()
+        self._SAD_gen = SAD_gen
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -270,7 +273,7 @@ class ActionGenerator(RegionFeatureGenerator):
     def generate_many(self, images, fonly=False):
         if not type(images) is list:
             images = [images]
-        SADs = SAD_gen.compute_many(images)
+        SADs = self.SAD_gen.compute_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
 
 class FaceGenerator(RegionFeatureGenerator):
