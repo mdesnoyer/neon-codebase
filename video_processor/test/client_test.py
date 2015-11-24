@@ -1116,7 +1116,7 @@ class SmokeTest(test_utils.neontest.TestCase):
                         neondata.RequestState.PROCESSING,
                         neondata.RequestState.REPROCESS]):
                     # See if we timeout
-                    self.assertLess(time.time() - start_time, 5.0,
+                    self.assertLess(time.time() - start_time, 10.0,
                                     'Timed out while running the smoke test')
 
                     time.sleep(0.1)
@@ -1124,7 +1124,7 @@ class SmokeTest(test_utils.neontest.TestCase):
             finally:
                 # Clean up the job process
                 self.video_client.stop()
-                self.video_client.join(5.0)
+                self.video_client.join(10.0)
                 if self.video_client.is_alive():
                     # SIGKILL it
                     utils.ps.send_signal_and_wait(signal.SIGKILL,
