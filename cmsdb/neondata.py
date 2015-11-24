@@ -2270,6 +2270,90 @@ class NeonUserAccount(NamespacedStoredObject):
                                  page_size=max_request_size,
                                  skip_missing=True))
 
+# define a ProcessingStrategy, that will dictate the behavior of the model.
+class ProcessingStrategy(DefaultedStoredObject):
+    '''
+    Defines the model parameters with which a client wishes their data to be
+    analyzed.
+
+    NOTE: The majority of these parameters share their names with the
+    parameters that are used to initialize local_video_searcher. For any
+    parameter for which this is the case, see local_video_searcher.py for
+    more elaborate documentation.
+    '''
+    def __init__(self, account_id, processing_time_ratio=1.0,
+                 local_search_width=32, local_search_step=4, n_thumbs=5,
+                 feat_score_weight=2.0, mixing_samples=40, max_variety=True,
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+        super(ProcessingStrategy, self).__init__(account_id)
+
+        # The processing time ratio dictates the maximum amount of time the
+        # video can spend in processing, which is given by:
+        #
+        # max_processing_time = (length of video in seconds * 
+        #                        processing_time_ratio)
+        self.processing_time_ratio = processing_time_ratio
+
+        # (this should rarely need to be changed)
+        # Local search width is the size of the local search regions. If the
+        # local_search_step is x, then for any frame which starts a local
+        # search region i, the frames searched are given by
+        # 
+        # i : i + local_search_width in steps of x.
+        self.local_search_width = local_search_width
+
+        # (this should rarely need to be changed)
+        # Local search step gives the step size between frames that undergo
+        # analysis in a local search region. See the documentation for
+        # local search width for the documentation.
+        self.local_search_step = local_search_step
+
+        # The number of thumbs that are desired as output from the video
+        # searching process.
+        self.n_thumbs = n_thumbs
+
+        # (this should rarely need to be changed)
+        # feat_score_weight is a multiplier that allows the feature score to
+        # be combined with the valence score. This is given by:
+        # 
+        # combined score = (valence score) + 
+        #                  (feat_score_weight * feature score)
+        self.feat_score_weight = feat_score_weight
+
+        # (this should rarely need to be changed)
+        # Mixing samples is the number of initial samples to take to get
+        # estimates for the running statistics.
+        self.mixing_samples = mixing_samples
+
+        # (this should rarely need to be changed)
+        # max variety determines whether or not the model should pay attention
+        # to the content of the images with respect to the variety of the top
+        # thumbnails.
+        self.max_variety = max_variety
+
+        # startend clip determines who much fo the video should be 'clipped'
+        # prior to the analysis, to exclude things like titleframes and
+        # credit rolls.
+        self.startend_clip = startend_clip
+
+        # adapt improve is a boolean that determines whether or not we should
+        # be using CLAHE (contrast-limited adaptive histogram equalization) to
+        # improve frames. 
+        self.adapt_improve = adapt_improve
+
+        # analysis crop dictates the region of the image that should be
+        # excluded prior to the analysis: i.e., if you never want the lower
+        # 1/3rd of the image to affect the analysis, you can crop it out here.
+        # The specification of the cropping is to be done in exactly the same
+        # way as the ImagePrep object in cvutils.
+        self.analysis_crop = analysis_crop
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ProcessingStrategy.__name__
+
 class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
