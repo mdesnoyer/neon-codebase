@@ -119,6 +119,8 @@ class SmartCrop(object):
         self.image = image
         self._bottom_percent = 0.7
 
+
+
     # @classmethod
     # def get_cropper(cls):
     #     ''' Return a singlton instance. '''
@@ -295,6 +297,11 @@ class SmartCrop(object):
 
         return self.image[y:y+new_height, new_x:new_x+new_width]
 
+    def face_adjust(faces, x):
+        ''' Search nearby and horizontally to avoid face cutting.
+        Face exclusion is also possible.
+        '''
+        pass
 
     def crop_and_resize(self, h, w):
         ''' Find the cropped area maximizes the summation of the saliency
