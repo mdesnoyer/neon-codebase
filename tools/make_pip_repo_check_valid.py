@@ -1,11 +1,15 @@
 #!/usr/bin/env python
-'''Tool that uploads a list of .tar.gz and .zip packages to S3 so they can be used by pip
-
-It creates an index of the repositories in the S3 at:
-index.html
+'''
+Replicates the function of make_pip_repo, but checks that every link that
+points to a S3 resource is valid (i.e., is not a dead link). This can occur
+when a modified repo is uploaded but with a different extension (i.e., zip -->
+.tar.gz) but the same repo name (as happened with dlib). 
 
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
+
+Adapted by:
+Nick Dufour 2015
 '''
 USAGE='%prog [options] <package1> <package2> etc..'
 import os.path
@@ -21,6 +25,40 @@ import logging
 import re
 import utils.neon
 from utils.options import define, options
+
+import urllib
+from HTMLParser import HTMLParser
+
+class MyHTMLParser(HTMLParser):
+
+    lasttag = None
+    attr = None
+
+    def handle_starttag(self, tag, attr):
+        self.lasttag = tag.lower()
+        if len(attr):
+            if attr[0][0] == 'href':
+                self.attr = attr[0][1]
+
+def validate_index(index):
+    invalid = []
+    valid = []
+    for i in index.split('\n'):
+        parser = MyHTMLParser()
+        parser.feed(i)
+        if parser.attr is not None:
+            if 'http' == parser.attr[:4]:
+                z = urllib.urlopen(parser.attr)
+                if z.code != 404:
+                    valid.append(i)
+                else:
+                    print 'Invalid: %s'%(i)
+                    invalid.append(i)
+            else:
+                valid.append(i)
+        else:
+            valid.append(i)
+    return '\n'.join(valid)
 
 define('s3bucket', default='neon-dependencies',
        help='Bucket in s3 to put the dependencies in')
@@ -53,7 +91,7 @@ def build_index():
             new_index += (
                 '<a href="http://s3-us-west-1.amazonaws.com/%s/%s">%s</a><br>\n' %
                 (options.s3bucket, os.path.basename(pkg_fn), pkg_name))
-
+    new_index = validate_index(new_index)
     return new_index
                           
 def main():

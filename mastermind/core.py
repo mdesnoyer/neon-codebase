@@ -41,6 +41,7 @@ statemon.define('invalid_experiment_type', int)
 statemon.define('db_update_error', int) # error updating database
 statemon.define('no_valid_thumbnails', int) # no valid thumbnails for a video
 statemon.define('critical_error', int)
+statemon.define('unexpected_error_calculating_directive', int)
 
 class MastermindError(Exception): pass
 class UpdateError(MastermindError): pass
@@ -586,7 +587,15 @@ class Mastermind(object):
             # Now update all the serving directives
             for video_id, video_info in self.video_info.items():
                 if video_info.account_id == account_id:
-                    self._calculate_new_serving_directive(video_id)
+                    try:
+                        self._calculate_new_serving_directive(video_id)
+                    except Exception as e:
+                        _log.exception_n('Unexpected exception calculating '
+                                         'new serving directive for video '
+                                         '%s: %s' % (video_id, e))
+                        statemon.state.increment(
+                            'unexpected_error_calculating_directive')
+                        
 
     def _calculate_new_serving_directive(self, video_id):
         '''Decide the amount of time each thumb should show for each video.
@@ -821,9 +830,19 @@ class Mastermind(object):
             if winner is None:
                 # Normalize the serving percentages
                 sum_fracs = sum(exp_frac.itervalues())
-                for tid in exp_frac.iterkeys():
-                    exp_frac[tid] *= experiment_frac / sum_fracs 
-                run_frac.update(exp_frac)
+                if sum_fracs > 0:
+                    for tid in exp_frac.iterkeys():
+                        exp_frac[tid] *= experiment_frac / sum_fracs 
+                    run_frac.update(exp_frac)
+                else:
+                    _log.warn('Thumb fractions is 0 for video %s' %
+                              video_id)
+                    sum_fracs = sum(run_frac.values())
+                    if sum_fracs == 0.0:
+                        return None
+                    # Normalize to sum to 1
+                    for tid in run_frac.iterkeys():
+                        run_frac[tid] /= sum_fracs
             else:
                 # The experiment is done
                 run_frac = dict((thumb.id, 0.0) 
@@ -1074,7 +1093,8 @@ class Mastermind(object):
                 off_thumbs = [x[0] for x in old_directive if (
                     x[1] < 1e-7 and
                     x[0] != baseline.id and
-                    (non_exp_thumb is None or x[0] != non_exp_thumb.id))]
+                    (non_exp_thumb is None or x[0] != non_exp_thumb.id) and
+                    x[0] in data.index)]
             except KeyError:
                 pass
 
@@ -1124,6 +1144,9 @@ class Mastermind(object):
             # Normalize the running fractions to sum to 1.0
             if non_exp_thumb is not None:
                 run_frac = run_frac[run_frac.index != non_exp_thumb.id]
+
+            # Fill in any nans
+            run_frac.fillna(0.0)
             run_frac = (run_frac / np.sum(run_frac)).to_dict()
             
         return (experiment_state,
@@ -1262,7 +1285,13 @@ def _modify_video_info(mastermind, video_id, experiment_state, value_left,
             if vmeta is not None:
                 request = neondata.NeonApiRequest.get(vmeta.job_id,
                                                       vmeta.get_account_id())
-                if request is not None:
+                # Only send the callback if we're serving because it's
+                # too likely that a customer will implement a callback
+                # handler that inserts our serving url on any callback
+                # they receive. So, they will just get an update once
+                # it's actually serving.
+                if (request is not None and 
+                    request.state == neondata.RequestState.SERVING):
                     request.send_callback()
     except Exception as e:
         _log.exception('Unhandled exception when updating video %s' % e)

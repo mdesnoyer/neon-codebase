@@ -324,7 +324,7 @@ class AkamaiNetstorage(object):
             action_string = fmt % (self.version)
         if index_zip:
             action_string += "&index-zip=%s" % index_zip
-        if mtime != None:
+        if mtime is not None:
             action_string += "&mtime=%s" % mtime
         if size:
             action_string += "&size=%s" % size

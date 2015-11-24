@@ -98,6 +98,10 @@ define("hash_size", default=64, type=int,
 # Other parameters
 define('send_callbacks', default=1, help='If 1, callbacks are sent')
 
+define('isp_host', default='isp-usw-388475351.us-west-2.elb.amazonaws.com',
+       help=('Host address to get to the ISP that is checked for if images '
+             'are there'))
+
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
 statemon.define('sucessful_callbacks', int)
@@ -3646,7 +3650,6 @@ The video metadata for this request must be in the database already.
                 # Send the callback
                 self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
-                send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
                     method='PUT',
@@ -3654,17 +3657,26 @@ The video metadata for this request must be in the database already.
                     body=response.to_json(),
                     request_timeout=20.0,
                     connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(cb_request,
-                                                            **send_kwargs)
+                cb_response = yield utils.http.send_request(
+                    cb_request,
+                    no_retry_codes=[405],
+                    async=True,
+                    **send_kwargs)
                 if cb_response.error:
                     # Now try a POST for backwards compatibility
                     cb_request.method='POST'
                     cb_response = yield utils.http.send_request(cb_request,
+                                                                async=True,
                                                                 **send_kwargs)
                     if cb_response.error:
+                        statemon.state.define_and_increment(
+                            'callback_error.%s' % self.api_key)
+                                                            
                         statemon.state.increment('callback_error')
-                        _log.warn('Error when sending callback to %s: %s' %
-                                  (self.callback_url, cb_response.error))
+                        _log.warn('Error when sending callback to %s for '
+                                  'video %s: %s' %
+                                  (self.callback_url, self.video_id,
+                                   cb_response.error))
                         new_callback_state = CallbackState.ERROR
                     else:
                        statemon.state.increment('sucessful_callbacks')
@@ -4456,38 +4468,38 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def image_available_in_isp(self):
-        try:               
-            url = yield self.get_serving_url(save=False, async=True)
-            if url is None:
-                _log.error('No serving url specified for video %s' % video_id)
-                raise tornado.gen.Return(False)
-
-            req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
-                                                 follow_redirects=True)
-            http_client = tornado.httpclient.AsyncHTTPClient()
-            res = yield utils.http.send_request(req, async=True)
-
-            if res.code != 200:
-                _log.debug('Image not available in ISP yet. Code %s' %
-                           res.code)
-                raise tornado.gen.Return(False)
-     
-            effective_url = res.effective_url
-            urlRegex = re.compile('neontn(.*)\.jpe?g')
-            urlSearch = urlRegex.search(res.effective_url)
-            if urlSearch is None:
-                _log.warn('Invalid effective url found for video %s: %s' %
-                          (self.key, res.effective_url))
-                raise tornado.gen.Return(False)
-
+        try:
             neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
                                                        self.get_account_id())
-            if urlSearch.group(1) == neon_user_account.default_thumbnail_id:
-                _log.debug('Still redirecting to the account default url')
+            if neon_user_account is None:
+                msg = ('Cannot find the neon user account %s for video %s. '
+                       'This should never happen' % 
+                       (self.get_account_id(), self.key))
+                _log.error(msg)
+                raise DBStateError(msg)
+                
+            request = tornado.httpclient.HTTPRequest(
+                'http://%s/v1/video?%s' % (
+                    options.isp_host,
+                    urllib.urlencode({
+                        'video_id' : InternalVideoID.to_external(self.key),
+                        'publisher_id' : neon_user_account.tracker_account_id
+                        })),
+                follow_redirects=True)
+            res = yield utils.http.send_request(request, async=True)
+
+            if res.code != 200:
+                if res.code != 204:
+                    _log.error('Unexpected response looking up video %s on '
+                               'isp: %s' % (self.key, res))
+                else:
+                    _log.debug('Image not available in ISP yet.')
                 raise tornado.gen.Return(False)
+                
             raise tornado.gen.Return(True)
         except tornado.httpclient.HTTPError as e: 
-            pass
+            _log.error('Unexpected response looking up video %s on '
+                       'isp: %s' % (self.key, e))
 
         raise tornado.gen.Return(False)
     

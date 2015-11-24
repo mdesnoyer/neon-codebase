@@ -21,6 +21,8 @@ from . import TextDetectionPy
 import utils.obj
 import utils.pycvutils
 from model.colorname import ColorName
+from model.parse_faces import DetectFaces, FindAndParseFaces
+from score_eyes import ScoreEyes
 
 _log = logging.getLogger(__name__)
 
@@ -49,6 +51,38 @@ class FeatureGenerator(object):
     def hash_type(self, hashobj):
         '''Updates a hash object with data about the type.'''
         hashobj.update(self.__class__.__name__)
+
+class RegionFeatureGenerator(FeatureGenerator):
+    '''
+    Abstract class for a region feature generator, which
+    replicates the functionality of FeatureGenerator but over
+    a list of images
+    '''
+    def __init__(self):
+        super(RegionFeatureGenerator, self).__init__()
+        self.__version__ = 1
+        self.max_height = None
+        self.crop_frac = None
+
+    def generate_many(self, images, fonly=False):
+        '''
+        Creates a feature vector for list of images.
+
+        Input:
+        images - a list of N images in openCV BGR format.
+        fonly - defaults to False. First only: compute this feature
+                only for the first image obtained. In the case of
+                features that require more than one frame to be
+                computed properly (i.e., SAD), the quantity is computed
+                with the minimal number of frames required.
+        Returns: 
+            1D/2D numpy feature object of N[xF] elements,
+            where F is the number of features.
+        '''
+        raise NotImplementedError()
+
+    def get_feat_name(self):
+        raise NotImplementedError()
 
 class PredictedFeatureGenerator(FeatureGenerator):
     '''Wrapper around a Predictor so that it looks like a feature generator.'''
@@ -104,14 +138,390 @@ class ColorNameGenerator(FeatureGenerator):
         return hash(self.max_height)
 
     def generate(self, image):
-        # leargist needs a PIL image in RGB format
         image_size = (int(2*round(float(image.shape[1]) * 
                                 self.max_height / image.shape[0] /2)),
                                 self.max_height)
         image_resized = cv2.resize(image, image_size)
-        cn = ColorName(image_resized)
+        return ColorName(image_resized)._hist
         return cn.get_colorname_histogram()
 
+class BlurGenerator(RegionFeatureGenerator):
+    '''
+    Quantizes the blurriness of a sequence of images.
+    '''
+    def __init__(self, max_height=512, crop_frac=[0.,0.,0.25,0.]):
+        super(BlurGenerator, self).__init__()
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=self.crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            feat_vec.append(self._comp_blur(img))
+        return np.array(feat_vec)
+
+    def _comp_blur(self, image):
+        '''
+        Computes the blur as the variance of the laplacian. 
+        '''
+        return cv2.Laplacian(image, cv2.CV_32F).var()
+
+    def get_feat_name(self):
+        return 'blur'
+
+class SADGenerator(RegionFeatureGenerator):
+    '''
+    Generates the sum of absolute differences, or SAD score,
+    for a sequence of frames. The first frame receives a score
+    of 0. This computes SAD for both forward and backward frames,
+    with the first and last frame getting the SAD value for 0 to 1 
+    and -2 to -1, respectively
+    '''
+    def __init__(self, max_height=512, crop_frac=[0.,0.,0.25,0.]):
+        super(SADGenerator, self).__init__()
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=self.crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        # theres an edge case, in which only one image is obtained--in this
+        # case, reject return a score of np.inf. This can occur if, for
+        # instance, the previous filters reject all but one frame. 
+        if len(images) < 2:
+            return np.array([np.inf])
+        if fonly:
+            images = images[:2]
+        images = [self.prep(x) for x in images]
+        SAD_vals = self._compute_SAD(images)
+        feat_vec = [float(SAD_vals[0])]
+        for i in range(0, len(SAD_vals)-1):
+            feat_vec.append((SAD_vals[i]+SAD_vals[i+1])/2.)
+        feat_vec.append(float(SAD_vals[-1]))
+        if fonly:
+            feat_vec = feat_vec[:1]
+        return np.array(feat_vec)
+
+    def _compute_SAD(self, images):
+        SAD_vals = []
+        prev_img = images[0]
+        for next_img in images[1:]:
+            sad = np.sum(cv2.absdiff(prev_img, next_img))
+            SAD_vals.append(sad)
+            prev_img = next_img
+        return SAD_vals
+
+    def get_feat_name(self):
+        return 'sad'
+
+class ActionGenerator(RegionFeatureGenerator):
+    '''
+    Scores scenes based on whether or not they are at a relative action peak
+    by computing the cross-correlation. In other words, we want frames that
+    occur are local minima in the action. Let's see if it works.
+    '''
+    def __init__(self, SAD_gen, action_vec=[1, 0, -1, 0, 1]):
+        '''
+        SAD_gen is a region feature generator for SAD.
+
+        action_vec is the description of a valid action type. The default, for
+        instance, finds troughs in the action as measured by the sum of
+        absolute differences and surrounded by comparatively more 'action.'
+        '''
+        self._action_vec = action_vec
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.action_vec, other.action_vec)
+
+    def __hash__(self):
+        return hash(self.action_vec)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        SADs = SAD_gen.compute_many(images)
+        return np.correlate(SADs, self._action_vec, mode='same')
+
+class FaceGenerator(RegionFeatureGenerator):
+    '''
+    Returns a boolean which indicates whether or not a face
+    was detected in each grame given a sequence of frames.
+    '''
+    def __init__(self, MSFP):
+        '''
+        MSFP is a multi-stage face parser, which has as
+        an attribute the preprocessor--this ensures that
+        the images passed to FaceGenerator and the images
+        passed to ClosedEyeGenerator are preprocessed
+        in the same way. Otherwise, the images cannot be
+        matched with each other.
+        '''
+        super(FaceGenerator, self).__init__()
+        self.MSFP = MSFP
+        self.prep = MSFP.prep
+        self.max_height = MSFP.max_height
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            feat_vec.append(self.MSFP.get_faces(img))
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'faces'
+
+class ClosedEyeGenerator(RegionFeatureGenerator):
+    '''
+    Returns the distance to the separating hyperplane of the
+    'least open eyes' in a sequence of frames.
+    '''
+    def __init__(self, MSFP, classifier):
+        '''
+        MSFP is a multi-stage face parser; see FaceGenerator
+        for an explanation of why this must be so.
+        '''
+        super(ClosedEyeGenerator, self).__init__()
+        self.MSFP = MSFP
+        self.prep = MSFP.prep
+        self.max_height = MSFP.max_height
+        self.scoreEyes = ScoreEyes(classifier)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            eyes = self.MSFP.get_eyes(img)
+            if not len(eyes):
+                feat_vec.append(0)
+                continue
+            classif, scores = self.scoreEyes.classifyScore(eyes)
+            feat_vec.append(np.min(scores))
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'eyes'
+
+class VibranceGenerator(RegionFeatureGenerator):
+    '''
+    Returns the mean "vibrance" (average of saturation + value) of an image.
+    '''
+    def __init__(self, max_height=480):
+        super(VibranceGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(max_height=self.max_height)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            # check to see if the image is black and white
+            if len(img.shape) < 3:
+                return np.mean(img)
+            elif img.shape[2] == 1:
+                return np.mean(img)
+            # convert to HSV
+            feat_vec.append(np.mean(cv2.cvtColor(
+                                        img, cv2.cv.CV_BGR2HSV)[:,:,1:]))
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'vibrance'
+
+class TextGenerator(RegionFeatureGenerator):
+    '''
+    New implementation, which relies on MSER
+    '''
+    def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
+        super(TextGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=crop_frac)
+        self._max_variation = max_variation
+        self.mser = cv2.MSER(_max_variation=self._max_variation)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def __getstate__(self):
+        self.mser = None
+        return self.__dict__.copy()
+
+    def generate_many(self, images, fonly=False):
+        if self.mser is None:
+            self.mser = cv2.MSER(_max_variation=self._max_variation)
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            feat_vec.append(self._text_quant(img))
+        return np.array(feat_vec)
+
+    def _text_quant(self, img):
+        '''quantifies the amount of text in an image (approx) by area'''
+        regions = self.mser.detect(img, None)
+        area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
+        area /= (1. * img.shape[0] * img.shape[1])
+        return area
+
+    def get_feat_name(self):
+        return 'text'
+
+class TextGeneratorOld(RegionFeatureGenerator):
+    '''
+    Returns the quantity of text per frame given a sequence
+    of frames.
+
+    Unlike the normal text filter, this does not chop off the
+    bottom quadrant (at least, not be default)
+    '''
+    def __init__(self, max_height=480, crop_frac=None):
+        super(TextGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            text_image = TextDetectionPy.TextDetection(img)
+            score = (float(np.count_nonzero(text_image)) /
+                (text_image.shape[0] * text_image.shape[1]))
+            feat_vec.append(score)
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'text'
+
+class PixelVarGenerator(RegionFeatureGenerator):
+    '''
+    Computes the maximum channelwise variance per image for
+    every image in a sequence
+    '''
+    def __init__(self, max_height=480, crop_frac=.8):
+        super(PixelVarGenerator, self).__init__()
+        self.max_height = max_height
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) == list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            img = self.prep(img)
+            feat_vec.append(np.max(np.var(np.var(img,0),0)))
+        return np.array(feat_vec)
+
+    def get_feat_name(self):
+        return 'pixvar'
 
 class MemCachedFeatures(FeatureGenerator):
     '''Wrapper for a feature generator that caches the features in memory'''
@@ -192,7 +602,7 @@ Inputs:
         # When setting cache dir to None, we revert to an in-memory
         # shared class.
         self._cache_dir = cache_dir
-        if self._cache_dir == None:
+        if self._cache_dir is None:
             _log.warning('Using an in memory cache instead of a disk cache.')
             mem_cache = MemCachedFeatures.create_shared_cache(
                 self.feature_generator)
