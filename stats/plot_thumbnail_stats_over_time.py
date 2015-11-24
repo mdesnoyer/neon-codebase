@@ -28,7 +28,7 @@ import stats.metrics
 import utils.neon
 from utils.options import options, define
 
-define("stats_host", default="54.210.126.245",
+define("stats_host", default="localhost",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
@@ -74,7 +74,7 @@ def get_data():
                 if row[1] in video_info.thumbnail_ids]
 
     label_map = []
-    for thumbnail_id in video_info.thumbnail_ids:
+    for thumbnail_id in set(video_info.thumbnail_ids):
         thumb_info = neondata.ThumbnailMetadata.get(thumbnail_id)
         label = '%s_%i' % (thumb_info.type, thumb_info.rank)
         label_map.append({'thumbnail_id' : thumbnail_id,

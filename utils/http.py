@@ -35,7 +35,8 @@ _waiting_in_pools_ref = statemon.state.get_ref('waiting_in_pools')
 # being called.
 @utils.sync.optional_sync
 @tornado.gen.coroutine
-def send_request(request, ntries=5, do_logging=True, base_delay=0.2):
+def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
+                 no_retry_codes=None):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -48,6 +49,8 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2):
     ntries - Number of times to try sending the request
     do_logging - True if logging should be turned on
     base_delay - Time in seconds for the first delay on the retry
+    no_retry_codes - A list of http codes that will cause the request to not
+                     retry
 
     '''
     # Verify the request url
@@ -59,6 +62,8 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2):
             _log.error(msg)
         raise tornado.gen.Return(tornado.httpclient.HTTPResponse(
             request, 400, error=tornado.httpclient.HTTPError(400, msg)))
+
+    no_retry_codes = no_retry_codes or []
     
     cur_try = 0
     response = None
@@ -104,6 +109,11 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2):
                 # The JSON doens't have an error field, so
                 # we're done
                 raise tornado.gen.Return(response)
+
+        elif response.error.code in no_retry_codes:
+            # We received a response that says we shouldn't retry, so
+            # just return the response.
+            raise tornado.gen.Return(response)
             
         else:
             if do_logging:

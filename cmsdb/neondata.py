@@ -98,6 +98,10 @@ define("hash_size", default=64, type=int,
 # Other parameters
 define('send_callbacks', default=1, help='If 1, callbacks are sent')
 
+define('isp_host', default='isp-usw-388475351.us-west-2.elb.amazonaws.com',
+       help=('Host address to get to the ISP that is checked for if images '
+             'are there'))
+
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
 statemon.define('sucessful_callbacks', int)
@@ -1700,9 +1704,15 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify_many(cls, keys, func, create_missing=False, callback=None):
+        def _do_modify(raw_mappings):
+            # Need to convert the keys in the mapping to the ids of the objects
+            mod_mappings = dict(((v.get_id(), v) for v in 
+                                 raw_mappings.itervalues()))
+            return func(mod_mappings)
+        
         return super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
-            func,
+            _do_modify,
             create_missing=create_missing,
             callback=callback)
 
@@ -1742,6 +1752,11 @@ class DefaultedStoredObject(NamespacedStoredObject):
             create_default=True,
             log_missing=log_missing,
             callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=None, callback=None):
+        return super(DefaultedStoredObject, cls).modify_many(
+            keys, func, create_missing=True, callback=callback)
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -2272,7 +2287,7 @@ class ExperimentStrategy(DefaultedStoredObject):
                  baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT,
+                 experiment_type=SEQUENTIAL,
                  impression_type=MetricType.VIEWS,
                  conversion_type=MetricType.CLICKS,
                  max_neon_thumbs=None):
@@ -2294,8 +2309,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         self.min_conversion = min_conversion
 
         # Fraction adjusting power rate. When this number is 0, it is
-        # equivalent to standard t-test, when it is 1.0, it is the
-        # regular multi-bandit problem.
+        # equivalent to all the serving fractions being the same,
+        # while if it is 1.0, the serving fraction will be controlled
+        # by the strategy.
         self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
@@ -3010,6 +3026,25 @@ class BrightcoveIntegration(AbstractIntegration):
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
+class CNNIntegration(AbstractIntegration):
+    ''' CNN Integration class '''
+
+    def __init__(self, 
+                 account_id='',
+                 api_key_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(CNNIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the api_key required to make requests to cnn api - external
+        self.api_key_ref = api_key_ref
+
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
@@ -3615,7 +3650,6 @@ The video metadata for this request must be in the database already.
                 # Send the callback
                 self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
-                send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
                     method='PUT',
@@ -3623,17 +3657,26 @@ The video metadata for this request must be in the database already.
                     body=response.to_json(),
                     request_timeout=20.0,
                     connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(cb_request,
-                                                            **send_kwargs)
+                cb_response = yield utils.http.send_request(
+                    cb_request,
+                    no_retry_codes=[405],
+                    async=True,
+                    **send_kwargs)
                 if cb_response.error:
                     # Now try a POST for backwards compatibility
                     cb_request.method='POST'
                     cb_response = yield utils.http.send_request(cb_request,
+                                                                async=True,
                                                                 **send_kwargs)
                     if cb_response.error:
+                        statemon.state.define_and_increment(
+                            'callback_error.%s' % self.api_key)
+                                                            
                         statemon.state.increment('callback_error')
-                        _log.warn('Error when sending callback to %s: %s' %
-                                  (self.callback_url, cb_response.error))
+                        _log.warn('Error when sending callback to %s for '
+                                  'video %s: %s' %
+                                  (self.callback_url, self.video_id,
+                                   cb_response.error))
                         new_callback_state = CallbackState.ERROR
                     else:
                        statemon.state.increment('sucessful_callbacks')
@@ -4124,14 +4167,36 @@ class ThumbnailMetadata(StoredObject):
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
-    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None,
+                 imp=None, conv=None, serving_history=None):
         super(ThumbnailStatus, self).__init__(thumbnail_id)
 
         # The fraction of traffic this thumbnail will get
         self.serving_frac = serving_frac
 
-        # The currently click through rate for this thumbnail
+        # List of (time, serving_frac) tuples
+        self.serving_history = serving_history or []
+
+        # The current click through rate for this thumbnail
         self.ctr = ctr
+
+        # The number of impressions this thumbnail received
+        self.imp = imp
+
+        # The number of conversions this thumbnail received
+        self.conv = conv
+
+    def set_serving_frac(self, serving_frac):
+        '''Sets the serving fraction. Returns true if it is new.'''
+        if (self.serving_frac is None or 
+            abs(serving_frac - self.serving_frac) > 1e-3):
+            self.serving_frac = serving_frac
+            self.serving_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 serving_frac))
+            return True
+        return False
+            
 
     @classmethod
     def _baseclass_name(cls):
@@ -4403,38 +4468,38 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def image_available_in_isp(self):
-        try:               
-            url = yield self.get_serving_url(save=False, async=True)
-            if url is None:
-                _log.error('No serving url specified for video %s' % video_id)
-                raise tornado.gen.Return(False)
-
-            req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
-                                                 follow_redirects=True)
-            http_client = tornado.httpclient.AsyncHTTPClient()
-            res = yield utils.http.send_request(req, async=True)
-
-            if res.code != 200:
-                _log.debug('Image not available in ISP yet. Code %s' %
-                           res.code)
-                raise tornado.gen.Return(False)
-     
-            effective_url = res.effective_url
-            urlRegex = re.compile('neontn(.*)\.jpe?g')
-            urlSearch = urlRegex.search(res.effective_url)
-            if urlSearch is None:
-                _log.warn('Invalid effective url found for video %s: %s' %
-                          (self.key, res.effective_url))
-                raise tornado.gen.Return(False)
-
+        try:
             neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
                                                        self.get_account_id())
-            if urlSearch.group(1) == neon_user_account.default_thumbnail_id:
-                _log.debug('Still redirecting to the account default url')
+            if neon_user_account is None:
+                msg = ('Cannot find the neon user account %s for video %s. '
+                       'This should never happen' % 
+                       (self.get_account_id(), self.key))
+                _log.error(msg)
+                raise DBStateError(msg)
+                
+            request = tornado.httpclient.HTTPRequest(
+                'http://%s/v1/video?%s' % (
+                    options.isp_host,
+                    urllib.urlencode({
+                        'video_id' : InternalVideoID.to_external(self.key),
+                        'publisher_id' : neon_user_account.tracker_account_id
+                        })),
+                follow_redirects=True)
+            res = yield utils.http.send_request(request, async=True)
+
+            if res.code != 200:
+                if res.code != 204:
+                    _log.error('Unexpected response looking up video %s on '
+                               'isp: %s' % (self.key, res))
+                else:
+                    _log.debug('Image not available in ISP yet.')
                 raise tornado.gen.Return(False)
+                
             raise tornado.gen.Return(True)
         except tornado.httpclient.HTTPError as e: 
-            pass
+            _log.error('Unexpected response looking up video %s on '
+                       'isp: %s' % (self.key, e))
 
         raise tornado.gen.Return(False)
     
