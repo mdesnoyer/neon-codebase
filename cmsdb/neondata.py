@@ -2504,7 +2504,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
         # source crop specifies the region of the image from which
         # the result will originate (i.e., only take from the area
         # included by the source_crop specification). This argument
-        # will take the form of a center_crop directive in the manner
+        # will take the form of a crop_frac directive in the manner
         # of ImagePrep in pycvutils. A value of 'None' denotes no
         # cropping [default value]
         self.source_crop = source_crop
@@ -3625,8 +3625,8 @@ class NeonApiRequest(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
-        '''Save the default thumbnail by attaching it to a video.
-The video metadata for this request must be in the database already.
+        '''Save the default thumbnail by attaching it to a video. The video
+        metadata for this request must be in the database already.
 
         Inputs:
         cdn_metadata - If known, the metadata to save to the cdn.
@@ -4150,7 +4150,9 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is slow.
+                       images. If this is None, it is looked up, which is 
+                       slow. If a source_crop is requested, the image is also
+                       cropped here.
         
         '''        
         image = PILImageUtils.convert_to_rgb(image)
@@ -4377,8 +4379,8 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        thumb.video_id = self.key
-        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, 
+                                   async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
