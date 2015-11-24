@@ -751,7 +751,7 @@ class LocalSearcher(object):
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
-    def set_processing_strategy(self, processing_strategy):
+    def update_processing_strategy(self, processing_strategy):
         '''
         Changes the state of the video client based on the processing
         strategy. See the ProcessingStrategy object in cmsdb/neondata.py
