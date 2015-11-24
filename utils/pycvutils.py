@@ -173,6 +173,8 @@ class ImagePrep(object):
         self.convert_to_gray = convert_to_gray
 
     def __call__(self, image):
+        if type(image) is list:
+            return [self(x) for x in image]
         image = _ensure_CV(image)
         # import ipdb
         # ipdb.set_trace()
