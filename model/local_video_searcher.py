@@ -721,6 +721,7 @@ class LocalSearcher(object):
         self.combiner = combiner
         self.startend_clip = startend_clip
         self.filters = filters
+        self.max_variety = max_variety
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
@@ -745,8 +746,27 @@ class LocalSearcher(object):
         self.fps = None
         self.col_stat = None
         self.num_frames = None
+        self.analysis_crop = None # this, if necessary at all, will be set
+                                  # by set_processing_strategy
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
+
+    def set_processing_strategy(self, processing_strategy):
+        '''
+        Changes the state of the video client based on the processing
+        strategy. See the ProcessingStrategy object in cmsdb/neondata.py
+        '''
+        self._reset()
+        self.processing_time_ratio = processing_strategy.processing_time_ratio
+        self._orig_local_search_width = processing_strategy.local_search_width
+        self._orig_local_search_step = processing_strategy.local_search_step
+        self.n_thumbs = processing_strategy.n_thumbs
+        self._feat_score_weight = processing_strategy.feat_score_weight
+        self.mixing_samples = processing_strategy.mixing_samples
+        self.max_variety = processing_strategy.max_variety
+        self.startend_clip = processing_strategy.startend_clip
+        self.adapt_improve = processing_strategy.adapt_improve
+        self.analysis_crop = processing_strategy.analysis_crop
 
     @property
     def min_score(self):
@@ -780,6 +800,8 @@ class LocalSearcher(object):
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
             self.stats[gen_name] = Statistics()
+        # create a prep object for analysis crops
+        self._prep = ImagePrep(crop_frac=self.analysis_crop)
         self.stats['score'] = Statistics()
         self.col_stat = ColorStatistics()
         # instantiate the combiner
@@ -793,7 +815,8 @@ class LocalSearcher(object):
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                                    max_rejectable=f_max_var_rej,
                                    feat_score_weight=self._feat_score_weight,
-                                   adapt_improve=self.adapt_improve)
+                                   adapt_improve=self.adapt_improve,
+                                   max_variety=max_variety)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -862,12 +885,13 @@ class LocalSearcher(object):
                     start_frame, start_score, end_frame, end_score))
         if not self._should_search(start_score, end_score):
             return
-        frames, framenos = self.get_search_frame(start_frame)
-        if frames is None:
+        gold, framenos = self.get_search_frame(start_frame)
+        if gold is None:
             # uh-oh, something went wrong! In this case, the search region
             # will not be searched again, and so we don't have to worry about
             # updating the knowledge of the search algo.
             return
+        frames = self._prep(gold)
         frame_feats = dict()
         allowed_frames = np.ones(len(frames)).astype(bool)
         # obtain the features required for the filter.
@@ -893,6 +917,7 @@ class LocalSearcher(object):
                 frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
             framenos = [framenos[x] for x in acc_idxs]
             frames = [frames[x] for x in acc_idxs]
+            gold = [gold[x] for x in acc_idxs]
             #     frame_feats[k] = [x for n, x in enumerate(frame_feats[k])
             #                         if accepted[n]]
             # framenos = [x for n, x in enumerate(frames) if accepted[n]]
@@ -908,6 +933,7 @@ class LocalSearcher(object):
         comb = np.array(comb)
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
+        best_gold = gold[np.argmax(comb)]
         indi_framescore = self.predictor.predict(best_frame)
         inter_framescore = (start_score + end_score) / 2
         # interpolate the framescore
@@ -921,8 +947,10 @@ class LocalSearcher(object):
                             framescore, np.max(comb)))
         # the selected frame (whatever it may be) will be assigned
         # the score equal to mean of its boundary frames.
-        # push the frame into the results object.
-        self.results.accept_replace(best_frameno, framescore, best_frame,
+        # push the frame into the results object. Ensure that the analysis 
+        # frame is not inserted, but rather the best "gold" frame (i.e., one
+        # that has not been cropped in accordance with analysis_crop)
+        self.results.accept_replace(best_frameno, framescore, best_gold,
                                     np.max(comb), meta=frame_feats)
 
     def _take_sample(self, frameno):
@@ -1041,7 +1069,8 @@ class LocalSearcher(object):
             statemon.state.increment('video_processing_error')
             frame = None
         return frame
-
+    #-------------------------------------------------------------------------
+    # OBTAINING FRAMES FROM THE VIDEO
     def get_seq_frames(self, framenos):
         '''
         Acquires a series of frames, in sorted order.
@@ -1083,6 +1112,9 @@ class LocalSearcher(object):
                         self.local_search_step)
         return frames, frameno
 
+    # END OBTAINING FRAMES FROM THE VIDEO
+    #-------------------------------------------------------------------------
+    
     def __getstate__(self):
         self._reset()
         return self.__dict__.copy()
