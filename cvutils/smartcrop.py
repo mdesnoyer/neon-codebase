@@ -13,6 +13,9 @@ from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
 import time
+define("saliency_threshold", default=50, type=int,
+       help="Saliency cut off threshold for boarder trimming.")
+
 define("haar_profile",
        default=os.path.join(os.path.dirname(__file__),
                            'data/haarcascade_profileface.xml'),
@@ -54,6 +57,7 @@ class ImageSignatureSaliency(object):
         # self.lab_im = cv2.cvtColor(src, cv2.COLOR_BGR2LAB)
         # l_channel, a_channel, b_channel = cv2.split(self.lab_im)
         # Resize the image to the longest edge 64.
+        self._saliency_threshold = options.saliency_threshold
         if len(src.shape) == 2:
             src = cv2.cvtColor(src, cv2.COLOR_GRAY2BGR)
         self.src = src
@@ -83,12 +87,11 @@ class ImageSignatureSaliency(object):
         resized_im = cv2.resize(self.src, (self.map_width, self.map_height))
         w = resized_im.shape[1]
         h = resized_im.shape[0]
-        saliency_threshold = 50
         for x_begin in xrange(0, w-1):
-            if max(self.smooth_map[0:, x_begin] > saliency_threshold):
+            if max(self.smooth_map[0:, x_begin] > self._saliency_threshold):
                 break
         for x_end in xrange(w-1, 0, -1):
-            if max(self.smooth_map[0:, x_end] > saliency_threshold):
+            if max(self.smooth_map[0:, x_end] > self._saliency_threshold):
                 break
         cv2.rectangle(resized_im.astype(uint8), (x_begin, 0), (x_end, h),
                       (0, 255, 255), 3, 8)
@@ -110,6 +113,7 @@ class SmartCrop(object):
         self.dlib_face_detector = dlib.get_frontal_face_detector()
         self.haar_params = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
         self._saliency_map = None
+        self._saliency_threshold = options.saliency_threshold
         self._faces = None
         self._text_boxes = None
         self.image = image
@@ -159,13 +163,28 @@ class SmartCrop(object):
 
     def _detect_faces(self, im):
         front_faces = self.detect_front_faces(im)
+        # return front_faces
         tic()
+        height = self.image.shape[0]
+        width = self.image.shape[1]
+        ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
+        im_resized = cv2.resize(im, (int(self.image.shape[1]/ratio),
+                                          int(self.image.shape[0]/ratio)))
         profile_faces = \
-            self.profile_face_cascade.detectMultiScale(im, **self.haar_params)
-        im_flip = cv2.flip(im, 1)
+            self.profile_face_cascade.detectMultiScale(im_resized, **self.haar_params)
+        if len(profile_faces) == 0:
+            profile_faces = np.array([])
+        profile_faces *= ratio
+        profile_faces = profile_faces.astype(int)
+        im_flip = cv2.flip(im_resized, 1)
         flip_profile_faces = \
             self.profile_face_cascade.detectMultiScale(im_flip, **self.haar_params)
-
+        if (len(flip_profile_faces) == 0):
+            flip_profile_faces = np.array([])
+        flip_profile_faces *= ratio
+        flip_profile_faces = flip_profile_faces.astype(int)
+        print "time for profile_faces."
+        toc()
         if len(flip_profile_faces) != 0:
             flip_profile_faces[0:, 0] = im.shape[1] - (flip_profile_faces[0:, 0] +
                                                        flip_profile_faces[0:, 2])
@@ -291,7 +310,6 @@ class SmartCrop(object):
             if abs(neutral_width - w) <= 5.0:
                 return cv2.resize(self.image, (w, h))
 
-        saliency_threshold = 50
         im = self.image.copy()
 
         (height, width, elem) = self.image.shape
@@ -314,10 +332,10 @@ class SmartCrop(object):
             new_height = height
             # Crop horizontally
             for x_begin in xrange(0, width-1):
-                if max(saliency_map[0:, x_begin] > saliency_threshold):
+                if max(saliency_map[0:, x_begin] > self._saliency_threshold):
                     break
             for x_end in xrange(width-1, 0, -1):
-                if max(saliency_map[0:, x_end] > saliency_threshold):
+                if max(saliency_map[0:, x_end] > self._saliency_threshold):
                     break
             # If there are high saliency points, then they will meet in the
             # center of the target. If there are no high saliency point,
@@ -330,10 +348,10 @@ class SmartCrop(object):
             new_height = int(width / float(w) * float(h))
             # Crop vertically
             for y_begin in xrange(0, height-1):
-                if max(saliency_map[y_begin, 0:] > saliency_threshold):
+                if max(saliency_map[y_begin, 0:] > self._saliency_threshold):
                     break
             for y_end in xrange(height-1, 0, -1):
-                if max(saliency_map[y_end, 0:] > saliency_threshold):
+                if max(saliency_map[y_end, 0:] > self._saliency_threshold):
                     break
             # If there are high saliency points, then they will meet in the
             # center of the target. If there are no high saliency point,
