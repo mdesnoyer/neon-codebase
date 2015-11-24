@@ -2482,7 +2482,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
-                 update_serving_urls=False,
+                 update_serving_urls=False, source_crop=None,
                  rendition_sizes=None):
 
         self.key = key
@@ -2500,6 +2500,14 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
+
+        # source crop specifies the region of the image from which
+        # the result will originate (i.e., only take from the area
+        # included by the source_crop specification). This argument
+        # will take the form of a center_crop directive in the manner
+        # of ImagePrep in pycvutils. A value of 'None' denotes no
+        # cropping [default value]
+        self.source_crop = source_crop
 
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
