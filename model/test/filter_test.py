@@ -122,7 +122,8 @@ class TestPixelVarianceFilter(unittest.TestCase):
         self.feature = model.features.PixelVarGenerator()
 
     def test_pixvar_filter(self):
-        imgs = ['white_middle_garbage.jpg', 'black.jpg', 'white_logo.jpg']
+        imgs = ['white_middle_garbage.jpg', 'black.jpg', 'white_logo.jpg',
+                'black_fading_title.jpg']
         for img in imgs:
             cvimg = cv2.imread(os.path.join(IMG_DIR, img))
             feats = self.feature.generate_many(cvimg)
