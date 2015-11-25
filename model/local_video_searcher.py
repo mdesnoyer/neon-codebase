@@ -274,6 +274,7 @@ class Combiner(object):
         Returns the scores for the thumbnails given a feat_dict, which is a
         dictionary {'feature name': feature_vector}
         '''
+
         stat_scores = []
         tot_pos = float(np.sum(
                             [self.weight_dict[x] for x in feat_dict.keys()]))
@@ -285,6 +286,16 @@ class Combiner(object):
             comb_score /= tot_pos # normalize
             comb_scores.append(comb_score)
         return comb_scores
+
+    def combine_scores_func(self, feat_dict):
+        ######################################################################
+        # TODO: Implement this
+        ######################################################################
+        raise NotImplementedError()
+        '''This will return a list of functions that can be evaluated lazily,
+        which permit the thumbnail scores to be updated--especially in the
+        event that some thumbnails would not actually be accepted if the order
+        of analysis was changed.'''
 
 class _Result(object):
     '''
@@ -631,6 +642,7 @@ class LocalSearcher(object):
                  filters=None,
                  startend_clip=0.1,
                  adapt_improve=False,
+                 queue_unsearched=False,
                  testing=False,
                  testing_dir='/tmp'):
         '''
@@ -699,6 +711,9 @@ class LocalSearcher(object):
             adapt_improve:
                 Adaptively improves the brightness / contrast / etc of an
                 image via the CLAHE algorithm.
+            queue_unsearched:
+                If the interval should not be searched initially, then it will
+                be placed into a priority queue based on the mean score. 
             testing:
                 If true, saves the sequence of considered thumbnails to the
                 directory specified by testing_dir as
@@ -748,6 +763,8 @@ class LocalSearcher(object):
         self.fps = None
         self.col_stat = None
         self.num_frames = None
+        self._queue = []
+        self._searched = 0
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
@@ -853,9 +870,18 @@ class LocalSearcher(object):
         while (time() - start_time) < max_processing_time:
             r = self._step()
             if r == False:
-                _log.info('Searched whole video')
                 # you've searched as much as possible
                 break
+        if len(self._queue):
+            _log.info('If time remains, will begin searching from queue')
+        while (time() - start_time) < max_processing_time:
+            if not len(self._queue):
+                _log.info('No analyses remain to be done.')
+                break
+            mean_score, (start_frame, end_frame, start_score, 
+                end_score) = heapq.heappop(self._queue)
+            self._conduct_local_search(start_frame, end_frame, start_score,
+                end_score, from_queue=True)
         raw_results = self.results.get_results()
         # format it into the expected format
         results = []
@@ -869,28 +895,36 @@ class LocalSearcher(object):
         except:
             _log.info('Unknown percentage of video sampled')
         try:
-            perc_srch = self.search_algo.searched * 100./(self.search_algo.N-1)
+            perc_srch = self._searched * 100./(self.search_algo.N-1)
             _log.info('%.2f%% of video searched'%perc_srch)
         except:
             _log.info('Unknown percentage of video searched')
         return results
 
     def _conduct_local_search(self, start_frame, end_frame,
-                              start_score, end_score):
+                              start_score, end_score, from_queue=False):
         '''
         Given the frames that are already the best, determine whether it makes
         sense to proceed with local search.
         '''
-        _log.debug('Local search of %i [%.3f] <---> %i [%.3f]'%(
+        if not from_queue:
+            if not self._should_search(start_frame, end_frame, start_score,
+                                       end_score): 
+                return
+        if not from_queue:
+            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]'%(
                     start_frame, start_score, end_frame, end_score))
-        if not self._should_search(start_score, end_score):
-            return
+        else:
+            _log.debug(('Local search of %i [%.3f] <---> %i [%.3f] '
+                        '[from queue]')%(
+                    start_frame, start_score, end_frame, end_score))
         gold, framenos = self.get_search_frame(start_frame)
         if gold is None:
             # uh-oh, something went wrong! In this case, the search region
             # will not be searched again, and so we don't have to worry about
             # updating the knowledge of the search algo.
             return
+        self._searched += 1
         frames = self._prep(gold)
         frame_feats = dict()
         allowed_frames = np.ones(len(frames)).astype(bool)
@@ -979,7 +1013,7 @@ class LocalSearcher(object):
         # update the search algo's knowledge
         self.search_algo.update(frameno, frame_score)
 
-    def _should_search(self, start_score, end_score):
+    def _should_search(self, start_frame, end_frame, start_score, end_score):
         '''
         Accepts a start frame score and the end frame score and returns True /
         False indicating if this region should be searched.
@@ -998,6 +1032,9 @@ class LocalSearcher(object):
                            ' mean observed score data')
         else:
             _log.debug('Interval cannot be admitted to results')
+        _log.debug('Placing rejected interval into queue')
+        heapq.heappush(self._queue, (-mean_score, (start_frame, end_frame,
+                                           start_score, end_score)))
         return False
 
     def _step(self):
