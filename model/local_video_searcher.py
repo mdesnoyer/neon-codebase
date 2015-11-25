@@ -801,7 +801,7 @@ class LocalSearcher(object):
         for gen_name in self.feats_to_cache.keys():
             self.stats[gen_name] = Statistics()
         # create a prep object for analysis crops
-        self._prep = ImagePrep(crop_frac=self.analysis_crop)
+        self._prep = pycvutils.ImagePrep(crop_frac=self.analysis_crop)
         self.stats['score'] = Statistics()
         self.col_stat = ColorStatistics()
         # instantiate the combiner
@@ -816,7 +816,7 @@ class LocalSearcher(object):
                                    max_rejectable=f_max_var_rej,
                                    feat_score_weight=self._feat_score_weight,
                                    adapt_improve=self.adapt_improve,
-                                   max_variety=max_variety)
+                                   max_variety=self.max_variety)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
