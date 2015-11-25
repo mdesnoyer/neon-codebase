@@ -184,10 +184,17 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
-    def start(self):
+
+    def start(self, message):
         '''
         Actual work done here
         '''
+        #Initialize SQS
+        '''server = sqs_utilities
+        self.sqs_queue = server.VideoProcessingQueue()
+        yield self.sqs_queue.connect_to_server(options.region,
+                                               options.aws_key,
+                                               options.secret_key)'''
         try:
             statemon.state.increment('workers_downloading')
             try:
@@ -208,6 +215,8 @@ class VideoProcessor(object):
             #finalize response, if success send client and notification
             #response
             self.finalize_response()
+            #self.sqs_queue.delete_message(message)
+
 
         except OtherWorkerCompleted as e:
             statemon.state.increment('other_worker_completed')
@@ -762,11 +771,9 @@ class VideoClient(multiprocessing.Process):
         result = None
         server = sqs_utilities
         self.sqs_queue = server.VideoProcessingQueue()
-
         yield self.sqs_queue.connect_to_server(options.region,
                                                options.aws_key,
                                                options.secret_key)
-
         _log.info("Connected to SQS server")
         message = yield self.sqs_queue.read_message()
         if message:
@@ -780,6 +787,7 @@ class VideoClient(multiprocessing.Process):
                     job_id  = job_params['job_id']
                     job_params['reprocess'] = False
                     def _change_job_state(request):
+                        request.try_count +=1;
                         if request.state in [neondata.RequestState.SUBMIT,
                                              neondata.RequestState.REPROCESS,
                                              neondata.RequestState.REQUEUED]:
@@ -805,6 +813,14 @@ class VideoClient(multiprocessing.Process):
                         raise tornado.gen.Return(False)
                     _log.info("key=worker [%s] msg=processing request %s for "
                               "%s." % (self.pid, job_id, api_key))
+                    if api_request.fail_count > 2 or api_request.try_count > 5:
+                        _log.info('Job %s for account %s has failed too many ' \
+                                   'times' %
+                                    (job_id, api_key))
+                        self.sqs_queue.delete_message(message)
+
+                        _log.info("This job has been deleted")
+                        raise tornado.gen.Return(False)
                 except tornado.gen.Return:
                     raise tornado.gen.Return(False)
                 except Exception,e:
@@ -812,8 +828,9 @@ class VideoClient(multiprocessing.Process):
                         self.pid, e.message))
                     raise tornado.gen.Return(False)
             if(job_params):
-                self.sqs_queue.delete_message(message)
-                raise tornado.gen.Return(job_params)
+                _log.info("Dequeue Successful")
+                job_and_message = (job_params, message)
+                raise tornado.gen.Return(job_and_message)
  
             raise tornado.gen.Return(result)
         else:
@@ -853,7 +870,9 @@ class VideoClient(multiprocessing.Process):
     def do_work(self):   
         ''' do actual work here'''
         try:
-            job = yield self.dequeue_job()
+            job_and_message = yield self.dequeue_job()
+            job = job_and_message[0]
+            message = job_and_message[1]
             _log.info(job)
             if not job or job == "{}": #string match
                 raise Queue.Empty
@@ -868,10 +887,11 @@ class VideoClient(multiprocessing.Process):
                                         job['reprocess'])
             statemon.state.increment('workers_processing')
             try:
-                vprocessor.start()
+                vprocessor.start(message)
             finally:
                 statemon.state.decrement('workers_processing')
             self.videos_processed += 1
+            self.sqs_queue.delete_message(message)
 
         except Queue.Empty:
             _log.debug("Q,Empty")

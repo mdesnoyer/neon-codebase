@@ -3577,6 +3577,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.callback_state = callback_state
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
+        self.try_count = 0 # Number of attempted processing tries
         
         self.integration_type = integration_type
         self.integration_id = integration_id

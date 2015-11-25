@@ -99,30 +99,54 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start() 
        
+        # Fill out redis
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.api_request = neondata.OoyalaApiRequest(
+            'job1', self.api_key,
+            'int1', 'vid1',
+            'some fun video',
+            'http://video.mp4', None, None,
+            'http://callback.com',
+            'http://default_thumb.jpg')
+        self.api_request.save() 
+
         #setup process video object
         self.api_request = None
 
         # Mock the SQS implementation
-        self.mock_sqs = sqsmock.SQSConnectionMock()
-        self.mock_queue = sqsmock.SQSQueueMock()
-
+        #self.mock_sqs = sqsmock.SQSConnectionMock()
         self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
                                  'connect_to_region')
-
-        self.mock_sqs_future = self._future_wrap_mock(
-                                         self.sqs_patcher.start(),
-                                         require_async_kw=True)
-       
-        self.mock_sqs_future.return_value = self.mock_sqs
-
-        self.read_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
-                                    'queue.Queue.read')
-
+        #self.mock_sqs_future = self._future_wrap_mock(
+        #                                 self.sqs_patcher.start(),
+        #                                 require_async_kw=False)
+        
+        self.mock_sqs = self.sqs_patcher.start()
+        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
+        self.read_patcher = patch('video_processor.sqs_utilities.'\
+                                  'VideoProcessingQueue.read_message')
         self.mock_read_future = self._future_wrap_mock(
             self.read_patcher.start(),
-            require_async_kw=True)
+            require_async_kw=False)
 
-        self.mock_read_future.side_effect = self.mock_queue.read
+        self.delete_patcher = patch('video_processor.sqs_utilities.'\
+                                    'VideoProcessingQueue.delete_message')
+        self.mock_delete_future = self._future_wrap_mock(
+            self.delete_patcher.start(),
+            require_async_kw=False)
+
+        self.mock_delete_future.return_value = True
 
         #patch for download_and_add_thumb
         self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
@@ -140,6 +164,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         self.sqs_patcher.stop()
         self.read_patcher.stop()
+        self.delete_patcher.stop()
         super(TestVideoClient, self).tearDown()
         
     def setup_video_processor(self, request_type, url='http://url.com'):
@@ -440,13 +465,51 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertNotEqual(meta2.frameno, meta1.frameno)
 
     @tornado.testing.gen_test(timeout=10)
-    #TODO: Get an assert in here
     def dequeue_job(self):
-        yield self.video_client.dequeue_job()
+        message = Message()
 
-    @tornado.testing.gen_test(timeout=70)
+        message_body = json.dumps({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        message.set_body(message_body)
+
+        self.mock_read_future.return_value = message
+
+        with self.assertLogExists(logging.INFO, "Dequeue successful"):
+            yield self.video_client.dequeue_job()
+
+    @tornado.testing.gen_test(timeout=10)
     def dequeue_job_with_empty_server(self):
-        with self.assertLogExists(logging.ERROR, "dequeue_error"):
+        self.mock_read_future.return_value = None
+        with self.assertLogExists(logging.ERROR, "Dequeue Error"):
+            yield self.video_client.dequeue_job()
+
+    @patch('cmsdb.neondata.NeonApiRequest')
+    @tornado.testing.gen_test(timeout=10)
+    def dequeue_job_with_failed_attempts(self, neon_mock):
+        message = Message()
+        message_body = json.dumps({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        message.set_body(message_body)
+
+        self.mock_read_future.return_value = message
+
+        neon_mock.modify().fail_count = 4
+        neon_mock.modify().state = neondata.RequestState.PROCESSING
+        with self.assertLogExists(logging.INFO, "This job has been deleted"):
             yield self.video_client.dequeue_job()
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
@@ -1373,7 +1436,6 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     def test_db_update_error(self, modify_mock):
         modify_mock.side_effect = [
             redis.ConnectionError("Connection Error")]
-
 
         message = Message()
 

@@ -147,6 +147,7 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=5)
     def test_delete_from_empty_server(self):
+        serv = video_processor.sqs_utilities
         _log.info("Reading empty server")
         self.sqs = serv.VideoProcessingQueue()
 
@@ -154,7 +155,6 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
                                          options.aws_key,
                                          options.secret_key)
 
-        yield self.sqs.connect_to_server()
         message = Message()
         deleted = yield self.sqs.delete_message(message)
         self.assertFalse(message)
