@@ -3027,6 +3027,25 @@ class BrightcoveIntegration(AbstractIntegration):
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
+class CNNIntegration(AbstractIntegration):
+    ''' CNN Integration class '''
+
+    def __init__(self, 
+                 account_id='',
+                 api_key_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(CNNIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the api_key required to make requests to cnn api - external
+        self.api_key_ref = api_key_ref
+
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
