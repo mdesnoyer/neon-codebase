@@ -747,7 +747,7 @@ class LocalSearcher(object):
         self.col_stat = None
         self.num_frames = None
         self.analysis_crop = None # this, if necessary at all, will be set
-                                  # by set_processing_strategy
+                                  # by update_processing_strategy
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
@@ -965,6 +965,7 @@ class LocalSearcher(object):
             # search algo with the knowledge that the frame is bad.
             self.search_algo.update(frameno, bad=True)
             return
+        frames = self._prep(gold)
         # get the score the image.
         frame_score = self.predictor.predict(frames[0])
         # extract all the features we want to cache
