@@ -965,7 +965,7 @@ class LocalSearcher(object):
             # search algo with the knowledge that the frame is bad.
             self.search_algo.update(frameno, bad=True)
             return
-        frames = self._prep(gold)
+        frames = self._prep(frames)
         # get the score the image.
         frame_score = self.predictor.predict(frames[0])
         # extract all the features we want to cache
