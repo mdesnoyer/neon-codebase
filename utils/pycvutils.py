@@ -270,9 +270,9 @@ class ImagePrep(object):
         else:
             timage = image[xlim1:]
         if ylim2 != 0:
-            timage = image[:, ylim1:-ylim2]
+            timage = timage[:, ylim1:-ylim2]
         else:
-            timage = image[:, ylim1:]
+            timage = timage[:, ylim1:]
         return timage
 
     def _resize_to_max(self, image, dim=None):
