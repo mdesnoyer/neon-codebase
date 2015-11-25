@@ -729,6 +729,8 @@ class LocalSearcher(object):
         self._testing = testing
         self._testing_dir = testing_dir
         self._reset()
+        self.analysis_crop = None # this, if necessary at all, will be set
+                                  # by update_processing_strategy
 
         # determine the generators to cache.
         for f in feature_generators:
@@ -746,8 +748,6 @@ class LocalSearcher(object):
         self.fps = None
         self.col_stat = None
         self.num_frames = None
-        self.analysis_crop = None # this, if necessary at all, will be set
-                                  # by update_processing_strategy
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
