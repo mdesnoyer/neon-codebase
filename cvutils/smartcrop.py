@@ -100,24 +100,36 @@ class ImageSignatureSaliency(object):
 
 class SmartCrop(object):
     _instance_ = None
-    def __init__(self, image):
+    def __init__(self, image,
+                 with_saliency=True,
+                 with_face_detection=True,
+                 with_text_detection=True):
         ''' This function should not be called by directly.
         Using the get_cropper to get the singlton instead.
         '''
-        self.haar_profile = options.haar_profile
-        self.profile_face_cascade = cv2.CascadeClassifier()
-        self.profile_face_cascade.load(self.haar_profile)
-        self.text_classifier1 = options.text_classifier1
-        self.text_classifier2 = options.text_classifier2
-
-        self.dlib_face_detector = dlib.get_frontal_face_detector()
-        self.haar_params = {'minNeighbors': 8, 'minSize': (50, 50), 'scaleFactor': 1.1}
-        self._saliency_map = None
-        self._saliency_threshold = options.saliency_threshold
-        self._faces = None
-        self._text_boxes = None
         self.image = image
-        self._bottom_percent = 0.7
+        self.with_saliency = with_saliency
+        self.with_face_detection = with_face_detection
+        self.with_text_detection = with_text_detection
+        if with_face_detection:
+            self.haar_profile = options.haar_profile
+            self.profile_face_cascade = cv2.CascadeClassifier()
+            self.profile_face_cascade.load(self.haar_profile)
+            self.dlib_face_detector = dlib.get_frontal_face_detector()
+            self.haar_params = {'minNeighbors': 8,
+                                'minSize': (50, 50),
+                                'scaleFactor': 1.1}
+            self._faces = None
+
+        if with_text_detection:
+            self.text_classifier1 = options.text_classifier1
+            self.text_classifier2 = options.text_classifier2
+            self._text_boxes = None
+            self._bottom_percent = 0.7
+
+        if with_saliency:
+            self._saliency_map = None
+            self._saliency_threshold = options.saliency_threshold
 
 
 
@@ -297,41 +309,72 @@ class SmartCrop(object):
 
         return self.image[y:y+new_height, new_x:new_x+new_width]
 
-    def face_adjust(faces, x):
+    def face_adjust(self, faces, new_x, new_width):
         ''' Search nearby and horizontally to avoid face cutting.
-        Face exclusion is also possible.
         '''
-        pass
-
-    def crop_and_resize(self, h, w):
-        ''' Find the cropped area maximizes the summation of the saliency
-        value
-        '''
-        # t_begin = tic()
-        text_boxes = self.get_text_boxes()
-        # print "get_text_boxes"
-        # toc()
-        # tic()
-        if len(text_boxes) == 0:
-            neutral_width = float(self.image.shape[1]) * h / self.image.shape[0]
-            if abs(neutral_width - w) <= 5.0:
-                return cv2.resize(self.image, (w, h))
-
-        im = self.image.copy()
-
+        face_cusion = 10
         (height, width, elem) = self.image.shape
-        # print "before saliency"
-        # toc()
+        new_x_end = new_x + new_width - 1
+        # Search to the left
+        # search to the right
+        # Check if face is being cut off. Try for example 3 times
+        min_face_cut = height
+        min_cut_left = new_x
+        # Search all the spaces to the left to see if we can have non cut face.
+        for left_x in xrange(new_x, -1, -1):
+            left_x_end = left_x + new_width - 1
+            face_cut_left = 0
+            face_cut_right = 0
+            for face in faces:
+                # left bound of the box is cutting off the face
+                if face[0] < left_x and face[0] + face[2] - 1 >= left_x:
+                    face_cut_left = face[3]
+                # right bound of the box is cutting off the face
+                if face[0] < left_x_end and face[0] + face[2] - 1 >= left_x_end:
+                    face_cut_right = face[3]
+                face_cut = max(face_cut_left, face_cut_right)
+                if face_cut < min_face_cut:
+                    min_face_cut = face_cut
+                    min_cut_left = left_x
+                    if face_cut == 0:
+                        break
+
+        min_face_cut = height
+        min_cut_right = new_x
+        # Search all the spaces to the right to see if we can have non cut face.
+        for right_x in xrange(new_x, width - new_width + 2):
+            right_x_end = right_x + new_width - 1
+            face_cut_left = 0
+            face_cut_right = 0
+            for face in faces:
+                # right bound of the box is cutting off the face
+                if face[0] < right_x and face[0] + face[2] - 1 >= right_x:
+                    face_cut_left = face[3]
+                # right bound of the box is cutting off the face
+                if face[0] < right_x_end and face[0] + face[2] - 1 >= right_x_end:
+                    face_cut_right = face[3]
+                face_cut = max(face_cut_left, face_cut_right)
+                if face_cut < min_face_cut:
+                    min_face_cut = face_cut
+                    min_cut_right = right_x
+                    if face_cut == 0:
+                        break
+
+        if new_x - min_cut_left < min_cut_right - new_x:
+            new_x = min_cut_left
+        else:
+            new_x = min_cut_right
+        # Check if the new_x is still in bounding range. Just to be safe
+        new_x = 0 if new_x < 0 else new_x
+        new_x = (width - new_width)  if new_x > (width - new_width) else new_x
+        return new_x
+
+    def saliency_adjust(self, h, w):
+        (height, width, elem) = self.image.shape
         # tic()
         saliency_map = self.get_saliency_map()
         # print "after saliency"
         # toc()
-        # tic()
-        faces = self.detect_faces()
-        # print "after face"
-        # toc()
-        # tic()
-
         # Saliency Map is calculated then trimmed to along the boundaries
         # to remove low saliency area.
         if float(h) / height > float(w) / width:
@@ -375,29 +418,51 @@ class SmartCrop(object):
         new_y = 0 if new_y < 0 else new_y
         new_y = (height - new_height) if new_y > (height - new_height) else new_y
 
-        new_x_end = new_x + new_width - 1
-        new_y_end = new_y + new_height - 1
+        return (new_x, new_y, new_width, new_height)
 
-        maximum_try = 3
-        # Check if face is being cut off. Try for example 3 times
-        for count in xrange(maximum_try):
-            face_cut_left = 0
-            face_cut_right = 0
-            face_left_bound = 0
-            face_right_bound = width - 1
-            for face in faces:
-                if face[0] < new_x and face[0] + face[2] - 1 >= new_x:
-                    face_cut_left = face[3]
-                    face_left_bound = face[0] - 10
-                if face[0] < new_x_end and face[0] + face[2] - 1 >= new_x_end:
-                    face_cut_right = face[3]
-                    face_right_bound = face[0] + face[2] - 1 + 10
-            if face_cut_left == 0 and face_cut_right == 0:
-                break
-            if face_cut_left > face_cut_right:
-                new_x = face_left_bound
-            else:
-                new_x = face_right_bound - new_width + 1
+
+    def crop_and_resize(self, h, w):
+        ''' Find the cropped area maximizes the summation of the saliency
+        value
+        '''
+        # t_begin = tic()
+        text_boxes = self.get_text_boxes()
+        # print "get_text_boxes"
+        # toc()
+        # tic()
+        if len(text_boxes) == 0:
+            neutral_width = float(self.image.shape[1]) * h / self.image.shape[0]
+            if abs(neutral_width - w) <= 5.0:
+                return cv2.resize(self.image, (w, h))
+
+        im = self.image.copy()
+
+        (height, width, elem) = self.image.shape
+        # print "before saliency"
+        # toc()
+        # tic()
+
+        # Get the default crop locations.
+        if float(h) / height > float(w) / width:
+            new_width = int(height / float(h) * float(w))
+            new_height = height
+        else:
+            new_width = width
+            new_height = int(width / float(w) * float(h))
+        center_horizontal = width / 2
+        center_vertical = height / 2
+        new_x = center_horizontal - new_width / 2
+        new_y = center_vertical - height / 2
+
+
+        (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
+
+        if self.with_face_detection:
+            # tic()
+            faces = self.detect_faces()
+            # print "after face"
+            # toc()
+            new_x = self.face_adjust(faces, new_x, new_width)
 
         # cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
 
