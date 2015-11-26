@@ -151,7 +151,7 @@ class ImagePrep(object):
             - resize such that no side is more than max_side
             - resize such that height is exactly scale_height
             - resize such that width is exactly scale_width
-            - force image size to image_size
+            - force image size to image_size [h, w]
             - resize and crop image to crop_image_size
             - resize an image such that its area is image_area
             - center crop image to crop_frac
