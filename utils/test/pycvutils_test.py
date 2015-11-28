@@ -362,7 +362,8 @@ class TestImagePrep(unittest.TestCase):
         self.assertTrue((1.-crop_frac[3] >= min_frac) and
                         (1.-crop_frac[3] <= max_frac))
 
-
+if __name__=='__main__':
+    unittest.main()
 
 
 
