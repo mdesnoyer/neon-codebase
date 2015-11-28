@@ -63,7 +63,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
     video - An opencv VideoCapture object
     frame_no - The frame number to seek to
     do_log - True if logging should happen on errors
-    cur_frame - If you know the frame number that the video should be at, 
+    cur_frame - If you know the frame number that the video should be at,
                 put it here. It helps to identify error cases.
 
     Outputs:
@@ -71,7 +71,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
     '''
 
     grab_sucess = True
-    if (cur_frame is not None and cur_frame > 0 and 
+    if (cur_frame is not None and cur_frame > 0 and
         video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES) == 0):
         if do_log:
             _log.warn('Cannot read the current frame location.'
@@ -86,7 +86,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
                 (frame_no - cur_frame) < 4 and (frame_no - cur_frame) >= 0) ):
             # Seeking to a place in the video that's a ways away, so JUMP
             video.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, frame_no)
-            
+
         cur_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
         while grab_sucess and cur_frame < frame_no:
             grab_sucess = video.grab()
@@ -106,7 +106,7 @@ def _ensure_CV(image):
     in OpenCV format.
     '''
     if _not_CV(image):
-        return from_pil(im)
+        return from_pil(image)
     return image
 
 def _not_CV(image):
@@ -134,7 +134,7 @@ class ImagePrep(object):
     image (by default), although this can be configured.
     '''
     def __init__(self, max_height=None, max_width=None,
-                 max_side=None, scale_height=None, 
+                 max_side=None, scale_height=None,
                  scale_width=None, image_size=None,
                  crop_image_size=None, image_area=None,
                  crop_frac=None, convert_to_gray=False,
@@ -161,9 +161,9 @@ class ImagePrep(object):
                   crop frac.
 
                   IMPORTANT:
-                    If crop_frac is a 4-element list, then it refers to the 
-                    percentage from FROM that edge. I.e., 
-                    crop_frac = [.6, .7] = retain 60% of the horizontal and 
+                    If crop_frac is a 4-element list, then it refers to the
+                    percentage from FROM that edge. I.e.,
+                    crop_frac = [.6, .7] = retain 60% of the horizontal and
                         70% of the vertical
                     crop_frac = [.2, .3, .1, .0] = cut 20% off the top, 30%
                         off the right, 10% off the bottom, and 0% off the
@@ -223,7 +223,7 @@ class ImagePrep(object):
 
         self.crop_frac may be a list of either 2 or 4
         elements, which either specify the top+bottom and
-        left+right crop frac, or the top / right / bottom 
+        left+right crop frac, or the top / right / bottom
         / left crop frac.
 
         IMPORTANT: SEE NOTE
