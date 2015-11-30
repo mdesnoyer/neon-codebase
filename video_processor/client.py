@@ -387,7 +387,9 @@ class VideoProcessor(object):
         try:
             processing_strategy = neondata.ProcessingStrategy.get(account_id)
         except Exception, e:
-            _log.error("Could not fetch processing strategy: %s"%(e))
+            _log.error(("Could not fetch processing strategy for account_id "
+                        "%s: %s")%(str(account_id), e))
+            raise DBError("Could not fetch processing strategy")
         self.model.update_processing_strategy(processing_strategy)
 
         try:
