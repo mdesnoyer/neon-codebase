@@ -2331,7 +2331,7 @@ class ProcessingStrategy(DefaultedStoredObject):
         # thumbnails.
         self.max_variety = max_variety
 
-        # startend clip determines who much fo the video should be 'clipped'
+        # startend clip determines how much of the video should be 'clipped'
         # prior to the analysis, to exclude things like titleframes and
         # credit rolls.
         self.startend_clip = startend_clip
@@ -2342,10 +2342,33 @@ class ProcessingStrategy(DefaultedStoredObject):
         self.adapt_improve = adapt_improve
 
         # analysis crop dictates the region of the image that should be
-        # excluded prior to the analysis: i.e., if you never want the lower
-        # 1/3rd of the image to affect the analysis, you can crop it out here.
-        # The specification of the cropping is to be done in exactly the same
-        # way as the ImagePrep object in cvutils.
+        # excluded prior to the analysis. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
         self.analysis_crop = analysis_crop
 
     @classmethod
@@ -2502,11 +2525,33 @@ class CDNHostingMetadata(NamespacedStoredObject):
         self.update_serving_urls = update_serving_urls
 
         # source crop specifies the region of the image from which
-        # the result will originate (i.e., only take from the area
-        # included by the source_crop specification). This argument
-        # will take the form of a crop_frac directive in the manner
-        # of ImagePrep in pycvutils. A value of 'None' denotes no
-        # cropping [default value]
+        # the result will originate. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
         self.source_crop = source_crop
 
         # A list of image rendition sizes to generate if resize is

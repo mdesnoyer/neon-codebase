@@ -137,6 +137,58 @@ def _subarray_in_array(a, suba):
             return (x1, y1, x2, y2)
     return None
 
+def produce_rand_config(image, base_prob=0.5):
+    '''
+    Produces a random configuration for ImagePrep.
+
+    base_prob = the probability that any parameter is defined
+    '''
+    true_height, true_width = image.shape[:2]
+    h = [true_height / 2, true_height * 2]  # width interval
+    w = [true_width / 2, true_width * 2]    # height interval
+    s_range = [min(h[0], w[0]), max(h[1], w[1])]
+    a_range = [h[0]*w[0], h[1]*w[1]]
+    pd = dict()
+    # max height
+    pd['max_height'] = np.random.randint(h[0], h[1])
+    pd['max_width'] = np.random.randint(w[0], w[1])
+    pd['max_side'] = np.random.randint(s_range[0], s_range[1])
+    pd['scale_height'] = np.random.randint(h[0], h[1])
+    pd['scale_width'] = np.random.randint(w[0], w[1])
+    pd['image_size'] = [np.random.randint(h[0], h[1]), 
+                        np.random.randint(w[0], w[1])]
+    pd['image_area'] = np.random.randint(a_range[0], a_range[1])
+    cc_type = np.random.rand()
+    grc = lambda: np.random.rand() / 2
+    if cc_type < 1./3:
+        cf = grc() * 2
+    elif cc_type < 2./3:
+        cf = [grc(), grc()]
+    else:
+        cf = [grc(), grc(), grc(), grc()]
+    pd['crop_frac'] = cf
+    for key in pd.keys():
+        if base_prob > np.random.rand():
+            pd[key] = None
+    if base_prob < np.random.rand():
+        pd['convert_to_gray'] = True
+    else:
+        pd['convert_to_gray'] = False
+    return pd
+
+def run_imageprep_seq(image, config):
+    '''
+    Runs ImagePrep sequentially by evaluating the arguments in-order
+    '''
+    op_order = ['convert_to_gray', 'max_height', 'max_width', 
+                'max_side', 'scale_height', 'scale_width', 'image_size',
+                'image_area', 'crop_frac']
+    for i in op_order:
+        ip = ImagePrep(**{i:config.get(i, None)})
+        image = ip(image)
+
+    return image
+
 class TestImagePrep(unittest.TestCase):
     '''
     Tests the atomic operations of ImagePrep, to ensure that they are
@@ -310,7 +362,6 @@ class TestImagePrep(unittest.TestCase):
         self.assertTrue(check_height_is(new_image, oh))
 
     def test_cropping(self):
-        _log.debug('Testing cropping')
         '''Attempts to validate the cropping.'''
         image = self.image_cv
         oh, ow = _get_dims(image)
@@ -361,6 +412,41 @@ class TestImagePrep(unittest.TestCase):
         min_frac, max_frac = _get_frac(ow, y1, ow)
         self.assertTrue((1.-crop_frac[3] >= min_frac) and
                         (1.-crop_frac[3] <= max_frac))
+
+    def test_returnTypes(self):
+        pil_img = self.image_pil
+        cv_img = self.image_cv
+        no_conv_arg = ImagePrep()
+        return_same = ImagePrep(return_same=True)
+        return_pil = ImagePrep(return_pil=True)
+        # no converstion arguments, should return CV
+        new_pil = no_conv_arg(pil_img)
+        new_cv = no_conv_arg(cv_img)
+        self.assertTrue(_is_CV(new_pil))
+        self.assertTrue(_is_CV(new_cv))
+        # return same image type
+        new_pil = return_same(pil_img)
+        new_cv = return_same(cv_img)
+        self.assertTrue(_is_PIL(new_pil))
+        self.assertTrue(_is_CV(new_cv))
+        # return PIL images
+        new_pil = return_pil(pil_img)
+        new_cv = return_pil(cv_img)
+        self.assertTrue(_is_PIL(new_pil))
+        self.assertTrue(_is_PIL(new_cv))
+
+    '''This completes all atomic tests of ImagePrep. Now, since we know that
+    the atomic operations are functional, we can apply an ensemble of
+    operations sequentially'''
+    def test_ensembleConfig(self):
+        np.random.seed(42)
+        for i in range(100):
+            # run 100 random tests
+            config = produce_rand_config(self.image_cv)
+            ip = ImagePrep(**config)
+            imageSeq = run_imageprep_seq(self.image_cv, config)
+            imageEns = ip(self.image_cv)
+            self.assertTrue(np.array_equiv(imageSeq, imageEns))
 
 if __name__=='__main__':
     unittest.main()

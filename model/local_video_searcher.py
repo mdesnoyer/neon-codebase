@@ -923,6 +923,9 @@ class LocalSearcher(object):
             # uh-oh, something went wrong! In this case, the search region
             # will not be searched again, and so we don't have to worry about
             # updating the knowledge of the search algo.
+            # --- TODO --- #
+            # Add an error case here!
+            # ---      --- #
             return
         self._searched += 1
         frames = self._prep(gold)
