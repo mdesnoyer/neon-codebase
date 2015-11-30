@@ -238,7 +238,7 @@ class JobManager(object):
                               cb)
                     statemon.state.increment('incorrect_callback')
             elif time.time() > (self.start_time + options.serving_timeout):
-                statemon.state.no_callcallback = 1
+                statemon.state.no_callback = 1
                 _log.error('Timeout waiting for the callback')
                 raise RunningTooLongError
 
