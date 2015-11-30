@@ -218,7 +218,7 @@ class SmartCrop(object):
 
     def get_text_boxes(self):
         if self._text_boxes is None:
-            # Downsize the image first. Make the longest edge to be 360 pixels.
+            # Downsize the image first. Make the longest edge to be 600 pixels.
             height = self.image.shape[0]
             width = self.image.shape[1]
             ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
@@ -325,6 +325,7 @@ class SmartCrop(object):
             left_x_end = left_x + new_width - 1
             face_cut_left = 0
             face_cut_right = 0
+            face_cut = 0
             for face in faces:
                 # left bound of the box is cutting off the face
                 if face[0] < left_x and face[0] + face[2] - 1 >= left_x:
@@ -332,12 +333,13 @@ class SmartCrop(object):
                 # right bound of the box is cutting off the face
                 if face[0] < left_x_end and face[0] + face[2] - 1 >= left_x_end:
                     face_cut_right = face[3]
-                face_cut = max(face_cut_left, face_cut_right)
-                if face_cut < min_face_cut:
-                    min_face_cut = face_cut
-                    min_cut_left = left_x
-                    if face_cut == 0:
-                        break
+                face_cut = max(face_cut_left, face_cut_right, face_cut)
+
+            if face_cut < min_face_cut:
+                min_face_cut = face_cut
+                min_cut_left = left_x
+            if face_cut == 0:
+                break
 
         min_face_cut = height
         min_cut_right = new_x
@@ -353,12 +355,13 @@ class SmartCrop(object):
                 # right bound of the box is cutting off the face
                 if face[0] < right_x_end and face[0] + face[2] - 1 >= right_x_end:
                     face_cut_right = face[3]
-                face_cut = max(face_cut_left, face_cut_right)
-                if face_cut < min_face_cut:
-                    min_face_cut = face_cut
-                    min_cut_right = right_x
-                    if face_cut == 0:
-                        break
+                face_cut = max(face_cut_left, face_cut_right, face_cut)
+                
+            if face_cut < min_face_cut:
+                min_face_cut = face_cut
+                min_cut_right = right_x
+                if face_cut == 0:
+                    break
 
         if new_x - min_cut_left < min_cut_right - new_x:
             new_x = min_cut_left
@@ -469,7 +472,8 @@ class SmartCrop(object):
         # print "before text"
         # toc()
         # tic()
-        text_cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
+        if self.with_text_detection:
+            text_cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
 
         # print "after text"
         # toc()
