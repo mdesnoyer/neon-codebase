@@ -197,8 +197,6 @@ class SmartCrop(object):
         if self._faces is not None:
             return self._faces
 
-        _log.info('face detection is called.')
-        _log.info('pixels:' + str(self.image[0][0]) + ', ' + str(self.image[0][1]))
         front_faces = self.detect_front_faces(self.image)
         profile_faces = self.detect_profile_faces(self.image)
 
@@ -444,7 +442,6 @@ class SmartCrop(object):
         ''' Crop and resize to the new size, based on face, saliency and text.
         Saliency crop is biased to the center of the image.
         '''
-        _log.info('crop.')
         (height, width, elem) = self.image.shape
         if self.with_saliency:
             text_boxes = self.get_text_boxes()
