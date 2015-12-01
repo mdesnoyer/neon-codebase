@@ -20,7 +20,7 @@ from cmsdb import cdnhosting
 from cmsdb import neondata
 import multiprocessing
 from PIL import Image
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 import signal
 from StringIO import StringIO
