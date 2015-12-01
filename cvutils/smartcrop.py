@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import sys
 import dlib
+import logging
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
@@ -13,6 +14,9 @@ from utils.options import define, options
 from scipy.fftpack import idct
 from scipy.fftpack import dct
 import time
+
+_log = logging.getLogger(__name__)
+
 define("saliency_threshold", default=50, type=int,
        help="Saliency cut off threshold for boarder trimming.")
 
@@ -192,59 +196,64 @@ class SmartCrop(object):
         '''
         if self._faces is not None:
             return self._faces
+
+        _log.info('face detection is called.')
+        _log.info('pixels:' + str(self.image[0][0]) + ', ' + str(self.image[0][1]))
         front_faces = self.detect_front_faces(self.image)
         profile_faces = self.detect_profile_faces(self.image)
 
         if len(front_faces) == 0:
-            return profile_faces
+            faces = profile_faces
         elif len(profile_faces) == 0:
-            return front_faces
+            faces = front_faces
         else:
             faces = np.append(front_faces, profile_faces, axis=0)
-            self._faces = faces
-            return faces
+        self._faces = faces
+        return faces
 
     def get_text_boxes(self):
         '''Detect text boxes using opencv3 text detector.
         The text detector is created in C++ language using the opencv3.
         Please refer the neon opencv_contrib branch for details.
         '''
-        if self._text_boxes is None:
-            # Downsize the image first. Make the longest edge to be 600 pixels.
-            height = self.image.shape[0]
-            width = self.image.shape[1]
-            ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
-            im_resized = cv2.resize(self.image, (int(self.image.shape[1]/ratio),
-                                                 int(self.image.shape[0]/ratio)))
-            cut_top = int(self._bottom_percent * im_resized.shape[0])
-            bottom_image = im_resized[cut_top:, 0:]
+        if self._text_boxes is not None:
+            return self._text_boxes
 
-            # Text detector is defined in erfilter.cpp in neon version of opencv3
-            # textDetect(InputArray _src, const String &model_1, const String &model_2,
-            #         int thresholdDelta,
-            #         float minArea, float maxArea, float minProbability,
-            #         bool nonMaxSuppression, float minProbabilityDiff,
-            #         float minProbablity_2,
-            #         vector<Rect> &groups_boxes, OutputArray _dst)
+        # Downsize the image first. Make the longest edge to be 600 pixels.
+        height = self.image.shape[0]
+        width = self.image.shape[1]
+        ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
+        im_resized = cv2.resize(self.image, (int(self.image.shape[1]/ratio),
+                                             int(self.image.shape[0]/ratio)))
+        cut_top = int(self._bottom_percent * im_resized.shape[0])
+        bottom_image = im_resized[cut_top:, 0:]
 
-            boxes, mask = cv2.text.textDetect(bottom_image,
-                self.text_classifier1,
-                self.text_classifier2,
-                16, # thresholdDelta, steps for MSER
-                0.00015, # min area, ratio to the total area
-                0.003, # max area, ratio to the total area
-                0.8, # min probablity for step 1
-                True, # bool nonMaxSuppression
-                0.5, # min probability differernce
-                0.9 # min probability for step 2
-                )
-            if len(boxes) == 0:
-                return np.array([])
-            boxes[0:, 1] += cut_top
-            boxes *= ratio
-            boxes = boxes.astype(int)
+        # Text detector is defined in erfilter.cpp in neon version of opencv3
+        # textDetect(InputArray _src, const String &model_1, const String &model_2,
+        #         int thresholdDelta,
+        #         float minArea, float maxArea, float minProbability,
+        #         bool nonMaxSuppression, float minProbabilityDiff,
+        #         float minProbablity_2,
+        #         vector<Rect> &groups_boxes, OutputArray _dst)
 
-            self._text_boxes = boxes
+        boxes, mask = cv2.text.textDetect(bottom_image,
+            self.text_classifier1,
+            self.text_classifier2,
+            16, # thresholdDelta, steps for MSER
+            0.00015, # min area, ratio to the total area
+            0.003, # max area, ratio to the total area
+            0.8, # min probablity for step 1
+            True, # bool nonMaxSuppression
+            0.5, # min probability differernce
+            0.9 # min probability for step 2
+            )
+        if len(boxes) == 0:
+            return np.array([])
+        boxes[0:, 1] += cut_top
+        boxes *= ratio
+        boxes = boxes.astype(int)
+
+        self._text_boxes = boxes
 
         return self._text_boxes
 
@@ -435,6 +444,7 @@ class SmartCrop(object):
         ''' Crop and resize to the new size, based on face, saliency and text.
         Saliency crop is biased to the center of the image.
         '''
+        _log.info('crop.')
         (height, width, elem) = self.image.shape
         if self.with_saliency:
             text_boxes = self.get_text_boxes()
