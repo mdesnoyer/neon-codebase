@@ -99,14 +99,13 @@ class ImageSignatureSaliency(object):
 
 
 class SmartCrop(object):
+    '''Crop and resize images using face, text and saliency.
+    '''
     _instance_ = None
     def __init__(self, image,
                  with_saliency=True,
                  with_face_detection=True,
                  with_text_detection=True):
-        ''' This function should not be called by directly.
-        Using the get_cropper to get the singlton instead.
-        '''
         self.image = image
         self.with_saliency = with_saliency
         self.with_face_detection = with_face_detection
@@ -132,21 +131,6 @@ class SmartCrop(object):
             self._saliency_threshold = options.saliency_threshold
 
 
-
-    # @classmethod
-    # def get_cropper(cls):
-    #     ''' Return a singlton instance. '''
-    #     cls._instance_ = cls._instance_ or SmartCrop()
-    #     # Check if options have changed.
-    #     if cls._instance_.haar_profile != options.haar_profile:
-    #         cls._instance_.haar_profile = options.haar_profile
-    #         cls._instance_.profile_face_cascade = cv2.CascadeClassifier()
-    #         cls._instance_.profile_face_cascade.load(cls._instance_.haar_profile)
-
-    #     cls._instance_.text_classifier1 = options.text_classifier1
-    #     cls._instance_.text_classifier2 = options.text_classifier2
-    #     return cls._instance_
-
     def get_saliency_map(self):
         if self._saliency_map is None:
             saliency = ImageSignatureSaliency(self.image)
@@ -154,6 +138,8 @@ class SmartCrop(object):
         return self._saliency_map
 
     def detect_front_faces(self, im):
+        '''Using dlib to detect front faces.
+        '''
         prep_im = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         height = self.image.shape[0]
         width = self.image.shape[1]
@@ -170,15 +156,9 @@ class SmartCrop(object):
 
         return face_array
 
-    def detect_faces(self):
-        if self._faces is None:
-            self._faces = self._detect_faces(self.image)
-        return self._faces
-
-    def _detect_faces(self, im):
-        front_faces = self.detect_front_faces(im)
-        # return front_faces
-        tic()
+    def detect_profile_faces(self, im):
+        '''Using haar detector to detect profile faces.
+        '''
         height = self.image.shape[0]
         width = self.image.shape[1]
         ratio = max(self.image.shape[0]/600.0, self.image.shape[1]/600.0)
@@ -197,8 +177,6 @@ class SmartCrop(object):
             flip_profile_faces = np.array([])
         flip_profile_faces *= ratio
         flip_profile_faces = flip_profile_faces.astype(int)
-        print "time for profile_faces."
-        toc()
         if len(flip_profile_faces) != 0:
             flip_profile_faces[0:, 0] = im.shape[1] - (flip_profile_faces[0:, 0] +
                                                        flip_profile_faces[0:, 2])
@@ -206,7 +184,16 @@ class SmartCrop(object):
                 profile_faces = flip_profile_faces
             else:
                 profile_faces = np.append(profile_faces, flip_profile_faces, axis=0)
+        return profile_faces
 
+    def detect_faces(self):
+        '''Detect both frontal and profile faces and combine the results.
+        self._faces is set to only calculate once.
+        '''
+        if self._faces is not None:
+            return self._faces
+        front_faces = self.detect_front_faces(self.image)
+        profile_faces = self.detect_profile_faces(self.image)
 
         if len(front_faces) == 0:
             return profile_faces
@@ -214,9 +201,14 @@ class SmartCrop(object):
             return front_faces
         else:
             faces = np.append(front_faces, profile_faces, axis=0)
+            self._faces = faces
             return faces
 
     def get_text_boxes(self):
+        '''Detect text boxes using opencv3 text detector.
+        The text detector is created in C++ language using the opencv3.
+        Please refer the neon opencv_contrib branch for details.
+        '''
         if self._text_boxes is None:
             # Downsize the image first. Make the longest edge to be 600 pixels.
             height = self.image.shape[0]
@@ -291,23 +283,56 @@ class SmartCrop(object):
         new_width = new_height * width / height
         new_x = x + (width - new_width)/2
         new_x_end = x + new_width
-        cropped_im = self.image[y:upper_text_y, x:x+new_width]
-        faces = self.detect_faces()
-        face_cut_left = 0
-        face_cut_right = 0
-        for face in faces:
-            if face[0] < new_x and face[0] + face[2] - 1 >= new_x:
-                face_cut_left = face[3]
-                face_left_bound = x
-            if face[0] < new_x_end and face[0] + face[2] - 1 >= new_x_end:
-                face_cut_right = face[3]
-                face_right_bound = x + width - 1
-        if face_cut_left > face_cut_right:
-            new_x = face_left_bound
-        if face_cut_right > face_cut_left:
-            new_x = face_right_bound - new_width + 1
+        if self.with_face_detection:
+            faces = self.detect_faces()
+            new_x = self.face_adjust(faces, new_x, new_width)
 
         return self.image[y:y+new_height, new_x:new_x+new_width]
+
+    def _insert_interval(self, interval_group, new_interval):
+        '''Insert a new interval into the interval group.
+        If it overlaps with existing intervals, combine them.
+        The intervals can be viewed as the face cuts.
+        '''
+        new_interval_group = []
+        for interval in interval_group:
+            if new_interval[0] >= interval[0] and new_interval[0] <= interval[1] or \
+               new_interval[1] >= interval[0] and new_interval[1] <= interval[1]:
+                new_interval = (min(new_interval[0], interval[0]),
+                                max(new_interval[1], interval[1]))
+            else:
+                new_interval_group.append(interval)
+        new_interval_group.append(new_interval)
+        return new_interval_group
+
+    def _get_interval_sum(self, interval_group):
+        '''The length summation of all the intervals.
+        For example, if a vertical line cut multiple faces, this returns the
+        total length of face cuts.
+        '''
+        lengths = [x[1] - x[0] + 1 for x in interval_group]
+        return sum(lengths)
+
+    def _face_cut_length(self, left_line, right_line, faces):
+        '''Check the left and right bounding box to return the size of face cut.
+        If there is not face cut, returns 0; otherwise, returns the max.
+        '''
+        left_cuts = []
+        right_cuts = []
+        for face in faces:
+            # left bound of the box is cutting off the face
+            if face[0] < left_line and face[0] + face[2] - 1 >= left_line:
+                left_cuts = self._insert_interval(left_cuts,
+                                                  (face[1], face[1] + face[3] -1))
+            # right bound of the box is cutting off the face
+            if face[0] < right_line and face[0] + face[2] - 1 >= right_line:
+                right_cuts = self._insert_interval(right_cuts,
+                                                  (face[1], face[1] + face[3] -1))
+
+        left_length = self._get_interval_sum(left_cuts)
+        right_length = self._get_interval_sum(right_cuts)
+        return max(left_length, right_length)
+
 
     def face_adjust(self, faces, new_x, new_width):
         ''' Search nearby and horizontally to avoid face cutting.
@@ -323,18 +348,7 @@ class SmartCrop(object):
         # Search all the spaces to the left to see if we can have non cut face.
         for left_x in xrange(new_x, -1, -1):
             left_x_end = left_x + new_width - 1
-            face_cut_left = 0
-            face_cut_right = 0
-            face_cut = 0
-            for face in faces:
-                # left bound of the box is cutting off the face
-                if face[0] < left_x and face[0] + face[2] - 1 >= left_x:
-                    face_cut_left = face[3]
-                # right bound of the box is cutting off the face
-                if face[0] < left_x_end and face[0] + face[2] - 1 >= left_x_end:
-                    face_cut_right = face[3]
-                face_cut = max(face_cut_left, face_cut_right, face_cut)
-
+            face_cut = self._face_cut_length(left_x, left_x_end, faces)
             if face_cut < min_face_cut:
                 min_face_cut = face_cut
                 min_cut_left = left_x
@@ -346,17 +360,7 @@ class SmartCrop(object):
         # Search all the spaces to the right to see if we can have non cut face.
         for right_x in xrange(new_x, width - new_width + 2):
             right_x_end = right_x + new_width - 1
-            face_cut_left = 0
-            face_cut_right = 0
-            for face in faces:
-                # right bound of the box is cutting off the face
-                if face[0] < right_x and face[0] + face[2] - 1 >= right_x:
-                    face_cut_left = face[3]
-                # right bound of the box is cutting off the face
-                if face[0] < right_x_end and face[0] + face[2] - 1 >= right_x_end:
-                    face_cut_right = face[3]
-                face_cut = max(face_cut_left, face_cut_right, face_cut)
-                
+            face_cut = self._face_cut_length(right_x, right_x_end, faces)
             if face_cut < min_face_cut:
                 min_face_cut = face_cut
                 min_cut_right = right_x
@@ -373,6 +377,9 @@ class SmartCrop(object):
         return new_x
 
     def saliency_adjust(self, h, w):
+        '''Crop the image using saliency map.
+        The current method is to crop the image conservatively. 
+        '''
         (height, width, elem) = self.image.shape
         # tic()
         saliency_map = self.get_saliency_map()
@@ -425,25 +432,16 @@ class SmartCrop(object):
 
 
     def crop_and_resize(self, h, w):
-        ''' Find the cropped area maximizes the summation of the saliency
-        value
+        ''' Crop and resize to the new size, based on face, saliency and text.
+        Saliency crop is biased to the center of the image.
         '''
-        # t_begin = tic()
-        text_boxes = self.get_text_boxes()
-        # print "get_text_boxes"
-        # toc()
-        # tic()
-        if len(text_boxes) == 0:
-            neutral_width = float(self.image.shape[1]) * h / self.image.shape[0]
-            if abs(neutral_width - w) <= 5.0:
-                return cv2.resize(self.image, (w, h))
-
-        im = self.image.copy()
-
         (height, width, elem) = self.image.shape
-        # print "before saliency"
-        # toc()
-        # tic()
+        if self.with_saliency:
+            text_boxes = self.get_text_boxes()
+            if len(text_boxes) == 0:
+                neutral_width = float(width) * h / height
+                if abs(neutral_width - w) <= 5.0:
+                    return cv2.resize(self.image, (w, h))
 
         # Get the default crop locations.
         if float(h) / height > float(w) / width:
@@ -458,7 +456,8 @@ class SmartCrop(object):
         new_y = center_vertical - height / 2
 
 
-        (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
+        if self.with_saliency:
+            (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
 
         if self.with_face_detection:
             # tic()
@@ -467,19 +466,11 @@ class SmartCrop(object):
             # toc()
             new_x = self.face_adjust(faces, new_x, new_width)
 
-        # cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
 
-        # print "before text"
-        # toc()
-        # tic()
         if self.with_text_detection:
-            text_cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
+            cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
+        else:
+            cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
 
-        # print "after text"
-        # toc()
-        # tic()
-        resized_im = cv2.resize(text_cropped_im, (w, h))
-        # "end"
-        # t_end = toc()
-        # print "total", (t_end-t_begin), "seconds"
+        resized_im = cv2.resize(cropped_im, (w, h))
         return resized_im
