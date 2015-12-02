@@ -54,7 +54,9 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 duration = video.get('duration', None)
                 if duration:
                     ts = time.strptime(duration, "%H:%M:%S")
-                    duration = datetime.timedelta(hours=ts.tm_hour, minutes=ts.tm_min, seconds=ts.tm_sec).total_seconds()
+                    duration = datetime.timedelta(hours=ts.tm_hour, 
+                                                  minutes=ts.tm_min, 
+                                                  seconds=ts.tm_sec).total_seconds()
 
                 thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
                 custom_data = self._build_custom_data_from_topics(video['topics'])
