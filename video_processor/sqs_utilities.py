@@ -221,8 +221,7 @@ class VideoProcessingQueue(object):
         except tornado.gen.Return:
             raise tornado.gen.Return(final_message.get_body())
         except ValueError, e:
-            _log.error(e.message)
-            raise tornado.gen.Return(False)
+            raise Exception(e)
 
     @tornado.gen.coroutine
     def read_message(self):
@@ -238,14 +237,12 @@ class VideoProcessingQueue(object):
            A message if successful, None otherwise
         '''
         priority = self._get_priority_qindex()
-        _log.info(priority)
         message = None
         while priority < options.num_queues and message == None:
             queue = self._get_queue(priority)
             message = yield self._sqs_read(queue)
             priority += 1
 
-        _log.info(message)
         timeout = 300
         if(message):
             if(message.message_attributes['duration']['string_value']):

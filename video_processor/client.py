@@ -20,6 +20,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import atexit
+import boto
 import boto.exception
 from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
@@ -55,7 +56,7 @@ import utils.neon
 import utils.pycvutils
 import utils.http
 from utils import statemon
-from video_processor import sqs_utilities
+from video_processor import video_processing_queue
 
 import logging
 _log = logging.getLogger(__name__)
@@ -110,10 +111,14 @@ define('max_bandwidth_per_core', default=15500000.0,
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
-define('region', default='us-east-1', help='Region of the SQS queue to connect to')
-define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
-define('secret_key', default='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', 
-       help='Secret key to connect to AWS')
+define('video_queue_region', default='us-east-1', 
+       help='region of the SQS queue to connect to')
+define('fail_count', default=2, help='Number of failures allowed before a '
+       'message is deleted')
+define('attempt_count', default=5, help='Number of attempts allowed before a '
+       'message is deleted')
+define('timeout_length', default=1.0, help='Amount of time that dequeue_job is '
+       'allowed to run before timing out')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -184,17 +189,10 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
-
-    def start(self, message):
+    def start(self, sqs_queue, message):
         '''
         Actual work done here
         '''
-        #Initialize SQS
-        '''server = sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue()
-        yield self.sqs_queue.connect_to_server(options.region,
-                                               options.aws_key,
-                                               options.secret_key)'''
         try:
             statemon.state.increment('workers_downloading')
             try:
@@ -215,7 +213,6 @@ class VideoProcessor(object):
             #finalize response, if success send client and notification
             #response
             self.finalize_response()
-            #self.sqs_queue.delete_message(message)
 
 
         except OtherWorkerCompleted as e:
@@ -254,6 +251,7 @@ class VideoProcessor(object):
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
+            sqs_queue.delete_message(message)
 
     def download_video_file(self):
         '''
@@ -682,7 +680,6 @@ class VideoProcessor(object):
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
         
-
     def build_callback_response(self):
         '''
         build the dict that defines the callback response
@@ -761,6 +758,7 @@ class VideoClient(multiprocessing.Process):
         self.model = None
         self.cv_semaphore = cv_semaphore
         self.videos_processed = 0
+        self.sqs_queue = video_processing_queue.VideoProcessingQueue()
 
     @tornado.gen.coroutine
     def dequeue_job(self):
@@ -769,11 +767,8 @@ class VideoClient(multiprocessing.Process):
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        server = sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue()
-        yield self.sqs_queue.connect_to_server(options.region,
-                                               options.aws_key,
-                                               options.secret_key)
+        yield self.sqs_queue.connect_to_server(options.video_queue_region)
+
         _log.info("Connected to SQS server")
         message = yield self.sqs_queue.read_message()
         if message:
@@ -806,29 +801,26 @@ class VideoClient(multiprocessing.Process):
                         _log.error('Could not get job %s for %s' %
                                    (job_id, api_key))
                         statemon.state.increment('dequeue_error')
-                        raise tornado.gen.Return(False)
+                        raise Exception('Api Request does not exist.')
                     if api_request.state != neondata.RequestState.PROCESSING:
                         _log.info('Job %s for account %s ignored' %
                                   (job_id, api_key))
-                        raise tornado.gen.Return(False)
+                        raise Exception('Job is not processing.')
                     _log.info("key=worker [%s] msg=processing request %s for "
                               "%s." % (self.pid, job_id, api_key))
-                    if api_request.fail_count > 2 or api_request.try_count > 5:
+                    if (api_request.fail_count > options.fail_count or 
+                            api_request.try_count > options.attempt_count):
                         _log.info('Job %s for account %s has failed too many ' \
                                    'times' %
                                     (job_id, api_key))
                         self.sqs_queue.delete_message(message)
-
-                        _log.info("This job has been deleted")
-                        raise tornado.gen.Return(False)
-                except tornado.gen.Return:
-                    raise tornado.gen.Return(False)
-                except Exception,e:
+                        raise Exception('Too many attempts. Aborting')
+                except Exception as e:
                     _log.error("key=worker [%s] msg=db error %s" %(
                         self.pid, e.message))
-                    raise tornado.gen.Return(False)
+                    raise Exception(e.message)
             if(job_params):
-                _log.info("Dequeue Successful")
+                _log.debug("Dequeue Successful")
                 job_and_message = (job_params, message)
                 raise tornado.gen.Return(job_and_message)
  
@@ -836,7 +828,7 @@ class VideoClient(multiprocessing.Process):
         else:
             _log.error("Dequeue Error")
             statemon.state.increment('dequeue_error')
-            raise tornado.gen.Return(False)
+            raise Exception('Server is empty')
 
     ##### Model Methods #####
 
@@ -848,6 +840,7 @@ class VideoClient(multiprocessing.Process):
         _log.info('Loading model from %s version %s'
                   % (self.model_file, self.model_version))
         self.model = model.load_model(self.model_file)
+
         if not self.model:
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
@@ -859,8 +852,11 @@ class VideoClient(multiprocessing.Process):
         
         # Register a function to die cleanly on a sigterm
         atexit.register(self.stop)
+        start_time = time.time()
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
+            if(time.time() - start_time > options.timeout_length):
+                raise TimeoutError()
             self.do_work()
  
         _log.info("stopping worker [%s] " % (self.pid))
@@ -870,10 +866,7 @@ class VideoClient(multiprocessing.Process):
     def do_work(self):   
         ''' do actual work here'''
         try:
-            job_and_message = yield self.dequeue_job()
-            job = job_and_message[0]
-            message = job_and_message[1]
-            _log.info(job)
+            job, message = yield self.dequeue_job()
             if not job or job == "{}": #string match
                 raise Queue.Empty
 
@@ -886,12 +879,12 @@ class VideoClient(multiprocessing.Process):
                                         self.cv_semaphore,
                                         job['reprocess'])
             statemon.state.increment('workers_processing')
+
             try:
-                vprocessor.start(message)
+                vprocessor.start(self.sqs_queue, message)
             finally:
                 statemon.state.decrement('workers_processing')
             self.videos_processed += 1
-            self.sqs_queue.delete_message(message)
 
         except Queue.Empty:
             _log.debug("Q,Empty")
@@ -929,6 +922,9 @@ def shutdown_master_process():
             # Send a SIGKILL
             utils.ps.send_signal_and_wait(signal.SIGKILL, [worker.pid])
     
+class TimeoutError(Exception):
+    def __init__(self):
+        self.message = "The worker timed out"
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

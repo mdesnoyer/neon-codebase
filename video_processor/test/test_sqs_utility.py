@@ -27,17 +27,9 @@ from tornado import ioloop
 from tornado.testing import AsyncTestCase
 import unittest
 import utils.neon
-import video_processor.sqs_utilities
+import video_processor.video_processing_queue
 
 _log = logging.getLogger(__name__)
-
-# ======== Parameters  =======================#
-from utils.options import define, options
-define('region', default='us-east-1', help='Region of the SQS queue to connect to')
-define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
-define('secret_key', default='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', 
-       help='Secret key to connect to AWS')
-define('num_queues', default=3, help='Number of queues in the SQS server')
 
 class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
     '''Used to test the SQS queue'''
@@ -45,10 +37,12 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestVideoProcessingQueue, self).setUp()
         
-        self.mock_sqs = sqsmock.SQSConnectionMock()
-        self.mock_queue = sqsmock.SQSQueueMock()
+        self.video_queue_region = 'us-east-1'
+        self.num_queues = 3
 
-        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+        self.mock_sqs = sqsmock.SQSConnectionMock()
+
+        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
 
         self.mock_sqs_future = self._future_wrap_mock(
@@ -57,107 +51,84 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
        
         self.mock_sqs_future.return_value = self.mock_sqs
 
-        self.read_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
-                                    'queue.Queue.read')
-
-        self.mock_read_future = self._future_wrap_mock(
-            self.read_patcher.start(),
-            require_async_kw=True)
-
-        self.mock_read_future.side_effect = self.mock_queue.read
-
-
-        self.write_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
-                                    'queue.Queue.write')
-
-        self.mock_write_future = self._future_wrap_mock(
-            self.write_patcher.start(),
-            require_async_kw=True)
-
-        self.mock_write_future.side_effect = self.mock_queue.write
-
-        self.delete_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
-                                    'queue.Queue.delete_message')
-
-        self.mock_delete_future = self._future_wrap_mock(
-            self.delete_patcher.start(),
-            require_async_kw=True)
-
-        self.mock_delete_future.side_effect = self.mock_queue.delete_message
-
     def tearDown(self):
         self.sqs_patcher.stop()
-        self.read_patcher.stop()
-        self.write_patcher.stop()
-        self.delete_patcher.stop()
         super(TestVideoProcessingQueue, self).tearDown()
      
-    @tornado.testing.gen_test(timeout=5)
+    @tornado.testing.gen_test(timeout=10)
     def test_full_class(self):
-        _log.info("Beginning full sqs test")
-        serv = video_processor.sqs_utilities
-        self.sqs = serv.VideoProcessingQueue()
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield self.sqs.connect_to_server(options.region,
-                                         options.aws_key,
-                                         options.secret_key)
+        yield sqs.connect_to_server(self.video_queue_region)
 
-        for i in range(1, 101):
-            priority = i%options.num_queues
+        for i in range(1, 11):
+            priority = i % self.num_queues
 
-            message_body = yield self.sqs.write_message(priority, str(i))
-            _log.info("message written")
+            message_body = yield sqs.write_message(priority, str(i))
             self.assertTrue(message_body)
 
-        count = 100
+        count = 10
         while count > 0:
-            mes = yield self.sqs.read_message()
-            _log.info("message read")
+            mes = yield sqs.read_message()
 
             if mes != None:
-                deleted = yield self.sqs.delete_message(mes)
-                _log.info("message deleted")
+                deleted = yield sqs.delete_message(mes)
                 self.assertTrue(deleted)
                 count = count - 1
 
-    @tornado.testing.gen_test(timeout=5)
+    @tornado.testing.gen_test
     def test_invalid_priority(self):
-        _log.info("Writing garbage")
-        serv = video_processor.sqs_utilities
-        self.sqs = serv.VideoProcessingQueue()
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield self.sqs.connect_to_server(options.region,
-                                         options.aws_key,
-                                         options.secret_key)
+        yield sqs.connect_to_server(self.video_queue_region)
 
-        message_body = yield self.sqs.write_message(3, 'Test')
+        with self.assertRaises(ValueError) as cm:
+            message_body = yield sqs.write_message(5, 'Test')
 
-    @tornado.testing.gen_test(timeout=5)
+    @tornado.testing.gen_test
     def test_read_from_empty_server(self):
-        _log.info("Reading empty server")
-        serv = video_processor.sqs_utilities
-        self.sqs = serv.VideoProcessingQueue()
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield self.sqs.connect_to_server(options.region,
-                                         options.aws_key,
-                                         options.secret_key)
+        yield sqs.connect_to_server(self.video_queue_region)
         
-        message = yield self.sqs.read_message()
+        message = yield sqs.read_message()
         self.assertIsNone(message)
 
-    @tornado.testing.gen_test(timeout=5)
-    def test_delete_from_empty_server(self):
-        serv = video_processor.sqs_utilities
-        _log.info("Reading empty server")
-        self.sqs = serv.VideoProcessingQueue()
+    @tornado.testing.gen_test
+    def test_delete_message_twice(self):
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield self.sqs.connect_to_server(options.region,
-                                         options.aws_key,
-                                         options.secret_key)
+        yield sqs.connect_to_server(self.video_queue_region)
 
         message = Message()
-        deleted = yield self.sqs.delete_message(message)
-        self.assertFalse(message)
+        yield sqs.write_message(0, 'test')
+        mes = None
+        while not mes:
+            mes = yield sqs.read_message()
+
+        deleted = yield sqs.delete_message(mes)
+        self.assertTrue(deleted)
+        deleted = yield sqs.delete_message(mes)
+        self.assertFalse(deleted)
+
+    @tornado.testing.gen_test
+    def test_invalid_message_body(self):
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
+
+        yield sqs.connect_to_server(self.video_queue_region)
+        
+        test_tuple = (0, 'test')
+        test_dict = [0,3,2]
+
+        with self.assertRaises(ValueError) as cm:
+            yield sqs.write_message(0, 13)
+
+        with self.assertRaises(ValueError) as cm:
+            yield sqs.write_message(0, test_tuple)
+
+        with self.assertRaises(ValueError) as cm:
+            yield sqs.write_message(0, test_dict)
+
 
 
 if __name__ == '__main__':

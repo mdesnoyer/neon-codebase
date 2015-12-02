@@ -7,7 +7,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import boto.exception
-from boto.s3.connection import S3Connection
 
 import traceback
 import datetime
@@ -30,7 +29,7 @@ import utils.neon
 import utils.logs
 import utils.http
 
-import video_processor.sqs_utilities
+import video_processor.video_processing_queue
 
 import dateutil.parser
 
@@ -51,10 +50,7 @@ define("port", default=8084, help="run on the given port", type=int)
 define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
-define('region', default='us-east-1', help='Region of the SQS queue to connect to')
-define('aws_key', default='AKIAIG2UEH2FF6WSRXDA', help='Key to connect to AWS')
-define('secret_key', default='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', 
-       help='Secret key to connect to AWS')
+define('video_queue_region', default='us-east-1', help='region of the SQS queue to connect to')
 
 from utils import statemon
 statemon.define('post_account_oks', int) 
@@ -814,20 +810,20 @@ class VideoHelper():
                 api_request = neondata.NeonApiRequest.get(video.job_id, account_id_api_key)
                 
                 # send the request to the video server
-                server = video_processor.sqs_utilities
+                server = video_processor.video_processing_queue
                 sqs_queue = server.VideoProcessingQueue()
 
-                yield sqs_queue.connect_to_server(options.region,
-                                                       options.aws_key,
-                                                       options.secret_key)
+                yield sqs_queue.connect_to_server(options.video_queue_region)
 
                 #Need the priority. Also, I'm assuming that the api_request is the body of the message
-                message = yield sqs_queue.write_message(0, 
-                                                api_request.to_json())
+                message = yield sqs_queue.write_message(
+                    api_request.get_processing_priority(), 
+                    api_request.to_json(),
+                    video.duration * 2)
                 if message: 
                     raise tornado.gen.Return((video,api_request))
                 else:  
-                    raise Exception('unable to communicate with video server', ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+                    raise Exception('unable to communicate with SQS queue')
             else: 
                 raise AlreadyExists('job_id=%s' % (video.job_id))
 
@@ -888,18 +884,16 @@ class VideoHandler(APIV2Handler):
                                _set_serving_enabled)
             
         # add the job
-        server = video_processor.sqs_utilities
-        self.sqs_queue = server.VideoProcessingQueue()
+        sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield self.sqs_queue.connect_to_server(options.region,
-                                               options.aws_key,
-                                               options.secret_key)
+        yield sqs_queue.connect_to_server(options.video_queue_region)
 
         account = neondata.NeonUserAccount.get(account_id)
 
-        message = yield self.sqs_queue.write_message(
-                                        account.get_processing_priority(), 
-                                        api_request.to_json())
+        message = yield sqs_queue.write_message(
+                    account.get_processing_priority(), 
+                    api_request.to_json(),
+                    new_video.duration * 2)
 
         #if response and response.code is ResponseCode.HTTP_OK: 
         if message:

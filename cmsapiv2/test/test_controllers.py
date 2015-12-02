@@ -7,7 +7,6 @@ if sys.path[0] != __base_path__:
 
 
 from boto.sqs.message import Message
-from boto.s3.connection import S3Connection
 import boto.exception
 from cmsapiv2 import controllers
 import json
@@ -29,7 +28,7 @@ from StringIO import StringIO
 from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
-import video_processor.sqs_utilities
+import video_processor.video_processing_queue
 
 
 class TestControllersBase(test_utils.neontest.AsyncHTTPTestCase): 
@@ -874,11 +873,11 @@ class TestVideoHandler(TestControllersBase):
         self.verify_account_mock.side_effect = True
 
         # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
         self.mock_sqs = self.sqs_patcher.start()
         self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
-        self.write_patcher = patch('video_processor.sqs_utilities.'\
+        self.write_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.write_message')
         self.mock_write_future = self._future_wrap_mock(
             self.write_patcher.start(),
@@ -1492,11 +1491,11 @@ class TestHealthCheckHandler(TestControllersBase):
               self.http_mocker.start()) 
 
         # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.sqs_utilities.boto.sqs.' \
+        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
         self.mock_sqs = self.sqs_patcher.start()
         self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
-        self.write_patcher = patch('video_processor.sqs_utilities.'\
+        self.write_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.write_message')
         self.mock_write_future = self._future_wrap_mock(
             self.write_patcher.start(),
