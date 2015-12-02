@@ -66,11 +66,46 @@ NORMALIZE = 0     # flag for statistics where better = closer to mean
 MAXIMIZE = 1      # flag for statistics where better = larger
 PEN_LOW_HALF = -2 # flag for statistics where better > median
 PEN_HIGH_HALF = 2 # flag for statistics where better < median
-PEN_NONZERO = 3   # flag for statistics as (x > 0)
+PEN_ZERO = 3   # flag for statistics as (x > 0)
 
 TESTING = False
 TESTING_DIR = None
 CUR_TESTING_DIR = None
+
+def get_feat_score_transfer_func(max_penalty, median=0.3):
+    '''
+    Returns a function that maps a feature score to another score that will be
+    multiplicatively combined with the score and the other transferred feature
+    scores. Thus, max_penalty is the maximum amount the final score may be
+    reduced by having the worst feature score for this particular feature
+    possible. 
+
+    In other words, if you wish the blurriest image in a video to have its
+    final score reduced by at least 80%, irrespective of its other feature
+    scores, then you would obtain its transfer func with
+
+    get_feat_score_transfer_func(0.8)
+
+    The median is the score for which the penalty for the final score for that
+    image is (at least, depending on the other feature scores) equidistant
+    between the max penalty and no penalty. So if it's value is 0.4, then an
+    image in the 40th percentile of the rankings is penalized with half the
+    maximum penalty  
+    '''
+    k = 7. # this is the slope of the transfer function. 
+    c = max_penalty
+    x0 = median
+    def calcL(k, x0, c):
+        numer = (c-1)*np.exp(-k*x0)*(np.exp(k*x0)+1)*(np.exp(k*x0)+np.exp(k))
+        return -(numer / (np.exp(k)-1))
+
+    def calcZ(k, x0, c):
+        numer = -c * (np.exp(k*x0) + 1) + np.exp(k*(x0-1)) + 1
+        return numer / (np.exp(k*(x0-1)) - np.exp(k*x0))
+
+    L = calcL(k, x0, c)
+    Z = calcZ(k, x0, c)
+    return lambda x: Z + (L / (1+np.exp(-k*(x-x0))))
 
 class Statistics(object):
     '''
@@ -216,8 +251,8 @@ class Combiner(object):
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
-    def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
-                 combine=lambda x: np.sum(x)):
+    def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
+                 combine=lambda x: np.prod(x)):
         '''
         weight_dict is a dictionary of {'stat name': weight} which yields
             absolute weights.
@@ -232,6 +267,11 @@ class Combiner(object):
         '''
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
+        # compute the transfer functions
+        self._trans_funcs = dict()
+        for feat in weight_valence:
+            max_pen = penalties[feat]
+            self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
         self._combine = combine
 
     def _set_stats_dict(self, stats_dict):
@@ -256,9 +296,10 @@ class Combiner(object):
             if self.weight_valence.has_key(feat_name):
                 valence = self.weight_valence[feat_name]
             else:
-                valence = MINIMIZE # assume you are trying to maximize it
+                _log.error('No valence defined for feature %s'%(feat_name))
+                raise
             for v in feat_vec:
-                if valence == PEN_NONZERO:
+                if valence == PEN_ZERO:
                     rank = int(v > 0)
                 else:
                     rank = self._stats_dict[feat_name].rank(v)
@@ -270,11 +311,8 @@ class Combiner(object):
                     rank = 1. + min(0, rank - 0.5) * 2
                 if valence == PEN_HIGH_HALF:
                     rank = 1. - max(0, rank - 0.5) * 2
-                vals.append(rank * self.weight_dict[feat_name])
+                vals.append(self._trans_funcs[feat_name](rank))
             return vals
-
-        else:
-            return [(x * self.weight_dict[feat_name])**2 for x in feat_vec]
         return feat_vec
 
     def _compute_stats_score_func(self, feat_name, feat_val):
@@ -286,7 +324,8 @@ class Combiner(object):
             if self.weight_valence.has_key(feat_name):
                 valence = self.weight_valence[feat_name]
             else:
-                valence = MINIMIZE
+                _log.error('No valence defined for feature %s'%(feat_name))
+                raise
             if valence == MINIMIZE:
                 rankfunc = lambda x: 1. - stat_obj.rank(x)
             elif valence == NORMALIZE:
@@ -297,11 +336,11 @@ class Combiner(object):
                 rankfunc = lambda x: 1. - max(0, stat_obj.rank(x) - 0.5) * 2
             elif valence == MAXIMIZE:
                 rankfunc = lambda x: stat_obj.rank(x)
-            elif valence == PEN_NONZERO:
+            elif valence == PEN_ZERO:
                 rankfunc = lambda x: x > 0
-            return lambda: rankfunc(feat_val)**2 * self.weight_dict[feat_name]
+            return lambda: self._trans_funcs[feat_name](rankfunc(feat_val))
         else:
-            return lambda: (feat_val * self.weight_dict[feat_name])**2
+            return lambda: feat_val
 
     def combine_scores_func(self, feat_dict):
         '''This will return a list of functions that can be evaluated lazily,
@@ -309,11 +348,9 @@ class Combiner(object):
         event that some thumbnails would not actually be accepted if the order
         of analysis was changed.'''
         funcs = []
-        tot_pos = float(np.sum(
-                            [self.weight_dict[x] for x in feat_dict.keys()]))
         for feat_name, feat_val in feat_dict.iteritems():
             funcs.append(self._compute_stats_score_func(feat_name, feat_val))
-        return lambda: sum([x() for x in funcs])/tot_pos
+        return lambda: self._combine([x() for x in funcs])
 
     def combine_scores(self, feat_dict):
         '''
@@ -322,14 +359,11 @@ class Combiner(object):
         '''
 
         stat_scores = []
-        tot_pos = float(np.sum(
-                            [self.weight_dict[x] for x in feat_dict.keys()]))
         for k, v in feat_dict.iteritems():
             stat_scores.append(self._compute_stat_score(k, v))
         comb_scores = []
         for x in zip(*stat_scores):
             comb_score = self._combine(x)
-            comb_score /= tot_pos # normalize
             comb_scores.append(comb_score)
         return comb_scores
 
@@ -373,11 +407,8 @@ class _Result(object):
     def comb_score(self):
         if self.feat_score is None:
             return self.score
-        if self._feat_score_weight is None:
-            return self.score
-        return self.score + self.feat_score * self._feat_score_weight
-        # let's try multiplicative
-        #return self.score * (self.feat_score * self._feat_score_weight)
+        #return self.score * self.feat_score * self._feat_score_weight
+        return self.score * self.feat_score
 
     def __cmp__(self, other):
         if type(self) is not type(other):
@@ -684,6 +715,7 @@ class LocalSearcher(object):
                  adapt_improve=False,
                  queue_unsearched=False,
                  use_all_data=False,
+                 use_best_data=False,
                  testing=False,
                  testing_dir='/tmp'):
         '''
@@ -758,6 +790,11 @@ class LocalSearcher(object):
             use_all_data:
                 If True, will use all feature data from any analyzed thumb,
                 not just those from the search intervals.
+            use_best_data:
+                If True, local search will add the data from the best
+                thumbnail found to its knowledge about the feature score
+                distributions. Note that this option is irrelevant if 
+                use_all_data is enabled.
             testing:
                 If true, saves the sequence of considered thumbnails to the
                 directory specified by testing_dir as
@@ -782,6 +819,7 @@ class LocalSearcher(object):
         self.filters = filters
         self.max_variety = max_variety
         self.use_all_data = use_all_data
+        self.use_best_data = use_best_data
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
@@ -986,13 +1024,6 @@ class LocalSearcher(object):
             feats = fgen.generate_many(frames)
             if f.feature in self.feats_to_cache:
                 frame_feats[f.feature] = feats
-                if self.use_all_data:
-                    for cfidx, fval in enumerate(feats):
-                        if ((framenos[cfidx] == start_frame) and 
-                            (framenos[cfidx] == end_frame)):
-                            # then it's already been measured
-                            continue
-                        self.stats[f.feature].push(fval)
             accepted = f.filter(feats)
             n_rej = np.sum(np.logical_not(accepted))
             n_acc = np.sum(accepted)
@@ -1020,12 +1051,6 @@ class LocalSearcher(object):
             if k in self.feats_to_cache:
                 feats = f.generate_many(frames)
                 frame_feats[k] = feats
-                for cfidx, fval in enumerate(feats):
-                    if ((framenos[cfidx] == start_frame) and 
-                        (framenos[cfidx] == end_frame)):
-                        # then it's already been measured
-                        continue
-                    self.stats[k].push(fval)
         # get the combined scores
         comb = self.combiner.combine_scores(frame_feats)
         comb = np.array(comb)
@@ -1041,6 +1066,25 @@ class LocalSearcher(object):
         flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
         inter_framescore = (1 - flambda) * start_score + flambda * end_score
         framescore = (indi_framescore + inter_framescore) / 2
+        if self.use_all_data:
+            # save the data from the analysis, for frames that were not
+            # filtered out.
+            for featName, cfeats in frame_feats.iteritems():
+                if featName not in self.feats_to_cache:
+                    continue
+                for cfidx, fval in enumerate(cfeats):
+                    if ((framenos[cfidx] == start_frame) and 
+                        (framenos[cfidx] == end_frame)):
+                        # then it's already been measured
+                        continue
+                    self.stats[featName].push(fval)
+        elif (self.use_best_data and 
+              (best_frameno != start_frame) and 
+              (best_frameno != end_frame)):
+            # save the data from the best identified thumb
+            for featName, featVal in best_feat_dict.iteritems():
+                self.stats[featName].push(featVal)
+
         _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
                     ' is %i with interp score %.3f and with feature score '
                     '%.3f')%(start_frame,
@@ -1051,11 +1095,11 @@ class LocalSearcher(object):
         # push the frame into the results object. Ensure that the analysis 
         # frame is not inserted, but rather the best "gold" frame (i.e., one
         # that has not been cropped in accordance with analysis_crop)
-        # if best_frameno == 757:
+        # if best_frameno == 2353:
         #     import ipdb
         #     ipdb.set_trace()
         self.results.accept_replace(best_frameno, framescore, best_gold,
-                                    np.max(comb), meta=frame_feats,
+                                    np.max(comb), meta=best_feat_dict,
                                     feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
