@@ -39,6 +39,7 @@ import itertools
 import simplejson as json
 import logging
 import multiprocessing
+from passlib.hash import sha256_crypt
 from PIL import Image
 import random
 import re
@@ -93,6 +94,13 @@ define("hash_type", default="dhash", type=str,
        help="Type of perceptual hash function to use. ahash, phash or dhash")
 define("hash_size", default=64, type=int,
        help="Size of the perceptual hash in bits")
+
+# Other parameters
+define('send_callbacks', default=1, help='If 1, callbacks are sent')
+
+define('isp_host', default='isp-usw-388475351.us-west-2.elb.amazonaws.com',
+       help=('Host address to get to the ISP that is checked for if images '
+             'are there'))
 
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
@@ -167,6 +175,13 @@ class DBConnection(object):
         '''
         self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
         self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
+
+    def __del__(self):
+        self.close()
+
+    def close(self):
+        self.conn.close()
+        self.blocking_conn.close()
 
     def fetch_keys_from_db(self, pattern='*', keys_per_call=1000,
                            set_name=None, callback=None):
@@ -257,7 +272,10 @@ class DBConnection(object):
 
         NOTE: To be only used by the test code
         '''
-        cls._singleton_instance = {}
+        with cls.__singleton_lock:
+            for k in cls._singleton_instance.keys():
+                cls._singleton_instance[k].close()
+                del cls._singleton_instance[k]
 
 class RedisRetryWrapper(object):
     '''Wraps a redis client so that it retries with exponential backoff.
@@ -276,6 +294,12 @@ class RedisRetryWrapper(object):
         self.client = None
         self.connection = None
         self._connect()
+
+    def __del__(self):
+        self._disconnect()
+
+    def close(self):
+        self._disconnect()
 
     def _connect(self):
         db_address = _get_db_address(self.class_name)
@@ -371,6 +395,12 @@ class RedisAsyncWrapper(object):
         self.connection = None
         self._lock = threading.RLock()
         self._connect()
+
+    def __del__(self):
+        self._disconnect()
+
+    def close(self):
+        self._disconnect()
 
     def _connect(self):
         db_address = _get_db_address(self.class_name)
@@ -902,7 +932,17 @@ class DefaultSizes(object):
     HEIGHT = 90 
 
 class ServingControllerType(object): 
-    IMAGEPLATFORM = 'imageplatform' 
+    IMAGEPLATFORM = 'imageplatform'
+
+class AccessLevels(object):
+    NONE = 0 
+    READ = 1 
+    UPDATE = 2 
+    CREATE = 4 
+    DELETE = 8
+    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
+    ADMIN = 16 
+    GLOBAL_ADMIN = 32
 
 ##############################################################################
 class StoredObject(object):
@@ -1664,9 +1704,15 @@ class NamespacedStoredObject(StoredObject):
 
     @classmethod
     def modify_many(cls, keys, func, create_missing=False, callback=None):
+        def _do_modify(raw_mappings):
+            # Need to convert the keys in the mapping to the ids of the objects
+            mod_mappings = dict(((v.get_id(), v) for v in 
+                                 raw_mappings.itervalues()))
+            return func(mod_mappings)
+        
         return super(NamespacedStoredObject, cls).modify_many(
             [cls.format_key(x) for x in keys],
-            func,
+            _do_modify,
             create_missing=create_missing,
             callback=callback)
 
@@ -1706,6 +1752,11 @@ class DefaultedStoredObject(NamespacedStoredObject):
             create_default=True,
             log_missing=log_missing,
             callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=None, callback=None):
+        return super(DefaultedStoredObject, cls).modify_many(
+            keys, func, create_missing=True, callback=callback)
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -1884,6 +1935,51 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         else:
             return format_tuple(cls.get(tai))
 
+class User(NamespacedStoredObject): 
+    ''' User 
+    
+    These are users that can used across multiple systems most notably 
+    the API and the current UI. 
+
+    Each of these can be attached to a NeonUserAccount (misnamed, but this 
+    is our Application/Customer layer). This will grant the User access to 
+    anything the NeonUserAccount can access.  
+        
+    Users can be associated to many NeonUserAccounts     
+    ''' 
+    def __init__(self, 
+                 username, 
+                 password='password', 
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+ 
+        super(User, self).__init__(username)
+
+        # here for the conversion to postgres, not used yet  
+        self.user_id = uuid.uuid1().hex
+
+        # the users username, chosen by them, redis key 
+        self.username = username
+
+        # the users password_hash, we don't store plain text passwords 
+        self.password_hash = sha256_crypt.encrypt(password)
+
+        # short-lived JWtoken that will give user access to API calls 
+        self.access_token = None
+
+        # longer-lived JWtoken that will allow a user to refresh a token
+        # this token should only be sent over HTTPS to the auth endpoints
+        # for now this is not encrypted 
+        self.refresh_token = None
+
+        # access level granted to this user, uses class AccessLevels 
+        self.access_level = access_level 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return User.__name__
+        
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
 
@@ -1901,7 +1997,8 @@ class NeonUserAccount(NamespacedStoredObject):
                  name=None, 
                  abtest=True, 
                  serving_enabled=True, 
-                 serving_controller=ServingControllerType.IMAGEPLATFORM):
+                 serving_controller=ServingControllerType.IMAGEPLATFORM, 
+                 users=[]):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
@@ -1941,7 +2038,11 @@ class NeonUserAccount(NamespacedStoredObject):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller
-    
+
+        # What users are privy to the information assoicated to this NeonUserAccount
+        # simply a list of usernames 
+        self.users = users
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2186,7 +2287,7 @@ class ExperimentStrategy(DefaultedStoredObject):
                  baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT,
+                 experiment_type=SEQUENTIAL,
                  impression_type=MetricType.VIEWS,
                  conversion_type=MetricType.CLICKS,
                  max_neon_thumbs=None):
@@ -2208,8 +2309,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         self.min_conversion = min_conversion
 
         # Fraction adjusting power rate. When this number is 0, it is
-        # equivalent to standard t-test, when it is 1.0, it is the
-        # regular multi-bandit problem.
+        # equivalent to all the serving fractions being the same,
+        # while if it is 1.0, the serving fraction will be controlled
+        # by the strategy.
         self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
@@ -2864,7 +2966,7 @@ class BrightcoveIntegration(AbstractIntegration):
     BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, i_id=None, a_id='', p_id=None, 
-                rtoken=None, wtoken=None, auto_update=False,
+                rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
@@ -2879,7 +2981,6 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
-        self.auto_update = auto_update 
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
@@ -2911,164 +3012,10 @@ class BrightcoveIntegration(AbstractIntegration):
         return "brightcove_integration"
 
     def get_api(self, video_server_uri=None):
-        '''Return the Brightcove API object for this integration.'''
+        '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update,
-            self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created, callback_url=self.callback_url)
-
-    @tornado.gen.engine
-    def update_thumbnail(self, i_vid, new_tid, nosave=False, callback=None):
-        ''' method to keep video metadata and thumbnail data consistent 
-        callback(None): bad request
-        callback(False): internal error
-        callback(True): success
-        '''
-        bc = self.get_api()
-
-        #Get video metadata
-        integration_vid = InternalVideoID.to_external(i_vid)
-        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
-        if not vmdata:
-            _log.error("key=update_thumbnail msg=vid %s not found" %i_vid)
-            callback(None)
-            return
-        
-        #Thumbnail ids for the video
-        tids = vmdata.thumbnail_ids
-        
-        #Aspect ratio of the video 
-        fsize = vmdata.get_frame_size()
-
-        #Get all thumbnails
-        thumbnails = yield tornado.gen.Task(
-                ThumbnailMetadata.get_many, tids)
-        t_url = None
-        
-        # Get the type of thumbnail (Neon/ Brighcove)
-        thumb_type = "" #type_rank
-
-        #Check if the new tid exists
-        for thumbnail in thumbnails:
-            if thumbnail.key == new_tid:
-                t_url = thumbnail.urls[0]
-                thumb_type = "bc" if thumbnail.type == "brightcove" else ""
-        
-        if not t_url:
-            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            callback(None)
-            return
-        
-
-        # Update the new_tid as the thumbnail for the video
-        try:
-            image = utils.imageutils.PILImageUtils.download_image(
-                t_url)
-            update_response = yield bc.update_thumbnail_and_videostill(
-                integration_vid,
-                new_tid,
-                image=image,
-                still_size=(self.video_still_width, None))
-        except Exception as e:
-            _log.error('Error updating the thumbnail and video still to '
-                       'Brightcove for video %s %s' % (i_vid, e))
-            callback(False)
-            return
-
-        thumb_bc_id, still_bc_id = update_response
-
-        def _update_external_tid(thumb_obj):
-            thumb_obj.external_id = thumb_bc_id
-
-        yield tornado.gen.Task(ThumbnailMetadata.modify,
-                               new_tid,
-                               _update_external_tid)
-
-        #NOTE: When the call is made from brightcove controller, do not 
-        #save the changes in the db, this is just a temp change for A/B testing
-        if nosave:
-            callback(True)
-            return
-
-        # Save the correct thumb to chosen in the database
-        def _set_chosen(thumb_dict):
-            for thumb_id, thumb in thumb_dict.iteritems():
-                if thumb is not None:
-                    thumb.chosen = thumb_id == new_tid
-        ret = yield tornado.gen.Task(
-            ThumbnailMetadata.modify_many, tids, _set_chosen)
-        if not ret:
-            _log.error("Error updating thumbnails in database")
-            callback(False)
-
-        # Update the request state
-        def _set_active(obj):
-            obj.state = RequestState.ACTIVE
-        ret = yield tornado.gen.Task(
-            NeonApiRequest.modify,
-            vmdata.job_id,
-            self.neon_api_key,
-            _set_active)
-        if not ret:
-            _log.error("Error updating request state in database")
-            callback(False)
-            
-        callback(True)
-
-    def create_job(self, vid, callback):
-        ''' Create neon job for particular video '''
-        def created_job(result):
-            if not result.error:
-                try:
-                    job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid, job_id)
-                    self.save(callback)
-                except Exception,e:
-                    callback(False)
-            else:
-                callback(False)
-        
-        vserver = options.video_server
-        self.get_api(vserver).create_video_request(vid, self.integration_id,
-                                            created_job)
-
-    def check_feed_and_create_api_requests(self):
-        ''' Use this only after you retreive the object from DB '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        bc.create_neon_api_requests(self.integration_id)    
-        bc.create_requests_unscheduled_videos(self.integration_id)
-
-    def check_feed_and_create_request_by_tag(self):
-        ''' Temp method to support backward compatibility '''
-        self.get_api().create_brightcove_request_by_tag(self.integration_id)
-
-    def check_playlist_feed_and_create_requests(self):
-        ''' Get playlists and create requests '''
-        
-        for pid in self.playlist_feed_ids:
-            self.get_api().create_request_from_playlist(pid, self.integration_id)
-
-    @tornado.gen.coroutine
-    def verify_token_and_create_requests_for_video(self, n):
-        ''' Method to verify brightcove token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with brightcove vid metadata
-        '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        val = yield bc.verify_token_and_create_requests(
-            self.integration_id, n)
-        raise tornado.gen.Return(val)
-
-    def sync_individual_video_metadata(self):
-        ''' sync video metadata from bcove individually using 
-        find_video_id api '''
-        self.get_api().bcove_api.sync_individual_video_metadata(
-            self.integration_id)
+            self.neon_api_key, self.publisher_id, 
+            self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
@@ -3079,17 +3026,24 @@ class BrightcoveIntegration(AbstractIntegration):
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
-    @staticmethod
-    def find_all_videos(token, limit, callback=None):
-        ''' find all brightcove videos '''
+class CNNIntegration(AbstractIntegration):
+    ''' CNN Integration class '''
 
-        # Get the names and IDs of recently published videos:
-        url = 'http://api.brightcove.com/services/library?\
-                command=find_all_videos&sort_by=publish_date&token=' + token
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
-                request_timeout=60.0, connect_timeout=10.0)
-        http_client.fetch(req, callback)
+    def __init__(self, 
+                 account_id='',
+                 api_key_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(CNNIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the api_key required to make requests to cnn api - external
+        self.api_key_ref = api_key_ref
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
@@ -3278,21 +3232,6 @@ class YoutubePlatform(AbstractPlatform):
             # Not yet supported
             callback(None)
 
-
-    def update_thumbnail(self, vid, thumb_url, callback):
-        '''
-        Update thumbnail for the given video
-        '''
-
-        def atoken_exec(atoken):
-            if atoken:
-                yt = api.youtube_api.YoutubeApi(self.refresh_token)
-                yt.async_set_youtube_thumbnail(vid, thumb_url, atoken, callback)
-            else:
-                callback(False)
-        self.get_access_token(atoken_exec)
-
-
     def create_job(self):
         '''
         Create youtube api request
@@ -3315,8 +3254,7 @@ class OoyalaIntegration(AbstractIntegration):
                  a_id='', 
                  p_code=None, 
                  api_key=None, 
-                 api_secret=None, 
-                 auto_update=False): 
+                 api_secret=None): 
         '''
         Init ooyala platform 
         
@@ -3324,15 +3262,12 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-
         super(OoyalaIntegration, self).__init__()
- 
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
         self.api_secret = api_secret 
-        self.auto_update = auto_update 
-    
+ 
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
@@ -3347,112 +3282,7 @@ class OoyalaIntegration(AbstractIntegration):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
-    def check_feed_and_create_requests(self):
-        '''
-        #check feed and create requests
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo.process_publisher_feed(copy.deepcopy(self)) 
-
-    #verify token and create requests on signup
-    def create_video_requests_on_signup(self, n, callback=None):
-        ''' Method to verify ooyala token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with ooyala vid metadata
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def update_thumbnail(self, i_vid, new_tid):
-        '''
-        Update the Preview image on Ooyala video 
-        
-        callback(None): bad request/ Gateway error
-        callback(False): internal error
-        callback(True): success
-
-        '''
-        #Get video metadata
-        integration_vid = InternalVideoID.to_external(i_vid)
-        
-        vmdata = yield tornado.gen.Task(VideoMetadata.get, i_vid)
-        if not vmdata:
-            _log.error("key=ooyala update_thumbnail msg=vid %s not found" %i_vid)
-            raise tornado.gen.Return(None)
-        
-        #Thumbnail ids for the video
-        tids = vmdata.thumbnail_ids
-        
-        #Aspect ratio of the video 
-        fsize = vmdata.get_frame_size()
-
-        #Get all thumbnails
-        thumbnails = yield tornado.gen.Task(
-                ThumbnailMetadata.get_many, tids)
-        t_url = None
-        
-        #Check if the new tid exists
-        for thumb in thumbnails:
-            if thumb.key == new_tid:
-                t_url = thumb.urls[0]
-        
-        if not t_url:
-            _log.error("key=update_thumbnail msg=tid %s not found" %new_tid)
-            raise tornado.gen.Return(None)
-            
-        
-        # Update the new_tid as the thumbnail for the video
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret)
-        update_result = yield tornado.gen.Task(oo.update_thumbnail,
-                                               integration_vid,
-                                               t_url,
-                                               new_tid,
-                                               fsize)
-        #check if thumbnail was updated 
-        if not update_result:
-            raise tornado.gen.Return(None)
-            
-      
-        #Update the database with video
-        #Get previous thumbnail and new thumb
-        modified_thumbs = [] 
-        new_thumb, old_thumb = ThumbnailMetadata.enable_thumbnail(
-            thumbnails, new_tid)
-        modified_thumbs.append(new_thumb)
-        if old_thumb is None:
-            #old_thumb can be None if there was no neon thumb before
-            _log.debug("key=update_thumbnail" 
-                    " msg=set thumbnail in DB %s tid %s"%(i_vid, new_tid))
-        else:
-            modified_thumbs.append(old_thumb)
-       
-        #Verify that new_thumb data is not empty 
-        if new_thumb is not None:
-            res = yield tornado.gen.Task(ThumbnailMetadata.save_all,
-                                         modified_thumbs)  
-            if not res:
-                _log.error("key=update_thumbnail msg=ThumbnailMetadata save_all"
-                                " failed for %s" %new_tid)
-                raise tornado.gen.Return(False)
-                
-        else:
-            _log.error("key=oo_update_thumbnail msg=new_thumb is None %s"%new_tid)
-            raise tornado.gen.Return(False)
-            
-
-        vid_request = NeonApiRequest.get(vmdata.job_id, self.neon_api_key)
-        vid_request.state = RequestState.ACTIVE
-        ret = vid_request.save()
-        if not ret:
-            _log.error("key=update_thumbnail msg=%s state not updated to active"
-                        %vid_request.key)
-        raise tornado.gen.Return(True)
+            return signature 
     
 # DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
@@ -3468,9 +3298,6 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
  
@@ -3508,7 +3335,6 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature 
     
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3523,23 +3349,21 @@ class OoyalaPlatform(AbstractPlatform):
 class RequestState(object):
     'Request state enumeration'
 
+    UNKNOWN    = "unknown"
     SUBMIT     = "submit"
     PROCESSING = "processing"
     FINALIZING = "finalizing" # In the process of finalizing the request
     REQUEUED   = "requeued"
-    FAILED     = "failed" # Failed due to video url issue/ network issue
     FINISHED   = "finished"
     SERVING    = "serving" # Thumbnails are ready to be served 
     INT_ERROR  = "internal_error" # Neon had some code error
     CUSTOMER_ERROR = "customer_error" # customer request had a partial error 
-    ACTIVE     = "active" # Thumbnail selected by editor; Only releavant to BC
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
-    # NOTE: This state is being added to save DB lookup calls to
-    # determine the active state This is required for the
-    # UI. Re-evaluate this state for new UI For CMS API response if
-    # SERVING_AND_ACTIVE return active state
-    SERVING_AND_ACTIVE = "serving_active" # indicates there is a chosen thumb & is serving ready 
+    # The following states are all DEPRECATED
+    SERVING_AND_ACTIVE = "serving_active" # DEPRECATED    
+    FAILED     = "failed" # DEPRECATED in favor of INT_ERROR, CUSTOMER_ERROR
+    ACTIVE     = "active" # DEPRECATED. Thumbnail selected by editor; Only releavant to BC
 
 class CallbackState(object):
     '''State enums for callbacks being sent.'''
@@ -3794,12 +3618,13 @@ The video metadata for this request must be in the database already.
         '''Sends the callback to the customer if necessary.
 
         Inputs:
-        job_id - Job id string
-        api_key - Api key string
         send_kwargs - Keyword arguments to utils.http.send_request for when
                       sending the callback
         '''
+        if not options.send_callbacks:
+            return
         new_callback_state = CallbackState.NOT_SENT
+        response = None
         if self.callback_url:
             # Check the callback url format
             parsed = urlparse.urlsplit(self.callback_url)
@@ -3809,27 +3634,53 @@ The video metadata for this request must be in the database already.
                 statemon.state.increment('invalid_callback_url')
                 new_callback_state = CallbackState.ERROR
             else:
+
+                # Build the response
+                response = VideoCallbackResponse.create_from_dict(
+                    self.response)
+                internal_vid = InternalVideoID.generate(self.api_key,
+                                                        self.video_id)
+                vstatus = yield tornado.gen.Task(VideoStatus.get, internal_vid)
+                response.experiment_state = vstatus.experiment_state
+                response.winner_thumbnail = vstatus.winner_tid
+                response.processing_state = self.state
+                response.job_id = self.job_id
+                response.video_id = self.video_id
             
                 # Send the callback
-                cb_body = self.response
-                if isinstance(cb_body, dict):
-                    cb_body = json.dumps(cb_body)
+                self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
-                send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
-                    method='POST',
+                    method='PUT',
                     headers={'content-type' : 'application/json'},
-                    body=cb_body,
+                    body=response.to_json(),
                     request_timeout=20.0,
                     connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(cb_request,
-                                                            **send_kwargs)
+                cb_response = yield utils.http.send_request(
+                    cb_request,
+                    no_retry_codes=[405],
+                    async=True,
+                    **send_kwargs)
                 if cb_response.error:
-                    statemon.state.increment('callback_error')
-                    _log.warn('Error when sending callback to %s: %s' %
-                              (self.callback_url, cb_response.error))
-                    new_callback_state = CallbackState.ERROR
+                    # Now try a POST for backwards compatibility
+                    cb_request.method='POST'
+                    cb_response = yield utils.http.send_request(cb_request,
+                                                                async=True,
+                                                                **send_kwargs)
+                    if cb_response.error:
+                        statemon.state.define_and_increment(
+                            'callback_error.%s' % self.api_key)
+                                                            
+                        statemon.state.increment('callback_error')
+                        _log.warn('Error when sending callback to %s for '
+                                  'video %s: %s' %
+                                  (self.callback_url, self.video_id,
+                                   cb_response.error))
+                        new_callback_state = CallbackState.ERROR
+                    else:
+                       statemon.state.increment('sucessful_callbacks')
+                       new_callback_state = CallbackState.SUCESS 
                 else:
                     statemon.state.increment('sucessful_callbacks')
                     new_callback_state = CallbackState.SUCESS
@@ -3837,6 +3688,8 @@ The video metadata for this request must be in the database already.
             # Modify the database state
             def _mod_obj(x):
                 x.callback_state = new_callback_state
+                if response:
+                    x.response = response.to_dict()
             yield tornado.gen.Task(self.modify, self.job_id, self.api_key,
                                    _mod_obj)
 
@@ -4314,14 +4167,36 @@ class ThumbnailMetadata(StoredObject):
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
-    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None,
+                 imp=None, conv=None, serving_history=None):
         super(ThumbnailStatus, self).__init__(thumbnail_id)
 
         # The fraction of traffic this thumbnail will get
         self.serving_frac = serving_frac
 
-        # The currently click through rate for this thumbnail
+        # List of (time, serving_frac) tuples
+        self.serving_history = serving_history or []
+
+        # The current click through rate for this thumbnail
         self.ctr = ctr
+
+        # The number of impressions this thumbnail received
+        self.imp = imp
+
+        # The number of conversions this thumbnail received
+        self.conv = conv
+
+    def set_serving_frac(self, serving_frac):
+        '''Sets the serving fraction. Returns true if it is new.'''
+        if (self.serving_frac is None or 
+            abs(serving_frac - self.serving_frac) > 1e-3):
+            self.serving_frac = serving_frac
+            self.serving_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 serving_frac))
+            return True
+        return False
+            
 
     @classmethod
     def _baseclass_name(cls):
@@ -4590,6 +4465,44 @@ class VideoMetadata(StoredObject):
                                        _update_serving_url)
         raise tornado.gen.Return(serving_url)
         
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def image_available_in_isp(self):
+        try:
+            neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
+                                                       self.get_account_id())
+            if neon_user_account is None:
+                msg = ('Cannot find the neon user account %s for video %s. '
+                       'This should never happen' % 
+                       (self.get_account_id(), self.key))
+                _log.error(msg)
+                raise DBStateError(msg)
+                
+            request = tornado.httpclient.HTTPRequest(
+                'http://%s/v1/video?%s' % (
+                    options.isp_host,
+                    urllib.urlencode({
+                        'video_id' : InternalVideoID.to_external(self.key),
+                        'publisher_id' : neon_user_account.tracker_account_id
+                        })),
+                follow_redirects=True)
+            res = yield utils.http.send_request(request, async=True)
+
+            if res.code != 200:
+                if res.code != 204:
+                    _log.error('Unexpected response looking up video %s on '
+                               'isp: %s' % (self.key, res))
+                else:
+                    _log.debug('Image not available in ISP yet.')
+                raise tornado.gen.Return(False)
+                
+            raise tornado.gen.Return(True)
+        except tornado.httpclient.HTTPError as e: 
+            _log.error('Unexpected response looking up video %s on '
+                       'isp: %s' % (self.key, e))
+
+        raise tornado.gen.Return(False)
+    
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
@@ -4637,6 +4550,17 @@ class AbstractJsonResponse(object):
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__)
 
+    @classmethod
+    def create_from_dict(cls, d):
+        '''Create the object from a dictionary.'''
+        retval = cls()
+        if d is not None:
+            for k, v in d.iteritems():
+                retval.__dict__[k] = v
+        retval.timestamp = str(time.time())
+
+        return retval
+
 class VideoResponse(AbstractJsonResponse):
     ''' VideoResponse object that contains list of thumbs for a video 
         # NOTE: this obj is only used to format in to a json response 
@@ -4660,7 +4584,11 @@ class VideoResponse(AbstractJsonResponse):
         self.serving_url = serving_url
 
 class VideoCallbackResponse(AbstractJsonResponse):
-    def __init__(self, jid, vid, fnos=None, thumbs=None, s_url=None, err=None):
+    def __init__(self, jid=None, vid=None, fnos=None, thumbs=None,
+                 s_url=None, err=None,
+                 processing_state=RequestState.UNKNOWN,
+                 experiment_state=ExperimentState.UNKNOWN,
+                 winner_thumbnail=None):
         self.job_id = jid
         self.video_id = vid
         self.framenos = fnos if fnos is not None else []
@@ -4668,6 +4596,9 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.serving_url = s_url
         self.error = err
         self.timestamp = str(time.time())
+        self.processing_state = processing_state
+        self.experiment_state = experiment_state
+        self.winner_thumbnail = winner_thumbnail
     
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks

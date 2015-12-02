@@ -178,7 +178,7 @@ class BisectionSampling:
             if not f in self._scores.keys():
                 self._frames_processed += 1
                 frame = self.get_frame(video,f)
-                if not frame == None:
+                if frame is not None:
                     s = self._mod.score(frame,f,video)
                     #print f,s[0],s[1]
                     self._scores[f] = s[0]

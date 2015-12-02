@@ -354,7 +354,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         if rtoken is None: rtoken = self.rtoken
         if wtoken is None: wtoken = self.wtoken
-        if autoupdate == None: autoupdate = False
+        if autoupdate is None: autoupdate = False
 
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/%s' \
                             %(self.a_id, self.b_id))
@@ -1672,6 +1672,21 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(
             len([x for x in thumbs 
                  if x.type == neondata.ThumbnailType.CUSTOMUPLOAD]), 3)
+
+    def test_invalid_upload_custom_thumbnail(self):
+        vid = self._get_videos()[0]
+        url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
+                    "/%s/videos/%s" %(self.a_id, self.b_id, vid))
+        data = {
+                "created_time": time.time(),
+                "type": "default",
+                "urls": ["http://some_image.jpg"]
+                }
+        vals = {'thumbnails' : [data]}
+        response = self.put_request(url, vals, self.api_key, jsonheader=True)
+        self.assertEqual(response.code, 400)
+        self.assertRegexpMatches(json.loads(response.body)['error'],
+                                 'no valid thumbnail found')
 
     def test_disable_thumbnail(self):
         '''

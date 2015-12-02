@@ -71,6 +71,9 @@ public:
                         unsigned char * bucketId,
                         int bucketIdLen,
                         std::string & tid);
+
+    bool DoesDirectiveExist(const char * account_id, 
+                            const char * video_id);
    
 
 protected:
