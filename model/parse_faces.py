@@ -67,7 +67,7 @@ class MultiStageFaceParser(object):
     an attribute its own preprocessing object.
     '''
 
-    def __init__(self, predictor, max_height=640):
+    def __init__(self, predictor, max_height=520):
         self.detector = dlib.get_frontal_face_detector()
         self.fParse = FindAndParseFaces(predictor, self.detector)
         self.image_data = {}
@@ -111,6 +111,20 @@ class MultiStageFaceParser(object):
         self.get_seg(image)
         return self.fParse.get_all(['l eye', 'r eye'])
 
+    def get_face_subimages(self, image):
+        '''
+        Returns all face subimages, as a list.
+        '''
+        ihash = hash(image.tostring())
+        if not self.image_data.has_key(ihash):
+            self.get_faces(image)
+        faces = []
+        dets = self.image_data[ihash][0]
+        for det in dets:
+            L, T, R, B = det.left(), det.top(), det.right(), det.bottom()
+            faces.append(image[T:B,L:R])
+        return faces
+        
     def __getstate__(self):
         self.reset()
         self.fParse.reset()
