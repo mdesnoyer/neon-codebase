@@ -151,7 +151,7 @@ class BlurGenerator(RegionFeatureGenerator):
     Quantizes the blurriness of a sequence of images.
     '''
     def __init__(self, max_height=512, crop_frac=[.125, .125, .125, .125], 
-                 thresh=99.9):
+                 thresh=99.):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
@@ -170,7 +170,7 @@ class BlurGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -224,7 +224,7 @@ class SADGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
@@ -283,7 +283,7 @@ class ActionGenerator(RegionFeatureGenerator):
         return hash(self.action_vec)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         SADs = self._SAD_gen.generate_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
@@ -320,7 +320,7 @@ class FaceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -359,7 +359,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -376,6 +376,59 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
 
     def get_feat_name(self):
         return 'eyes'
+
+class FacialBlurGenerator(RegionFeatureGenerator):
+    '''
+    Returns the average blurriness of the faces, weighted by the size of the
+    faces.
+    '''
+    def __init__(self, MSFP, thresh=99.):
+        '''
+        MSFP is a multi-stage face parser; see FaceGenerator for an
+        explanation of why this must be so. Thresh is the blurriness threshold
+        which is the same as in the BlurGenerator.
+        '''
+        super(FacialBlurGenerator, self).__init__()
+        self.MSFP = MSFP
+        self.prep = MSFP.prep
+        self.thresh = thresh
+        self.max_height = MSFP.max_height
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if type(images) is not list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            feat_vec.append(self._get_face_blur(img))
+        return np.array(feat_vec)
+
+    def _get_face_blur(self, image):
+        faces = self.MSFP.get_face_subimages(image)
+        if not len(faces):
+            return 0
+        blurs = []
+        areas = []
+        for face in faces:
+            blurs.append(self._get_blur(face))
+            areas.append(np.prod(faces.shape[:2]))
+        areas = np.array(areas)
+        areas /= np.sum(areas)
+        return np.sum(blurs * areas)
+
+    def _get_blur(self, image):
+        blur_img = cv2.Laplacian(image, cv2.CV_32F)
+        return np.percentile(blur_img, self.thresh)
 
 class VibranceGenerator(RegionFeatureGenerator):
     '''
@@ -399,24 +452,105 @@ class VibranceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
         feat_vec = []
         for img in images:
-            # check to see if the image is black and white
-            if len(img.shape) < 3:
-                return np.mean(img)
-            elif img.shape[2] == 1:
-                return np.mean(img)
-            # convert to HSV
-            feat_vec.append(np.mean(cv2.cvtColor(
-                                        img, cv2.cv.CV_BGR2HSV)[:,:,1:]))
+            feat_vec.append(self._mean_vibrance(img))
         return np.array(feat_vec)
+
+    def _mean_vibrance(self, image):
+        # check to see if the image is black and white. if so, its vibrance
+        # is defined to be zero
+        if len(image.shape) < 3:
+            return 0.
+        elif image.shape[2] == 1:
+            return 0.
+        # convert to HSV
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)[:,:,1:]))
 
     def get_feat_name(self):
         return 'vibrance'
+
+class BrightnessGenerator(RegionFeatureGenerator):
+    '''
+    Returns the average brightness of an image.
+    '''
+    def __init__(self, max_height=480, crop_frac=None):
+        super(BrightnessGenerator, self).__init__()
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=self.crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) is list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            feat_vec.append(self._mean_brightness(img))
+        return np.array(feat_vec)
+
+    def _mean_brightness(self, image):
+        if len(image.shape) < 3:
+            return np.mean(image)
+        elif image.shape[2] == 1:
+            return np.mean(image)
+        # convert to HSV
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,2]))
+
+class SaturationGenerator(RegionFeatureGenerator):
+    '''
+    Returns the average brightness of an image.
+    '''
+    def __init__(self, max_height=480, crop_frac=None):
+        super(SaturationGenerator, self).__init__()
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.prep = utils.pycvutils.ImagePrep(
+                        max_height=self.max_height,
+                        crop_frac=self.crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if typediff <> 0:
+            return typediff
+        return cmp(self.max_height, other.max_height)
+
+    def __hash__(self):
+        return hash(self.max_height)
+
+    def generate_many(self, images, fonly=False):
+        if not type(images) is list:
+            images = [images]
+        if fonly:
+            images = images[:1]
+        feat_vec = []
+        for img in images:
+            feat_vec.append(self._mean_saturation(img))
+        return np.array(feat_vec)
+
+    def _mean_saturation(self, image):
+        if len(image.shape) < 3:
+            return 0.
+        elif image.shape[2] == 1:
+            return 0.
+        # convert to HSV
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,1]))
 
 class TextGenerator(RegionFeatureGenerator):
     '''
@@ -448,7 +582,7 @@ class TextGenerator(RegionFeatureGenerator):
     def generate_many(self, images, fonly=False):
         if self.mser is None:
             self.mser = cv2.MSER(_max_variation=self._max_variation)
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -490,7 +624,7 @@ class EntropyGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -539,7 +673,7 @@ class TextGeneratorSlow(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -578,7 +712,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if type(images) is not list:
             images = [images]
         if fonly:
             images = images[:1]
