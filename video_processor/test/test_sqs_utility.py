@@ -40,7 +40,7 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
         self.video_queue_region = 'us-east-1'
         self.num_queues = 3
 
-        self.mock_sqs = sqsmock.SQSConnectionMock()
+        '''self.mock_sqs = sqsmock.SQSConnectionMock()
 
         self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
@@ -49,10 +49,10 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
                                          self.sqs_patcher.start(),
                                          require_async_kw=True)
        
-        self.mock_sqs_future.return_value = self.mock_sqs
+        self.mock_sqs_future.return_value = self.mock_sqs'''
 
     def tearDown(self):
-        self.sqs_patcher.stop()
+        #self.sqs_patcher.stop()
         super(TestVideoProcessingQueue, self).tearDown()
      
     @tornado.testing.gen_test(timeout=10)
@@ -129,7 +129,22 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
         with self.assertRaises(ValueError) as cm:
             yield sqs.write_message(0, test_dict)
 
+    @tornado.testing.gen_test
+    def test_no_duration(self):
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
+        yield sqs.connect_to_server(self.video_queue_region)
+        
+        message = yield sqs.write_message(0, "test", None)
+
+        self.assertEqual(message, "test")
+
+    @tornado.testing.gen_test
+    def test_connect_to_bad_region(self):
+        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
+
+        with self.assertRaises(AttributeError) as cm:
+            yield sqs.connect_to_server("fake_region")
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -192,7 +192,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.write_patcher.stop()
         super(TestServices, self).tearDown()
     
-    def write_side_effect(self, priority, message):
+    def write_side_effect(self, priority, message, timeout):
         return message
 
     def get_app(self):
@@ -390,7 +390,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             ''' video server response on job submit '''
             params = tornado.escape.json_decode(http_request.body)
             job_id = str(random.random())
-            '''self.job_ids.append(job_id)
+            self.job_ids.append(job_id)
             def _mod_video(x):
                 x.job_id = job_id
                 x.video_url = params['video_url']
@@ -416,7 +416,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 external_thumbnail_id=params.get('external_thumbnail_id',
                                                  None),
                 publish_date=params.get('publish_date', None)).save()
-            '''
+            
             response = tornado.httpclient.HTTPResponse(http_request, 200,
                 buffer=StringIO('{"job_id":"%s"}'%job_id))
             return response

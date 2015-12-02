@@ -31,6 +31,8 @@ import tornado.escape
 import tornado.gen
 import tornado.httpclient
 import traceback
+import urlparse
+import urllib
 import utils.neon
 import utils.logs
 import utils.http
@@ -684,8 +686,23 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         yield sqs_queue.connect_to_server(options.video_queue_region)
  
+        duration = 300
+        if video_url:
+            url_parse = urlparse.urlparse(video_url)
+            url_parse = list(url_parse)
+            url_parse[2] = urllib.quote(url_parse[2])
+            req = tornado.httpclient.HTTPRequest(
+                method='HEAD',
+                url=urlparse.urlunparse(url_parse),
+                request_timeout=5.0) 
+                
+            result = yield utils.http.send_request(req, async=True)
+            if not result.error:
+                headers = result.headers
+                duration = (int(headers.get('Content-Length', 0)))
+
         #TODO: I'm not sure how to get the priority here
-        message = yield sqs_queue.write_message(0, body)
+        message = yield sqs_queue.write_message(0, body, duration)
         
         if not message:
             _log.error("Failed to write message with video id %s", (video_id))

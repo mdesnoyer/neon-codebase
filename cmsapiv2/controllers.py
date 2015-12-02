@@ -25,6 +25,9 @@ import tornado.escape
 import tornado.gen
 import tornado.httpclient
 
+import urlparse
+import urllib
+
 import utils.neon
 import utils.logs
 import utils.http
@@ -814,12 +817,31 @@ class VideoHelper():
                 sqs_queue = server.VideoProcessingQueue()
 
                 yield sqs_queue.connect_to_server(options.video_queue_region)
-
-                #Need the priority. Also, I'm assuming that the api_request is the body of the message
-                message = yield sqs_queue.write_message(
-                    api_request.get_processing_priority(), 
+            
+                duration = video.duration
+                if video.url and not duration:
+                    url_parse = urlparse(video.url)
+                    url_parse = list(url_parse)
+                    url_parse[2] = urllib.quote(url_parse[2])
+                    req = tornado.httpclient.HTTPRequest(
+                        method='HEAD',
+                        url=urlparse.urlunparse(url_parse),
+                        request_timeout=5.0) 
+                
+                    result = yield utils.http.send_request(req, async=True)
+                    if not result.error:
+                        headers = result.headers
+                        duration = (int(headers.get('Content-Length', 0)))
+                    else:
+                        duration = 300
+                elif not video.url and not duration:
+                    duration = 300
+                
+                #TODO: get the priority
+                message = yield sqs_queue.write_message(0, 
                     api_request.to_json(),
-                    video.duration * 2)
+                    duration)
+
                 if message: 
                     raise tornado.gen.Return((video,api_request))
                 else:  
@@ -889,13 +911,30 @@ class VideoHandler(APIV2Handler):
         yield sqs_queue.connect_to_server(options.video_queue_region)
 
         account = neondata.NeonUserAccount.get(account_id)
-
+        duration = new_video.duration
+        if new_video.url and not duration:
+            url_parse = urlparse(new_video.url)
+            url_parse = list(url_parse)
+            url_parse[2] = urllib.quote(url_parse[2])
+            req = tornado.httpclient.HTTPRequest(
+                method='HEAD',
+                url=urlparse.urlunparse(url_parse),
+                request_timeout=5.0) 
+                
+            result = yield utils.http.send_request(req, async=True)
+            if not result.error:
+                headers = result.headers
+                duration = (int(headers.get('Content-Length', 0)))
+            else:
+                duration = 300
+        elif not new_video.url and not duration:
+            duration = 300
+                
         message = yield sqs_queue.write_message(
                     account.get_processing_priority(), 
                     api_request.to_json(),
-                    new_video.duration * 2)
+                    duration)
 
-        #if response and response.code is ResponseCode.HTTP_OK: 
         if message:
             job_info = {} 
             job_info['job_id'] = api_request.job_id

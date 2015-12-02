@@ -1217,12 +1217,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model.choose_thumbnails.return_value = ct_output
 
         # Mock the SQS implementation
-        #self.mock_sqs = sqsmock.SQSConnectionMock()
         self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
-        #self.mock_sqs_future = self._future_wrap_mock(
-        #                                 self.sqs_patcher.start(),
-        #                                 require_async_kw=False)
         
         self.mock_sqs = self.sqs_patcher.start()
         self.mock_sqs.return_value = sqsmock.SQSConnectionMock()

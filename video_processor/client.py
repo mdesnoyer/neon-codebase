@@ -117,7 +117,7 @@ define('fail_count', default=2, help='Number of failures allowed before a '
        'message is deleted')
 define('attempt_count', default=5, help='Number of attempts allowed before a '
        'message is deleted')
-define('timeout_length', default=1.0, help='Amount of time that dequeue_job is '
+define('timeout_length', default=5.0, help='Amount of time that dequeue_job is '
        'allowed to run before timing out')
 
 class VideoError(Exception): pass 
@@ -128,7 +128,9 @@ class DBError(IOError): pass
 
 # For when another worker completed the video
 class OtherWorkerCompleted(Exception): pass 
-    
+
+# TimeoutError Exception
+class TimeoutError(Exception): pass
 
 ###########################################################################
 # Process Video File
@@ -856,7 +858,7 @@ class VideoClient(multiprocessing.Process):
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             if(time.time() - start_time > options.timeout_length):
-                raise TimeoutError()
+                raise TimeoutError("The worker timed out")
             self.do_work()
  
         _log.info("stopping worker [%s] " % (self.pid))
@@ -921,10 +923,6 @@ def shutdown_master_process():
             print 'Worker is still going. Force kill it'
             # Send a SIGKILL
             utils.ps.send_signal_and_wait(signal.SIGKILL, [worker.pid])
-    
-class TimeoutError(Exception):
-    def __init__(self):
-        self.message = "The worker timed out"
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
