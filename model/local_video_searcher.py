@@ -66,6 +66,11 @@ NORMALIZE = 0     # flag for statistics where better = closer to mean
 MAXIMIZE = 1      # flag for statistics where better = larger
 PEN_LOW_HALF = -2 # flag for statistics where better > median
 PEN_HIGH_HALF = 2 # flag for statistics where better < median
+PEN_NONZERO = 3   # flag for statistics as (x > 0)
+
+TESTING = False
+TESTING_DIR = None
+CUR_TESTING_DIR = None
 
 class Statistics(object):
     '''
@@ -141,7 +146,7 @@ class Statistics(object):
 
     def rank(self, x):
         '''Returns the rank of x'''
-        quant = np.sum(self._vals[:self._count] <= x)
+        quant = np.sum(self._vals[:self._count] < x)
         return quant * 1./max(1, self._count)
 
     def percentile(self, x):
@@ -253,7 +258,10 @@ class Combiner(object):
             else:
                 valence = MINIMIZE # assume you are trying to maximize it
             for v in feat_vec:
-                rank = self._stats_dict[feat_name].rank(v)
+                if valence == PEN_NONZERO:
+                    rank = int(v > 0)
+                else:
+                    rank = self._stats_dict[feat_name].rank(v)
                 if valence == MINIMIZE:
                     rank = 1. - rank
                 if valence == NORMALIZE:
@@ -268,6 +276,44 @@ class Combiner(object):
         else:
             return [(x * self.weight_dict[feat_name])**2 for x in feat_vec]
         return feat_vec
+
+    def _compute_stats_score_func(self, feat_name, feat_val):
+        '''For an images feature name / feature value pair, returns a lambda
+        function that allows you to evaluate it lazily / dynamically, so that
+        early thumbnails are not given a "free pass"'''
+        if self._stats_dict.has_key(feat_name):
+            stat_obj = self._stats_dict[feat_name]
+            if self.weight_valence.has_key(feat_name):
+                valence = self.weight_valence[feat_name]
+            else:
+                valence = MINIMIZE
+            if valence == MINIMIZE:
+                rankfunc = lambda x: 1. - stat_obj.rank(x)
+            elif valence == NORMALIZE:
+                rankfunc = lambda x: 1. - abs(0.5 - stat_obj.rank(x)) * 2
+            elif valence == PEN_LOW_HALF:
+                rankfunc = lambda x: 1. + min(0, stat_obj.rank(x) - 0.5) * 2
+            elif valence == PEN_HIGH_HALF:
+                rankfunc = lambda x: 1. - max(0, stat_obj.rank(x) - 0.5) * 2
+            elif valence == MAXIMIZE:
+                rankfunc = lambda x: stat_obj.rank(x)
+            elif valence == PEN_NONZERO:
+                rankfunc = lambda x: x > 0
+            return lambda: rankfunc(feat_val)**2 * self.weight_dict[feat_name]
+        else:
+            return lambda: (feat_val * self.weight_dict[feat_name])**2
+
+    def combine_scores_func(self, feat_dict):
+        '''This will return a list of functions that can be evaluated lazily,
+        which permit the thumbnail scores to be updated--especially in the
+        event that some thumbnails would not actually be accepted if the order
+        of analysis was changed.'''
+        funcs = []
+        tot_pos = float(np.sum(
+                            [self.weight_dict[x] for x in feat_dict.keys()]))
+        for feat_name, feat_val in feat_dict.iteritems():
+            funcs.append(self._compute_stats_score_func(feat_name, feat_val))
+        return lambda: sum([x() for x in funcs])/tot_pos
 
     def combine_scores(self, feat_dict):
         '''
@@ -287,16 +333,6 @@ class Combiner(object):
             comb_scores.append(comb_score)
         return comb_scores
 
-    def combine_scores_func(self, feat_dict):
-        ######################################################################
-        # TODO: Implement this
-        ######################################################################
-        raise NotImplementedError()
-        '''This will return a list of functions that can be evaluated lazily,
-        which permit the thumbnail scores to be updated--especially in the
-        event that some thumbnails would not actually be accepted if the order
-        of analysis was changed.'''
-
 class _Result(object):
     '''
     Private class to be used by the ResultsList object. Represents an
@@ -308,7 +344,7 @@ class _Result(object):
     '''
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
-                 feat_score_weight=None):
+                 feat_score_weight=None, feat_score_func=None):
         self._defined = False
         if score and frameno:
             self._defined = True
@@ -317,6 +353,7 @@ class _Result(object):
         self.score = score
         self.frameno = frameno
         self._feat_score = feat_score
+        self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
         self.image = image
         if self.image is not None:
@@ -324,7 +361,23 @@ class _Result(object):
         else:
             self._color_name = None
         self.meta = meta
-        self._comp_comb_score(feat_score_weight)
+        self._feat_score_weight = feat_score_weight
+
+    @property
+    def feat_score(self):
+        if self._feat_score_func is None:
+            return self._feat_score
+        return self._feat_score_func()
+
+    @property
+    def comb_score(self):
+        if self.feat_score is None:
+            return self.score
+        if self._feat_score_weight is None:
+            return self.score
+        return self.score + self.feat_score * self._feat_score_weight
+        # let's try multiplicative
+        #return self.score * (self.feat_score * self._feat_score_weight)
 
     def __cmp__(self, other):
         if type(self) is not type(other):
@@ -340,24 +393,13 @@ class _Result(object):
     def __str__(self):
         if not self._defined:
             return 'Undefined Top Result object'
-        if self._feat_score:
+        if self.feat_score:
             return 'Result fr:%i sc:%.2f feat sc:%.2f comb sc:%.2f'%(
-                        self.frameno, self.score, self._feat_score,
+                        self.frameno, self.score, self.feat_score,
                         self.comb_score)
         else:
             return 'Result fr:%i sc:%.2f feat sc:N/A comb sc:%.2f'%(
                         self.frameno, self.score, self.comb_score)
-
-    def _comp_comb_score(self, feat_score_weight):
-        if feat_score_weight is None:
-            _log.debug('feat_score_weight not set!')
-            self.comb_score = self.score
-            return
-        if self._feat_score is None:
-            _log.debug('_feat_score not set!')
-            self.comb_score = self.score
-            return
-        self.comb_score = self.score + self._feat_score * feat_score_weight
 
     def dist(self, other):
         if type(self) is not type(other):
@@ -405,8 +447,6 @@ class ResultsList(object):
         self._min_acceptable = min_acceptable
         self._max_rejectable = max_rejectable
         self._feat_score_weight = feat_score_weight
-        self._testing = False
-        self._testing_dir = None
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         if adapt_improve:
@@ -429,21 +469,20 @@ class ResultsList(object):
         except TypeError:
             return self._max_rejectable
 
-    def _set_testing(self, testing_dir):
-        '''
-        Sets up the testing directory.
-        '''
-        self._testing = True
-        self._testing_dir = testing_dir
-
     def _write_testing_frame(self, res, reason=None, idx=None):
         '''
         Creates a filename for the current result object. Reason
         is either 'accept' or 'reject'. If accept, must provide
         an index for the position in the results list.
         '''
-        if not self._testing:
+        if not TESTING:
             return
+        cur_sc_str = ' '.join(['%.3f'%x.feat_score for x in self.results
+                               if x._defined])
+        cur_comb_str = ' '.join(['%.3f'%x.comb_score for x in self.results
+                               if x._defined])
+        _log.info('Current feat scores for top thumbs: ' + cur_sc_str)
+        _log.info('Current comb scores for top thumbs: ' + cur_comb_str)
         _log.debug('TESTING ENABLED: saving %s'%res)
         fname = '%04i_'%(self._considered_thumbs)
         fname += '%05i_'%(res.frameno)
@@ -451,7 +490,7 @@ class ResultsList(object):
         if res._feat_score is None:
             fname += 'NA_'
         else:
-            fname += '%04.2f_'%(res._feat_score)
+            fname += '%04.2f_'%(res.feat_score)
         fname += '%04.2f_'%(res.comb_score)
         if reason == 'accept':
             fname += 'accepted_replacing_%i.jpg'%(idx)
@@ -459,7 +498,7 @@ class ResultsList(object):
             fname += '%s.jpg'%(reason)
         else:
             fname += 'rejected.jpg'
-        fname = os.path.join(self._testing_dir, fname)
+        fname = os.path.join(CUR_TESTING_DIR, fname)
         cv2.imwrite(fname, res.image)
 
     def reset(self, n_thumbs=None):
@@ -477,14 +516,15 @@ class ResultsList(object):
             self.dists[entry_idx, idx] = dst
 
     def accept_replace(self, frameno, score, image=None, feat_score=None,
-                       meta=None):
+                       meta=None, feat_score_func=None):
         '''
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
         '''
         res = _Result(frameno=frameno, score=score, image=image,
                       feat_score=feat_score, meta=meta,
-                      feat_score_weight=self._feat_score_weight)
+                      feat_score_weight=self._feat_score_weight,
+                      feat_score_func=feat_score_func)
         self._considered_thumbs += 1
         if score < self.min:
             _log.debug('Frame %i [%.3f] rejected due to score'%(frameno,
@@ -643,6 +683,7 @@ class LocalSearcher(object):
                  startend_clip=0.1,
                  adapt_improve=False,
                  queue_unsearched=False,
+                 use_all_data=False,
                  testing=False,
                  testing_dir='/tmp'):
         '''
@@ -714,6 +755,9 @@ class LocalSearcher(object):
             queue_unsearched:
                 If the interval should not be searched initially, then it will
                 be placed into a priority queue based on the mean score. 
+            use_all_data:
+                If True, will use all feature data from any analyzed thumb,
+                not just those from the search intervals.
             testing:
                 If true, saves the sequence of considered thumbnails to the
                 directory specified by testing_dir as
@@ -737,12 +781,16 @@ class LocalSearcher(object):
         self.startend_clip = startend_clip
         self.filters = filters
         self.max_variety = max_variety
+        self.use_all_data = use_all_data
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
         self.adapt_improve = adapt_improve
-        self._testing = testing
-        self._testing_dir = testing_dir
+        if testing:
+            global TESTING
+            TESTING = True
+            global TESTING_DIR
+            TESTING_DIR = testing_dir
         self._reset()
         self.analysis_crop = None # this, if necessary at all, will be set
                                   # by update_processing_strategy
@@ -797,9 +845,9 @@ class LocalSearcher(object):
     def _set_up_testing(self):
         vname = self.video_name
         if vname is None:
-            vdir = os.path.join(self._testing_dir, 'default')
+            vdir = os.path.join(TESTING_DIR, 'default')
         else:
-            vdir = os.path.join(self._testing_dir, vname)
+            vdir = os.path.join(TESTING_DIR, vname)
         if os.path.exists(vdir):
             shutil.rmtree(vdir)
         try:
@@ -807,8 +855,8 @@ class LocalSearcher(object):
         except:
             pass
         if os.path.exists(vdir):
-            self.results._set_testing(vdir)
-            return vdir
+            global CUR_TESTING_DIR
+            CUR_TESTING_DIR = vdir
         else:
             raise Exception("Could not create testing dir!")
 
@@ -840,7 +888,7 @@ class LocalSearcher(object):
         # where rtuple is the value to be returned.
         self.video = video
         self.video_name = video_name
-        if self._testing:
+        if TESTING:
             self._set_up_testing()
         fps = video.get(cv2.cv.CV_CAP_PROP_FPS) or 30.0
         num_frames = int(video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
@@ -938,6 +986,13 @@ class LocalSearcher(object):
             feats = fgen.generate_many(frames)
             if f.feature in self.feats_to_cache:
                 frame_feats[f.feature] = feats
+                if self.use_all_data:
+                    for cfidx, fval in enumerate(feats):
+                        if ((framenos[cfidx] == start_frame) and 
+                            (framenos[cfidx] == end_frame)):
+                            # then it's already been measured
+                            continue
+                        self.stats[f.feature].push(fval)
             accepted = f.filter(feats)
             n_rej = np.sum(np.logical_not(accepted))
             n_acc = np.sum(accepted)
@@ -964,13 +1019,22 @@ class LocalSearcher(object):
                 continue
             if k in self.feats_to_cache:
                 feats = f.generate_many(frames)
-                frame_feats[k] = f.generate_many(frames)
+                frame_feats[k] = feats
+                for cfidx, fval in enumerate(feats):
+                    if ((framenos[cfidx] == start_frame) and 
+                        (framenos[cfidx] == end_frame)):
+                        # then it's already been measured
+                        continue
+                    self.stats[k].push(fval)
         # get the combined scores
         comb = self.combiner.combine_scores(frame_feats)
         comb = np.array(comb)
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
         best_gold = gold[np.argmax(comb)]
+        best_feat_dict = {x:frame_feats[x][np.argmax(comb)] for x in 
+                                frame_feats.keys()}
+        feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
         indi_framescore = self.predictor.predict(best_frame)
         inter_framescore = (start_score + end_score) / 2
         # interpolate the framescore
@@ -987,8 +1051,12 @@ class LocalSearcher(object):
         # push the frame into the results object. Ensure that the analysis 
         # frame is not inserted, but rather the best "gold" frame (i.e., one
         # that has not been cropped in accordance with analysis_crop)
+        # if best_frameno == 757:
+        #     import ipdb
+        #     ipdb.set_trace()
         self.results.accept_replace(best_frameno, framescore, best_gold,
-                                    np.max(comb), meta=frame_feats)
+                                    np.max(comb), meta=frame_feats,
+                                    feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
         '''
