@@ -531,7 +531,7 @@ class AdditiveCombiner(object):
         that we can evaluate each transfer function's value independently'''
         funcs_dict = {}
         for feat_name, feat_val in feat_dict.iteritems():
-            cur_func = self._compute_stats_score_func(feat_name, feat_val))
+            cur_func = self._compute_stats_score_func(feat_name, feat_val)
             funcs_dict[feat_name] = cur_func
         return funcs_dict
 
