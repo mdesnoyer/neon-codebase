@@ -513,7 +513,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         super(TestFinalizeResponse, self).tearDown()
 
     def test_default_process(self):
-
         self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated

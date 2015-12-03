@@ -2506,8 +2506,8 @@ class CDNHostingMetadata(NamespacedStoredObject):
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
-                 update_serving_urls=False, source_crop=None,
-                 rendition_sizes=None):
+                 update_serving_urls=False,
+                 rendition_sizes=None, source_crop=None):
 
         self.key = key
 
@@ -4444,6 +4444,7 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
+        thumb.video_id = self.key
         yield thumb.add_image_data(image, self, cdn_metadata, 
                                    async=True)
 
