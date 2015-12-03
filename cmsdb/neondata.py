@@ -2505,8 +2505,8 @@ class CDNHostingMetadata(NamespacedStoredObject):
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
-                 update_serving_urls=False, source_crop=None,
-                 rendition_sizes=None):
+                 update_serving_urls=False,
+                 rendition_sizes=None, source_crop=None):
 
         self.key = key
 
