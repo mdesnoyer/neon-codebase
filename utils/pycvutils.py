@@ -171,6 +171,73 @@ class ImagePrep(object):
             - if return_same, convert the image back to its original format.
             - if return_pil, return the image as a PIL-style image.
         '''
+        # VALIDATE INPUTS
+        if (type(max_height) is not int) and (max_height is not None):
+            raise ValueError('max_height must be None or int')
+        if type(max_height) is int:
+            if max_height <= 0:
+                raise ValueError('max_height must be positive')
+        if (type(max_width) is not int) and (max_width is not None):
+            raise ValueError('max_width must be None or int')
+        if type(max_width) is int:
+            if max_width <= 0:
+                raise ValueError('max_width must be positive')
+        if (type(max_side) is not int) and (max_side is not None):
+            raise ValueError('max_side must be None or int')
+        if type(max_side) is int:
+            if max_side <= 0:
+                raise ValueError('max_side must be positive')
+        if (type(scale_height) is not int) and (scale_height is not None):
+            raise ValueError('scale_height must be None or int')
+        if type(scale_height) is int:
+            if scale_height <= 0:
+                raise ValueError('scale_height must be positive')
+        if (type(scale_width) is not int) and (scale_width is not None):
+            raise ValueError('scale_width must be None or int')
+        if type(scale_width) is int:
+            if scale_width <= 0:
+                raise ValueError('scale_width must be positive')
+        if (type(image_size) is not list) and (image_size is not None):
+            raise ValueError('image_size must be None or [h, w] list')
+        if image_size is not None:
+            for i in image_size:
+                if type(i) is not int:
+                    raise ValueError('image_size must be in ints')
+                if i <= 0:
+                    raise ValueError('image_size ints must be positive')
+        if ((type(crop_image_size) is not list) and 
+            (crop_image_size is not None)):
+            raise ValueError('crop_image_size must be None or [h, w] list')
+        if crop_image_size is not None:
+            for i in crop_image_size:
+                if type(i) is not int:
+                    raise ValueError('crop_image_size must be in ints')
+        if (type(image_area) is not int) and (image_area is not None):
+            raise ValueError('image_area must be None or int')
+        if type(image_area) is int:
+            if image_area <= 0:
+                raise ValueError('image_area must be positive')
+        if ((type(crop_frac) is not float) and
+            (type(crop_frac) is not list) and
+            (crop_frac is not None)):
+            raise ValueError(('crop frac must be float, list of floats, or '
+                              'None'))
+        if type(crop_frac) is float:
+            if crop_frac < 0:
+                raise ValueError('Crop frac must be positive')
+            if crop_frac > 1:
+                raise ValueError('Crop frac must be no greater than 1')
+        if type(crop_frac) is list:
+            if (len(crop_frac) != 2) and (len(crop_frac) != 4):
+                raise ValueError('crop_frac list len must be 2 or 4')
+            for i in crop_frac:
+                if type(i) is not float:
+                    raise ValueError('crop_frac must be in float')
+                if i < 0:
+                    raise ValueError('crop_fracs must be 0 or greater')
+                if i > 1:
+                    raise ValueError('crop fracs must be less than 1')
+        
         self.max_height = max_height
         self.max_width = max_width
         self.max_side = max_side
