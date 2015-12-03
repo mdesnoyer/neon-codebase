@@ -469,7 +469,7 @@ class VibranceGenerator(RegionFeatureGenerator):
         elif image.shape[2] == 1:
             return 0.
         # convert to HSV
-        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)[:,:,1:]))
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSV)[:,:,1:])
 
     def get_feat_name(self):
         return 'vibrance'
@@ -511,7 +511,7 @@ class BrightnessGenerator(RegionFeatureGenerator):
         elif image.shape[2] == 1:
             return np.mean(image)
         # convert to HSV
-        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,2]))
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,2])
 
 class SaturationGenerator(RegionFeatureGenerator):
     '''
@@ -550,7 +550,7 @@ class SaturationGenerator(RegionFeatureGenerator):
         elif image.shape[2] == 1:
             return 0.
         # convert to HSV
-        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,1]))
+        return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,1])
 
 class TextGenerator(RegionFeatureGenerator):
     '''
