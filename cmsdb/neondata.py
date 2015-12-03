@@ -2271,6 +2271,113 @@ class NeonUserAccount(NamespacedStoredObject):
                                  page_size=max_request_size,
                                  skip_missing=True))
 
+# define a ProcessingStrategy, that will dictate the behavior of the model.
+class ProcessingStrategy(DefaultedStoredObject):
+    '''
+    Defines the model parameters with which a client wishes their data to be
+    analyzed.
+
+    NOTE: The majority of these parameters share their names with the
+    parameters that are used to initialize local_video_searcher. For any
+    parameter for which this is the case, see local_video_searcher.py for
+    more elaborate documentation.
+    '''
+    def __init__(self, account_id, processing_time_ratio=2.5,
+                 local_search_width=32, local_search_step=4, n_thumbs=5,
+                 feat_score_weight=2.0, mixing_samples=40, max_variety=True,
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+        super(ProcessingStrategy, self).__init__(account_id)
+
+        # The processing time ratio dictates the maximum amount of time the
+        # video can spend in processing, which is given by:
+        #
+        # max_processing_time = (length of video in seconds * 
+        #                        processing_time_ratio)
+        self.processing_time_ratio = processing_time_ratio
+
+        # (this should rarely need to be changed)
+        # Local search width is the size of the local search regions. If the
+        # local_search_step is x, then for any frame which starts a local
+        # search region i, the frames searched are given by
+        # 
+        # i : i + local_search_width in steps of x.
+        self.local_search_width = local_search_width
+
+        # (this should rarely need to be changed)
+        # Local search step gives the step size between frames that undergo
+        # analysis in a local search region. See the documentation for
+        # local search width for the documentation.
+        self.local_search_step = local_search_step
+
+        # The number of thumbs that are desired as output from the video
+        # searching process.
+        self.n_thumbs = n_thumbs
+
+        # (this should rarely need to be changed)
+        # feat_score_weight is a multiplier that allows the feature score to
+        # be combined with the valence score. This is given by:
+        # 
+        # combined score = (valence score) + 
+        #                  (feat_score_weight * feature score)
+        self.feat_score_weight = feat_score_weight
+
+        # (this should rarely need to be changed)
+        # Mixing samples is the number of initial samples to take to get
+        # estimates for the running statistics.
+        self.mixing_samples = mixing_samples
+
+        # (this should rarely need to be changed)
+        # max variety determines whether or not the model should pay attention
+        # to the content of the images with respect to the variety of the top
+        # thumbnails.
+        self.max_variety = max_variety
+
+        # startend clip determines how much of the video should be 'clipped'
+        # prior to the analysis, to exclude things like titleframes and
+        # credit rolls.
+        self.startend_clip = startend_clip
+
+        # adapt improve is a boolean that determines whether or not we should
+        # be using CLAHE (contrast-limited adaptive histogram equalization) to
+        # improve frames. 
+        self.adapt_improve = adapt_improve
+
+        # analysis crop dictates the region of the image that should be
+        # excluded prior to the analysis. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
+        self.analysis_crop = analysis_crop
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ProcessingStrategy.__name__
+
 class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
@@ -2399,7 +2506,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
     ''' 
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
-                 update_serving_urls=False,
+                 update_serving_urls=False, source_crop=None,
                  rendition_sizes=None):
 
         self.key = key
@@ -2417,6 +2524,36 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
+
+        # source crop specifies the region of the image from which
+        # the result will originate. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
+        self.source_crop = source_crop
 
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
@@ -3553,8 +3690,8 @@ class NeonApiRequest(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
-        '''Save the default thumbnail by attaching it to a video.
-The video metadata for this request must be in the database already.
+        '''Save the default thumbnail by attaching it to a video. The video
+        metadata for this request must be in the database already.
 
         Inputs:
         cdn_metadata - If known, the metadata to save to the cdn.
@@ -4078,7 +4215,9 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is slow.
+                       images. If this is None, it is looked up, which is 
+                       slow. If a source_crop is requested, the image is also
+                       cropped here.
         
         '''        
         image = PILImageUtils.convert_to_rgb(image)
@@ -4305,8 +4444,8 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
-        thumb.video_id = self.key
-        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, 
+                                   async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail

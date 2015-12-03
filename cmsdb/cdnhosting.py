@@ -122,6 +122,7 @@ class CDNHosting(object):
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
+        self.source_crop = cdn_metadata.source_crop
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -143,10 +144,20 @@ class CDNHosting(object):
         overwrite - Should existing files be overwritten?
         servingurl_overwrite - Should the serving urls be overwritten?
 
+        Also performs source cropping, to exclude regions of the image that we
+        know a priori are 'bad' (i.e., newscrawl with CNN).
+
         Returns: list [(cdn_url, width, height)]
         '''
         new_serving_thumbs = [] # (url, width, height)
-        
+        if self.source_crop is not None:
+            if not self.resize:
+                _log.error(('Crop source specified but no desired final size '
+                            'is defined'))
+                raise ValueError(('Crop source can only operate along with '
+                                  'resize'))
+            _prep = pycvutils.ImagePrep(crop_frac=self.source_crop)
+            image = _prep(image)
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
         try:

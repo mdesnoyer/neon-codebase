@@ -57,6 +57,13 @@ class Model(object):
     def __str__(self):
         return utils.obj.full_object_str(self)
 
+    def update_processing_strategy(self, processing_strategy):
+        try:
+            self.video_searcher.update_processing_strategy(
+                                                processing_strategy)
+        except Exception, e:
+            _log.error(("Video Searcher does not support different "
+                        "processing strategies."))
 
     def reset(self):
         self.predictor.reset()

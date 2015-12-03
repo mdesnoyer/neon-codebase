@@ -381,6 +381,17 @@ class VideoProcessor(object):
         if duration > 3600:
             statemon.state.increment('video_duration_60m')
 
+        # Fetch the ProcessingStrategy
+        account_id = self.job_params['api_key']
+        
+        try:
+            processing_strategy = neondata.ProcessingStrategy.get(account_id)
+        except Exception, e:
+            _log.error(("Could not fetch processing strategy for account_id "
+                        "%s: %s")%(str(account_id), e))
+            raise DBError("Could not fetch processing strategy")
+        self.model.update_processing_strategy(processing_strategy)
+
         try:
             results = \
               self.model.choose_thumbnails(

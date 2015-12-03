@@ -64,7 +64,7 @@ def seek_video(video, frame_no, do_log=True, cur_frame=None):
     video - An opencv VideoCapture object
     frame_no - The frame number to seek to
     do_log - True if logging should happen on errors
-    cur_frame - If you know the frame number that the video should be at, 
+    cur_frame - If you know the frame number that the video should be at,
                 put it here. It helps to identify error cases.
 
     Outputs:
@@ -106,9 +106,17 @@ def _ensure_CV(image):
     Ensures that the image is an Numpy array
     in OpenCV format.
     '''
-    if not type(image).__module__ == np.__name__:
-        return imageutils.PILImageUtils.to_cv(im)
+    if _not_CV(image):
+        return from_pil(image)
     return image
+
+def _not_CV(image):
+    '''
+    Returns a 1 for a PIL image and a 0 for an OpenCV style image.
+    '''
+    if not type(image).__module__ == np.__name__:
+        return 1
+    return 0
 
 def _get_area(image):
     # computes the area of an image
@@ -122,46 +130,115 @@ def _convert_to_gray(image):
 
 class ImagePrep(object):
     '''
-    Exports a class that preprocesses images
-    in a varity of configurable ways. This
-    accepts either a PIL or OpenCV image, but always
-    returns an OpenCV image.
+    Exports a class that preprocesses images in a varity of configurable ways.
+    This accepts either a PIL or OpenCV image, but will return an OpenCV style
+    image (by default), although this can be configured.
     '''
     def __init__(self, max_height=None, max_width=None,
-                 max_side=None, scale_height=None, 
+                 max_side=None, scale_height=None,
                  scale_width=None, image_size=None,
                  crop_image_size=None, image_area=None,
-                 crop_frac=None, convert_to_gray=False):
+                 crop_frac=None, convert_to_gray=False,
+                 return_same=False, return_pil=False):
         '''
-        If any of the inputs are None or False, then
-        that input does not trigger any preprocessing.
+        If any of the inputs are None or False, then that input does not
+        trigger any preprocessing.
 
-        Inputs are defined by the actions they trigger. In order
-        of application:
+        Inputs are defined by the actions they trigger. In order of
+        application:
+            - convert image to grayscale.
             - resize such that height is not more than max_height
             - resize such that width is not more than max_width
             - resize such that no side is more than max_side
             - resize such that height is exactly scale_height
             - resize such that width is exactly scale_width
-            - force image size to image_size
+            - force image size to image_size [h, w]
             - resize and crop image to crop_image_size
             - resize an image such that its area is image_area
             - center crop image to crop_frac
-                - this may either be a float, a 2-element list,
-                  or a 4-element list. Which either specify the 
-                  overall, top+bottom and left+right crop frac, or 
-                  the top / right / bottom / left crop frac.
+                - this may either be a float, a 2-element list, or a 4-element
+                  list. Which either specify the overall, top+bottom and
+                  left+right crop frac, or the top / right / bottom / left
+                  crop frac.
 
                   IMPORTANT:
-                    If crop_frac is a 4-element list, then it refers to the 
-                    percentage from FROM that edge. I.e., 
-                    crop_frac = [.6, .7] = retain 60% of the horizontal and 
+                    If crop_frac is a 4-element list, then it refers to the
+                    percentage from FROM that edge. I.e.,
+                    crop_frac = [.6, .7] = retain 60% of the horizontal and
                         70% of the vertical
                     crop_frac = [.2, .3, .1, .0] = cut 20% off the top, 30%
                         off the right, 10% off the bottom, and 0% off the
                         left.
-            - convert image to grayscale.
+            - if return_same, convert the image back to its original format.
+            - if return_pil, return the image as a PIL-style image.
         '''
+        # VALIDATE INPUTS
+        if (type(max_height) is not int) and (max_height is not None):
+            raise ValueError('max_height must be None or int')
+        if type(max_height) is int:
+            if max_height <= 0:
+                raise ValueError('max_height must be positive')
+        if (type(max_width) is not int) and (max_width is not None):
+            raise ValueError('max_width must be None or int')
+        if type(max_width) is int:
+            if max_width <= 0:
+                raise ValueError('max_width must be positive')
+        if (type(max_side) is not int) and (max_side is not None):
+            raise ValueError('max_side must be None or int')
+        if type(max_side) is int:
+            if max_side <= 0:
+                raise ValueError('max_side must be positive')
+        if (type(scale_height) is not int) and (scale_height is not None):
+            raise ValueError('scale_height must be None or int')
+        if type(scale_height) is int:
+            if scale_height <= 0:
+                raise ValueError('scale_height must be positive')
+        if (type(scale_width) is not int) and (scale_width is not None):
+            raise ValueError('scale_width must be None or int')
+        if type(scale_width) is int:
+            if scale_width <= 0:
+                raise ValueError('scale_width must be positive')
+        if (type(image_size) is not list) and (image_size is not None):
+            raise ValueError('image_size must be None or [h, w] list')
+        if image_size is not None:
+            for i in image_size:
+                if type(i) is not int:
+                    raise ValueError('image_size must be in ints')
+                if i <= 0:
+                    raise ValueError('image_size ints must be positive')
+        if ((type(crop_image_size) is not list) and 
+            (crop_image_size is not None)):
+            raise ValueError('crop_image_size must be None or [h, w] list')
+        if crop_image_size is not None:
+            for i in crop_image_size:
+                if type(i) is not int:
+                    raise ValueError('crop_image_size must be in ints')
+        if (type(image_area) is not int) and (image_area is not None):
+            raise ValueError('image_area must be None or int')
+        if type(image_area) is int:
+            if image_area <= 0:
+                raise ValueError('image_area must be positive')
+        if ((type(crop_frac) is not float) and
+            (type(crop_frac) is not list) and
+            (crop_frac is not None)):
+            raise ValueError(('crop frac must be float, list of floats, or '
+                              'None'))
+        if type(crop_frac) is float:
+            if crop_frac < 0:
+                raise ValueError('Crop frac must be positive')
+            if crop_frac > 1:
+                raise ValueError('Crop frac must be no greater than 1')
+        if type(crop_frac) is list:
+            if (len(crop_frac) != 2) and (len(crop_frac) != 4):
+                raise ValueError('crop_frac list len must be 2 or 4')
+            for i in crop_frac:
+                if type(i) is not float:
+                    raise ValueError('crop_frac must be in float')
+                if i < 0:
+                    raise ValueError('crop_fracs must be 0 or greater')
+                if i > 1:
+                    raise ValueError('crop fracs must be less than 1')
+        
         self.max_height = max_height
         self.max_width = max_width
         self.max_side = max_side
@@ -172,11 +249,14 @@ class ImagePrep(object):
         self.image_area = image_area
         self.crop_frac = crop_frac
         self.convert_to_gray = convert_to_gray
+        self.return_pil = return_pil
+        self.return_same = return_same
 
     def __call__(self, image):
+        if type(image) is list:
+            return [self(x) for x in image]
+        not_cv = _not_CV(image)
         image = _ensure_CV(image)
-        # import ipdb
-        # ipdb.set_trace()
         if self.convert_to_gray:
             image = _convert_to_gray(image)
         if self.max_height is not None:
@@ -200,6 +280,8 @@ class ImagePrep(object):
             image = self._resize_to_area(image)
         if self.crop_frac is not None:
             image = self._center_crop(image)
+        if (not_cv and self.return_same) or self.return_pil:
+            image = to_pil(image)
         return image
 
     def _center_crop(self, image):
@@ -209,7 +291,7 @@ class ImagePrep(object):
 
         self.crop_frac may be a list of either 2 or 4
         elements, which either specify the top+bottom and
-        left+right crop frac, or the top / right / bottom 
+        left+right crop frac, or the top / right / bottom
         / left crop frac.
 
         IMPORTANT: SEE NOTE
@@ -256,9 +338,9 @@ class ImagePrep(object):
         else:
             timage = image[xlim1:]
         if ylim2 != 0:
-            timage = image[:, ylim1:-ylim2]
+            timage = timage[:, ylim1:-ylim2]
         else:
-            timage = image[:, ylim1:]
+            timage = timage[:, ylim1:]
         return timage
 
     def _resize_to_max(self, image, dim=None):
