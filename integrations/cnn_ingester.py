@@ -16,6 +16,7 @@ from cmsdb import neondata
 import datetime
 import functools
 import logging
+import integrations.cnn
 import integrations.brightcove
 import integrations.exceptions
 import signal
