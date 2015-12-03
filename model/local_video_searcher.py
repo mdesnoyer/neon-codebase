@@ -245,11 +245,9 @@ class ColorStatistics(object):
         '''
         return self._dists.percentile(x)
 
-class Combiner(object):
+class MultiplicativeCombiner(object):
     '''
-    Combines arbitrary feature vectors according to either (1) predefined
-    weights or (2) attempts to deduce the weight given the global statistics
-    object.
+    Multiplicatively combines feature scores
     '''
     def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
                  combine=lambda x: np.prod(x)):
@@ -265,14 +263,19 @@ class Combiner(object):
         Note: if a statistic has an entry in both the stats and weights dict,
             then weights dict takes precedence.
         '''
-        self.weight_dict = weight_dict
+        #self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         # compute the transfer functions
         self._trans_funcs = dict()
+        self.name = 'Multiplicative combiner'
         for feat in weight_valence:
             max_pen = penalties[feat]
             self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
         self._combine = combine
+        # the combiner exports a combination function for use in the results
+        # objects, it accepts model score (ms), feature score (fs) and
+        # feature score weight (w)
+        self.result_combine = lambda ms, fs, w: ms*fs
 
     def _set_stats_dict(self, stats_dict):
         '''
@@ -367,6 +370,134 @@ class Combiner(object):
             comb_scores.append(comb_score)
         return comb_scores
 
+class AdditiveCombiner(object):
+    '''
+    Combines arbitrary feature vectors according to either (1) predefined
+    weights or (2) attempts to deduce the weight given the global statistics
+    object.
+    '''
+    def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
+                 combine=lambda x: np.sum(x)):
+        '''
+        weight_dict is a dictionary of {'stat name': weight} which yields
+            absolute weights.
+        weight_valence is a dictionary of {'stat name': valence} encoding,
+            which indicates whether 'better' is higher, lower, or maximally
+            typical.
+        combine is an anonymous function to combine scored statistics; combine
+            must have a single argument and be able to operate on lists of
+            floats.
+        Note: if a statistic has an entry in both the stats and weights dict,
+            then weights dict takes precedence.
+        '''
+        self.weight_dict = weight_dict
+        self.weight_valence = weight_valence
+        self._combine = combine
+        self.name = 'Additive Combiner'
+        # the combiner exports a combination function for use in the results
+        # objects, it accepts model score (ms), feature score (fs) and
+        # feature score weight (w)
+        self.result_combine = lambda ms, fs, w: ms + w * fs
+
+    def _set_stats_dict(self, stats_dict):
+        '''
+        Sets the statistics dictionary given a video searcher object.
+
+        Should only be called by the object that has the stats dictionary.
+
+        stats_dict is a dictionary of {'stat name': Statistics()}
+        '''
+        self._stats_dict = stats_dict
+
+    def _compute_stat_score(self, feat_name, feat_vec):
+        '''
+        Computes the statistics score for a feature vector. If it has a
+        defined weight, then we simply return the product of this weight with
+        the value of the feature.
+        '''
+
+        if self._stats_dict.has_key(feat_name):
+            vals = []
+            if self.weight_valence.has_key(feat_name):
+                valence = self.weight_valence[feat_name]
+            else:
+                valence = MINIMIZE # assume you are trying to maximize it
+            for v in feat_vec:
+                if valence == PEN_NONZERO:
+                    rank = int(v > 0)
+                else:
+                    rank = self._stats_dict[feat_name].rank(v)
+                if valence == MINIMIZE:
+                    rank = 1. - rank
+                if valence == NORMALIZE:
+                    rank = 1. - abs(0.5 - rank)*2
+                if valence == PEN_LOW_HALF:
+                    rank = 1. + min(0, rank - 0.5) * 2
+                if valence == PEN_HIGH_HALF:
+                    rank = 1. - max(0, rank - 0.5) * 2
+                vals.append(rank * self.weight_dict[feat_name])
+            return vals
+
+        else:
+            return [(x * self.weight_dict[feat_name])**2 for x in feat_vec]
+        return feat_vec
+
+    def _compute_stats_score_func(self, feat_name, feat_val):
+        '''For an images feature name / feature value pair, returns a lambda
+        function that allows you to evaluate it lazily / dynamically, so that
+        early thumbnails are not given a "free pass"'''
+        if self._stats_dict.has_key(feat_name):
+            stat_obj = self._stats_dict[feat_name]
+            if self.weight_valence.has_key(feat_name):
+                valence = self.weight_valence[feat_name]
+            else:
+                valence = MINIMIZE
+            if valence == MINIMIZE:
+                rankfunc = lambda x: 1. - stat_obj.rank(x)
+            elif valence == NORMALIZE:
+                rankfunc = lambda x: 1. - abs(0.5 - stat_obj.rank(x)) * 2
+            elif valence == PEN_LOW_HALF:
+                rankfunc = lambda x: 1. + min(0, stat_obj.rank(x) - 0.5) * 2
+            elif valence == PEN_HIGH_HALF:
+                rankfunc = lambda x: 1. - max(0, stat_obj.rank(x) - 0.5) * 2
+            elif valence == MAXIMIZE:
+                rankfunc = lambda x: stat_obj.rank(x)
+            elif valence == PEN_NONZERO:
+                rankfunc = lambda x: x > 0
+            return lambda: rankfunc(feat_val)**2 * self.weight_dict[feat_name]
+        else:
+            return lambda: (feat_val * self.weight_dict[feat_name])**2
+
+    def combine_scores_func(self, feat_dict):
+        '''This will return a list of functions that can be evaluated lazily,
+        which permit the thumbnail scores to be updated--especially in the
+        event that some thumbnails would not actually be accepted if the order
+        of analysis was changed.'''
+        funcs = []
+        tot_pos = float(np.sum(
+                            [self.weight_dict[x] for x in feat_dict.keys()]))
+        for feat_name, feat_val in feat_dict.iteritems():
+            funcs.append(self._compute_stats_score_func(feat_name, feat_val))
+        return lambda: sum([x() for x in funcs])/tot_pos
+
+    def combine_scores(self, feat_dict):
+        '''
+        Returns the scores for the thumbnails given a feat_dict, which is a
+        dictionary {'feature name': feature_vector}
+        '''
+
+        stat_scores = []
+        tot_pos = float(np.sum(
+                            [self.weight_dict[x] for x in feat_dict.keys()]))
+        for k, v in feat_dict.iteritems():
+            stat_scores.append(self._compute_stat_score(k, v))
+        comb_scores = []
+        for x in zip(*stat_scores):
+            comb_score = self._combine(x)
+            comb_score /= tot_pos # normalize
+            comb_scores.append(comb_score)
+        return comb_scores
+
 class _Result(object):
     '''
     Private class to be used by the ResultsList object. Represents an
@@ -375,10 +506,15 @@ class _Result(object):
     Note: comb_score is not the score output by the combiner, but rather
     the combination of the feature score (feat_score, which is output by
     the combiner) and the score, as a function of the feat_score_weight)
+
+    The combination function is exported by the combiner, and must accept
+    three arguments: model score (ms), feature score (fs), and feature
+    score weight (w) and return a float.
     '''
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
-                 feat_score_weight=None, feat_score_func=None):
+                 feat_score_weight=None, feat_score_func=None,
+                 combination_function=None):
         self._defined = False
         if score and frameno:
             self._defined = True
@@ -390,6 +526,9 @@ class _Result(object):
         self._feat_score_func = feat_score_func
         self._hash = getrandbits(128)
         self.image = image
+        if combination_function is None:
+            combination_function = lambda: ms, fs, w: ms + fs * w
+        self._combination_function = combination_function
         if self.image is not None:
             self._color_name = ColorName(self.image)
         else:
@@ -405,10 +544,14 @@ class _Result(object):
 
     @property
     def comb_score(self):
+        '''Property that computes the combination score. Note that it no
+        longer checks to see if the feature score weight is defined; thus
+        if you use a function that requires the feature score weight, it
+        must be defined'''
         if self.feat_score is None:
             return self.score
-        #return self.score * self.feat_score * self._feat_score_weight
-        return self.score * self.feat_score
+        return self._combination_function(self.score, self.feat_score,
+                                          self._feat_score_weight)
 
     def __cmp__(self, other):
         if type(self) is not type(other):
@@ -471,7 +614,7 @@ class ResultsList(object):
     '''
     def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
                  max_rejectable=0.2, feat_score_weight=0.,
-                 adapt_improve=False):
+                 adapt_improve=False, combination_function=None):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.reset()
@@ -480,6 +623,7 @@ class ResultsList(object):
         self._feat_score_weight = feat_score_weight
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
+        self._combination_function = combination_function
         if adapt_improve:
             self._clipLimit = 1.0
             self._tileGridSize = (8,8)
@@ -555,7 +699,8 @@ class ResultsList(object):
         res = _Result(frameno=frameno, score=score, image=image,
                       feat_score=feat_score, meta=meta,
                       feat_score_weight=self._feat_score_weight,
-                      feat_score_func=feat_score_func)
+                      feat_score_func=feat_score_func,
+                      combination_function=self._combination_function)
         self._considered_thumbs += 1
         if score < self.min:
             _log.debug('Frame %i [%.3f] rejected due to score'%(frameno,
@@ -916,10 +1061,11 @@ class LocalSearcher(object):
                                             100./self.n_thumbs))
         self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
-                                   max_rejectable=f_max_var_rej,
-                                   feat_score_weight=self._feat_score_weight,
-                                   adapt_improve=self.adapt_improve,
-                                   max_variety=self.max_variety)
+                           max_rejectable=f_max_var_rej,
+                           feat_score_weight=self._feat_score_weight,
+                           adapt_improve=self.adapt_improve,
+                           max_variety=self.max_variety,
+                            combination_function=self.combiner.result_combine)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
