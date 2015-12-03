@@ -246,7 +246,8 @@ class SmartCrop(object):
             0.9 # min probability for step 2
             )
         if len(boxes) == 0:
-            return np.array([])
+            self._text_boxes = np.array([])
+            return self._text_boxes
         boxes[0:, 1] += cut_top
         boxes *= ratio
         boxes = boxes.astype(int)
@@ -443,7 +444,7 @@ class SmartCrop(object):
         Saliency crop is biased to the center of the image.
         '''
         (height, width, elem) = self.image.shape
-        if self.with_saliency:
+        if self.with_text_detection:
             text_boxes = self.get_text_boxes()
             if len(text_boxes) == 0:
                 neutral_width = float(width) * h / height
