@@ -430,6 +430,9 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         blur_img = cv2.Laplacian(image, cv2.CV_32F)
         return np.percentile(blur_img, self.thresh)
 
+    def get_feat_name(self):
+        'face_blur'
+
 class VibranceGenerator(RegionFeatureGenerator):
     '''
     Returns the mean "vibrance" (average of saturation + value) of an image.
@@ -513,6 +516,9 @@ class BrightnessGenerator(RegionFeatureGenerator):
         # convert to HSV
         return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,2])
 
+    def get_feat_name(self):
+        return 'brightness'
+
 class SaturationGenerator(RegionFeatureGenerator):
     '''
     Returns the average brightness of an image.
@@ -551,6 +557,9 @@ class SaturationGenerator(RegionFeatureGenerator):
             return 0.
         # convert to HSV
         return np.mean(cv2.cvtColor(image, cv2.cv.CV_BGR2HSL)[:,:,1])
+
+    def get_feat_name(self):
+        return 'saturation'
 
 class TextGenerator(RegionFeatureGenerator):
     '''
