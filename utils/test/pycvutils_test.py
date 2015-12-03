@@ -13,11 +13,13 @@ from glob import glob
 from utils.pycvutils import ImagePrep
 from PIL import Image
 
-dimtol = 1.     # dimension tolerance
-areatol = 1.    # area tolerance
-asptol = 1.     # aspect ratio tolerance
+dimtol = 1.      # dimension:        tolerance = dimtol      
+areatol = .01    # area:             tolerance = areatol * max(area1, area2)
+asptol = .01     # aspect ratio:     tolerance = asptol * max(asp1, asp2)
 
 TEST_IMAGE = os.path.join(os.path.dirname(__file__), 'im480x360.jpg')
+
+np.random.seed(42)
 
 def _is_CV(image):
     return type(image).__module__ == np.__name__
@@ -40,81 +42,14 @@ def _get_dims(image):
         h, w = image.shape[:2]
     return h, w
 
-def _check_dim(image, dims, at_most=False):
-    '''Checks the dimensions of an image. dims is an array of type [h, w].
-    If h or w is <= 0, then it ignores that dimension. If at_most is true,
-    then it checks that the dimensions are at most h and w.'''
-    oh, ow = _get_dims(image)
-    h, w = dims
-    hdiff = (h - oh) * (h > 0)
-    wdiff = (w - ow) * (w > 0)
-    if at_most:
-        return (((hdiff + dimtol) >= 0) and ((wdiff + dimtol) >= 0))
-    else:
-        return ((abs(hdiff) <= dimtol) and (abs(wdiff) <= dimtol))
-
 def _compute_aspect_ratio(image):
     '''Computes the aspect ratio'''
     oh, ow = _get_dims(image)
     return float(ow) / float(oh)
 
-def _compute_aspect_ratio_range(image):
-    oh, ow = _get_dims(image)
-    max_asp = float(ow + asptol) / float(oh - asptol)
-    min_asp = float(ow - asptol) / float(oh + asptol)
-    return (min_asp, max_asp)
-
 def _compute_area(image):
     oh, ow = _get_dims(image)
     return oh * ow
-
-def _compute_area_range(image):
-    oh, ow = _get_dims(image)
-    max_area = (ow + asptol) * (oh + asptol)
-    min_area = (ow - asptol) * (oh - asptol)
-    return (min_area, max_area)
-
-def check_width_is(image, x):
-    return _check_dim(image, [0, x])
-
-def check_width_at_most(image, x):
-    return _check_dim(image, [0, x], True)
-
-def check_height_is(image, x):
-    return _check_dim(image, [x, 0])
-
-def check_height_at_most(image, x):
-    return _check_dim(image, [x, 0], True)
-
-def check_dims_is(image, x):
-    return _check_dim(image, x)
-
-def check_dims_at_most(image, x):
-    return _check_dim(image, x, True)
-
-def check_aspect_ratio_is(image, min_asp, max_asp):
-    '''Verifies that the aspect ratio is within allowable range'''
-    obs_asp = _compute_aspect_ratio(image)
-    return ((obs_asp >= min_asp) and (obs_asp <= max_asp))
-
-def check_area_is(image, min_area, max_area):
-    '''Verifies that the area is within allowable range'''
-    obs_area = _compute_area(image)
-    return ((obs_area >= min_area) and (obs_area <= max_area))
-
-def check_aspect_ratio_equal(image1, image2):
-    '''Verifies that the aspect ratio of image2 is within the range of
-    image1'''
-    min_asp, max_asp = _compute_aspect_ratio_range(image1)
-    obs_asp = _compute_aspect_ratio(image2)
-    return ((obs_asp >= min_asp) and (obs_asp <= max_asp))
-
-def check_is_grayscale(image):
-    if len(image.shape) <= 2:
-        return True
-    if image.shape[2] <= 1:
-        return True
-    return False
 
 def _subarray_in_array(a, suba):
     targ = suba.flatten()[0]
@@ -207,159 +142,196 @@ class TestImagePrep(unittest.TestCase):
     def image_pil(self):
         return self._image_pil.copy()
 
-    def test_max_height_cv(self):
-        # first: make sure that a very large desired height does not
-        # change anything.
-        image = self.image_cv
-        oh, ow = _get_dims(image)
-        max_height = oh * 2
-        ip = ImagePrep(max_height=max_height)
-        new_image = ip(image)
-        self.assertTrue(check_dims_is(new_image, [oh, ow]))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
-        # now check a small height
-        max_height = oh / 2
-        ip = ImagePrep(max_height=max_height)
-        new_image = ip(image)
-        self.assertTrue(check_height_at_most(new_image, max_height))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def test_inputs(self):
+        singletons = ['max_height', 'max_width', 'max_side', 'scale_height',
+                      'scale_width', 'image_area']
+        for i in singletons:
+            args = {i:'a'}
+            self.assertRaises(ValueError, ImagePrep, **args)
+            args = {i:0}
+            self.assertRaises(ValueError, ImagePrep, **args)
+        # wrong arg types
+        self.assertRaises(ValueError, ImagePrep, crop_frac=2)
+        self.assertRaises(ValueError, ImagePrep, crop_frac=['a','b'])
+        # too large
+        self.assertRaises(ValueError, ImagePrep, crop_frac=1.1)
+        self.assertRaises(ValueError, ImagePrep, crop_frac=[1.1,0.5])
+        # too small
+        self.assertRaises(ValueError, ImagePrep, crop_frac=-0.1)
+        self.assertRaises(ValueError, ImagePrep, crop_frac=[-1.1,0.5])
+        # wrong length
+        self.assertRaises(ValueError, ImagePrep, crop_frac=[0.5, 0.5, 0.5])
 
-    def test_max_height_pil(self):
-        # first: make sure that a very large desired height does not
-        # change anything.
-        image = self.image_pil
-        oh, ow = _get_dims(image)
-        max_height = oh * 2
-        ip = ImagePrep(max_height=max_height)
-        new_image = ip(image)
-        self.assertTrue(check_dims_is(new_image, [oh, ow]))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
-        # now check a small height
-        max_height = oh / 2
-        ip = ImagePrep(max_height=max_height)
-        new_image = ip(image)
-        self.assertTrue(check_height_at_most(new_image, max_height))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertSideIs(self, s1, s2):
+        '''Asserts s1 == s2 to a tolerance of dimtol'''
+        self.assertAlmostEqual(s1, s2, delta=dimtol)
 
-    def test_max_width_cv(self):
-        # first: make sure that a very large desired height does not
-        # change anything.
-        image = self.image_cv
-        oh, ow = _get_dims(image)
-        max_width = ow * 2
-        ip = ImagePrep(max_width=max_width)
-        new_image = ip(image)
-        self.assertTrue(check_dims_is(new_image, [oh, ow]))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
-        # now check a small height
-        max_width = ow * 2
-        ip = ImagePrep(max_width=max_width)
-        new_image = ip(image)
-        self.assertTrue(check_width_at_most(new_image, max_width))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertSideNotMoreThan(self, s1, s2):
+        '''Asserts that s1 <= s2 to a tolerance of dimtol'''
+        self.assertLessEqual(s1, s2 + dimtol)
 
-    def test_max_width_pil(self):
-        # first: make sure that a very large desired height does not
-        # change anything.
-        image = self.image_pil
-        oh, ow = _get_dims(image)
-        max_width = ow * 2
-        ip = ImagePrep(max_width=max_width)
-        new_image = ip(image)
-        self.assertTrue(check_dims_is(new_image, [oh, ow]))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
-        # now check a small height
-        max_width = ow * 2
-        ip = ImagePrep(max_width=max_width)
-        new_image = ip(image)
-        self.assertTrue(check_width_at_most(new_image, max_width))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertAspMatch(self, im1, im2):
+        '''Asserts that the aspect ratio of two images are equal to a
+        tolerance calculated from asptol'''
+        asp1 = _compute_aspect_ratio(im1)
+        asp2 = _compute_aspect_ratio(im2)
+        tolerance = asptol * max(asp1, asp2)
+        self.assertAlmostEqual(asp1, asp2, delta=tolerance)
 
-    def test_max_side_cv(self):
-        image = self.image_cv
-        oh, ow = _get_dims(image)
-        max_side = np.min([oh, ow])
-        ip = ImagePrep(max_side=max_side)
-        new_image = ip(image)
-        self.assertTrue(max(_get_dims(new_image)) == max_side)
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertAspIs(self, im1, asp2):
+        '''Asserts that the aspect ratio an image is equal to asp2'''
+        asp1 = _compute_aspect_ratio(im1)
+        tolerance = asptol * max(asp1, asp2)
+        self.assertAlmostEqual(asp1, asp2, delta=tolerance)
 
-    def test_max_side_pil(self):
-        image = self.image_pil
-        oh, ow = _get_dims(image)
-        max_side = np.min([oh, ow])
-        ip = ImagePrep(max_side=max_side)
-        new_image = ip(image)
-        self.assertTrue(max(_get_dims(new_image)) == max_side)
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertDimMatch(self, im1, dims):
+        '''Asserts the dimensions of im1 matches dims to within a tolerance'''
+        oh, ow = _get_dims(im1)
+        h, w = dims
+        self.assertSideIs(oh, h)
+        self.assertSideIs(ow, w)
 
-    def test_scale_height_cv(self):
-        image = self.image_cv
-        oh, ow = _get_dims(image)
-        new_height = np.random.randint(oh/2, oh*2)
-        ip = ImagePrep(scale_height=new_height)
-        new_image = ip(image)
-        self.assertTrue(check_height_is(new_image, new_height))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+    def assertAreaIs(self, im1, area2):
+        '''Asserts that the area of im1 is equal to area2 to within
+        tolerance'''
+        area1 = _compute_area(im1)
+        tolerance = areatol * max(area1, area2)
+        self.assertAlmostEqual(area1, area2, delta=tolerance)
 
-    def test_scale_height_pil(self):
-        image = self.image_pil
+    def _test_max_height(self, image, direction='down'):
+        oh, ow = _get_dims(image)
+        if direction == 'down':
+            max_height = oh / 2
+        else:
+            max_height = oh * 2
+        ip = ImagePrep(max_height = max_height)
+        new_image = ip(image)
+        nh, nw = _get_dims(new_image)
+        self.assertSideNotMoreThan(nh, max_height)
+        self.assertAspMatch(image, new_image)
+
+    def _test_max_width(self, image, direction='down'):
+        oh, ow = _get_dims(image)
+        if direction == 'down':
+            max_width = ow / 2
+        else:
+            max_width = ow * 2
+        ip = ImagePrep(max_width = max_width)
+        new_image = ip(image)
+        nh, nw = _get_dims(new_image)
+        self.assertSideNotMoreThan(nw, max_width)
+        self.assertAspMatch(image, new_image)
+
+    def _test_max_side(self, image, direction='down'):
+        oh, ow = _get_dims(image)
+        mxs = max(oh, ow)
+        if direction == 'down':
+            max_side = mxs / 2
+        else:
+            max_side = mxs * 2
+        ip = ImagePrep(max_side = max_side)
+        new_image = ip(image)
+        nh, nw = _get_dims(new_image)
+        nmxs = max(nh, nw)
+        self.assertSideNotMoreThan(nmxs, max_side)
+        self.assertAspMatch(image, new_image)
+
+    def _test_scale_height(self, image):
         oh, ow = _get_dims(image)
         new_height = np.random.randint(oh/2, oh*2)
         ip = ImagePrep(scale_height=new_height)
         new_image = ip(image)
-        self.assertTrue(check_height_is(new_image, new_height))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+        nh, nw = _get_dims(new_image)
+        self.assertSideIs(nh, new_height)
 
-    def test_scale_width_cv(self):
-        image = self.image_cv
+    def _test_scale_width(self, image):
         oh, ow = _get_dims(image)
         new_width = np.random.randint(ow/2, ow*2)
         ip = ImagePrep(scale_width=new_width)
         new_image = ip(image)
-        self.assertTrue(check_width_is(new_image, new_width))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
+        nh, nw = _get_dims(new_image)
+        self.assertSideIs(nw, new_width)
 
-    def test_scale_width_pil(self):
-        image = self.image_pil
-        oh, ow = _get_dims(image)
-        new_width = np.random.randint(ow/2, ow*2)
-        ip = ImagePrep(scale_width=new_width)
-        new_image = ip(image)
-        self.assertTrue(check_width_is(new_image, new_width))
-        self.assertTrue(check_aspect_ratio_equal(image, new_image))
-
-    # if all of these have passed, we assume that the CV --> PIL
-    # conversion is working properly, and only use CV images for the
-    # remainder of the format-invariant tests.
-    def test_image_size(self):
-        image = self.image_cv
+    def _test_image_size(self, image):
         oh, ow = _get_dims(image)
         new_height = np.random.randint(oh/2, oh*2)
         new_width = np.random.randint(ow/2, ow*2)
         ip = ImagePrep(image_size=[new_height, new_width])
         new_image = ip(image)
-        self.assertTrue(check_width_is(new_image, new_width))
-        self.assertTrue(check_height_is(new_image, new_height))
+        nh, nw = _get_dims(new_image)
+        self.assertSideIs(nh, new_height)
+        self.assertSideIs(nw, new_width)
 
-    def test_image_area(self):
-        image = self.image_cv
+    def _test_image_area(self, image):
         area = _compute_area(image)
         new_area = np.random.randint(area/2, area*2)
         ip = ImagePrep(image_area=new_area)
         new_image = ip(image)
-        min_area, max_area = _compute_area_range(new_image)
-        self.assertTrue(new_area >= min_area)
-        self.assertTrue(new_area <= max_area)
+        self.assertAreaIs(new_image, new_area)
+        self.assertAspMatch(new_image, image)
 
-    def test_convert_to_gray(self):
-        image = self.image_cv
+    def _test_convert_to_gray(self, image):
         oh, ow = _get_dims(image)
         ip = ImagePrep(convert_to_gray=True)
         new_image = ip(image)
-        self.assertTrue(check_is_grayscale(new_image))
-        self.assertTrue(check_width_is(new_image, ow))
-        self.assertTrue(check_height_is(new_image, oh))
+        nh, nw = _get_dims(new_image)
+        self.assertEqual(len(new_image.shape), 2)
+        self.assertEqual(oh, nh)
+        self.assertEqual(ow, nw)
+        
+    def test_max_height(self):
+        image = self.image_cv
+        self._test_max_height(image, direction='down')
+        self._test_max_height(image, direction='up')
+        image = self.image_pil
+        self._test_max_height(image, direction='down')
+        self._test_max_height(image, direction='up')
+
+    def test_max_width(self):
+        image = self.image_cv
+        self._test_max_width(image, direction='down')
+        self._test_max_width(image, direction='up')
+        image = self.image_pil
+        self._test_max_width(image, direction='down')
+        self._test_max_width(image, direction='up')
+
+    def test_max_side(self):
+        image = self.image_cv
+        self._test_max_side(image, direction='down')
+        self._test_max_side(image, direction='up')
+        image = self.image_pil
+        self._test_max_side(image, direction='down')
+        self._test_max_side(image, direction='up')
+
+    def test_scale_height(self):
+        image = self.image_cv
+        self._test_scale_height(image)
+        image = self.image_pil
+        self._test_scale_height(image)
+
+    def test_scale_width(self):
+        image = self.image_cv
+        self._test_scale_width(image)
+        image = self.image_pil
+        self._test_scale_width(image)
+
+    def test_image_size(self):
+        image = self.image_cv
+        self._test_image_size(image)
+        image = self.image_pil
+        self._test_image_size(image)
+
+    def test_image_area(self):
+        image = self.image_cv
+        self._test_image_area(image)
+        image = self.image_pil
+        self._test_image_area(image)
+
+    def test_convert_to_gray(self):
+        image = self.image_cv
+        self._test_convert_to_gray(image)
+        image = self.image_pil
+        self._test_convert_to_gray(image)
 
     def test_cropping(self):
         '''Attempts to validate the cropping.'''
@@ -376,9 +348,12 @@ class TestImagePrep(unittest.TestCase):
         self.assertTrue(fnd)
         x1, y1, x2, y2 = fnd
         min_frac, max_frac = _get_frac(oh, x1, x2)
-        self.assertTrue((crop_frac >= min_frac) and (crop_frac <= max_frac))
+        self.assertGreaterEqual(crop_frac, min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac)
         min_frac, max_frac = _get_frac(ow, y1, y2)
-        self.assertTrue((crop_frac >= min_frac) and (crop_frac <= max_frac))
+        self.assertGreaterEqual(crop_frac, min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac)
+        
         # test crop type 2
         crop_frac = [np.random.rand()*.5+.5, np.random.rand()*.5+.5]
         ip = ImagePrep(crop_frac=crop_frac)
@@ -387,11 +362,11 @@ class TestImagePrep(unittest.TestCase):
         self.assertTrue(fnd)
         x1, y1, x2, y2 = fnd
         min_frac, max_frac = _get_frac(oh, x1, x2)
-        self.assertTrue((crop_frac[0] >= min_frac) and
-                        (crop_frac[0] <= max_frac))
+        self.assertGreaterEqual(crop_frac[0], min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac[0])
         min_frac, max_frac = _get_frac(ow, y1, y2)
-        self.assertTrue((crop_frac[1] >= min_frac) and
-                        (crop_frac[1] <= max_frac))
+        self.assertGreaterEqual(crop_frac[1], min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac[1])
         # test crop type 3
         crop_frac = [np.random.rand()*.5, np.random.rand()*.5,
                      np.random.rand()*.5, np.random.rand()*.5]
@@ -403,15 +378,17 @@ class TestImagePrep(unittest.TestCase):
         min_frac, max_frac = _get_frac(oh, x1, oh)
         self.assertTrue((1.-crop_frac[0] >= min_frac) and
                         (1.-crop_frac[0] <= max_frac))
+        self.assertGreaterEqual(1-crop_frac[0], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[0])
         min_frac, max_frac = _get_frac(ow, 0, y2)
-        self.assertTrue((1.-crop_frac[1] >= min_frac) and
-                        (1.-crop_frac[1] <= max_frac))
+        self.assertGreaterEqual(1-crop_frac[1], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[1])
         min_frac, max_frac = _get_frac(oh, 0, x2)
-        self.assertTrue((1.-crop_frac[2] >= min_frac) and
-                        (1.-crop_frac[2] <= max_frac))
+        self.assertGreaterEqual(1-crop_frac[2], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[2])
         min_frac, max_frac = _get_frac(ow, y1, ow)
-        self.assertTrue((1.-crop_frac[3] >= min_frac) and
-                        (1.-crop_frac[3] <= max_frac))
+        self.assertGreaterEqual(1-crop_frac[3], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[3])
 
     def test_returnTypes(self):
         pil_img = self.image_pil
@@ -450,16 +427,3 @@ class TestImagePrep(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
-
-
-
-
-
-
-
-
-
-
-
-
-
