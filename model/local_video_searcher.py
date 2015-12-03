@@ -843,7 +843,7 @@ class ResultsList(object):
                         'video to be accepted')%(res))
             return self._push_over_lowest(res)
 
-        if dists[arg_srt_idx[0]] < self.min_acceptable:
+        if dists[arg_srt_idx[1]] < self.min_acceptable:
             _log.debug(('%s is insufficiently different given the variety '
                         'seen in the video so far.')%(res))
             self._write_testing_frame(res, 'below_sim_threshold')
