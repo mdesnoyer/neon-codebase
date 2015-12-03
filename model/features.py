@@ -421,7 +421,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         areas = []
         for face in faces:
             blurs.append(self._get_blur(face))
-            areas.append(np.prod(faces.shape[:2]))
+            areas.append(np.prod(face.shape[:2]))
         areas = np.array(areas)
         areas /= np.sum(areas)
         return np.sum(blurs * areas)
@@ -431,7 +431,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         return np.percentile(blur_img, self.thresh)
 
     def get_feat_name(self):
-        'face_blur'
+        return 'face_blur'
 
 class VibranceGenerator(RegionFeatureGenerator):
     '''
