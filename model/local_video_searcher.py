@@ -374,6 +374,26 @@ class MultiplicativeCombiner(object):
                                 feat_name, feat_val))
         return lambda: self._combine([x() for x in funcs])
 
+    def get_indy_funcs(self, feat_dict):
+        '''Testing function that returns individual transfer functions, so
+        that we can evaluate each transfer function's value independently'''
+        funcs_dict = {}
+        for feat_name, feat_val in feat_dict.iteritems():
+            incl = True
+            if len(self.dependencies[feat_name]):
+                for dep, lamb in self.dependencies[feat_name]:
+                    if not feat_dict.has_key(dep):
+                        incl = False
+                        break
+                    dep_val = feat_dict[dep]
+                    if not lamb(dep_val):
+                        incl = False
+                        break
+            if incl:
+                funcs_dict[feat_name] = self._compute_stats_score_func(
+                                feat_name, feat_val)
+        return funcs_dict
+
     def combine_scores(self, feat_dict):
         '''
         Returns the scores for the thumbnails given a feat_dict, which is a
@@ -505,6 +525,15 @@ class AdditiveCombiner(object):
         for feat_name, feat_val in feat_dict.iteritems():
             funcs.append(self._compute_stats_score_func(feat_name, feat_val))
         return lambda: sum([x() for x in funcs])/tot_pos
+
+    def get_indy_funcs(self, feat_dict):
+        '''Testing function that returns individual transfer functions, so
+        that we can evaluate each transfer function's value independently'''
+        funcs_dict = {}
+        for feat_name, feat_val in feat_dict.iteritems():
+            cur_func = self._compute_stats_score_func(feat_name, feat_val))
+            funcs_dict[feat_name] = cur_func
+        return funcs_dict
 
     def combine_scores(self, feat_dict):
         '''
@@ -677,6 +706,8 @@ class ResultsList(object):
         an index for the position in the results list.
         '''
         if not TESTING:
+            return
+        if TESTING_DIR is None:
             return
         cur_sc_str = ' '.join(['%.3f'%x.feat_score for x in self.results
                                if x._defined])
@@ -888,7 +919,7 @@ class LocalSearcher(object):
                  use_all_data=False,
                  use_best_data=False,
                  testing=False,
-                 testing_dir='/tmp'):
+                 testing_dir=None):
         '''
         Inputs:
             predictor:
@@ -1054,7 +1085,7 @@ class LocalSearcher(object):
     def _set_up_testing(self):
         vname = self.video_name
         if vname is None:
-            vdir = os.path.join(TESTING_DIR, 'default')
+            return
         else:
             vdir = os.path.join(TESTING_DIR, vname)
         if os.path.exists(vdir):
@@ -1270,6 +1301,11 @@ class LocalSearcher(object):
         # if best_frameno == 2353:
         #     import ipdb
         #     ipdb.set_trace()
+        if TESTING:
+            meta = [best_feat_dict, 
+                    self.combiner.get_indy_funcs(best_feat_dict)]]
+        else:
+            meta = None
         self.results.accept_replace(best_frameno, framescore, best_gold,
                                     np.max(comb), meta=best_feat_dict,
                                     feat_score_func=feat_score_func)
