@@ -1307,7 +1307,7 @@ class LocalSearcher(object):
         else:
             meta = None
         self.results.accept_replace(best_frameno, framescore, best_gold,
-                                    np.max(comb), meta=best_feat_dict,
+                                    np.max(comb), meta=meta,
                                     feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
