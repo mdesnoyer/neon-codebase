@@ -250,16 +250,22 @@ class MultiplicativeCombiner(object):
     Multiplicatively combines feature scores
     '''
     def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
-                 combine=lambda x: np.prod(x)):
+                 combine=lambda x: np.prod(x),
+                 dependencies=ddict(lambda: [])):
         '''
-        weight_dict is a dictionary of {'stat name': weight} which yields
-            absolute weights.
+        penalties is a dict of feature names --> maximum penalties, see
+            get_feat_score_transfer_func for an explanation.
         weight_valence is a dictionary of {'stat name': valence} encoding,
             which indicates whether 'better' is higher, lower, or maximally
             typical.
         combine is an anonymous function to combine scored statistics; combine
             must have a single argument and be able to operate on lists of
             floats.
+        dependencies: a dictionary of feature names to [feature_name, lambda]
+            pairs. Given two features x and y, and 
+                dependencies[x] = [y, lambda_func]
+            then the value of x only affects the combined score if
+            lambda_func(y_val) == True. 
         Note: if a statistic has an entry in both the stats and weights dict,
             then weights dict takes precedence.
         '''
@@ -269,13 +275,14 @@ class MultiplicativeCombiner(object):
         self._trans_funcs = dict()
         self.name = 'Multiplicative combiner'
         for feat in weight_valence:
-            max_pen = penalties[feat]
+            max_pen = 1-penalties[feat]
             self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
         self._combine = combine
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
         self.result_combine = lambda ms, fs, w: ms*fs
+        self.dependencies = dependencies
 
     def _set_stats_dict(self, stats_dict):
         '''
@@ -352,22 +359,41 @@ class MultiplicativeCombiner(object):
         of analysis was changed.'''
         funcs = []
         for feat_name, feat_val in feat_dict.iteritems():
-            funcs.append(self._compute_stats_score_func(feat_name, feat_val))
+            incl = True
+            if len(self.dependencies[feat_name]):
+                for dep, lamb in self.dependencies[feat_name]:
+                    if not feat_dict.has_key(dep):
+                        incl = False
+                        break
+                    dep_val = feat_dict[dep]
+                    if not lamb(dep_val):
+                        incl = False
+                        break
+            if incl:
+                funcs.append(self._compute_stats_score_func(
+                                feat_name, feat_val))
         return lambda: self._combine([x() for x in funcs])
 
     def combine_scores(self, feat_dict):
         '''
         Returns the scores for the thumbnails given a feat_dict, which is a
         dictionary {'feature name': feature_vector}
+
+        This has to be changed from the original implementation (see
+        AdditiveCombiner) since it has dependencies. So what is done instead
+        is that we deal them to individual dictionaries, and evaluate the
+        combine_scores_func. 
         '''
 
         stat_scores = []
+        max_def = max([len(x) for x in feat_dict.itervalues()])
+        indi_dicts = [dict() for x in range(max_def)]
         for k, v in feat_dict.iteritems():
-            stat_scores.append(self._compute_stat_score(k, v))
+            for n, kval in enumerate(v):
+                indi_dicts[n][k] = kval
         comb_scores = []
-        for x in zip(*stat_scores):
-            comb_score = self._combine(x)
-            comb_scores.append(comb_score)
+        for feat_dict in indi_dicts:
+            comb_ccores.append(self.combine_scores_func(feat_dict)())
         return comb_scores
 
 class AdditiveCombiner(object):
@@ -527,7 +553,7 @@ class _Result(object):
         self._hash = getrandbits(128)
         self.image = image
         if combination_function is None:
-            combination_function = lambda: ms, fs, w: ms + fs * w
+            combination_function = lambda ms, fs, w: ms + fs * w
         self._combination_function = combination_function
         if self.image is not None:
             self._color_name = ColorName(self.image)
