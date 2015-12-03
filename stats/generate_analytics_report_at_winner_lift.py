@@ -18,6 +18,7 @@ from cmsdb import neondata
 import copy
 from datetime import datetime
 import dateutil.parser
+import happybase
 import impala.dbapi
 import impala.error
 import logging
@@ -25,13 +26,19 @@ import pandas
 import re
 import stats.metrics
 from stats import statutils
+import struct
 import utils.neon
 from utils.options import options, define
+import utils.prod
 
 define("stats_host", default="127.0.0.1",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
+define("stack_name", default=None,
+       help="Name of the stack where the database is")
+define("hbase_host", default="hbase3",
+       help="Name of the stack where the database is")
 define("pub_id", default=None, type=str,
        help=("Publisher, in the form of the tracker account id to get the "
              "data for"))
@@ -55,6 +62,12 @@ define("do_mobile", default=0, type=int,
        help="Only collect mobile data if 1")
 define("do_desktop", default=0, type=int,
        help="Only collect desktop data if 1")
+define("use_cmsdb_ctrs", default=0, type=int,
+       help="If 1, use the CTRS in the cmsdb in the calculations")
+define("video_ids", default=None, type=str,
+       help="File containing video ids to analyze, one per line")
+define("use_realtime_data", default=0, type=int,
+       help="If 1, use the realtime data instead of the cleaned Impala data")
 
 _log = logging.getLogger(__name__)
 
@@ -109,45 +122,43 @@ def filter_video_objects(videos):
     
 
 def get_video_objects():
-    _log.info('Querying for video ids')
-    conn = connect()
-    cursor = conn.cursor()
-    cursor.execute(
-    """select distinct regexp_extract(thumbnail_id, 
-    '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
-    thumbnail_id is not NULL and
-    tai='%s' %s""" % (options.pub_id, 
-                      statutils.get_time_clause(options.start_time,
-                                                options.end_time)))
+    
+    if options.video_ids:
+        _log.info('Using video ids from %s' % options.video_ids)
+        with open(options.video_ids) as f:
+            video_ids = [x.strip() for x in f]
+    else:
+        _log.info('Querying for video ids')
+        conn = connect()
+        cursor = conn.cursor()
+        cursor.execute(
+        """select distinct regexp_extract(thumbnail_id, 
+        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
+        thumbnail_id is not NULL and
+        tai='%s' %s""" % (options.pub_id, 
+                          statutils.get_time_clause(options.start_time,
+                                                    options.end_time)))
 
-    vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
-    video_ids = [vidRe.match(x[0]).group(2) for 
-                 x in cursor if vidRe.match(x[0])]
+        vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
+        video_ids = [vidRe.match(x[0]).group(2) for 
+                     x in cursor if vidRe.match(x[0])]
 
     videos = neondata.VideoMetadata.get_many(video_ids)
     videos = [x for x in videos if x is not None]
 
     return filter_video_objects(videos)
-    
 
-def collect_stats(thumb_info, video_info,
-                  impression_metric=MetricTypes.LOADS,
-                  conversion_metric=MetricTypes.CLICKS):
-    '''Grabs the stats counts from the database and some calculations.
+def get_hourly_stats_from_impala(video_info, impression_metric,
+                                 conversion_metric):
+    '''Grabs the stats from Impala
 
-    Inputs:
-    thumb_info - thumbnail_id -> ThumbnailMetadata
-    video_info - video_id -> VideoMetadata
-
-    Returns: A panda DataFrame with index of (integration_id, video_id, type,
-    rank) and columns of (impression_count, conversion_count, CTR, extra conversions, lift, pvalue)
+    Returns a pandas DataFrame with columns of hr, imp, conv and thumb_id
     '''
-    video_data = {} # (integration_id, video_id) => DataFrame with stats
-
     col_map = {
         MetricTypes.LOADS: 'imloadclienttime',
         MetricTypes.VIEWS: 'imvisclienttime',
-        MetricTypes.CLICKS: 'imclickclienttime'}
+        MetricTypes.CLICKS: 'imclickclienttime'
+        }
     
     conn = connect()
     cursor = conn.cursor()
@@ -203,8 +214,87 @@ def collect_stats(thumb_info, video_info,
     cursor.execute(query)
 
     impala_cols = [metadata[0] for metadata in cursor.description]
-    all_hourly_data = pandas.DataFrame((dict(zip(impala_cols, row))
-                                        for row in cursor))
+    return pandas.DataFrame((dict(zip(impala_cols, row))
+                             for row in cursor))
+
+def get_hourly_stats_from_hbase(thumbnail_info, impression_metric,
+                                conversion_metric):
+    
+    '''Grabs the stats from Hbase
+
+    Returns a pandas DataFrame with columns of hr, imp, conv and thumbnail_id
+    '''
+    col_map = {
+        MetricTypes.LOADS: 'il',
+        MetricTypes.VIEWS: 'iv',
+        MetricTypes.CLICKS: 'ic',
+        MetricTypes.PLAYS: 'vp'
+        }
+    start_time = None
+    if options.start_time is not None:
+        start_time = dateutil.parser.parse(options.start_time)
+    end_time = None
+    if options.end_time is not None:
+        end_time = dateutil.parser.parse(options.end_time)
+        
+    conn = happybase.Connection(utils.prod.find_host_private_address(
+        options.hbase_host,
+        options.stack_name))
+    try:
+        table = conn.table('THUMBNAIL_TIMESTAMP_EVENT_COUNTS')
+        data = []
+        for thumb_id in thumbnail_info.keys():
+            start_key = thumb_id
+            if start_time is not None:
+                start_key += '_' + start_time.strftime('%Y-%m-%dT%H')
+            end_key = thumb_id
+            if end_time is not None:
+                end_key += '_' + end_time.strftime('%Y-%m-%dT%H')
+            end_key += 'a'
+            
+            for key, row in table.scan(row_start=start_key,
+                                       row_stop=end_key,
+                                       columns=['evts']):
+                garb1, garb, hr = key.rpartition('_')
+                hr = dateutil.parser.parse(hr)
+                cur_counts = dict([(k.partition(':')[2],
+                                    struct.unpack('>q', v)[0])
+                                    for k, v in row.iteritems()])
+                row_data = {
+                    'hr': hr,
+                    'thumbnail_id': thumb_id,
+                    'imp': cur_counts.get(col_map[impression_metric], 0),
+                    'conv': cur_counts.get(col_map[conversion_metric], 0)
+                    }
+                data.append(row_data)
+        
+    finally:
+        conn.close()
+
+    return pandas.DataFrame(data)
+
+def collect_stats(thumb_info, video_info,
+                  impression_metric=MetricTypes.LOADS,
+                  conversion_metric=MetricTypes.CLICKS):
+    '''Grabs the stats counts from the database and some calculations.
+
+    Inputs:
+    thumb_info - thumbnail_id -> ThumbnailMetadata
+    video_info - video_id -> VideoMetadata
+
+    Returns: A panda DataFrame with index of (integration_id, video_id, type,
+    rank) and columns of (impression_count, conversion_count, CTR, extra conversions, lift, pvalue)
+    '''
+    video_data = {} # (integration_id, video_id) => DataFrame with stats
+
+    if options.use_realtime_data:
+        all_hourly_data = get_hourly_stats_from_hbase(thumb_info,
+                                                      impression_metric,
+                                                      conversion_metric)
+    else:
+        all_hourly_data = get_hourly_stats_from_impala(video_info, 
+                                                       impression_metric,
+                                                       conversion_metric)
 
     # Add a column for the video id
     all_hourly_data = pandas.concat([
@@ -227,7 +317,8 @@ def collect_stats(thumb_info, video_info,
         
         cross_stats = stats.metrics.calc_lift_at_first_significant_hour(
             impressions, conversions, neondata.VideoStatus.get(video_id),
-            neondata.ThumbnailStatus.get_many(impressions.columns))
+            neondata.ThumbnailStatus.get_many(impressions.columns),
+            options.use_cmsdb_ctrs)
 
         windowed_impressions = impressions
         windowed_conversions = conversions

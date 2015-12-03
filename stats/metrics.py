@@ -21,7 +21,8 @@ import pandas
 import scipy.stats
 
 def calc_lift_at_first_significant_hour(impressions, conversions,
-                                        video_status, thumb_statuses):
+                                        video_status, thumb_statuses,
+                                        use_cmsdb_ctrs=False):
     '''Calculates the lift for each thumbnail relative to the others 
     when statistical significant is reached.
     Inputs:
@@ -74,7 +75,7 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                 index=zscore.index)
             p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
-            if exp_end and max(cum_imp.index) > exp_end:
+            if use_cmsdb_ctrs and exp_end and max(cum_imp.index) > exp_end:
                 # The experiment has ended, so assume the ctrs in the
                 # database are correct
                 exp_end = exp_end.replace(minute=0, second=0, microsecond=0)
@@ -84,15 +85,13 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                     stats['lift'][base][top] = (
                         (thumb_ctrs[top] - thumb_ctrs[base]) /
                         thumb_ctrs[base])
-                #stats['revlift'][base][top] = (thumb_ctrs[top] - 
-                #                               thumb_ctrs[base])
                 if (thumb_ctrs[top] < 1e-8 or
                     not np.isfinite(cum_ctr[top][idx])):
                     stats['revlift'][base][top] = 0.0
                 else:
                     stats['revlift'][base][top] = (
                         1 - (thumb_ctrs[base] / thumb_ctrs[top]))
-		stats['xtra_conv_at_sig'][base][top] = (
+                stats['xtra_conv_at_sig'][base][top] = (
                     cum_conv[top][idx] - cum_imp[top][idx] *
                     cum_ctr[base][idx])
             else:
