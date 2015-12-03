@@ -393,7 +393,7 @@ class MultiplicativeCombiner(object):
                 indi_dicts[n][k] = kval
         comb_scores = []
         for feat_dict in indi_dicts:
-            comb_ccores.append(self.combine_scores_func(feat_dict)())
+            comb_scores.append(self.combine_scores_func(feat_dict)())
         return comb_scores
 
 class AdditiveCombiner(object):
