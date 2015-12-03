@@ -472,7 +472,8 @@ class VibranceGenerator(RegionFeatureGenerator):
         elif image.shape[2] == 1:
             return 0.
         # convert to HSV
-        return np.mean(cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:,:,1:])
+        return np.mean(
+                np.prod(cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:,:,1:], 2))
 
     def get_feat_name(self):
         return 'vibrance'
