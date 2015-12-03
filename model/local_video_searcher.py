@@ -1303,7 +1303,7 @@ class LocalSearcher(object):
         #     ipdb.set_trace()
         if TESTING:
             meta = [best_feat_dict, 
-                    self.combiner.get_indy_funcs(best_feat_dict)]]
+                    self.combiner.get_indy_funcs(best_feat_dict)]
         else:
             meta = None
         self.results.accept_replace(best_frameno, framescore, best_gold,
