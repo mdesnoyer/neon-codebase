@@ -151,7 +151,7 @@ class TestImagePrep(unittest.TestCase):
             args = {i:0}
             self.assertRaises(ValueError, ImagePrep, **args)
         # wrong arg types
-        self.assertRaises(ValueError, ImagePrep, crop_frac=2)
+        self.assertRaises(ValueError, ImagePrep, max_width='a')
         self.assertRaises(ValueError, ImagePrep, crop_frac=['a','b'])
         # too large
         self.assertRaises(ValueError, ImagePrep, crop_frac=1.1)
