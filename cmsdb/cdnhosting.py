@@ -156,7 +156,8 @@ class CDNHosting(object):
                             'is defined'))
                 raise ValueError(('Crop source can only operate along with '
                                   'resize'))
-            _prep = pycvutils.ImagePrep(crop_frac=self.source_crop)
+            _prep = pycvutils.ImagePrep(crop_frac=self.source_crop,
+                                        return_same=True)
             image = _prep(image)
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
