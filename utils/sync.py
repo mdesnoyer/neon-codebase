@@ -185,6 +185,8 @@ class PeriodicCoroutineTimer(object):
         self._callback = callback
         self._callback_time = callback_time / 1000.
         self._stopped = True
+        self._running = False
+        self._cur_future = None
 
     def start(self):
         if self._stopped:
@@ -195,17 +197,29 @@ class PeriodicCoroutineTimer(object):
         self._stopped = True
 
     def is_running(self):
+        '''Returns True if the timer is running.'''
         return not self._stopped
+
+    @tornado.gen.coroutine
+    def wait_for_running_func(self):
+        '''Waits until the the currently funning functions is done.'''
+        if self._running:
+            val = yield self._cur_future
+            raise tornado.gen.Return(val)
 
     @tornado.gen.coroutine
     def run(self):
         while not self._stopped:
+            self._running = True
             try:
                 start_time = time.time()
 
-                yield tornado.gen.maybe_future(self._callback())
+                self._cur_future = tornado.gen.maybe_future(self._callback())
+                yield self._cur_future
             except Exception as e:
                 _log.exception('Unexpected error when calling callback %s: %s'
                                % (self._callback, e))
+            self._running = False
             wait_time = self._callback_time - (time.time() - start_time)
-            yield tornado.gen.sleep(max(wait_time, 0.0))
+            if not self._stopped:
+                yield tornado.gen.sleep(max(wait_time, 0.0))
