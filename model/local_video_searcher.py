@@ -856,7 +856,7 @@ class ResultsList(object):
                     return self._replace(arg_srt_idx[0], res)
                 else:
                     _log.debug('Most similar thumb is better than candidate')
-                    self._write_testing_frame(res, ('to_similar_to_all_but_'
+                    self._write_testing_frame(res, ('too_similar_to_all_but_'
                                         'one_but_most_similar_has_higher_'
                                         'score'))
                     return False
@@ -870,7 +870,7 @@ class ResultsList(object):
                 self._write_testing_frame(res, 'below_sim_threshold')
                 return False
         # if there are any undefined thumbnails, replace them.
-        undef_thumbs = filter(lambda x: x.score == -np.inf)
+        undef_thumbs = filter(lambda x: x.score == -np.inf, self.results)
         if len(undef_thumbs):
             return self._push_over_lowest(res)
         # otherwise, iterate over the lowest scoring ones and replace the
