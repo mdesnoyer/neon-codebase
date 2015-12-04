@@ -2507,7 +2507,11 @@ class CDNHostingMetadata(NamespacedStoredObject):
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
-                 rendition_sizes=None, source_crop=None):
+                 rendition_sizes=None,
+                 source_crop=None,
+                 crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
 
         self.key = key
 
@@ -2554,6 +2558,9 @@ class CDNHostingMetadata(NamespacedStoredObject):
         #         For example, to remove the bottom 1/3rd of an image, you
         #         would specify [0., 0., .3333, 0.]
         self.source_crop = source_crop
+        self.crop_with_saliency = crop_with_saliency
+        self.crop_with_face_detection = crop_with_face_detection
+        self.crop_with_text_detection = crop_with_text_detection
 
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
