@@ -843,13 +843,36 @@ class ResultsList(object):
                         'video to be accepted')%(res))
             return self._push_over_lowest(res)
 
-        if dists[arg_srt_idx[1]] < self.min_acceptable:
-            # i.e., if the new thumbnail will be below the minimum acceptable
-            # distance AND it will not increase the global minimum distance
-            _log.debug(('%s is insufficiently different given the variety '
-                        'seen in the video so far.')%(res))
-            self._write_testing_frame(res, 'below_sim_threshold')
-            return False
+        if dists[arg_srt_idx[0]] < self.min_acceptable:
+            # it's too close to the other thumbnails.
+            if dists[arg_srt_idx[1]] > self.min_acceptable:
+                # so maybe you can remove the closest one--i.e., if the
+                # candidate frame is different enough from all but one of
+                # the other thumbs and its score is higher than the least
+                # different thumbs.
+                if (self.results[arg_srt_idx[0]].comb_score < 
+                    res.comb_score):
+                    # replace the closest one. 
+                    return self._replace(arg_srt_idx[0], res)
+                else:
+                    _log.debug('Most similar thumb is better than candidate')
+                    self._write_testing_frame(res, ('to_similar_to_all_but_'
+                                        'one_but_most_similar_has_higher_'
+                                        'score'))
+                    return False
+            else:
+
+                # i.e., if the new thumbnail will be below the minimum
+                # acceptable distance AND it will not increase the global
+                #minimum distance
+                _log.debug(('%s is insufficiently different given the variety'
+                            ' seen in the video so far.')%(res))
+                self._write_testing_frame(res, 'below_sim_threshold')
+                return False
+        # if there are any undefined thumbnails, replace them.
+        undef_thumbs = filter(lambda x: x.score == -np.inf)
+        if len(undef_thumbs):
+            return self._push_over_lowest(res)
         # otherwise, iterate over the lowest scoring ones and replace the
         # lowest one that is 'less different' than you are from the
         # remaining thumbnails
