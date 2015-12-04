@@ -843,8 +843,7 @@ class ResultsList(object):
                         'video to be accepted')%(res))
             return self._push_over_lowest(res)
 
-        if ((dists[arg_srt_idx[1]] < self.min_acceptable) and
-            (np.min(dists) < np.min(self.dists))):
+        if dists[arg_srt_idx[1]] < self.min_acceptable:
             # i.e., if the new thumbnail will be below the minimum acceptable
             # distance AND it will not increase the global minimum distance
             _log.debug(('%s is insufficiently different given the variety '
