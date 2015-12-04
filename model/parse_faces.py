@@ -122,6 +122,11 @@ class MultiStageFaceParser(object):
         dets = self.image_data[ihash][0]
         for det in dets:
             L, T, R, B = det.left(), det.top(), det.right(), det.bottom()
+            # account for image overruns!
+            T = max(0, T)
+            B = min(image.shape[0], B)
+            R = max(0, R)
+            L = min(image.shape[1], L)
             faces.append(image[T:B,L:R])
         return faces
         
