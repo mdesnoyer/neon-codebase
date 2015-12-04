@@ -24,7 +24,8 @@ def get_time_clause(start_time=None, end_time=None):
     '''
     clauses = []
     if start_time is not None:
-        start_time = dateutil.parser.parse(start_time)
+        if not isinstance(start_time, datetime):
+            start_time = dateutil.parser.parse(start_time)
         clauses.extend([
             '(yr > {year} or (yr = {year} and mnth >= {month}))'.format(
                 year=start_time.year, month=start_time.month),
@@ -32,7 +33,8 @@ def get_time_clause(start_time=None, end_time=None):
             start_time.strftime('%Y-%m-%d %H:%M:%S')])
 
     if end_time is not None:
-        end_time = dateutil.parser.parse(end_time)
+        if not isinstance(end_time, datetime):
+            end_time = dateutil.parser.parse(end_time)
         clauses.extend([
             '(yr < {year} or (yr = {year} and mnth <= {month}))'.format(
                 year=end_time.year, month=end_time.month),

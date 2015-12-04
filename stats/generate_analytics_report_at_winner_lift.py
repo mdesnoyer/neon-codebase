@@ -88,7 +88,7 @@ def connect():
 def filter_video_objects(videos):
     _log.info('Loading video info')
     requests = neondata.NeonApiRequest.get_many([(x.job_id, x.get_account_id())
-                                                 for x in videos])
+                                                 for x in videos if x.job_id])
     retval = []
     start_video_time = None
     end_video_time = None
@@ -136,7 +136,7 @@ def get_video_objects():
         cursor = conn.cursor()
         cursor.execute(
         """select distinct regexp_extract(thumbnail_id, 
-        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from imageloads where 
+        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from eventsequences where 
         thumbnail_id is not NULL and
         tai='%s' %s""" % (options.pub_id, 
                           statutils.get_time_clause(options.start_time,
@@ -151,6 +151,20 @@ def get_video_objects():
 
     return filter_video_objects(videos)
 
+def get_time_range(video_ids):
+    '''For a list of video ids get the (min, max) time range in floats.'''
+    conn = connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """select min(servertime), max(servertime) 
+           from eventsequences where
+           tai='%s' and 
+           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+           1) in (%s)
+        """ % (options.pub_id,
+               ','.join(["'%s'" % x for x in video_ids])))
+    return [datetime.utcfromtimestamp(x) for x in cursor.fetchone()]
+
 def get_hourly_stats_from_impala(video_info, impression_metric,
                                  conversion_metric):
     '''Grabs the stats from Impala
@@ -162,6 +176,8 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
         MetricTypes.VIEWS: 'imvisclienttime',
         MetricTypes.CLICKS: 'imclickclienttime'
         }
+
+    start_time, end_time = get_time_range(video_info.keys())
     
     conn = connect()
     cursor = conn.cursor()
@@ -190,8 +206,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             (col_map[impression_metric], options.pub_id,
              col_map[impression_metric],
              ','.join(["'%s'" % x for x in video_info.keys()]),
-             statutils.get_time_clause(options.start_time,
-                                       options.end_time),
+             statutils.get_time_clause(start_time, end_time),
              statutils.get_mobile_clause(options.do_mobile),
              statutils.get_desktop_clause(options.do_desktop),
              statutils.get_page_clause(options.page_url, impression_metric)))
@@ -213,8 +228,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             """ % (col_map[impression_metric], col_map[conversion_metric],
                    options.pub_id, col_map[impression_metric],
                    ','.join(["'%s'" % x for x in video_info.keys()]),
-                   statutils.get_time_clause(options.start_time,
-                                             options.end_time),
+                   statutils.get_time_clause(start_time, end_time),
                    statutils.get_mobile_clause(options.do_mobile),
                    statutils.get_desktop_clause(options.do_desktop),
                    statutils.get_page_clause(options.page_url,
@@ -225,7 +239,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
     return pandas.DataFrame((dict(zip(impala_cols, row))
                              for row in cursor))
 
-def get_hourly_stats_from_hbase(thumbnail_info, impression_metric,
+def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
                                 conversion_metric):
     
     '''Grabs the stats from Hbase
@@ -238,12 +252,7 @@ def get_hourly_stats_from_hbase(thumbnail_info, impression_metric,
         MetricTypes.CLICKS: 'ic',
         MetricTypes.PLAYS: 'vp'
         }
-    start_time = None
-    if options.start_time is not None:
-        start_time = dateutil.parser.parse(options.start_time)
-    end_time = None
-    if options.end_time is not None:
-        end_time = dateutil.parser.parse(options.end_time)
+    start_time, end_time = get_time_range(video_info.keys())
         
     conn = happybase.Connection(utils.prod.find_host_private_address(
         options.hbase_host,
@@ -264,7 +273,7 @@ def get_hourly_stats_from_hbase(thumbnail_info, impression_metric,
                                        row_stop=end_key,
                                        columns=['evts']):
                 garb1, garb, hr = key.rpartition('_')
-                hr = dateutil.parser.parse(hr)
+                hr = datetime.strptime(hr, 'Y-%m-%dT%H')
                 cur_counts = dict([(k.partition(':')[2],
                                     struct.unpack('>q', v)[0])
                                     for k, v in row.iteritems()])
@@ -296,7 +305,8 @@ def collect_stats(thumb_info, video_info,
     video_data = {} # (integration_id, video_id) => DataFrame with stats
 
     if options.use_realtime_data:
-        all_hourly_data = get_hourly_stats_from_hbase(thumb_info,
+        all_hourly_data = get_hourly_stats_from_hbase(video_info,
+                                                      thumb_info,
                                                       impression_metric,
                                                       conversion_metric)
     else:
@@ -331,11 +341,13 @@ def collect_stats(thumb_info, video_info,
         windowed_impressions = impressions
         windowed_conversions = conversions
         if options.start_time is not None:
-            windowed_impressions = impressions[options.start_time:]
-            windowed_conversions = conversions[options.start_time:]
+            start_time = dateutil.parser.parse(options.start_time)
+            windowed_impressions = impressions[start_time:]
+            windowed_conversions = conversions[start_time:]
         if options.end_time is not None:
-            windowed_impressions = impressions[:options.end_time]
-            windowed_conversions = conversions[:options.end_time]
+            end_time = dateutil.parser.parse(options.end_time)
+            windowed_impressions = impressions[:end_time]
+            windowed_conversions = conversions[:end_time]
         cum_impr = windowed_impressions.cumsum().fillna(method='ffill')
         cum_conv = windowed_conversions.cumsum().fillna(method='ffill')
             
