@@ -843,7 +843,10 @@ class ResultsList(object):
                         'video to be accepted')%(res))
             return self._push_over_lowest(res)
 
-        if dists[arg_srt_idx[1]] < self.min_acceptable:
+        if ((dists[arg_srt_idx[1]] < self.min_acceptable) and
+            (np.min(dists) < np.min(self.dists)):
+            # i.e., if the new thumbnail will be below the minimum acceptable
+            # distance AND it will not increase the global minimum distance
             _log.debug(('%s is insufficiently different given the variety '
                         'seen in the video so far.')%(res))
             self._write_testing_frame(res, 'below_sim_threshold')
@@ -887,13 +890,12 @@ class ResultsList(object):
         as (image, score, frameno)
         '''
         _log.debug('Dumping results')
-        sco_by_idx = np.argsort([x.score for x in self.results])
+        sco_by_idx = np.argsort([x.score for x in self.results])[::-1]
         res = []
         for idx in sco_by_idx:
             res_obj = self.results[idx]
             if not res_obj._defined:
-                statemon.state.increment('low_number_of_frames_seen')
-                break
+                continue
             image = self._improve_raw_img(res_obj.image)
             res.append([image, res_obj.score, res_obj.frameno])
         return res
