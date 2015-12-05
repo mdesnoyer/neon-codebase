@@ -89,7 +89,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
         _log.error('Error submitting job: %s' % e)
         statemon.state.job_submission_error = 1
         raise SubmissionError
-    api_resp = json.loads(res.buffer)
+    api_resp = json.loads(res.body)
     raise tornado.gen.Return((video_id, api_resp["job_id"]))
 
 @utils.sync.optional_sync
