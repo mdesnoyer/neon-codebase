@@ -346,8 +346,8 @@ def collect_stats(thumb_info, video_info,
             windowed_conversions = conversions[start_time:]
         if options.end_time is not None:
             end_time = dateutil.parser.parse(options.end_time)
-            windowed_impressions = impressions[:end_time]
-            windowed_conversions = conversions[:end_time]
+            windowed_impressions = windowed_impressions[:end_time]
+            windowed_conversions = windowed_conversions[:end_time]
         if len(windowed_impressions) == 0 or len(windowed_conversions) == 0:
             continue
         cum_impr = windowed_impressions.cumsum().fillna(method='ffill')
