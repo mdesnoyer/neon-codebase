@@ -81,7 +81,7 @@ if __name__ == '__main__':
     data = get_hourly_stats_by_time('gvs3vytvg20ozp78rolqmdfa', 
                                     dateutil.parser.parse('2015-11-01T00:00:00'),
                                     dateutil.parser.parse('2015-11-13T23:59:59'))
-    data['date'] = data['hr'].date
+    data['date'] = data['hr'].dt.date
     by_day = data.groupby(['date']).sum()
     with pandas.ExcelWriter('/tmp/discovery_raw_daily_counts.xls') as writer:
         by_day.to_excel(writer)
