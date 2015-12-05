@@ -10,7 +10,7 @@ import numpy as np
 import cv2
 import os
 import dlib
-from utils.pycvutils import ImagePrep
+from utils import pycvutils
 
 comp_dict = {}
 comp_dict['face'] = range(17)
@@ -38,7 +38,7 @@ class DetectFaces(object):
     '''
     def __init__(self):
         self.detector = dlib.get_frontal_face_detector()
-        self.prep = ImagePrep(convert_to_gray=True)
+        self.prep = pycvutils.ImagePrep(convert_to_gray=True)
 
     def get_N_faces(self, image):
         '''
@@ -72,7 +72,7 @@ class MultiStageFaceParser(object):
         self.fParse = FindAndParseFaces(predictor, self.detector)
         self.image_data = {}
         self.max_height = max_height
-        self.prep = ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height)
 
     def reset(self):
@@ -127,7 +127,7 @@ class FindAndParseFaces(object):
             self.detector = detector
         self.predictor = predictor
         self.reset()
-        self.prep = ImagePrep(convert_to_gray=True)
+        self.prep = pycvutils.ImagePrep(convert_to_gray=True)
 
     def reset(self):
         self._faceDets = []

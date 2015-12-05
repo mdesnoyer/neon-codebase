@@ -29,7 +29,7 @@ import utils.http
 import utils.logs
 import utils.neon
 from utils.http import RequestPool
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 
 import logging
 _log = logging.getLogger(__name__)
