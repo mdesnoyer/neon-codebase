@@ -129,8 +129,8 @@ def monitor_neon_pipeline(video_id=None):
                     neondata.RequestState.INT_ERROR,
                     neondata.RequestState.CUSTOMER_ERROR]:
                     statemon.state.job_failed = 1
-                    _log.error('Job failed with response: %s' %
-                               request.response)
+                    _log.error('Job failed with state %s with response: %s' %
+                               (request.state, request.response))
                     raise JobFailed
             else:
                 _log.warn("request data not found in db")
