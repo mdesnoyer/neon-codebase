@@ -21,7 +21,7 @@ import test_utils.neontest
 import tornado.gen
 import tornado.testing
 import unittest
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils.options import define, options
 import utils.neon
 from utils import statemon
