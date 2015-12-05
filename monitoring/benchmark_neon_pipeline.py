@@ -21,6 +21,7 @@ import tornado
 import tornado.web
 import utils.http
 import utils.neon
+import utils.net
 import utils.ps
 from utils import statemon
 import utils.sync
@@ -160,8 +161,8 @@ class JobManager(object):
             "external_video_ref": self.video_id,
             "video_url": video_url, 
             "video_title": video_title,
-            "callback_url": "http://%s:%s/callback" % (cur_host, 
-                                                       options.callback_port)
+            "callback_url": "http://%s:%s/callback" %(utils.net.get_local_ip(),
+                                                      options.callback_port)
         }
         req = tornado.httpclient.HTTPRequest(request_url, method='POST', 
                                              headers=headers,
