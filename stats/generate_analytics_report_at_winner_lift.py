@@ -361,7 +361,7 @@ def collect_stats(thumb_info, video_info,
         baseline_types = options.baseline_types.split(',')
         base_thumb = None
         base_rank = None
-        cump_impr_all = impressions.cumsum().fillna(method='ffill')
+        cum_impr_all = impressions.cumsum().fillna(method='ffill')
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
