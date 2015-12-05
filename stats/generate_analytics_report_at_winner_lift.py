@@ -67,6 +67,9 @@ define("video_ids", default=None, type=str,
        help="File containing video ids to analyze, one per line")
 define("use_realtime_data", default=0, type=int,
        help="If 1, use the realtime data instead of the cleaned Impala data")
+define("show_bad_experiment_vids", default=0, type=int,
+       help=("If 1, include videos where there either is not a Neon thumb or"
+             " there is not a baseline"))
 
 _log = logging.getLogger(__name__)
 
@@ -373,6 +376,10 @@ def collect_stats(thumb_info, video_info,
                         base_rank = cur_thumb.rank
             if base_thumb is not None:
                 break
+        if (not options.show_bad_experiment_vids and 
+            (base_thumb is None or not(extra_conv[base_thumb.key] != 0).any())):
+            # We don't want to include videos without a baseline or an entry in             # the experiment
+            continue
 
         thumb_stats = pandas.DataFrame({
             'impr' : cum_impr.iloc[-1],

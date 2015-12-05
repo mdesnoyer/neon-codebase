@@ -162,14 +162,7 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     # significant lift
     sig_data = all_data.copy()
     sig_data = sig_data.groupby(level=1).filter(
-        lambda x: np.any(x['p_value']>0.95)
-        and np.any(x['is_base']) 
-        and np.any(x['is_base'] ==False))
-
-    # Only grab videos that have a baseline and one non-baseline
-    all_data = all_data.groupby(level=1).filter(
-        lambda x: np.any(x['is_base']) 
-        and np.any(x['is_base'] == False))
+        lambda x: np.any(x['p_value']>0.95))
 
     neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
                             (sig_data['p_value'] > 0.95)]
@@ -200,12 +193,18 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
         return float('nan')
     base_sums = data.groupby(['is_base']).sum()
     neon_sums = data.groupby(level=['type']).sum()
+    all_sums = data.sum()
 
     #lift = base_sums['impr'][True] * base_sums[xtra_conv_col][False] / \
     #  (base_sums['conv'][True] * base_sums['impr'][False])
 
-    lift = base_sums['impr'][True] * neon_sums[xtra_conv_col]['neon'] / \
-      (base_sums['conv'][True] * neon_sums['impr']['neon'])
+    # Lift based on the aggregate CTR differences
+    #lift = base_sums['impr'][True] * neon_sums[xtra_conv_col]['neon'] / \
+    #  (base_sums['conv'][True] * neon_sums['impr']['neon'])
+   
+    # Lift based on the extra clicks compared to the total clicks
+    lift = neon_sums[xtra_conv_col]['neon'] / (all_sums['conv'] - 
+           neon_sums[xtra_conv_col]['neon'])
 
     return lift
 
