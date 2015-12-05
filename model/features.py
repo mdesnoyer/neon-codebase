@@ -17,9 +17,8 @@ import logging
 import numpy as np
 import os
 import os.path
-from . import TextDetectionPy
 import utils.obj
-import utils.pycvutils
+from utils import pycvutils
 from model.colorname import ColorName
 from model.parse_faces import DetectFaces, FindAndParseFaces
 from score_eyes import ScoreEyes
@@ -118,9 +117,9 @@ class GistGenerator(FeatureGenerator):
 
     def generate(self, image):
         # leargist needs a PIL image in RGB format
-        rimage = utils.pycvutils.resize_and_crop(image, self.image_size[0],
+        rimage = pycvutils.resize_and_crop(image, self.image_size[0],
                                                  self.image_size[1])
-        pimage = utils.pycvutils.to_pil(rimage)
+        pimage = pycvutils.to_pil(rimage)
         return leargist.color_gist(pimage)
 
 class ColorNameGenerator(FeatureGenerator):
@@ -155,7 +154,7 @@ class BlurGenerator(RegionFeatureGenerator):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
         self.thresh = thresh
@@ -210,7 +209,7 @@ class SADGenerator(RegionFeatureGenerator):
         super(SADGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
 
@@ -261,7 +260,7 @@ class ActionGenerator(RegionFeatureGenerator):
     by computing the cross-correlation. In other words, we want frames that
     occur are local minima in the action. Let's see if it works.
     '''
-    def __init__(self, SAD_gen, action_vec=[1, 0, -1, 0, 1]):
+    def __init__(self, SAD_gen=None, action_vec=[1, 0, -1, 0, 1]):
         '''
         SAD_gen is a region feature generator for SAD.
 
@@ -271,6 +270,8 @@ class ActionGenerator(RegionFeatureGenerator):
         '''
         super(ActionGenerator, self).__init__()
         self._action_vec = action_vec
+        if SAD_gen is None:
+            SAD_gen = SADGenerator()
         self._SAD_gen = SAD_gen
 
     def __cmp__(self, other):
@@ -574,7 +575,7 @@ class TextGenerator(RegionFeatureGenerator):
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
         self._max_variation = max_variation
-        self.mser = cv2.MSER(_max_variation=self._max_variation)
+        self.mser = cv2.MSER_create(_max_variation=self._max_variation)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -591,8 +592,8 @@ class TextGenerator(RegionFeatureGenerator):
 
     def generate_many(self, images, fonly=False):
         if self.mser is None:
-            self.mser = cv2.MSER(_max_variation=self._max_variation)
-        if type(images) is not list:
+            self.mser = cv2.MSER_create(_max_variation=self._max_variation)
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -604,7 +605,7 @@ class TextGenerator(RegionFeatureGenerator):
 
     def _text_quant(self, img):
         '''quantifies the amount of text in an image (approx) by area'''
-        regions = self.mser.detect(img, None)
+        regions = self.mser.detectRegions(img, None)
         area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
         area /= (1. * img.shape[0] * img.shape[1])
         return area

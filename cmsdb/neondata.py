@@ -57,7 +57,8 @@ import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 import utils.botoutils
 import utils.logs
-from utils.imageutils import PILImageUtils
+import cvutils.imageutils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
 from utils import statemon
@@ -1858,7 +1859,7 @@ class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
 
-    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.~]+'
     VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
     
     @staticmethod
@@ -2506,7 +2507,11 @@ class CDNHostingMetadata(NamespacedStoredObject):
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
-                 rendition_sizes=None, source_crop=None):
+                 rendition_sizes=None,
+                 source_crop=None,
+                 crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
 
         self.key = key
 
@@ -2553,6 +2558,9 @@ class CDNHostingMetadata(NamespacedStoredObject):
         #         For example, to remove the bottom 1/3rd of an image, you
         #         would specify [0., 0., .3333, 0.]
         self.source_crop = source_crop
+        self.crop_with_saliency = crop_with_saliency
+        self.crop_with_face_detection = crop_with_face_detection
+        self.crop_with_text_detection = crop_with_text_detection
 
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
@@ -4443,6 +4451,7 @@ class VideoMetadata(StoredObject):
                        just this object is updated along with the thumbnail
                        object.
         '''
+        thumb.video_id = self.key
         yield thumb.add_image_data(image, self, cdn_metadata, 
                                    async=True)
 
@@ -4476,7 +4485,7 @@ class VideoMetadata(StoredObject):
     @tornado.gen.coroutine
     def download_image_from_url(self, image_url): 
         try:
-            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+            image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
         except IOError, e:
             msg = "IOError while downloading image %s: %s" % (

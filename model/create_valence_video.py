@@ -56,7 +56,6 @@ def main(options):
     mod = model.load_model(options.model)
 
     mod.filt.filters[-1] = model.filters.CrossFadeFilter(18)
-    mod.filt.filters[-2] = model.filters.TextFilter(0.025)
 
     _log.info('Opening %s for input' % options.input)
     inputVideo = cv2.VideoCapture(options.input)

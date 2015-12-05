@@ -22,7 +22,7 @@ import tornado.gen
 import tornado.httpclient
 import tornado.testing
 import unittest
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils.options import define, options
 import utils.neon
 
@@ -33,7 +33,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.random_image = PILImageUtils.create_random_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())

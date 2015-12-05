@@ -49,9 +49,9 @@ import time
 import urllib
 import urllib2
 import urlparse
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
-import utils.pycvutils
+from utils import pycvutils
 import utils.http
 from utils import statemon
 
@@ -439,7 +439,7 @@ class VideoProcessor(object):
         try:
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
-                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
 
             cv_image = self._get_specific_frame(mov, int(nframes / 2))
             meta = neondata.ThumbnailMetadata(
@@ -462,7 +462,7 @@ class VideoProcessor(object):
         try:
             mov = cv2.VideoCapture(video_file)
             if nframes is None:
-                nframes = mov.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+                nframes = mov.get(cv2.CAP_PROP_FRAME_COUNT)
 
             frameno = random.randint(0, nframes-1)
 
@@ -490,7 +490,7 @@ class VideoProcessor(object):
         _log.debug('Extracting frame %i from video %s' %
                    (frameno, self.video_url))
         try:            
-            seek_sucess, image = utils.pycvutils.seek_video(mov, frameno)
+            seek_sucess, image = pycvutils.seek_video(mov, frameno)
             if seek_sucess:
                 #Now grab the frame
                 read_sucess, image = mov.read()
