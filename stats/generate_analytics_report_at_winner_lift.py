@@ -80,6 +80,12 @@ class MetricTypes:
     CLICKS = 'clicks'
     PLAYS = 'plays'
 
+impala_col_map = {
+    MetricTypes.LOADS: 'imloadclienttime',
+    MetricTypes.VIEWS: 'imvisclienttime',
+    MetricTypes.CLICKS: 'imclickclienttime'
+    }
+
 def connect():
     return impala.dbapi.connect(host=options.stats_host,
                                 port=options.stats_port,
@@ -124,7 +130,7 @@ def filter_video_objects(videos):
     return retval
     
 
-def get_video_objects():
+def get_video_objects(impression_metric):
     
     if options.video_ids:
         _log.info('Using video ids from %s' % options.video_ids)
@@ -138,7 +144,9 @@ def get_video_objects():
         """select distinct regexp_extract(thumbnail_id, 
         '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from eventsequences where 
         thumbnail_id is not NULL and
-        tai='%s' %s""" % (options.pub_id, 
+        %s is not null and
+        tai='%s' %s""" % (impala_col_map[impression_metric],
+                          options.pub_id, 
                           statutils.get_time_clause(options.start_time,
                                                     options.end_time)))
 
@@ -171,11 +179,6 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
 
     Returns a pandas DataFrame with columns of hr, imp, conv and thumb_id
     '''
-    col_map = {
-        MetricTypes.LOADS: 'imloadclienttime',
-        MetricTypes.VIEWS: 'imvisclienttime',
-        MetricTypes.CLICKS: 'imclickclienttime'
-        }
 
     start_time, end_time = get_time_range(video_info.keys())
     
@@ -203,8 +206,8 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             %s
             %s
             group by thumbnail_id, hr""" %
-            (col_map[impression_metric], options.pub_id,
-             col_map[impression_metric],
+            (impala_col_map[impression_metric], options.pub_id,
+             impala_col_map[impression_metric],
              ','.join(["'%s'" % x for x in video_info.keys()]),
              statutils.get_time_clause(start_time, end_time),
              statutils.get_mobile_clause(options.do_mobile),
@@ -225,8 +228,9 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             %s
             %s
             group by thumbnail_id, hr
-            """ % (col_map[impression_metric], col_map[conversion_metric],
-                   options.pub_id, col_map[impression_metric],
+            """ % (impala_col_map[impression_metric],
+                   impala_col_map[conversion_metric],
+                   options.pub_id, impala_col_map[impression_metric],
                    ','.join(["'%s'" % x for x in video_info.keys()]),
                    statutils.get_time_clause(start_time, end_time),
                    statutils.get_mobile_clause(options.do_mobile),
@@ -348,6 +352,8 @@ def collect_stats(thumb_info, video_info,
             end_time = dateutil.parser.parse(options.end_time)
             windowed_impressions = impressions[:end_time]
             windowed_conversions = conversions[:end_time]
+        if len(windowed_impressions) == 0 or len(windowed_conversions) == 0:
+            continue
         cum_impr = windowed_impressions.cumsum().fillna(method='ffill')
         cum_conv = windowed_conversions.cumsum().fillna(method='ffill')
             
@@ -574,7 +580,7 @@ def calculate_cmsdb_stats():
         
 def main():    
     _log.info('Getting metadata about the videos.')
-    video_info = get_video_objects()
+    video_info = get_video_objects(MetricTypes.VIEWS)
     video_info = dict([(x.key, x) for x in video_info if x is not None])
 
     _log.info('Getting metadata about the thumbnails.')
