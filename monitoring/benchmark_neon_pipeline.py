@@ -203,7 +203,7 @@ def main():
     
     while True:
         try:
-            yield monitor_neon_pipeline(async=True)
+            monitor_neon_pipeline()
             statemon.state.unexpected_exception_thrown = 0
         except JobError as e:
             # Logging already done
