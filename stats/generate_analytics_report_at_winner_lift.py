@@ -35,10 +35,6 @@ define("stats_host", default="127.0.0.1",
         type=str, help="Host to connect to the stats db on.")
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
-define("stack_name", default=None,
-       help="Name of the stack where the database is")
-define("hbase_host", default="hbase3",
-       help="Name of the stack where the database is")
 define("pub_id", default=None, type=str,
        help=("Publisher, in the form of the tracker account id to get the "
              "data for"))
@@ -365,10 +361,11 @@ def collect_stats(thumb_info, video_info,
         baseline_types = options.baseline_types.split(',')
         base_thumb = None
         base_rank = None
+        cump_impr_all = impressions.cumsum().fillna(method='ffill')
         for baseline_type in baseline_types:
             for thumb_id in video.thumbnail_ids:
                 cur_thumb = thumb_info[thumb_id]
-                impr_count = cum_impr.iloc[-1].get(thumb_id, None)
+                impr_count = cum_impr_all.iloc[-1].get(thumb_id, None)
                 if (cur_thumb.type == baseline_type and impr_count is not None
                     and impr_count > options.min_impressions):
                     if base_rank is None or cur_thumb.rank < base_rank:
