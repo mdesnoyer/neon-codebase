@@ -614,7 +614,7 @@ class VideoHelper():
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url: 
                 # save the default thumbnail
-                image = yield video.download_image_from_url(default_thumbnail_url)
+                image = yield video.download_image_from_url(default_thumbnail_url, async=True)
                 thumb = yield video.download_and_add_thumbnail(image=image, image_url=default_thumbnail_url,  
                                                       external_thumbnail_id=args.get('thumbnail_ref', None), async=True)
 
