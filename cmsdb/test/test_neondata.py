@@ -2007,11 +2007,13 @@ class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
             self.valid_obj.to_json()
             ]
 
-        found_obj = yield TrackerAccountIDMapper.get("tai1", async=True)
-        self.assertLogExists(logging.ERROR, 'Connection Error')
-        self.assertLogExists(logging.WARN, 'Redis is busy')
-        self.assertLogExists(logging.ERROR, 'Socket Timeout')
-        self.assertLogExists(logging.ERROR, 'Socket Error')
+        with self.assertLogExists(logging.ERROR, 'Connection Error'):
+            with self.assertLogExists(logging.WARN, 'Redis is busy'):
+                with self.assertLogExists(logging.ERROR, 'Socket Timeout'):
+                    with self.assertLogExists(logging.ERROR, 'Socket Error'):
+                        found_obj = yield tornado.gen.Task(
+                            TrackerAccountIDMapper.get,
+                            'tai1')
 
         self.assertEqual(self.valid_obj.__dict__, found_obj.__dict__)
 
@@ -2648,7 +2650,7 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
-    @tornado.testing.gen_test(timeout=50)
+    @tornado.testing.gen_test()
     def test_listen_and_notify(self): 
         cb = MagicMock()     
         pubsub = neondata.PostgresPubSub()
@@ -2987,6 +2989,13 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
         self.assertEquals(so1.account_id, get1.account_id)
         self.assertEquals(so2.account_id, get2.account_id)
         self.assertEquals(so3.account_id, get3.account_id)
+
+    @tornado.testing.gen_test 
+    def test_save_all_neon_user_account_with_dupe(self):
+        aid = uuid.uuid1().hex   
+        so1 = neondata.NeonUserAccount(aid)
+        so2 = neondata.NeonUserAccount(aid)
+        neondata.NeonUserAccount.save_all([so1, so2])
 
     @tornado.testing.gen_test 
     def test_delete_neon_user_account(self):

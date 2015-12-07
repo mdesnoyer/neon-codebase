@@ -1719,8 +1719,11 @@ class StoredObject(object):
                                                 obj.to_json(), 
                                                 cls.__name__)
                 sql_statements.append(query)
-            #TODO figure out rv 
-            cursor = yield conn.transaction(sql_statements)
+            #TODO figure out rv
+            try:  
+                cursor = yield conn.transaction(sql_statements)
+            except psycopg2.IntegrityError as e: 
+                pass
             db.return_connection(conn)
         else: 
             db_connection = DBConnection.get(cls)
@@ -1757,7 +1760,8 @@ class StoredObject(object):
 
         Returns True if the object was successfully deleted
         '''
-        raise tornado.gen.Return(cls._delete_many_raw_keys([key]))
+        rv = yield cls._delete_many_raw_keys([key], async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
     @utils.sync.optional_sync
@@ -1771,7 +1775,8 @@ class StoredObject(object):
         Returns:
         True if it was delete sucessfully
         '''
-        raise tornado.gen.Return(cls._delete_many_raw_keys(keys))
+        rv = yield cls._delete_many_raw_keys(keys, async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
     @utils.sync.optional_sync
@@ -2120,33 +2125,37 @@ class NamespacedStoredObject(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def modify(cls, key, func, create_missing=False):
-        raise tornado.gen.Return(super(NamespacedStoredObject, cls).modify(
+        rv = yield super(NamespacedStoredObject, cls).modify(
                                  cls.format_key(key),
                                  func,
-                                 create_missing=create_missing))
+                                 create_missing=create_missing, async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False):
-        raise tornado.gen.Return(super(NamespacedStoredObject, cls).modify_many(
+        rv = yield super(NamespacedStoredObject, cls).modify_many(
                                  [cls.format_key(x) for x in keys],
                                  func,
-                                 create_missing=create_missing))
+                                 create_missing=create_missing, async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete(cls, key, callback=None):
-        raise tornado.gen.Return(super(NamespacedStoredObject, cls).delete(
-                                 cls.format_key(key)))
+        rv = yield super(NamespacedStoredObject, cls).delete(
+                                 cls.format_key(key), async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
-        raise tornado.gen.Return(super(NamespacedStoredObject, cls).delete_many(
-                                 [cls.format_key(k) for k in keys]))
+        rv = yield super(NamespacedStoredObject, cls).delete_many(
+                               [cls.format_key(k) for k in keys], async=True)
+        raise tornado.gen.Return(rv) 
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
