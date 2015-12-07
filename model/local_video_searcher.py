@@ -78,7 +78,7 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     multiplicatively combined with the score and the other transferred feature
     scores. Thus, max_penalty is the maximum amount the final score may be
     reduced by having the worst feature score for this particular feature
-    possible. 
+    possible.
 
     In other words, if you wish the blurriest image in a video to have its
     final score reduced by at least 80%, irrespective of its other feature
@@ -90,9 +90,9 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     image is (at least, depending on the other feature scores) equidistant
     between the max penalty and no penalty. So if it's value is 0.4, then an
     image in the 40th percentile of the rankings is penalized with half the
-    maximum penalty  
+    maximum penalty
     '''
-    k = 7. # this is the slope of the transfer function. 
+    k = 7. # this is the slope of the transfer function.
     c = max_penalty
     x0 = median
     def calcL(k, x0, c):
@@ -262,10 +262,10 @@ class MultiplicativeCombiner(object):
             must have a single argument and be able to operate on lists of
             floats.
         dependencies: a dictionary of feature names to [feature_name, lambda]
-            pairs. Given two features x and y, and 
+            pairs. Given two features x and y, and
                 dependencies[x] = [y, lambda_func]
             then the value of x only affects the combined score if
-            lambda_func(y_val) == True. 
+            lambda_func(y_val) == True.
         Note: if a statistic has an entry in both the stats and weights dict,
             then weights dict takes precedence.
         '''
@@ -402,7 +402,7 @@ class MultiplicativeCombiner(object):
         This has to be changed from the original implementation (see
         AdditiveCombiner) since it has dependencies. So what is done instead
         is that we deal them to individual dictionaries, and evaluate the
-        combine_scores_func. 
+        combine_scores_func.
         '''
 
         stat_scores = []
@@ -735,10 +735,10 @@ class ResultsList(object):
 
     def reset(self, n_thumbs=None):
         _log.debug('Result object of size %i resetting'%(self.n_thumbs))
-        self.results = [_Result() for x in range(self.n_thumbs)]
-        self.min = self.results[0].score
         if n_thumbs is not None:
             self.n_thumbs = n_thumbs
+        self.results = [_Result() for x in range(self.n_thumbs)]
+        self.min = self.results[0].score
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
 
     def _update_dists(self, entry_idx):
@@ -850,9 +850,9 @@ class ResultsList(object):
                 # candidate frame is different enough from all but one of
                 # the other thumbs and its score is higher than the least
                 # different thumbs.
-                if (self.results[arg_srt_idx[0]].comb_score < 
+                if (self.results[arg_srt_idx[0]].comb_score <
                     res.comb_score):
-                    # replace the closest one. 
+                    # replace the closest one.
                     return self._replace(arg_srt_idx[0], res)
                 else:
                     _log.debug('Most similar thumb is better than candidate')
@@ -1012,14 +1012,14 @@ class LocalSearcher(object):
                 image via the CLAHE algorithm.
             queue_unsearched:
                 If the interval should not be searched initially, then it will
-                be placed into a priority queue based on the mean score. 
+                be placed into a priority queue based on the mean score.
             use_all_data:
                 If True, will use all feature data from any analyzed thumb,
                 not just those from the search intervals.
             use_best_data:
                 If True, local search will add the data from the best
                 thumbnail found to its knowledge about the feature score
-                distributions. Note that this option is irrelevant if 
+                distributions. Note that this option is irrelevant if
                 use_all_data is enabled.
             testing:
                 If true, saves the sequence of considered thumbnails to the
@@ -1101,7 +1101,7 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, n=1, video_name=''):
+    def choose_thumbnails(self, video, video_name='', n=None):
         self._reset()
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
@@ -1124,11 +1124,13 @@ class LocalSearcher(object):
         else:
             raise Exception("Could not create testing dir!")
 
-    def choose_thumbnails_impl(self, video, n=1, video_name=''):
+    def choose_thumbnails_impl(self, video, video_name='', n=None):
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
             self.stats[gen_name] = Statistics()
+        if n is not None:
+            self.n_thumbs = n
         # create a prep object for analysis crops
         self._prep = pycvutils.ImagePrep(crop_frac=self.analysis_crop)
         self.stats['score'] = Statistics()
@@ -1140,7 +1142,6 @@ class LocalSearcher(object):
         f_max_var_rej = lambda: min(0.1,
                                         self.col_stat.percentile(
                                             100./self.n_thumbs))
-        self.n_thumbs = n
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
@@ -1191,7 +1192,7 @@ class LocalSearcher(object):
             if not len(self._queue):
                 _log.info('No analyses remain to be done.')
                 break
-            mean_score, (start_frame, end_frame, start_score, 
+            mean_score, (start_frame, end_frame, start_score,
                 end_score) = heapq.heappop(self._queue)
             self._conduct_local_search(start_frame, end_frame, start_score,
                 end_score, from_queue=True)
@@ -1222,7 +1223,7 @@ class LocalSearcher(object):
         '''
         if not from_queue:
             if not self._should_search(start_frame, end_frame, start_score,
-                                       end_score): 
+                                       end_score):
                 return
         if not from_queue:
             _log.debug('Local search of %i [%.3f] <---> %i [%.3f]'%(
@@ -1284,7 +1285,7 @@ class LocalSearcher(object):
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
         best_gold = gold[np.argmax(comb)]
-        best_feat_dict = {x:frame_feats[x][np.argmax(comb)] for x in 
+        best_feat_dict = {x:frame_feats[x][np.argmax(comb)] for x in
                                 frame_feats.keys()}
         feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
         indi_framescore = self.predictor.predict(best_frame)
@@ -1300,13 +1301,13 @@ class LocalSearcher(object):
                 if featName not in self.feats_to_cache:
                     continue
                 for cfidx, fval in enumerate(cfeats):
-                    if ((framenos[cfidx] == start_frame) and 
+                    if ((framenos[cfidx] == start_frame) and
                         (framenos[cfidx] == end_frame)):
                         # then it's already been measured
                         continue
                     self.stats[featName].push(fval)
-        elif (self.use_best_data and 
-              (best_frameno != start_frame) and 
+        elif (self.use_best_data and
+              (best_frameno != start_frame) and
               (best_frameno != end_frame)):
             # save the data from the best identified thumb
             for featName, featVal in best_feat_dict.iteritems():
@@ -1319,14 +1320,14 @@ class LocalSearcher(object):
                             framescore, np.max(comb)))
         # the selected frame (whatever it may be) will be assigned
         # the score equal to mean of its boundary frames.
-        # push the frame into the results object. Ensure that the analysis 
+        # push the frame into the results object. Ensure that the analysis
         # frame is not inserted, but rather the best "gold" frame (i.e., one
         # that has not been cropped in accordance with analysis_crop)
         # if best_frameno == 2353:
         #     import ipdb
         #     ipdb.set_trace()
         if TESTING:
-            meta = [best_feat_dict, 
+            meta = [best_feat_dict,
                     self.combiner.get_indy_funcs(best_feat_dict)]
         else:
             meta = None
@@ -1499,7 +1500,7 @@ class LocalSearcher(object):
 
     # END OBTAINING FRAMES FROM THE VIDEO
     #-------------------------------------------------------------------------
-    
+
     def __getstate__(self):
         self._reset()
         return self.__dict__.copy()
