@@ -382,45 +382,18 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     ## HTTP Side effect for all Tornado HTTP Requests
 
     def _success_http_side_effect(self, *args, **kwargs):
-        ''' generic sucess http side effects for all patched http calls 
+        ''' generic success http side effects for all patched http calls 
             for this test ''' 
-
 
         def _neon_submit_job_response(http_request):
             ''' video server response on job submit '''
-            params = tornado.escape.json_decode(http_request.body)
-            job_id = str(random.random())
-            self.job_ids.append(job_id)
-            def _mod_video(x):
-                x.job_id = job_id
-                x.video_url = params['video_url']
-                x.integration_id = params.get('integration_id', '0') or '0'
-                serving_enabled = False
-                if 'default_thumbnail' in params:
-                    x.thumbnail_ids.append('somenewthumbid')
-            neondata.VideoMetadata.modify(
-                neondata.InternalVideoID.generate(params['api_key'],
-                                                  params['video_id']),
-                _mod_video,
-                create_missing=True)
-
-            neondata.NeonApiRequest(
-                job_id,
-                params['api_key'],
-                params['video_id'],
-                params['video_title'],
-                params['video_url'],
-                integration_id=params.get('integration_id', '0') or '0',
-                http_callback=params.get('callback_url', None),
-                default_thumbnail=params.get('default_thumbnail', None),
-                external_thumbnail_id=params.get('external_thumbnail_id',
-                                                 None),
-                publish_date=params.get('publish_date', None)).save()
-            
-            response = tornado.httpclient.HTTPResponse(http_request, 200,
-                buffer=StringIO('{"job_id":"%s"}'%job_id))
+            url = '/api/v2/%s/videos' % '1234234'
+            self.http_client.fetch(self.get_url(url),
+                                   callback=self.stop, 
+                                   method="GET")
+            response = self.wait()
             return response
-        
+
         def _add_image_response(req): 
             ''' image response '''
             itype = "THUMBNAIL"
@@ -882,9 +855,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         neon_integration_id = "0"
         self.assertIn(neon_integration_id, nuser.integrations.keys()) 
 
-    def test_create_neon_video_request(self):
-        ''' verify that video request creation via services  ''' 
-        
+    @patch('tornado.httpclient.AsyncHTTPClient') 
+    def test_create_neon_video_request(self, mock_http):
+        ''' verify that video request creation via services  '''        
         api_key = self.create_neon_account()
         vals = { 'video_url' : "http://test.mp4", "title": "test_title" }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -892,8 +865,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
-
+          
         response = self.post_request(uri, vals, api_key)
+
         self.assertEqual(response.code, 200)
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
@@ -1059,7 +1033,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.body, 
             '{"error":"custom data must be a dictionary"}')
 
-    def test_create_video_request_utf8(self):
+    @patch("tornado.httpclient.AsyncHTTPClient")
+    def test_create_video_request_utf8(self, mock_http):
         self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
@@ -1070,6 +1045,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             }
         uri = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/create_thumbnail_api_request'%(self.a_id, "61"))
+
         response = self.post_request(uri, vals, api_key, jsonheader=True)
         
         self.assertEqual(response.code, 201)
@@ -1079,7 +1055,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             neondata.InternalVideoID.generate(api_key, 'vid1'))
         self.assertEquals(video.url, vals['video_url'])
         self.assertEquals(video.integration_id, "61")
-
+        _log.info(video)
         job = neondata.NeonApiRequest.get(video.job_id, api_key)
         self.assertEquals(job.video_title, vals['video_title'])
         self.assertEquals(job.video_url, vals['video_url'])

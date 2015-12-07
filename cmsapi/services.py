@@ -259,6 +259,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         elif status >= 500:
             statemon.state.increment(ref=_internal_err_ref, safe=False)
             _log.warn("Internal Error. Request %r" % self.request)
+        _log.info("Data is:  %s" %data)
 
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
@@ -681,10 +682,17 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
-        
-        sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
-
-        yield sqs_queue.connect_to_server(options.video_queue_region)
+        http_client = tornado.httpclient.AsyncHTTPClient()
+        hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
+        url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
+        request = tornado.httpclient.HTTPRequest(client_url,
+                                                 method="POST",
+                                                 headers=hdr,
+                                                 body=body,
+                                                 request_timeout=300.0,
+                                                 connect_timeout=30.0)
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+        #yield sqs_queue.connect_to_server(options.video_queue_region)
  
         duration = 300
         if video_url:
@@ -700,21 +708,34 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             if not result.error:
                 headers = result.headers
                 duration = (int(headers.get('Content-Length', 0)))
+        else:
+            _log.debug("video_url is None")
 
         #TODO: I'm not sure how to get the priority here
-        message = yield sqs_queue.write_message(0, body, duration)
+        #message = yield sqs_queue.write_message(0, body, duration)
         
-        if not message:
-            _log.error("Failed to write message with video id %s", (video_id))
-            data = '{"error adding job to the queue"}'
+        if response.code == 409:
+            job_id = json.loads(response.body)["job_id"]
+            data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
+                    % (video_id, job_id)
+            self.send_json_response(data, 409)
+            return
+
+        if response.code == 400:
+            data = '{"error":"bad request. check api specs","video_id":"%s"}' %\
+                        video_id
+            self.send_json_response(data, 400)
+            return
+
+        if response.error:
+            _log.error("key=create_neon_thumbnail_api_request "
+                    "msg=thumbnail api error %s" %response.error)
+            data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
-            statemon.state.increment('failed_to_write_message')
             return
 
         #Success
-        if message:
-            _log.info(message)
-            self.send_json_response(message, 201)
+        self.send_json_response(response.body, 201)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self, integration_id):
@@ -862,6 +883,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if options.local == 1:
             client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         body = tornado.escape.json_encode(request_body)
+        url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=client_url,
                                              method="POST",
@@ -870,7 +892,32 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              request_timeout=30.0,
                                              connect_timeout=10.0)
         
-        result = yield tornado.gen.Task(utils.http.send_request, req)
+        #TODO: mock this out
+        result = yield utils.http.send_request(req)
+
+        #sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
+
+        #yield sqs_queue.connect_to_server(options.video_queue_region)
+ 
+        duration = 300
+        if video_url:
+            url_parse = urlparse.urlparse(video_url)
+            url_parse = list(url_parse)
+            url_parse[2] = urllib.quote(url_parse[2])
+            req = tornado.httpclient.HTTPRequest(
+                method='HEAD',
+                url=urlparse.urlunparse(url_parse),
+                request_timeout=5.0) 
+                
+            result = yield utils.http.send_request(req, async=True)
+            if not result.error:
+                headers = result.headers
+                duration = (int(headers.get('Content-Length', 0)))
+        else:
+            _log.debug("video_url is None")
+
+        #TODO: I'm not sure how to get the priority here
+        #message_body = yield sqs_queue.write_message(0, body, duration)
         
         if result.code == 409:
             data = '{"error":"url already processed","video_id":"%s"}'%video_id
@@ -883,10 +930,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
             return
-
+        
         # NOTE: job id gets inserted into Neon platform account on video server
 
-        job_id = json.loads(result.body)["job_id"] # get job id from response
+        job_id = json.loads(message_body)["job_id"] # get job id from response
         t_urls = [] 
         thumbs = []
         im_index = int(hashlib.md5(video_id).hexdigest(), 16) \

@@ -820,6 +820,7 @@ class VideoHelper():
             
                 duration = video.duration
                 if video.url and not duration:
+                    _log.debug("Duration is None")
                     url_parse = urlparse(video.url)
                     url_parse = list(url_parse)
                     url_parse[2] = urllib.quote(url_parse[2])
@@ -835,6 +836,7 @@ class VideoHelper():
                     else:
                         duration = 300
                 elif not video.url and not duration:
+                    _log.info("Video URL and Duration are None")
                     duration = 300
                 
                 #TODO: get the priority
@@ -913,6 +915,7 @@ class VideoHandler(APIV2Handler):
         account = neondata.NeonUserAccount.get(account_id)
         duration = new_video.duration
         if new_video.url and not duration:
+            _log.debug("duration is none. Using video url to get duration")
             url_parse = urlparse(new_video.url)
             url_parse = list(url_parse)
             url_parse[2] = urllib.quote(url_parse[2])
@@ -928,6 +931,7 @@ class VideoHandler(APIV2Handler):
             else:
                 duration = 300
         elif not new_video.url and not duration:
+            _log.debug("video url and duration are None")
             duration = 300
                 
         message = yield sqs_queue.write_message(
