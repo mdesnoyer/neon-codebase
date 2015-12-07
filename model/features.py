@@ -76,7 +76,7 @@ class RegionFeatureGenerator(FeatureGenerator):
                 features that require more than one frame to be
                 computed properly (i.e., SAD), the quantity is computed
                 with the minimal number of frames required.
-        Returns: 
+        Returns:
             1D/2D numpy feature object of N[xF] elements,
             where F is the number of features.
         '''
@@ -139,7 +139,7 @@ class ColorNameGenerator(FeatureGenerator):
         return hash(self.max_height)
 
     def generate(self, image):
-        image_size = (int(2*round(float(image.shape[1]) * 
+        image_size = (int(2*round(float(image.shape[1]) *
                                 self.max_height / image.shape[0] /2)),
                                 self.max_height)
         image_resized = cv2.resize(image, image_size)
@@ -150,7 +150,7 @@ class BlurGenerator(RegionFeatureGenerator):
     '''
     Quantizes the blurriness of a sequence of images.
     '''
-    def __init__(self, max_height=512, crop_frac=[.125, .125, .125, .125], 
+    def __init__(self, max_height=512, crop_frac=[.125, .125, .125, .125],
                  thresh=99.):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
@@ -182,7 +182,7 @@ class BlurGenerator(RegionFeatureGenerator):
 
     def _comp_blur_var(self, image):
         '''
-        Computes the blur as the variance of the laplacian. 
+        Computes the blur as the variance of the laplacian.
         '''
         return cv2.Laplacian(image, cv2.CV_32F).var()
 
@@ -203,7 +203,7 @@ class SADGenerator(RegionFeatureGenerator):
     Generates the sum of absolute differences, or SAD score,
     for a sequence of frames. The first frame receives a score
     of 0. This computes SAD for both forward and backward frames,
-    with the first and last frame getting the SAD value for 0 to 1 
+    with the first and last frame getting the SAD value for 0 to 1
     and -2 to -1, respectively
     '''
     def __init__(self, max_height=512, crop_frac=[0.,0.,0.25,0.]):
@@ -228,7 +228,7 @@ class SADGenerator(RegionFeatureGenerator):
             images = [images]
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
-        # instance, the previous filters reject all but one frame. 
+        # instance, the previous filters reject all but one frame.
         if len(images) < 2:
             return np.array([np.inf])
         if fonly:
@@ -420,8 +420,17 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         blurs = []
         areas = []
         for face in faces:
-            blurs.append(self._get_blur(face))
-            areas.append(np.prod(face.shape[:2]))
+            try:
+                blurs.append(self._get_blur(face))
+            except:
+                _log.error('Problem with face of shape '+str(face.shape))
+                blurs.append(0.)
+                areas.append(0.)
+                continue
+            try:
+                areas.append(np.prod(face.shape[:2]))
+            except:
+                _log.error('Problem with face of shape '+str(face.shape))
         areas = np.array(areas)
         areas /= np.sum(areas)
         return np.sum(blurs * areas)
@@ -645,7 +654,7 @@ class EntropyGenerator(RegionFeatureGenerator):
         return np.array(feat_vec)
 
     def _img_entropy(self, img):
-        gen_hist = lambda img, i: cv2.calcHist([img], [i], None, [256], 
+        gen_hist = lambda img, i: cv2.calcHist([img], [i], None, [256],
                                                [0, 256])
         if (len(img.shape) < 3):
             rng = [0]
@@ -738,7 +747,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
 class MemCachedFeatures(FeatureGenerator):
     '''Wrapper for a feature generator that caches the features in memory'''
     _shared_instances = {}
-    
+
     def __init__(self, feature_generator):
         super(MemCachedFeatures, self).__init__()
         self.feature_generator = feature_generator
@@ -783,7 +792,7 @@ class MemCachedFeatures(FeatureGenerator):
             return instance
 
         return None
-        
+
 class DiskCachedFeatures(FeatureGenerator):
     '''Wrapper for a feature generator that caches the features for images on the disk.
 
@@ -795,7 +804,7 @@ Inputs:
         feature_generator - the generator to cache features for
         cache_dir - Directory to store the cached features in.
                     If None, becomes an in-memory shared cache.
-        
+
         '''
         super(DiskCachedFeatures, self).__init__()
         self.feature_generator = feature_generator
@@ -834,7 +843,7 @@ Inputs:
 
             if os.path.exists(cache_file):
                 return np.load(cache_file)
-            
+
         features = self.feature_generator.generate(image)
 
         if self.cache_dir is not None:
@@ -843,7 +852,7 @@ Inputs:
             np.save(cache_file, features)
 
         return features
-            
+
 
     def __setstate__(self, state):
         '''Extra handling for when this is unpickled.'''
