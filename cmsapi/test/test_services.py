@@ -26,7 +26,6 @@ from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.redis
-from test_utils import sqsmock
 import time
 import tornado.gen
 import tornado.ioloop
@@ -170,30 +169,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        
-        # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
-                                 'connect_to_region')
-        self.mock_sqs = self.sqs_patcher.start()
-        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
-        self.write_patcher = patch('video_processor.video_processing_queue.'\
-                                  'VideoProcessingQueue.write_message')
-        self.mock_write_future = self._future_wrap_mock(
-            self.write_patcher.start(),
-            require_async_kw=False)
-        self.mock_write_future.side_effect = self.write_side_effect
 
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
         self.redis.stop()
-        self.sqs_patcher.stop()
-        self.write_patcher.stop()
         super(TestServices, self).tearDown()
-    
-    def write_side_effect(self, priority, message, timeout):
-        return message
 
     def get_app(self):
         ''' return services app '''
@@ -223,6 +205,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                                body=body,
                                headers=headers)
         response = self.wait()
+        _log.info("yes")
         return response
 
     def put_request(self, url, vals, apikey, jsonheader=False):
@@ -386,12 +369,12 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             for this test ''' 
 
         def _neon_submit_job_response(http_request):
-            ''' video server response on job submit '''
-            url = '/api/v2/%s/videos' % '1234234'
-            self.http_client.fetch(self.get_url(url),
-                                   callback=self.stop, 
-                                   method="GET")
-            response = self.wait()
+            ''' response on job submit '''
+            params = tornado.escape.json_decode(http_request.body)
+            job_id = str(random.random())
+            
+            response = tornado.httpclient.HTTPResponse(http_request, 200,
+                buffer=StringIO('{"job_id":"%s"}'%job_id))
             return response
 
         def _add_image_response(req): 
@@ -855,8 +838,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         neon_integration_id = "0"
         self.assertIn(neon_integration_id, nuser.integrations.keys()) 
 
-    @patch('tornado.httpclient.AsyncHTTPClient') 
-    def test_create_neon_video_request(self, mock_http):
+    def test_create_neon_video_request(self):
         ''' verify that video request creation via services  '''        
         api_key = self.create_neon_account()
         vals = { 'video_url' : "http://test.mp4", "title": "test_title" }
@@ -865,7 +847,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
-          
+
         response = self.post_request(uri, vals, api_key)
 
         self.assertEqual(response.code, 200)
@@ -1033,8 +1015,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.body, 
             '{"error":"custom data must be a dictionary"}')
 
-    @patch("tornado.httpclient.AsyncHTTPClient")
-    def test_create_video_request_utf8(self, mock_http):
+    def test_create_video_request_utf8(self):
         self.cp_mock_async_client.side_effect = \
           self._success_http_side_effect
         api_key = self.create_neon_account()
@@ -1080,7 +1061,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.code, 201)
         _log.info(response.body)
         jresponse = response.body
-        job_id = jresponse['job_id']
+        job_id = jresponse[0]
         self.assertIsNotNone(job_id)
         
         # add video to account

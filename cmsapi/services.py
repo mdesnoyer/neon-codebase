@@ -892,33 +892,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                              request_timeout=30.0,
                                              connect_timeout=10.0)
         
-        #TODO: mock this out
-        result = yield utils.http.send_request(req)
-
-        #sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
-
-        #yield sqs_queue.connect_to_server(options.video_queue_region)
- 
-        duration = 300
-        if video_url:
-            url_parse = urlparse.urlparse(video_url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = tornado.httpclient.HTTPRequest(
-                method='HEAD',
-                url=urlparse.urlunparse(url_parse),
-                request_timeout=5.0) 
-                
-            result = yield utils.http.send_request(req, async=True)
-            if not result.error:
-                headers = result.headers
-                duration = (int(headers.get('Content-Length', 0)))
-        else:
-            _log.debug("video_url is None")
-
-        #TODO: I'm not sure how to get the priority here
-        #message_body = yield sqs_queue.write_message(0, body, duration)
-        
+        result = utils.http.send_request(req)
         if result.code == 409:
             data = '{"error":"url already processed","video_id":"%s"}'%video_id
             self.send_json_response(data, 409)
@@ -933,7 +907,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         
         # NOTE: job id gets inserted into Neon platform account on video server
 
-        job_id = json.loads(message_body)["job_id"] # get job id from response
+        job_id = json.loads(result.body)["job_id"] # get job id from response
         t_urls = [] 
         thumbs = []
         im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
