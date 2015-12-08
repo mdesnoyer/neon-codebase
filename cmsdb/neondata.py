@@ -656,22 +656,24 @@ class PostgresPubSub(object):
             self.user = options.get('cmsdb.neondata.db_user')
 
             self.channels = {} 
-            
+        
+        @tornado.gen.coroutine    
         def _connect(self):
-            '''connect function for pubsub 
-               we don't want to use momoko here, because we have to have 
-               a sync connection for autocommit to work properly or at all 
+            '''connect function for pubsub
+               
+               just use the PostgresDB class to get a connection
+               to the database 
             ''' 
-            connection = psycopg2.connect(dsn='dbname=%s user=%s host=%s port=%s' \
-                                          % (self.name, self.user, self.host, self.port))
-            connection.autocommit = True 
-            return connection 
+            db = PostgresDB() 
+            conn = yield db.get_connection()
+            raise tornado.gen.Return(conn)
         
         @tornado.gen.coroutine 
         def _receive_notification(self, 
                                   fd, 
                                   events, 
-                                  channel_name): 
+                                  channel_name):
+ 
             '''_receive_notification, callback for add_handler that monitors an open 
                pg file handler 
 
@@ -682,7 +684,7 @@ class PostgresPubSub(object):
             try:   
                 channel = self.channels[channel_name]
                 notifications = [] 
-                connection = channel['connection']  
+                connection = channel['connection'].connection 
                 connection.poll()
                 _log.info('Notifying listeners of db changes - %s' % (connection.notifies))
                 
@@ -721,7 +723,8 @@ class PostgresPubSub(object):
  
             for cb in callback_functions: 
                 self.listen(channel_name, cb)  
-        
+
+        @tornado.gen.coroutine
         def listen(self, channel_name, func):
             '''publicly accessible function that starts listening on a channel 
                
@@ -733,7 +736,7 @@ class PostgresPubSub(object):
  
                simply is added to the io_loop via add_handler 
             ''' 
-            if channel_name in self.channels: 
+            if channel_name in self.channels:
                 self.channels[channel_name]['callback_functions'].append(func) 
             else: 
                 _log.info(
@@ -741,15 +744,15 @@ class PostgresPubSub(object):
                     (self.host, channel_name))
                 statemon.state.increment('postgres_listeners')
                 try: 
-                    connection = self._connect()
-                    connection.cursor().execute('LISTEN %s' % channel_name)
+                    momoko_conn = yield self._connect()
+                    yield momoko_conn.execute('LISTEN %s' % channel_name)
 
                     io_loop = tornado.ioloop.IOLoop.current()
                     self.channels[channel_name] = { 
-                                                    'connection' : connection, 
+                                                    'connection' : momoko_conn, 
                                                     'callback_functions' : [func] 
                                                   }
-                    io_loop.add_handler(connection.fileno(), 
+                    io_loop.add_handler(momoko_conn.connection.fileno(), 
                                         lambda fd, events: self._receive_notification(fd, events, channel_name), 
                                         io_loop.READ) 
                 except psycopg2.Error as e: 
@@ -760,6 +763,7 @@ class PostgresPubSub(object):
                                    % (channel_name, e)) 
                     statemon.state.increment('postgres_unknown_errors')
                     
+        @tornado.gen.coroutine
         def unlisten(self, channel_name):
             '''unlisten from a subscribed channel 
 
@@ -775,8 +779,7 @@ class PostgresPubSub(object):
             try: 
                 channel = self.channels[channel_name] 
                 connection = channel['connection']
-                with connection.cursor() as cursor: 
-                    cursor.execute('UNLISTEN %s' % channel_name)
+                yield connection.execute('UNLISTEN %s' % channel_name)
                 connection.close()
                 self.channels.pop(channel_name, None)
                 statemon.state.decrement('postgres_listeners')
@@ -1293,7 +1296,7 @@ class StoredObject(object):
         if self.key is None:
             raise ValueError("key not set")
 
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
@@ -1409,7 +1412,7 @@ class StoredObject(object):
 
         Returns the object
         '''
-        if options.get('cmsdb.neondata.wants_postgres'): 
+        if options.wants_postgres: 
             db = PostgresDB()
             conn = yield db.get_connection()
 
@@ -1477,7 +1480,7 @@ class StoredObject(object):
         A list of cls objects
         '''
         retval = []
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
@@ -1509,7 +1512,7 @@ class StoredObject(object):
         if len(keys) == 0:
             raise tornado.gen.Return([])
 
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
@@ -1607,7 +1610,7 @@ class StoredObject(object):
         if create_class is None:
             create_class = cls
             
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
             if len(keys) == 0:
@@ -1708,8 +1711,8 @@ class StoredObject(object):
     def save_all(cls, objects):
         '''Save many objects simultaneously'''
         data = {}
-
-        if options.get('cmsdb.neondata.wants_postgres'):
+        rv = True 
+        if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
             sql_statements = [] 
@@ -1719,12 +1722,22 @@ class StoredObject(object):
                                                 obj.to_json(), 
                                                 cls.__name__)
                 sql_statements.append(query)
-            #TODO figure out rv
             try:  
                 cursor = yield conn.transaction(sql_statements)
             except psycopg2.IntegrityError as e: 
-                pass
+                '''we rollback the transaction, but we still need to 
+                   save all the objects that were in the transaction
+                   we also do not know what object caused the integrityerror, 
+                   so just save on all of them'''
+                for obj in objects: 
+                    obj.save() 
+            except Exception as e: 
+                rv = False
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
+                statemon.state.increment('postgres_unknown_errors')
+
             db.return_connection(conn)
+            raise tornado.gen.Return(rv) 
         else: 
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -1783,7 +1796,7 @@ class StoredObject(object):
     @tornado.gen.coroutine
     def _delete_many_raw_keys(cls, keys):
         '''Deletes many objects by their raw keys'''
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
             sql_statements = []
@@ -1814,7 +1827,8 @@ class StoredObject(object):
                                             value_from_callable=True)
             raise tornado.gen.Return(result)
     
-    @classmethod 
+    @classmethod
+    @tornado.gen.coroutine 
     def _handle_all_changes_pg(cls, future, func): 
         '''Callback to handle all changes occurring on postgres objects 
            
@@ -1833,7 +1847,7 @@ class StoredObject(object):
             obj = cls.get(key) 
             try:
                 statemon.state.increment('postgres_successful_pubsub_callbacks')
-                func(key, obj, op)
+                yield tornado.gen.maybe_future(func(key, obj, op))
             except Exception as e:
                 _log.error('Unexpected exception on db change when calling'
                            ' %s with arguments %s: %s' % 
@@ -1902,12 +1916,12 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             pubsub = PostgresPubSub();
             pattern = cls._baseclass_name().lower()
 
-            pubsub.listen(pattern, 
-                          lambda x: cls._handle_all_changes_pg(x, func))
+            yield pubsub.listen(pattern, 
+                                lambda x: cls._handle_all_changes_pg(x, func))
         else: 
             conn = PubSubConnection.get(cls)
         
@@ -1920,9 +1934,9 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             pubsub = PostgresPubSub();
-            pubsub.unlisten(channel) 
+            yield pubsub.unlisten(cls._baseclass_name().lower()) 
         else: 
             conn = PubSubConnection.get(cls)
         
@@ -2235,7 +2249,7 @@ class NeonApiKey(NamespacedStoredObject):
         #NOTE: This is a misnomer. It is being overriden here since the save()
         # function uses to_json() and the NeonApiKey is saved as a plain string
         # in the database
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             return json.dumps(self.__dict__) 
         else:  
             return self.api_key
@@ -2260,7 +2274,7 @@ class NeonApiKey(NamespacedStoredObject):
     def get(cls, a_id, callback=None):
         #NOTE: parent get() method uses json.loads() hence overriden here
         key = cls.format_key(a_id)
-        if options.get('cmsdb.neondata.wants_postgres'):
+        if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
             

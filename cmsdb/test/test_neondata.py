@@ -2663,7 +2663,7 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test()
     def test_subscribe_to_changes(self):
         cb = MagicMock()     
-        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
+        yield neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
         yield tornado.gen.sleep(0.01) 
@@ -2672,11 +2672,11 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test()
     def test_unsubscribe_from_changes(self):
         cb = MagicMock()     
-        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
+        yield neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
 
-        neondata.NeonUserAccount.unsubscribe_from_changes('neonuseraccount', async=True)
+        yield neondata.NeonUserAccount.unsubscribe_from_changes('*', async=True)
         so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so2.save(async=True)
 
@@ -2686,10 +2686,10 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test()
     def test_multiple_functions_listening(self):
         cb = MagicMock()     
-        neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
+        yield neondata.NeonUserAccount.subscribe_to_changes(cb, async=True)
 
         cb2 = MagicMock() 
-        neondata.NeonUserAccount.subscribe_to_changes(cb2, async=True)
+        yield neondata.NeonUserAccount.subscribe_to_changes(cb2, async=True)
 
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
@@ -2905,7 +2905,6 @@ class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
               neondata.BrightcovePlatform.modify,
               '45', '82',
               _initialize_bc_plat, create_missing=True)
-        #print bc
  
     @tornado.testing.gen_test 
     def test_modify_brightcove_integration(self):
@@ -2919,7 +2918,6 @@ class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
               neondata.BrightcoveIntegration.modify,
               '45', '82',
               _initialize_bc_plat)
-        #print bc 
             
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
