@@ -109,7 +109,7 @@ class GistGenerator(FeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
         return cmp(self.image_size, other.image_size)
 
@@ -162,16 +162,17 @@ class BlurGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+       images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -216,16 +217,17 @@ class SADGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
         # instance, the previous filters reject all but one frame.
@@ -275,7 +277,7 @@ class ActionGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
         return cmp(self.action_vec, other.action_vec)
 
@@ -283,8 +285,7 @@ class ActionGenerator(RegionFeatureGenerator):
         return hash(self.action_vec)
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         SADs = self._SAD_gen.generate_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
 
@@ -312,7 +313,7 @@ class FaceGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
         return cmp(self.max_height, other.max_height)
 
@@ -320,8 +321,7 @@ class FaceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -351,7 +351,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
         return cmp(self.max_height, other.max_height)
 
@@ -359,8 +359,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -396,7 +395,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
         return cmp(self.max_height, other.max_height)
 
@@ -404,8 +403,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -442,6 +440,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'face_blur'
 
+
 class VibranceGenerator(RegionFeatureGenerator):
     '''
     Returns the mean "vibrance" (average of saturation + value) of an image.
@@ -456,16 +455,17 @@ class VibranceGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -501,12 +501,14 @@ class BrightnessGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
         if not type(images) is list:
@@ -543,12 +545,14 @@ class SaturationGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
         if not type(images) is list:
@@ -587,12 +591,16 @@ class TextGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        if self.crop_frac != other.crop_frac:
+            return cmp(self.crop_frac, other.crop_frac)
+        return cmp(self.max_variation, other.max_variation)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def __getstate__(self):
         self.mser = None
@@ -601,8 +609,7 @@ class TextGenerator(RegionFeatureGenerator):
     def generate_many(self, images, fonly=False):
         if self.mser is None:
             self.mser = cv2.MSER(_max_variation=self._max_variation)
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -635,16 +642,17 @@ class EntropyGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, self.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -684,16 +692,17 @@ class TextGeneratorSlow(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
@@ -723,16 +732,17 @@ class PixelVarGenerator(RegionFeatureGenerator):
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff <> 0:
+        if typediff != 0:
             return typediff
-        return cmp(self.max_height, other.max_height)
+        if self.max_height != other.max_height:
+            return cmp(self.max_height, other.max_height)
+        return cmp(self.crop_frac, other.crop_frac)
 
     def __hash__(self):
-        return hash(self.max_height)
+        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-        if type(images) is not list:
-            images = [images]
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
