@@ -169,13 +169,16 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-
+        
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
         self.redis.stop()
         super(TestServices, self).tearDown()
+    
+    def write_side_effect(self, priority, message, timeout):
+        return message
 
     def get_app(self):
         ''' return services app '''
@@ -205,7 +208,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                                body=body,
                                headers=headers)
         response = self.wait()
-        _log.info("yes")
         return response
 
     def put_request(self, url, vals, apikey, jsonheader=False):
@@ -369,9 +371,36 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             for this test ''' 
 
         def _neon_submit_job_response(http_request):
-            ''' response on job submit '''
+            ''' video server response on job submit '''
             params = tornado.escape.json_decode(http_request.body)
+            _log.info(params)
             job_id = str(random.random())
+            self.job_ids.append(job_id)
+            def _mod_video(x):
+                x.job_id = job_id
+                x.video_url = params['video_url']
+                x.integration_id = params.get('integration_id', '0') or '0'
+                serving_enabled = False
+                if 'default_thumbnail' in params:
+                    x.thumbnail_ids.append('somenewthumbid')
+            neondata.VideoMetadata.modify(
+                neondata.InternalVideoID.generate(params['api_key'],
+                                                  params['video_id']),
+                _mod_video,
+                create_missing=True)
+
+            neondata.NeonApiRequest(
+                job_id,
+                params['api_key'],
+                params['video_id'],
+                params['video_title'],
+                params['video_url'],
+                integration_id=params.get('integration_id', '0') or '0',
+                http_callback=params.get('callback_url', None),
+                default_thumbnail=params.get('default_thumbnail', None),
+                external_thumbnail_id=params.get('external_thumbnail_id',
+                                                 None),
+                publish_date=params.get('publish_date', None)).save()
             
             response = tornado.httpclient.HTTPResponse(http_request, 200,
                 buffer=StringIO('{"job_id":"%s"}'%job_id))
@@ -436,7 +465,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             return response
 
         #neon api request
-        elif "api/v1/submitvideo" in http_request.url:
+        elif "api/v2/" in http_request.url:
             response = _neon_submit_job_response(http_request)            
             
 
@@ -1059,9 +1088,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         vid = "vid1"
         response = self.post_request(uri, vals, api_key)
         self.assertEqual(response.code, 201)
-        _log.info(response.body)
         jresponse = response.body
-        job_id = jresponse[0]
+        job_id = json.loads(jresponse)['job_id']
         self.assertIsNotNone(job_id)
         
         # add video to account

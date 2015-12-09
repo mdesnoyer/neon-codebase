@@ -645,7 +645,6 @@ class VideoProcessor(object):
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
                 _set_serving_enabled)
-
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
 
@@ -784,7 +783,7 @@ class VideoClient(multiprocessing.Process):
                     job_id  = job_params['job_id']
                     job_params['reprocess'] = False
                     def _change_job_state(request):
-                        request.try_count +=1;
+                        request.try_count +=1
                         if request.state in [neondata.RequestState.SUBMIT,
                                              neondata.RequestState.REPROCESS,
                                              neondata.RequestState.REQUEUED]:

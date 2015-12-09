@@ -259,7 +259,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         elif status >= 500:
             statemon.state.increment(ref=_internal_err_ref, safe=False)
             _log.warn("Internal Error. Request %r" % self.request)
-        _log.info("Data is:  %s" %data)
 
         self.set_header("Content-Type", "application/json")
         self.set_status(status)
@@ -685,7 +684,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
-        request = tornado.httpclient.HTTPRequest(client_url,
+        request = tornado.httpclient.HTTPRequest(url,
                                                  method="POST",
                                                  headers=hdr,
                                                  body=body,
@@ -885,7 +884,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         body = tornado.escape.json_encode(request_body)
         url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
-        req = tornado.httpclient.HTTPRequest(url=client_url,
+        req = tornado.httpclient.HTTPRequest(url=url,
                                              method="POST",
                                              headers=hdr,
                                              body=body,

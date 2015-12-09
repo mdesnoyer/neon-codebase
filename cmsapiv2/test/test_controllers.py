@@ -873,10 +873,14 @@ class TestVideoHandler(TestControllersBase):
         self.verify_account_mock.side_effect = True
 
         # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
-                                 'connect_to_region')
-        self.mock_sqs = self.sqs_patcher.start()
-        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
+        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
+                                 'VideoProcessingQueue.connect_to_server')
+        
+        self.mock_sqs_future = self._future_wrap_mock(
+            self.sqs_patcher.start(),
+            require_async_kw=False)
+
+        self.mock_sqs_future.return_value = sqsmock.SQSConnectionMock()
         self.write_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.write_message')
         self.mock_write_future = self._future_wrap_mock(
@@ -1121,7 +1125,7 @@ class TestVideoHandler(TestControllersBase):
 
     def test_post_video_with_vserver_fail(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs' % (self.account_id_api_key, self.test_i_id)
-        self.mock_sqs.side_effect = False
+        self.mock_sqs_future.side_effect = False
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
         self.http_client.fetch(self.get_url(url),
                                callback = self.stop, 
@@ -1146,7 +1150,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertNotEquals(first_job_id,'')
         
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=1' % (self.account_id_api_key, self.test_i_id)
-        self.mock_sqs.side_effect = False
+        self.mock_sqs_future.side_effect = False
         self.http_client.fetch(self.get_url(url),
                                callback=self.stop,
                                body='',
@@ -1491,10 +1495,14 @@ class TestHealthCheckHandler(TestControllersBase):
               self.http_mocker.start()) 
 
         # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
-                                 'connect_to_region')
-        self.mock_sqs = self.sqs_patcher.start()
-        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
+        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
+                                 'VideoProcessingQueue.connect_to_server')
+        
+        self.mock_sqs_future = self._future_wrap_mock(
+            self.sqs_patcher.start(),
+            require_async_kw=False)
+
+        self.mock_sqs_future.return_value = sqsmock.SQSConnectionMock()
         self.write_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.write_message')
         self.mock_write_future = self._future_wrap_mock(

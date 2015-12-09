@@ -117,15 +117,13 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.api_request = None
 
         # Mock the SQS implementation
-        #self.mock_sqs = sqsmock.SQSConnectionMock()
-        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
-                                 'connect_to_region')
-        #self.mock_sqs_future = self._future_wrap_mock(
-        #                                 self.sqs_patcher.start(),
-        #                                 require_async_kw=False)
+        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
+                                 'VideoProcessingQueue.connect_to_server')
         
-        self.mock_sqs = self.sqs_patcher.start()
-        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
+        self.mock_sqs_future = self._future_wrap_mock(
+            self.sqs_patcher.start(),
+            require_async_kw=False)
+
         self.read_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.read_message')
         self.mock_read_future = self._future_wrap_mock(
@@ -487,9 +485,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             yield self.video_client.dequeue_job()
         self.assertEqual(cm.exception.message, 'Server is empty')
 
-    @patch('cmsdb.neondata.NeonApiRequest')
     @tornado.testing.gen_test
-    def test_dequeue_job_with_failed_attempts(self, neon_mock):
+    def test_dequeue_job_with_failed_attempts(self):
         message = Message()
         message_body = json.dumps({
             'api_key': self.api_key,
@@ -504,15 +501,19 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         self.mock_read_future.return_value = message
 
-        neon_mock.modify().fail_count = 4
-        neon_mock.modify().state = neondata.RequestState.PROCESSING
+        def _change_job_state(request):
+            request.fail_count = 4
+            request.state = neondata.RequestState.PROCESSING
+                      
+        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                             _change_job_state)
         with self.assertRaises(Exception) as cm:
             yield self.video_client.dequeue_job()
         self.assertEqual(cm.exception.message, 'Too many attempts. Aborting')
 
-    @patch('cmsdb.neondata.NeonApiRequest')
+    #@patch('cmsdb.neondata.NeonApiRequest')
     @tornado.testing.gen_test
-    def test_dequeue_job_with_too_many_attempts(self, neon_mock):
+    def test_dequeue_job_with_too_many_attempts(self):
         message = Message()
         message_body = json.dumps({
             'api_key': self.api_key,
@@ -527,8 +528,12 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         self.mock_read_future.return_value = message
 
-        neon_mock.modify().try_count = 7
-        neon_mock.modify().state = neondata.RequestState.PROCESSING
+        def _change_job_state(request):
+            request.try_count = 7
+            request.state = neondata.RequestState.PROCESSING
+                      
+        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                             _change_job_state)
         with self.assertRaises(Exception) as cm:
             yield self.video_client.dequeue_job()
         self.assertEqual(cm.exception.message, 'Too many attempts. Aborting')
@@ -1114,7 +1119,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
-
         
 class SmokeTest(test_utils.neontest.AsyncTestCase):
     ''' 
@@ -1217,11 +1221,13 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.model.choose_thumbnails.return_value = ct_output
 
         # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
-                                 'connect_to_region')
+        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
+                                 'VideoProcessingQueue.connect_to_server')
         
-        self.mock_sqs = self.sqs_patcher.start()
-        self.mock_sqs.return_value = sqsmock.SQSConnectionMock()
+        self.mock_sqs_future = self._future_wrap_mock(
+            self.sqs_patcher.start(),
+            require_async_kw=False)
+
         self.read_patcher = patch('video_processor.video_processing_queue.'\
                                   'VideoProcessingQueue.read_message')
         self.mock_read_future = self._future_wrap_mock(
@@ -1440,11 +1446,11 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             statemon.state.get('video_processor.client.video_download_error'),
             1)
 
-    @tornado.testing.gen_test(timeout=10)
     @patch('video_processor.client.neondata.VideoMetadata.modify')
+    @tornado.testing.gen_test(timeout=10)
     def test_db_update_error(self, modify_mock):
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error")]
+            redis.ConnectionError("Connection Error"), False]
 
         message = Message()
 
@@ -1465,6 +1471,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        _log.info(modify_mock.call_count)
         self.assertEquals(api_request.state,
                           neondata.RequestState.INT_ERROR)
 

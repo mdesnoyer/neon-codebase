@@ -800,18 +800,16 @@ class VideoHelper():
                                                  args, 
                                                  account_id_api_key)
             # add the job id save the video
-            video.job_id = api_request.job_id 
+            video.job_id = api_request.job_id
             yield tornado.gen.Task(video.save)
             raise tornado.gen.Return((video,api_request))
         else:
             reprocess = bool(int(args.get('reprocess', 0))) 
             if reprocess:
-                
-                reprocess_url = 'http://%s:%s/reprocess' % (options.video_server, 
-                                                            options.video_server_port)
                 # get the neonapirequest 
                 api_request = neondata.NeonApiRequest.get(video.job_id, account_id_api_key)
                 
+                account = neondata.NeonUserAccount.get(account_id_api_key)
                 # send the request to the video server
                 server = video_processor.video_processing_queue
                 sqs_queue = server.VideoProcessingQueue()
@@ -836,11 +834,11 @@ class VideoHelper():
                     else:
                         duration = 300
                 elif not video.url and not duration:
-                    _log.info("Video URL and Duration are None")
+                    _log.debug("Video URL and Duration are None")
                     duration = 300
                 
-                #TODO: get the priority
-                message = yield sqs_queue.write_message(0, 
+                message = yield sqs_queue.write_message(
+                    account.get_processing_priority(), 
                     api_request.to_json(),
                     duration)
 

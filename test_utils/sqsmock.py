@@ -101,6 +101,14 @@ class SQSConnectionMock(object):
     def __init__(self):
         self.queue_dict = {}
         self.queue_list = []
+        self.regions = ['us-east-1', 'us-west-2', 'us-west-1',
+                        'eu-west-1', 'eu-central-1', 'ap-southeast-1',
+                        'ap-southeast-2', 'ap-northeast-1', 'sa-east-1']
+
+    def connect_to_region(self, region):
+        _log.info("Yes")
+        if region not in self.regions:
+            raise AttributeError
 
     def get_queue(self, queue_name):
         try:

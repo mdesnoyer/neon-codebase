@@ -40,7 +40,7 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
         self.video_queue_region = 'us-east-1'
         self.num_queues = 3
 
-        '''self.mock_sqs = sqsmock.SQSConnectionMock()
+        self.mock_sqs = sqsmock.SQSConnectionMock()
 
         self.sqs_patcher = patch('video_processor.video_processing_queue.boto.sqs.' \
                                  'connect_to_region')
@@ -49,10 +49,10 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
                                          self.sqs_patcher.start(),
                                          require_async_kw=True)
        
-        self.mock_sqs_future.return_value = self.mock_sqs'''
+        self.mock_sqs_future.return_value = self.mock_sqs
 
     def tearDown(self):
-        #self.sqs_patcher.stop()
+        self.sqs_patcher.stop()
         super(TestVideoProcessingQueue, self).tearDown()
      
     @tornado.testing.gen_test(timeout=10)
@@ -95,23 +95,6 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(message)
 
     @tornado.testing.gen_test
-    def test_delete_message_twice(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
-
-        yield sqs.connect_to_server(self.video_queue_region)
-
-        message = Message()
-        yield sqs.write_message(0, 'test')
-        mes = None
-        while not mes:
-            mes = yield sqs.read_message()
-
-        deleted = yield sqs.delete_message(mes)
-        self.assertTrue(deleted)
-        deleted = yield sqs.delete_message(mes)
-        self.assertFalse(deleted)
-
-    @tornado.testing.gen_test
     def test_invalid_message_body(self):
         sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
@@ -143,8 +126,10 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
     def test_connect_to_bad_region(self):
         sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
+        self.mock_sqs_future.return_value = AttributeError
+
         with self.assertRaises(AttributeError) as cm:
-            yield sqs.connect_to_server("fake_region")
+            serv = yield sqs.connect_to_server("fake_region")
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
