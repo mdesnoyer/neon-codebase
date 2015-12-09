@@ -821,7 +821,7 @@ class TestVideoHandler(TestControllersBase):
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
 
         # Mock the SQS implementation
         self.sqs_patcher = patch('video_processor.video_processing_queue.' \
@@ -838,8 +838,6 @@ class TestVideoHandler(TestControllersBase):
             self.write_patcher.start(),
             require_async_kw=False)
         self.mock_write_future.return_value = "test_message"
-
-        self.verify_account_mock.side_effect = True
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -1040,7 +1038,7 @@ class TestVideoHandler(TestControllersBase):
                                callback=self.stop,
                                body='',
                                method='POST',
-                              allow_nonstandard_methods=True)
+                               allow_nonstandard_methods=True)
         response = self.wait()
         self.assertEquals(response.code, 409) 
         rjson = json.loads(response.body) 

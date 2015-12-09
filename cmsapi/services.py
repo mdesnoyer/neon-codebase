@@ -684,17 +684,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_url"] = video_url
         request_body["default_thumbnail"] = default_thumbnail 
         request_body["external_thumbnail_id"] = external_thumbnail_id
-        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
-                        % options.video_server 
-        if options.local == 1:
-            client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
-        url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
+        url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, api_key)
         request = tornado.httpclient.HTTPRequest(url,
                                                  method="POST",
                                                  headers=hdr,
@@ -702,27 +698,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                                  request_timeout=300.0,
                                                  connect_timeout=30.0)
         response = yield tornado.gen.Task(utils.http.send_request, request)
-        #yield sqs_queue.connect_to_server(options.video_queue_region)
- 
-        duration = 300
-        if video_url:
-            url_parse = urlparse.urlparse(video_url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = tornado.httpclient.HTTPRequest(
-                method='HEAD',
-                url=urlparse.urlunparse(url_parse),
-                request_timeout=5.0) 
-                
-            result = yield utils.http.send_request(req, async=True)
-            if not result.error:
-                headers = result.headers
-                duration = (int(headers.get('Content-Length', 0)))
-        else:
-            _log.debug("video_url is None")
-
-        #TODO: I'm not sure how to get the priority here
-        #message = yield sqs_queue.write_message(0, body, duration)
         
         if response.code == 409:
             job_id = json.loads(response.body)["job_id"]
@@ -887,13 +862,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["video_title"] = \
                 video_url.split('//')[-1] if title is None else title 
         request_body["video_url"]   = video_url
-        request_body["callback_url"] = None 
-        client_url = 'http://%s:8081/api/v1/submitvideo/topn'\
-                        % options.video_server 
-        if options.local == 1:
-            client_url = 'http://localhost:8081/api/v1/submitvideo/topn'
+        request_body["callback_url"] = None
         body = tornado.escape.json_encode(request_body)
-        url = 'http://localhost:8081/api/v2/%s/videos' % '1234234'
+        url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, self.api_key)
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
         req = tornado.httpclient.HTTPRequest(url=url,
                                              method="POST",
