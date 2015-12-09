@@ -14,7 +14,7 @@ import test_utils.neontest
 import tornado.ioloop
 import tornado.httpclient
 import unittest
-from utils import imageutils
+from cvutils import imageutils
 
 class TestPILImageUtils(unittest.TestCase):
     def setUp(self):
@@ -102,7 +102,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(tornado.httpclient.HTTPError):
                 imageutils.PILImageUtils.download_image('url')
 
-    @patch('utils.imageutils.Image')
+    @patch('cvutils.imageutils.Image')
     def test_image_ioerror(self, pil_mock):
         pil_mock.open.side_effect = [IOError()]
 
@@ -112,7 +112,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
                 imageutils.PILImageUtils.download_image('url')
 
     
-    @patch('utils.imageutils.Image')
+    @patch('cvutils.imageutils.Image')
     def test_image_valueerror(self, pil_mock):
         pil_mock.open.side_effect = [ValueError()]
 
@@ -120,7 +120,7 @@ class TestDownloadImage(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(IOError):
                 imageutils.PILImageUtils.download_image('url')
 
-    @patch('utils.imageutils.Image')
+    @patch('cvutils.imageutils.Image')
     def test_image_typeerror(self, pil_mock):
         pil_mock.open.side_effect = [TypeError()]
 

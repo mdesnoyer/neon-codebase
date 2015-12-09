@@ -30,10 +30,11 @@ from boto.s3.connection import S3Connection
 from poster.encode import multipart_encode
 from StringIO import StringIO
 import utils.botoutils
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon 
 import utils.sync
+from cvutils import smartcrop
 
 import logging
 _log = logging.getLogger(__name__)
@@ -122,6 +123,9 @@ class CDNHosting(object):
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
         self.source_crop = cdn_metadata.source_crop
+        self.crop_with_saliency = cdn_metadata.crop_with_saliency
+        self.crop_with_face_detection = cdn_metadata.crop_with_face_detection
+        self.crop_with_text_detection = cdn_metadata.crop_with_text_detection
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -162,9 +166,14 @@ class CDNHosting(object):
         # list of serving URLs
         try:
             if self.resize:
+                cv_im = pycvutils.from_pil(image)
+                sc = smartcrop.SmartCrop(cv_im,
+                    with_saliency=self.crop_with_saliency,
+                    with_face_detection=self.crop_with_face_detection,
+                    with_text_detection=self.crop_with_text_detection)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                    cv_im_r = sc.crop_and_resize(sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
                     cdn_val = yield self._upload_and_check_image(
                         im, tid, url, overwrite)

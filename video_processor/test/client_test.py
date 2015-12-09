@@ -55,7 +55,7 @@ import urlparse
 import urllib2
 import unittest
 import utils
-from utils.imageutils import PILImageUtils
+from cvutils import imageutils
 import utils.neon
 from utils.options import define, options
 import utils.ps
@@ -451,11 +451,11 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start(),
             require_async_kw=True)
-        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         self.im_download_mock.return_value = self.random_image
 
         # Mock out http callbacks
@@ -489,19 +489,19 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                         model_version='model1',
                                         frameno=6,
                                         filtered=''),
-             utils.imageutils.PILImageUtils.create_random_image(480, 640)),
+             imageutils.PILImageUtils.create_random_image(480, 640)),
              (neondata.ThumbnailMetadata(None,
                                          ttype=neondata.ThumbnailType.NEON,
                                          rank=1,
                                          model_score=2.1,
                                          model_version='model1',
                                          frameno=69),
-             utils.imageutils.PILImageUtils.create_random_image(480, 640)),
+             imageutils.PILImageUtils.create_random_image(480, 640)),
              (neondata.ThumbnailMetadata(None,
                                          ttype=neondata.ThumbnailType.RANDOM,
                                          rank=0,
                                          frameno=67),
-              utils.imageutils.PILImageUtils.create_random_image(480, 640))]
+              imageutils.PILImageUtils.create_random_image(480, 640))]
 
         
     def tearDown(self):
@@ -513,7 +513,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         super(TestFinalizeResponse, self).tearDown()
 
     def test_default_process(self):
-
         self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
@@ -1036,11 +1035,11 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start(),
             require_async_kw=True)
-        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         self.im_download_mock.side_effect = [self.random_image]
 
         # Mock out http requests.
@@ -1116,7 +1115,7 @@ class SmokeTest(test_utils.neontest.TestCase):
                         neondata.RequestState.PROCESSING,
                         neondata.RequestState.REPROCESS]):
                     # See if we timeout
-                    self.assertLess(time.time() - start_time, 5.0,
+                    self.assertLess(time.time() - start_time, 10.0,
                                     'Timed out while running the smoke test')
 
                     time.sleep(0.1)
@@ -1124,7 +1123,7 @@ class SmokeTest(test_utils.neontest.TestCase):
             finally:
                 # Clean up the job process
                 self.video_client.stop()
-                self.video_client.join(5.0)
+                self.video_client.join(10.0)
                 if self.video_client.is_alive():
                     # SIGKILL it
                     utils.ps.send_signal_and_wait(signal.SIGKILL,

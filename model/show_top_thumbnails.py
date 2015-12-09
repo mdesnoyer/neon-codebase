@@ -27,8 +27,8 @@ def run_one_video(mod, video_file, n, output_file, batch):
     video = cv2.VideoCapture(video_file)
 
     _log.info('Video is %fs long' % (
-        video.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT) /
-        video.get(cv2.cv.CV_CAP_PROP_FPS)))
+        video.get(cv2.CAP_PROP_FRAME_COUNT) /
+        video.get(cv2.CAP_PROP_FPS)))
     
     startTime = time.time()
     thumbs = mod.choose_thumbnails(video, n=n)

@@ -9,17 +9,22 @@ especially using the __setstate__ function.
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+import os.path
+import sys
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
 import dill as pickle
 import cv2
-from . import features
-from . import filters
+from model import features
+from model import filters
 import logging
-from . import predictor
+from model import predictor
 import utils.obj
 from utils import statemon
-from . import video_searcher
-from . import local_video_searcher
+from model import video_searcher
+from model import local_video_searcher
 
 _log = logging.getLogger(__name__)
 

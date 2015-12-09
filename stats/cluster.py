@@ -429,7 +429,7 @@ class Cluster():
         found_key = bucket.get_key(jar_key.name)
         wait_count = 0
         while found_key is None or jar_key.md5 != found_key.etag.strip('"'):
-            if wait_count > 60:
+            if wait_count > 120:
                 _log.error('Timeout when waiting for the jar to show up in S3')
                 raise IOError('Timeout when uploading jar to s3://%s/%s' %
                               (bucket.name, jar_key.name))

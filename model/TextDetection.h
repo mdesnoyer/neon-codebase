@@ -9,6 +9,8 @@
 // Copyright: 2013 Neon Labs
 // Author: Mark Desnoyer (desnoyer@neon-lab.com)
 
+// Not used anymore, but may check if it still works well.
+// Currently not working with opencv3
 #ifndef __TEXTDETECTION2_H__
 #define __TEXTDETECTION2_H__
 
