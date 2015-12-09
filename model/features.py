@@ -170,7 +170,7 @@ class BlurGenerator(RegionFeatureGenerator):
         return hash([str(self.max_height) + str(self.crop_frac)])
 
     def generate_many(self, images, fonly=False):
-       images = list(images)
+        images = list(images)
         if fonly:
             images = images[:1]
         feat_vec = []
