@@ -12,12 +12,18 @@ import logging
 from mock import MagicMock
 import re
 import time
+import tornado.gen
 import tornado.ioloop
 import tornado.testing
 import unittest
+import utils.statemon
+import utils.sync
 
 class TestCase(unittest.TestCase):
     '''Use this instead of the unittest one to get the extra functionality.'''
+
+    def tearDown(self):
+        utils.statemon.state._reset_values()
 
     @contextmanager
     def assertLogExists(self, level, regexp):
@@ -92,6 +98,8 @@ class TestCase(unittest.TestCase):
                 '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
                             for x in handler.logs])))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def assertWaitForEquals(self, func, expected, timeout=5.0):
         '''Waits for the result of a function to equal val.'''
         start_time = time.time()
@@ -103,9 +111,10 @@ class TestCase(unittest.TestCase):
                     return
             except Exception as e:
                 found = '%s: %s' % (e.__class__.__name__, e)
-            time.sleep(0.05)
+            yield tornado.gen.sleep(0.05)
         self.fail('Timed out waiting for %s to equal %s. '
                   'Its value was %s' % (func, expected, found))
+    
 
     def _future_wrap_mock(self, outer_mock, require_async_kw=False):
         '''Sets up a mock that mocks out a call that returns a future.
@@ -127,7 +136,8 @@ class TestCase(unittest.TestCase):
         '''
         inner_mock = MagicMock()
         def _build_future(*args, **kwargs):
-            if require_async_kw and not kwargs.get('async', False):
+            async = kwargs.pop('async', False)
+            if require_async_kw and not async:
                 return inner_mock(*args, **kwargs)
                 
             future = concurrent.futures.Future()
@@ -204,6 +214,7 @@ class AsyncHTTPTestCase(tornado.testing.AsyncHTTPTestCase, TestCase):
     '''
     def setUp(self):
         tornado.testing.AsyncHTTPTestCase.setUp(self)
+        utils.statemon.state._reset_values()
 
     def tearDown(self):
         tornado.testing.AsyncHTTPTestCase.tearDown(self)

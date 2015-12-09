@@ -18,6 +18,7 @@ import logging
 import math
 import model.errors
 import model.features
+import model.colorname
 import numpy as np
 import time
 import utils.obj
@@ -39,7 +40,9 @@ class VideoSearcher(object):
                  startend_buffer=0.1,
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
-                 max_thumb_min_dist=10.0):
+                 max_thumb_min_dist=10.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         '''
         Inputs:
         predictor - Predictor to use for a single frame
@@ -58,11 +61,15 @@ class VideoSearcher(object):
         self.filt = filt
         self.gist = model.features.MemCachedFeatures.create_shared_cache(
             model.features.GistGenerator())
+        self.colorname = model.features.MemCachedFeatures.create_shared_cache(
+            model.features.ColorNameGenerator())
         self.startend_buffer=startend_buffer
         self.max_startend_buffer=max_startend_buffer
         self.thumb_min_dist=thumb_min_dist
         self.max_thumb_min_dist=max_thumb_min_dist
         self.filter_dups=filter_dups
+        self.gist_threshold = gist_threshold
+        self.colorname_threshold = colorname_threshold
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -103,9 +110,14 @@ class VideoSearcher(object):
 
         a and b are numpy images in BGR format.
         '''
-        dist = np.linalg.norm(self.gist.generate(a) -
-                              self.gist.generate(b))
-        return dist <= 0.6
+        gist_dis = model.colorname.JSD(self.gist.generate(a),
+                                       self.gist.generate(b))
+        colorname_dis = model.colorname.JSD(self.colorname.generate(a),
+                                            self.colorname.generate(b))
+        return ((gist_dis < self.gist_threshold and \
+                    colorname_dis < 2 * self.colorname_threshold)
+                or (colorname_dis < self.colorname_threshold and
+                    gist_dis < 2 * self.gist_threshold))
 
     def filter_duplicates(self, image_list, n=None, tup_idx=0):
         '''Filters an image list of duplicates and returns at most n entries.
@@ -155,6 +167,9 @@ class VideoSearcher(object):
             return (self.predictor.predict(image), '')
         return (float('-inf'), self.filt.short_description())
 
+    def get_name(self):
+        return 'AbstractSearcher'
+
 
 class BisectSearcher(VideoSearcher):
     '''A video searcher that uses bisection search.'''
@@ -165,14 +180,18 @@ class BisectSearcher(VideoSearcher):
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
                  max_thumb_min_dist=10.0,
-                 processing_time_ratio=1.0):
+                 processing_time_ratio=1.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         super(BisectSearcher, self).__init__(predictor,
                                              filt,
                                              filter_dups,
                                              startend_buffer,
                                              max_startend_buffer,
                                              thumb_min_dist,
-                                             max_thumb_min_dist)
+                                             max_thumb_min_dist,
+                                             gist_threshold,
+                                             colorname_threshold)
         self.processing_time_ratio = processing_time_ratio
 
     def choose_thumbnails_impl(self, video, n=1, video_name=''):
@@ -403,6 +422,9 @@ class BisectSearcher(VideoSearcher):
                                         hashlib.md5(str(x[2])).digest()))
         return results
 
+    def get_name(self):
+        return 'BisectSearcher'
+
 class UniformSamplingSearcher(VideoSearcher):
     '''Searches through the video using uniform sampling.'''
     def __init__(self,
@@ -413,14 +435,18 @@ class UniformSamplingSearcher(VideoSearcher):
                  max_startend_buffer=5.0,
                  thumb_min_dist=0.1,
                  max_thumb_min_dist=10.0,
-                 sample_step=1.0):
+                 sample_step=1.0,
+                 gist_threshold = 0.01,
+                 colorname_threshold = 0.015):
         super(UniformSamplingSearcher, self).__init__(predictor,
                                                       filt,
                                                       filter_dups,
                                                       startend_buffer,
                                                       max_startend_buffer,
                                                       thumb_min_dist,
-                                                      max_thumb_min_dist)
+                                                      max_thumb_min_dist,
+                                                      gist_threshold,
+                                                      colorname_threshold)
         
         self.sample_step = sample_step # Step in seconds within the video
 
@@ -504,3 +530,6 @@ class UniformSamplingSearcher(VideoSearcher):
                            attr))
             
         return retval
+
+    def get_name(self):
+        return 'UniformSamplingSearcher'

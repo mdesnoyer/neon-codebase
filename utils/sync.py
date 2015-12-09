@@ -12,8 +12,13 @@ if sys.path[0] != __base_path__:
 import concurrent.futures
 import contextlib
 import functools
+import logging
 import threading
+import time
+import tornado.gen
 import tornado.ioloop
+
+_log = logging.getLogger(__name__)
 
 def optional_sync(func):
     '''A decorator that makes an asyncronous function optionally synchronous.
@@ -164,3 +169,43 @@ class FutureLock(object):
 
     def release(self):
         self.lock.release()
+
+class PeriodicCoroutineTimer(object):
+    '''Class that acts exactly like tornado.ioloop.PeriodicCallback
+    except it can take a coroutine as a function.
+    '''
+    def __init__(self, callback, callback_time, io_loop=None):
+        '''Initializes a callback to run periodically.
+
+        callback - Function to call. Can be a coroutine
+        callback_time - Time in milliseconds
+        io_loop - IOLoop to run on.
+        '''
+        self._ioloop = io_loop or tornado.ioloop.IOLoop.current()
+        self._callback = callback
+        self._callback_time = callback_time / 1000.
+        self._stopped = True
+
+    def start(self):
+        if self._stopped:
+            self._stopped = False
+            self._ioloop.spawn_callback(self.run)
+
+    def stop(self):
+        self._stopped = True
+
+    def is_running(self):
+        return not self._stopped
+
+    @tornado.gen.coroutine
+    def run(self):
+        while not self._stopped:
+            try:
+                start_time = time.time()
+
+                yield tornado.gen.maybe_future(self._callback())
+            except Exception as e:
+                _log.exception('Unexpected error when calling callback %s: %s'
+                               % (self._callback, e))
+            wait_time = self._callback_time - (time.time() - start_time)
+            yield tornado.gen.sleep(max(wait_time, 0.0))

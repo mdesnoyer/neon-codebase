@@ -5,15 +5,18 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
         sys.path.insert(0, __base_path__)
 
-
 from boto.sqs.message import Message
 import boto.exception
+from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
+from cmsapiv2 import authentication
+from datetime import datetime, timedelta
 import json
 import tornado.gen
 import tornado.testing
 import tornado.httpclient
 import test_utils.redis
+import time
 import unittest
 import utils.neon
 import utils.http
@@ -24,17 +27,15 @@ import uuid
 import jwt
 from mock import patch
 from cmsdb import neondata
+from passlib.hash import sha256_crypt
 from StringIO import StringIO
 from utils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 import video_processor.video_processing_queue
+from utils.options import options
 
-
-class TestControllersBase(test_utils.neontest.AsyncHTTPTestCase): 
-    def get_app(self): 
-        return controllers.application
-
+class TestBase(test_utils.neontest.AsyncHTTPTestCase): 
     def post_exceptions(self, url, params, exception_mocker): 
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = Exception('blah blah')  
@@ -141,14 +142,28 @@ class TestControllersBase(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(response.code, 400) 
         exception_mocker.stop()
 
+class TestAuthenticationBase(TestBase): 
+    def get_app(self): 
+        return authentication.application
+
+class TestControllersBase(TestBase): 
+    def get_app(self): 
+        return controllers.application
+
 class TestNewAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
         super(TestNewAccountHandler, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
+        self.verify_account_mocker.stop()
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
@@ -188,54 +203,12 @@ class TestNewAccountHandler(TestControllersBase):
         api_key = rjson['api_key']
         account_id = rjson['account_id'] 
         url = '/api/v2/%s?default_height=1200' % (account_id) 
-        header = { 'X-Neon-API-Key': rjson['api_key'] }
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='PUT', 
                                                 headers=header)
         self.assertEquals(response.code, 200)
  
-    @tornado.testing.gen_test 
-    def test_account_is_verified_no_api_key(self):
-        params = json.dumps({'name': 'meisnew'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header) 
-	self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        api_key = rjson['api_key']
-        account_id = rjson['account_id']
-        with self.assertRaises(tornado.httpclient.HTTPError):  
-            url = '/api/v2/%s?default_height=1200' % (account_id) 
-            response = yield self.http_client.fetch(self.get_url(url), 
-                                                    body=params, 
-                                                    method='PUT', 
-                                                    headers=header)
-
-    @tornado.testing.gen_test 
-    def test_account_is_verified_bad_api_key(self):
-        params = json.dumps({'name': 'meisnew'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header) 
-	self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        api_key = 'this_is_a_bad_api_key'
-        account_id = rjson['account_id']
-        header = { 'X-Neon-API-Key': api_key }
-        with self.assertRaises(tornado.httpclient.HTTPError):  
-            url = '/api/v2/%s?default_height=1200' % (account_id) 
-            response = yield self.http_client.fetch(self.get_url(url), 
-                                                    body=params, 
-                                                    method='PUT', 
-                                                    headers=header)
-
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
         with self.assertRaises(tornado.httpclient.HTTPError):  
@@ -244,9 +217,9 @@ class TestNewAccountHandler(TestControllersBase):
                                                     method="GET")
 
     def test_post_acct_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.AccountHandler.post')
-        params = json.dumps({'rando': '123123abc'})
-	url = '/api/v2/124234234?param=123'
+        exception_mocker = patch('cmsapiv2.controllers.NewAccountHandler.post')
+        params = json.dumps({'name': '123123abc'})
+	url = '/api/v2/accounts'
         self.post_exceptions(url, params, exception_mocker) 
 
 class TestAccountHandler(TestControllersBase):
@@ -256,10 +229,10 @@ class TestAccountHandler(TestControllersBase):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
@@ -275,14 +248,16 @@ class TestAccountHandler(TestControllersBase):
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 404) 
 	    pass
- 
+
     @tornado.testing.gen_test
     def test_post_acct_not_implemented(self):
         try: 
+            header = { 'Content-Type':'application/json' }
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='abc123', 
-                                                    method="POST")
+                                                    body='{"abc123":"1"}', 
+                                                    method="POST", 
+                                                    headers=header)
 	except tornado.httpclient.HTTPError as e:
 	    self.assertEquals(e.code, 501) 
 	    pass 
@@ -308,9 +283,7 @@ class TestAccountHandler(TestControllersBase):
         rjson = json.loads(response.body)
 	self.assertEquals(rjson['name'], '123abc') 
 	url = '/api/v2/%s' % (rjson['account_id']) 
-        header = { 'X-Neon-API-Key': rjson['api_key'] }
 	response = yield self.http_client.fetch(self.get_url(url),
-                                         headers=header,  
                        			 method="GET")
         rjson2 = json.loads(response.body) 
         self.assertEquals(rjson['account_id'],rjson2['account_id']) 
@@ -328,17 +301,14 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT',
-                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
-                                                headers = header,  
                                                 method="GET")
         rjson = json.loads(response.body)
         default_size = rjson['default_size']
@@ -347,10 +317,8 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_update_acct_height_only(self): 
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
-                                                headers=header,  
                                                 method="GET")
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
@@ -359,12 +327,10 @@ class TestAccountHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
-                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
-                                                headers=header,  
                                                 method="GET")
         new_user = json.loads(response.body)
         default_size_new = new_user['default_size']
@@ -372,12 +338,21 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(default_size_new[0],default_size_old[0])
 
     @tornado.testing.gen_test 
+    def test_update_acct_no_content_type(self): 
+        try: 
+            url = '/api/v2/124abc' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body='{"abc123":"1"}', 
+                                                    method="PUT") 
+	except tornado.httpclient.HTTPError as e:
+	    self.assertEquals(e.code, 400) 
+	    pass 
+
+    @tornado.testing.gen_test 
     def test_update_acct_width_only(self): 
         # do a get here to test and make sure the height wasn't messed up
-        header = { 'X-Neon-API-Key': self.user.api_v2_key }
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
-                                                headers=header,  
                                                 method="GET")
         orig_user = json.loads(response.body)
         default_size_old = orig_user['default_size'] 
@@ -386,12 +361,10 @@ class TestAccountHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT', 
-                                                headers=header,  
                                                 allow_nonstandard_methods=True)
          
         url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
-                                                headers=header,  
                                                 method="GET")
         new_user = json.loads(response.body)
         default_size_new = new_user['default_size']
@@ -407,28 +380,6 @@ class TestAccountHandler(TestControllersBase):
                                allow_nonstandard_methods=True)
         response = self.wait()
         self.assertEquals(response.code, 404) 
- 
-    def test_get_acct_unauthorized(self):
-        header = { 'X-Neon-API-Key': 'this_is_invalid_for_sure' }
-        url = '/api/v2/%s' % (self.user.neon_api_key) 
-        self.http_client.fetch(self.get_url(url), 
-                               headers=header, 
-                               callback=self.stop,  
-                               method="GET")
-        response = self.wait()
-        self.assertEquals(response.code, 401) 
-        
-    def test_update_acct_unauthorized(self):
-        header = { 'X-Neon-API-Key': 'this_is_invalid_for_sure' }
-        url = '/api/v2/%s?default_width=1200' % (self.user.neon_api_key) 
-        response = self.http_client.fetch(self.get_url(url), 
-                                          body='', 
-                                          method='PUT', 
-                                          headers=header,  
-                                          callback=self.stop, 
-                                          allow_nonstandard_methods=True)
-        response = self.wait() 
-        self.assertEquals(response.code, 401) 
  
     def test_get_acct_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.AccountHandler.get')
@@ -451,10 +402,10 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testiid' 
         defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -570,10 +521,10 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
@@ -632,7 +583,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body) 
+        rjson = json.loads(response.body)
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           self.test_i_id)
 
@@ -867,7 +818,7 @@ class TestVideoHandler(TestControllersBase):
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.side_effect = True
@@ -888,6 +839,7 @@ class TestVideoHandler(TestControllersBase):
             require_async_kw=False)
         self.mock_write_future.return_value = "test_message"
 
+        self.verify_account_mock.side_effect = True
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -1355,10 +1307,10 @@ class TestThumbnailHandler(TestControllersBase):
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image] 
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
@@ -1545,10 +1497,10 @@ class TestVideoStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         super(TestVideoStatsHandler, self).setUp()
 
     def tearDown(self): 
@@ -1629,10 +1581,10 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.test_i_id = 'testbciid' 
         self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
         self.verify_account_mocker = patch(
-            'cmsapiv2.controllers.APIV2Handler.verify_account')
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
-        self.verify_account_mock.side_effect = True
+        self.verify_account_mock.sife_effect = True
         neondata.ThumbnailMetadata('testingtid', width=800).save()
         neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
@@ -1747,21 +1699,28 @@ class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
-        self.user.save() 
+        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
+        self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
 
     def tearDown(self): 
         self.redis.stop()
     
-    def make_calls_and_asserts(self, url, method): 
+    def make_calls_and_assert_401(self, 
+                                  url, 
+                                  method, 
+                                  body_params='', 
+                                  message=None): 
         self.http_client.fetch(self.get_url(url),
                                callback=self.stop, 
-                               body='', 
+                               body=body_params, 
                                method=method, 
                                allow_nonstandard_methods=True)
         response = self.wait()
         self.assertEquals(response.code, 401)
+        if message: 
+            rjson = json.loads(response.body)
+            self.assertEquals(rjson['message'], message) 
 
     def test_all_urls(self): 
         urls = [ ('/api/v2/a1', 'GET'), 
@@ -1780,8 +1739,586 @@ class TestAPIKeyRequired(TestControllersBase):
                  ('/api/v2/a1/thumbnails', 'POST') ]
 
         for url, method in urls:
-            self.make_calls_and_asserts(url, method)  
+            self.make_calls_and_assert_401(url, method, message='account does not exist')
+ 
+    def test_urls_with_valid_account(self):
+        urls = [ 
+                 ('/api/v2/%s' % self.neon_user.neon_api_key, 'GET'),  
+                 ('/api/v2/%s' % self.neon_user.neon_api_key, 'PUT'),  
+                 ('/api/v2/%s/integrations/brightcove' % self.neon_user.neon_api_key, 'GET'),  
+                 ('/api/v2/%s/integrations/brightcove' % self.neon_user.neon_api_key, 'PUT'),  
+                 ('/api/v2/%s/integrations/brightcove' % self.neon_user.neon_api_key, 'POST'),  
+                 ('/api/v2/%s/integrations/ooyala' % self.neon_user.neon_api_key, 'GET'),  
+                 ('/api/v2/%s/integrations/ooyala' % self.neon_user.neon_api_key, 'PUT'),  
+                 ('/api/v2/%s/integrations/ooyala' % self.neon_user.neon_api_key, 'POST'),  
+                 ('/api/v2/%s/videos' % self.neon_user.neon_api_key, 'GET'),  
+                 ('/api/v2/%s/videos' % self.neon_user.neon_api_key, 'PUT'),  
+                 ('/api/v2/%s/videos' % self.neon_user.neon_api_key, 'POST'),  
+                 ('/api/v2/%s/thumbnails' % self.neon_user.neon_api_key, 'GET'),  
+                 ('/api/v2/%s/thumbnails' % self.neon_user.neon_api_key, 'PUT'),  
+                 ('/api/v2/%s/thumbnails' % self.neon_user.neon_api_key, 'POST')  
+               ]  
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, method, message='this endpoint requires an access token')
 
+    def test_with_invalid_token_bad_secret_qs(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword')
+        
+        token = jwt.encode({  
+                             'username': 'testuser',
+                             'exp' : datetime.utcnow() +
+                                     timedelta(seconds=324234)
+                           },
+                           'iisabadsecret',
+                           algorithm='HS256')
+        user.access_token = token 
+        user.save()
+
+        urls = [ 
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
+               ]  
+
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, method, message='invalid token')
+    
+    def test_with_valid_token_wrong_access_level(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        urls = [ 
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
+               ]  
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, method, message='you can not access this resource')
+
+    def test_with_valid_token_wrong_access_level_nua_level(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        urls = [ 
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
+               ]  
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, method, message='you can not access this resource')
+
+    def test_401_with_expired_token(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser', 'exp' : 0 }) 
+        user.access_token = token 
+        user.save()
+        urls = [ 
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'GET'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'PUT'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
+               ] 
+ 
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, 
+                                           method, 
+                                           message='access token is expired, please refresh the token')
+
+    def test_401_with_not_valid_user(self):
+        access_token = JWTHelper.generate_token({'username' : 'testuser'}) 
+        urls = [ 
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, access_token), 'GET'),
+                 ('/api/v2/%s?token=%s' % (self.neon_user.neon_api_key, access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, access_token), 'GET'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/brightcove?token=%s' % (self.neon_user.neon_api_key, access_token), 'POST'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, access_token), 'GET'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, access_token), 'PUT'),
+                 ('/api/v2/%s/integrations/ooyala?token=%s' % (self.neon_user.neon_api_key, access_token), 'POST'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, access_token), 'GET'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, access_token), 'PUT'),
+                 ('/api/v2/%s/videos?token=%s' % (self.neon_user.neon_api_key, access_token), 'POST'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, access_token), 'GET'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, access_token), 'PUT'),
+                 ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, access_token), 'POST')
+               ] 
+ 
+        for url, method in urls:
+            self.make_calls_and_assert_401(url, 
+                                           method, 
+                                           message='user does not exist')
+    
+    @tornado.testing.gen_test 
+    def test_create_brightcove_integration_god_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+
+        params = json.dumps({'publisher_id': '123123abc', 'token': token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        self.assertEquals(response.code, 200) 
+        
+    @tornado.testing.gen_test 
+    def test_create_brightcove_integration_create_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        self.assertEquals(response.code, 200)
+
+    def test_create_brightcove_integration_read_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop,
+                               headers=header)
+        response = self.wait() 
+        self.assertEquals(response.code, 401)
+ 
+    @tornado.testing.gen_test 
+    def test_create_brightcove_integration_all_normal_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        self.assertEquals(response.code, 200) 
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_god_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+
+        params = json.dumps({'name': 'meisnew', 'token': token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+
+        params = json.dumps({'name': 'meisnew'})
+        header = { 
+                   'Content-Type':'application/json', 
+                   'Authorization': 'Bearer %s' % token 
+                 }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+
+        url = '/api/v2/accounts?name=meisnew&token=%s' % token
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                allow_nonstandard_methods=True,
+                                                body='', 
+                                                method='POST') 
+	self.assertEquals(response.code, 200)
+
+    def test_create_new_account_create_mode(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+
+        params = json.dumps({'name': 'meisnew', 'token': token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        self.http_client.fetch(self.get_url(url), 
+                               body=params,
+                               callback=self.stop, 
+                               method='POST', 
+                               headers=header) 
+        response = self.wait()
+	self.assertEquals(response.code, 401)
+
+        params = json.dumps({'name': 'meisnew'})
+        header = { 
+                   'Content-Type':'application/json', 
+                   'Authorization': 'Bearer %s' % token 
+                 }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               callback=self.stop, 
+                               method='POST', 
+                               headers=header) 
+        response = self.wait()
+	self.assertEquals(response.code, 401)
+
+        url = '/api/v2/accounts?name=meisnew&token=%s' % token
+        self.http_client.fetch(self.get_url(url),
+                               allow_nonstandard_methods=True,
+                               callback=self.stop, 
+                               body='', 
+                               method='POST') 
+        response = self.wait()
+	self.assertEquals(response.code, 401)
+       
+class TestAuthenticationHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        super(TestAuthenticationHandler, self).setUp()
+
+    @classmethod 
+    def setUpClass(cls): 
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+        TestAuthenticationHandler.username = 'kevin' 
+        TestAuthenticationHandler.password = '12345678'
+        user = neondata.User(username=TestAuthenticationHandler.username, 
+                             password=TestAuthenticationHandler.password)
+        user.save()
+
+    @classmethod 
+    def tearDownClass(cls): 
+        cls.redis.stop()
+
+    def test_no_username(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'password': '123123abc'})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body) 
+        self.assertEquals(response.code, 400)
+
+    def test_no_password(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': '123123abc'})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body) 
+        self.assertEquals(response.code, 400)
+
+    def test_invalid_user_dne(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': 'abc', 'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body) 
+        self.assertEquals(response.code, 404)
+
+    def test_invalid_user_wrong_password(self):
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 'password': 'notvalidpw'})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body) 
+        self.assertEquals(response.code, 404)
+
+    @tornado.testing.gen_test
+    def test_token_returned(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        user = yield tornado.gen.Task(neondata.User.get, TestAuthenticationHandler.username)
+        self.assertEquals(user.access_token, rjson['access_token'])
+        self.assertEquals(user.refresh_token, rjson['refresh_token'])
+ 
+    @tornado.testing.gen_test
+    def test_token_changed(self):  
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        token1 = rjson['access_token'] 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        token2 = rjson['access_token'] 
+        self.assertNotEquals(token1, token2)
+
+class TestRefreshTokenHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
+        super(TestRefreshTokenHandler, self).setUp()
+         
+    def tearDown(self): 
+        options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
+ 
+    @classmethod 
+    def setUpClass(cls): 
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+        TestRefreshTokenHandler.username = 'kevin' 
+        TestRefreshTokenHandler.password = '12345678'
+        user = neondata.User(username=TestRefreshTokenHandler.username, 
+                             password=TestRefreshTokenHandler.password)
+        user.save()
+
+    @classmethod 
+    def tearDownClass(cls):
+        cls.redis.stop()
+
+    def test_no_token(self): 
+        url = '/api/v2/refresh_token' 
+        params = json.dumps({})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+
+    def test_refresh_token_expired(self):
+        options._set('cmsapiv2.apiv2.refresh_token_exp', 0) 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestRefreshTokenHandler.username, 
+                             'password': TestRefreshTokenHandler.password})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        refresh_token = rjson['refresh_token']
+        url = '/api/v2/refresh_token' 
+        params = json.dumps({'token': refresh_token }) 
+ 
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+
+        response = self.wait()
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['message'], 'refresh token has expired, please authenticate again') 
+        self.assertEquals(response.code, 401) 
+
+    @tornado.testing.gen_test 
+    def test_get_new_access_token(self):
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestRefreshTokenHandler.username, 
+                             'password': TestRefreshTokenHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson1 = json.loads(response.body)
+        refresh_token = rjson1['refresh_token']
+        url = '/api/v2/refresh_token' 
+        params = json.dumps({'token': refresh_token })  
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson2 = json.loads(response.body)
+        user = yield tornado.gen.Task(neondata.User.get, TestRefreshTokenHandler.username)
+        # verify that the access_token was indeed updated 
+        self.assertNotEquals(user.access_token, rjson1['access_token'])
+        self.assertEquals(user.access_token, rjson2['access_token'])
+        # verify refresh tokens stay the same 
+        self.assertEquals(user.refresh_token, rjson1['refresh_token'])
+
+class TestLogoutHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        super(TestLogoutHandler, self).setUp()
+   
+    @classmethod 
+    def setUpClass(cls): 
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+        TestLogoutHandler.username = 'kevin' 
+        TestLogoutHandler.password = '12345678'
+        user = neondata.User(username=TestLogoutHandler.username, 
+                             password=TestLogoutHandler.password)
+        user.save()
+
+    @classmethod 
+    def tearDownClass(cls): 
+        cls.redis.stop()
+
+    def test_no_token(self): 
+        url = '/api/v2/logout' 
+        params = json.dumps({})
+        header = { 'Content-Type':'application/json' }
+        self.http_client.fetch(self.get_url(url), 
+                               body=params, 
+                               method='POST', 
+                               callback=self.stop, 
+                               headers=header)
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+    
+    @tornado.testing.gen_test
+    def test_proper_logout(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestLogoutHandler.username, 
+                             'password': TestLogoutHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        access_token = rjson['access_token'] 
+
+        url = '/api/v2/logout' 
+        params = json.dumps({'token': access_token })
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+
+class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
+    def setUp(self):
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        super(TestAuthenticationHealthCheckHandler, self).setUp()
+
+    def tearDown(self): 
+        self.redis.stop()
+ 
+    def test_healthcheck_success(self): 
+	url = '/healthcheck/'
+        response = self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait()
+        self.assertEquals(response.code, 200) 
+        
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()
