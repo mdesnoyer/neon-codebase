@@ -22,6 +22,7 @@ from utils import pycvutils
 from model.colorname import ColorName
 from model.parse_faces import DetectFaces, FindAndParseFaces
 from model.score_eyes import ScoreEyes
+from scipy.stats import entropy
 
 _log = logging.getLogger(__name__)
 
