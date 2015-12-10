@@ -14,7 +14,6 @@ if sys.path[0] != __base_path__:
 import api.brightcove_api
 import boto.exception
 import boto.sqs
-#from boto.s3.connection import S3Connection
 import datetime
 import json
 import hashlib
