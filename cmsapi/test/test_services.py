@@ -33,7 +33,7 @@ import tornado.testing
 import tornado.httpclient
 import unittest
 import urllib
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils.options import define, options
 import utils.neon
 import logging
@@ -50,7 +50,7 @@ mock_image_url_prefix = "http://servicesunittest.mock.com/"
 def create_random_image_response():
     '''http image response''' 
     request = tornado.httpclient.HTTPRequest("http://someimageurl/image.jpg")
-    im = utils.imageutils.PILImageUtils.create_random_image(360, 480)
+    im = PILImageUtils.create_random_image(360, 480)
     imgstream = StringIO()
     im.save(imgstream, "jpeg", quality=100)
     imgstream.seek(0)
@@ -78,7 +78,7 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
         video_map[video_id] = job_id
         thumbnails = []
         for t in range(N_THUMBS):
-            image =  utils.imageutils.PILImageUtils.create_random_image(360,
+            image =  PILImageUtils.create_random_image(360,
                                                                         480)
             filestream = StringIO()
             image.save(filestream, "JPEG", quality=100) 
@@ -1494,7 +1494,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(res['data'][0]['width'], 800)
         self.assertEqual(res['data'][0]['height'], 600)
 
-    @patch('utils.imageutils.utils.http')
+    @patch('cvutils.imageutils.utils.http')
     @patch('cmsdb.cdnhosting.S3Connection')
     @patch('cmsapi.services.neondata.cmsdb.cdnhosting.utils.http')
     def test_upload_video_custom_thumbnail(self, mock_cloudinary,

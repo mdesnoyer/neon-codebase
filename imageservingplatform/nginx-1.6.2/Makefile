@@ -12,10 +12,10 @@ install:
 	$(MAKE) -f objs/Makefile install
 
 upgrade:
-	/repos/neon/build/Debug/bin/sbin/nginx -t
+	/repos/neon_cv3/neon/build/Release/bin/sbin/nginx -t
 
-	kill -USR2 `cat /repos/neon/build/Debug/bin/logs/nginx.pid`
+	kill -USR2 `cat /repos/neon_cv3/neon/build/Release/bin/logs/nginx.pid`
 	sleep 1
-	test -f /repos/neon/build/Debug/bin/logs/nginx.pid.oldbin
+	test -f /repos/neon_cv3/neon/build/Release/bin/logs/nginx.pid.oldbin
 
-	kill -QUIT `cat /repos/neon/build/Debug/bin/logs/nginx.pid.oldbin`
+	kill -QUIT `cat /repos/neon_cv3/neon/build/Release/bin/logs/nginx.pid.oldbin`

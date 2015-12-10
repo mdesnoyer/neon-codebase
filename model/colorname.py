@@ -3,16 +3,13 @@ import sys
 import numpy as np
 from scipy.stats import entropy
 from numpy.linalg import norm
-import model.features
-import glob
-import urllib
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 w2c_data = np.load(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                                'w2c.dat')))
+                                                'data/w2c.dat')))
 w2c_data = w2c_data[0:, 3:]
 w2c_max = np.argmax(w2c_data, axis=1)
 

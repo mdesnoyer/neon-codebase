@@ -17,8 +17,8 @@ import ffvideo
 import logging
 import math
 import model.errors
-import model.features
-import model.colorname
+from model import features
+from model import colorname
 import numpy as np
 import time
 import utils.obj
@@ -59,10 +59,10 @@ class VideoSearcher(object):
         self.__version__ = 1
         self.predictor = predictor
         self.filt = filt
-        self.gist = model.features.MemCachedFeatures.create_shared_cache(
-            model.features.GistGenerator())
-        self.colorname = model.features.MemCachedFeatures.create_shared_cache(
-            model.features.ColorNameGenerator())
+        self.gist = features.MemCachedFeatures.create_shared_cache(
+            features.GistGenerator())
+        self.colorname = features.MemCachedFeatures.create_shared_cache(
+            features.ColorNameGenerator())
         self.startend_buffer=startend_buffer
         self.max_startend_buffer=max_startend_buffer
         self.thumb_min_dist=thumb_min_dist
@@ -110,9 +110,9 @@ class VideoSearcher(object):
 
         a and b are numpy images in BGR format.
         '''
-        gist_dis = model.colorname.JSD(self.gist.generate(a),
+        gist_dis = colorname.JSD(self.gist.generate(a),
                                        self.gist.generate(b))
-        colorname_dis = model.colorname.JSD(self.colorname.generate(a),
+        colorname_dis = colorname.JSD(self.colorname.generate(a),
                                             self.colorname.generate(b))
         return ((gist_dis < self.gist_threshold and \
                     colorname_dis < 2 * self.colorname_threshold)

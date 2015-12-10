@@ -15,7 +15,7 @@ if sys.path[0] != __base_path__:
 import cmsdb.cdnhosting
 from cmsdb import neondata
 import utils.neon
-import utils.imageutils
+import cvutils.imageutils
 
 s3cdn = neondata.S3CDNHostingMetadata(
     bucket_name='fusion.ddmcdn.com', 
