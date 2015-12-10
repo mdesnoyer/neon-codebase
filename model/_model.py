@@ -9,16 +9,22 @@ especially using the __setstate__ function.
 Copyright: 2013 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 '''
+import os.path
+import sys
+__base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if sys.path[0] != __base_path__:
+    sys.path.insert(0, __base_path__)
 
-import cPickle as pickle
+import dill as pickle
 import cv2
-from . import features
-from . import filters
+from model import features
+from model import filters
 import logging
-from . import predictor
+from model import predictor
 import utils.obj
 from utils import statemon
-from . import video_searcher
+from model import video_searcher
+from model import local_video_searcher
 
 _log = logging.getLogger(__name__)
 
@@ -29,6 +35,12 @@ class Model(object):
         self.predictor = predictor
         self.filt = filt
         if video_searcher is None:
+            # while it's tempting to modify this to use the LocalSearcher,
+            # this would require adding numerous arguments to the
+            # instantiation of the Model class, and as such convention will
+            # now become that BisectSearcher is the default video searcher,
+            # and is what will be adopted in the event there is insufficient
+            # information available.
             self.video_searcher = video_searcher.BisectSearcher(
                 predictor, filt)
         else:
@@ -45,6 +57,13 @@ class Model(object):
     def __str__(self):
         return utils.obj.full_object_str(self)
 
+    def update_processing_strategy(self, processing_strategy):
+        try:
+            self.video_searcher.update_processing_strategy(
+                                                processing_strategy)
+        except Exception, e:
+            _log.error(("Video Searcher does not support different "
+                        "processing strategies."))
 
     def reset(self):
         self.predictor.reset()
@@ -88,7 +107,9 @@ class Model(object):
         it requires so long as it knows where model_data is, which it
         can determine based on where the model pickle is.
         '''
-        if self.filt is not None:
+        if self.filt is None:
+            return
+        else:
             self.filt.restore_additional_data(filename)
 
 

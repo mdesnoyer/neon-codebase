@@ -30,10 +30,11 @@ from boto.s3.connection import S3Connection
 from poster.encode import multipart_encode
 from StringIO import StringIO
 import utils.botoutils
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from utils import pycvutils
 from utils import statemon 
 import utils.sync
+from cvutils import smartcrop
 
 import logging
 _log = logging.getLogger(__name__)
@@ -121,6 +122,10 @@ class CDNHosting(object):
         self.update_serving_urls = cdn_metadata.update_serving_urls
         self.rendition_sizes = cdn_metadata.rendition_sizes or []
         self.cdn_prefixes = cdn_metadata.cdn_prefixes
+        self.source_crop = cdn_metadata.source_crop
+        self.crop_with_saliency = cdn_metadata.crop_with_saliency
+        self.crop_with_face_detection = cdn_metadata.crop_with_face_detection
+        self.crop_with_text_detection = cdn_metadata.crop_with_text_detection
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -142,17 +147,33 @@ class CDNHosting(object):
         overwrite - Should existing files be overwritten?
         servingurl_overwrite - Should the serving urls be overwritten?
 
+        Also performs source cropping, to exclude regions of the image that we
+        know a priori are 'bad' (i.e., newscrawl with CNN).
+
         Returns: list [(cdn_url, width, height)]
         '''
         new_serving_thumbs = [] # (url, width, height)
-        
+        if self.source_crop is not None:
+            if not self.resize:
+                _log.error(('Crop source specified but no desired final size '
+                            'is defined'))
+                raise ValueError(('Crop source can only operate along with '
+                                  'resize'))
+            _prep = pycvutils.ImagePrep(crop_frac=self.source_crop,
+                                        return_same=True)
+            image = _prep(image)
         # NOTE: if _upload_impl returns None, the image is not added to the 
         # list of serving URLs
         try:
             if self.resize:
+                cv_im = pycvutils.from_pil(image)
+                sc = smartcrop.SmartCrop(cv_im,
+                    with_saliency=self.crop_with_saliency,
+                    with_face_detection=self.crop_with_face_detection,
+                    with_text_detection=self.crop_with_text_detection)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    cv_im_r = pycvutils.resize_and_crop(cv_im, sz[1], sz[0])
+                    cv_im_r = sc.crop_and_resize(sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
                     cdn_val = yield self._upload_and_check_image(
                         im, tid, url, overwrite)
@@ -209,7 +230,7 @@ class CDNHosting(object):
             headers={'Accept': 'image/*'})
         response = yield utils.http.send_request(
             request,
-            base_delay=4.0,
+            base_delay=10.0,
             async=True)
         if response.error:
             raise tornado.gen.Return(False)

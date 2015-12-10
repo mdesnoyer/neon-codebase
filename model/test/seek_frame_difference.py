@@ -25,7 +25,7 @@ def main(video_name):
 def diff(video,f1,f2):
 	frame1 = seek(video,f1)
 	frame2 = seek(video,f2)
-	if not(frame1 == None or frame2 == None):
+	if not(frame1 is None or frame2 is None):
 		df = frame1-frame2
 		return np.sum(df*df)	
 	return float('-inf')
