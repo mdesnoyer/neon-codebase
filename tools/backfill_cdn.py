@@ -37,6 +37,9 @@ define('worker_multiplier', default=1.0,
        help=('Multiplier by the number of cores to figure out how many '
              'workers to use'))
 define('overwrite', default=0)
+define('video_ids', default=None, type=str,
+       help=("Filename of video ids to process instead of everything in "
+             "the account"))
 
 import logging
 _log = logging.getLogger(__name__)
@@ -93,6 +96,24 @@ def process_one_video(internal_video_id):
 
     return True
 
+def submit_many_videos(video_ids, pool):
+    # Submit each video
+    results = pool.imap_unordered(process_one_video,
+                                  plat.video_ids,
+                                  30)
+
+    n_success = 0
+    n_failure = 0
+    for result in results:
+        if result:
+            n_success += 1 
+        else:
+            n_failure += 1
+
+        if (n_success + n_failure) % 10 == 0:
+            _log.info('Processed %i sucesses and %i failures' % (
+                n_success, n_failure))
+
 def process_account(api_key, pool):
     account = neondata.NeonUserAccount.get(api_key)
 
@@ -112,22 +133,8 @@ def process_account(api_key, pool):
                    (api_key, integration_id))
         return
 
-    # Submit each video
-    results = pool.imap_unordered(process_one_video,
-                                  plat.get_internal_video_ids(),
-                                  30)
+    submit_many_videos(plat.get_internal_video_ids(), pool)
 
-    n_success = 0
-    n_failure = 0
-    for result in results:
-        if result:
-            n_success += 1 
-        else:
-            n_failure += 1
-
-        if (n_success + n_failure) % 10 == 0:
-            _log.info('Processed %i sucesses and %i failures' % (
-                n_success, n_failure))
 
 
 def init_worker():
@@ -148,7 +155,12 @@ def main():
                                 maxtasksperchild=50)
 
     try:
-        process_account(options.api_key, pool)
+        if options.video_ids:
+            video_ids = [x.strip() for x in open(options.video_ids)]
+            _log.info('Processing %d videos' % len(video_ids))
+            submit_many_videos(video_ids, pool)
+        else:
+            process_account(options.api_key, pool)
     finally:
         pool.terminate()
         _log.info('Waiting for workers to finish')
@@ -157,9 +169,6 @@ def main():
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
-
-    process_one_video('9xmw08l4ln1rk8uhv3txwbg1_6ad8ed60780cecdc58f845686155fbdc')
-    exit(1)
 
     # Register a function that will shutdown the workers
     atexit.register(utils.ps.shutdown_children)
