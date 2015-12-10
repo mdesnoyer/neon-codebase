@@ -459,7 +459,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(len(list(self.bucket.list())), 1)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20)
     def test_change_rendition_sizes(self):
         # Upload 640x480 & 160x90
         hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)

@@ -2299,7 +2299,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20)
     def test_lookup_cdn_info(self):
         # Create the necessary buckets so that we can write to them
         self.s3conn.create_bucket('n3.neon-images.com')
@@ -2533,7 +2533,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20)
     def test_add_account_default_thumb(self):
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
