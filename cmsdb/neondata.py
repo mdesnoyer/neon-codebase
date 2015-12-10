@@ -189,10 +189,10 @@ class PostgresDB(tornado.web.RequestHandler):
     ''' 
     class _PostgresDB: 
         def __init__(self): 
-            self.host = options.get('cmsdb.neondata.db_address')
-            self.port = options.get('cmsdb.neondata.db_port')
-            self.name = options.get('cmsdb.neondata.db_name')
-            self.user = options.get('cmsdb.neondata.db_user')
+            self.host = options.db_address
+            self.port = options.db_port
+            self.name = options.db_name
+            self.user = options.db_user
             # keeps track of the io_loops we have seen, mapped from 
             # id -> pool
             self.io_loop_dict = {}
