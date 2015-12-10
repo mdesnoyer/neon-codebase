@@ -158,6 +158,9 @@ def main():
 if __name__ == "__main__":
     utils.neon.InitNeon()
 
+    process_one_video('9xmw08l4ln1rk8uhv3txwbg1_6ad8ed60780cecdc58f845686155fbdc')
+    exit(1)
+
     # Register a function that will shutdown the workers
     atexit.register(utils.ps.shutdown_children)
     signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
