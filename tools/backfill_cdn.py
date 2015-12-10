@@ -63,7 +63,7 @@ def process_thumb(thumb, hoster):
                       servingurl_overwrite=True)
 
     except Exception as e:
-        _log.error('Error uploading %s: %s' % (thumb.key, e))
+        _log.exception('Error uploading %s: %s' % (thumb.key, e))
         return False
 
     return True
