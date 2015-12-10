@@ -255,6 +255,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         count = 0
         last_mod_date = None
+
         while True:
             if (self.platform.last_process_date is None and 
                 count >= options.max_vids_for_new_account):
@@ -286,13 +287,26 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
             try: 
                 yield self.submit_one_video_object(item, skip_old_video=True)
-            except integrations.ovp.OVPError: 
-                pass  
+            except integrations.ovp.OVPCustomRefIDError: 
+                pass 
+            except integrations.ovp.OVPRefIDError: 
+                pass 
+            except Exception: 
+                yield self.update_last_processed_date(last_mod_date)  
 
             count += 1
             last_mod_date = max(last_mod_date,
                                 int(item['lastModifiedDate']))
 
+        yield self.update_last_processed_date(last_mod_date) 
+
+    @tornado.gen.coroutine
+    def process_publisher_stream(self):
+        yield self.submit_playlist_videos()
+        yield self.submit_new_videos()
+
+    @tornado.gen.coroutine 
+    def update_last_processed_date(self, last_mod_date):
         if last_mod_date is not None:
             def _set_mod_date(x):
                 x.last_process_date = last_mod_date / 1000.0
@@ -304,12 +318,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             
             _log.debug(
                 'updated last process date for account %s integration %s'
-                % (self.platform.neon_api_key, self.platform.integration_id))
-
-    @tornado.gen.coroutine
-    def process_publisher_stream(self):
-        yield self.submit_playlist_videos()
-        yield self.submit_new_videos()
+                 % (self.platform.neon_api_key, self.platform.integration_id))
 
     @tornado.gen.coroutine
     def submit_many_videos(self, vid_objs, grab_new_thumb=True,
@@ -403,7 +412,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                        % (vid_obj['id'], self.platform.neon_api_key))
                 statemon.state.increment('cant_get_refid')
                 _log.error_n(msg)
-                raise integrations.ovp.OVPError(msg)
+                raise integrations.ovp.OVPRefIDError(msg)
         elif (self.platform.id_field == 
               neondata.BrightcovePlatform.BRIGHTCOVE_ID):
             video_id = vid_obj['id']
@@ -417,7 +426,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         self.platform.neon_api_key))
                 _log.error_n(msg)
                 statemon.state.increment('cant_get_custom_id')
-                raise integrations.ovp.OVPError(msg)
+                raise integrations.ovp.OVPCustomRefIDError(msg)
         video_id = unicode(video_id)
 
         # Get the published date
