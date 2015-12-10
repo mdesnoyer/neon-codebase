@@ -99,7 +99,7 @@ def process_one_video(internal_video_id):
 def submit_many_videos(video_ids, pool):
     # Submit each video
     results = pool.imap_unordered(process_one_video,
-                                  plat.video_ids,
+                                  video_ids,
                                   30)
 
     n_success = 0
