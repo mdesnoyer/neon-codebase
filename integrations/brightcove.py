@@ -284,7 +284,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 # No new videos
                 break
 
-            yield self.submit_one_video_object(item, skip_old_video=True)
+            try: 
+                yield self.submit_one_video_object(item, skip_old_video=True)
+            except integrations.ovp.OVPError: 
+                pass  
 
             count += 1
             last_mod_date = max(last_mod_date,

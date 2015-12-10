@@ -1221,6 +1221,67 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         return response.url, json.loads(response.body)
 
     @tornado.testing.gen_test
+    def test_bc_account_with_custom_last_mod_date_updated(self):
+        def _create_platform(x): 
+            x.id_field = 'newmediapaid'
+
+        self.integration.platform.last_process_date = 1430012300l
+        self.platform.id_field = 'newmediapaid' 
+        video_obj = { "referenceId": "1234",
+	              "videoStillURL": "http://imageinvalid.jpg",
+ 	              "publishedDate": "1449508690055",
+                      "lastModifiedDate": "1449514583914",
+  	              "thumbnailURL": "http://tnimageurl.jpg",
+	              "id": 4650024830001,
+                      "videoStill": {
+		          "displayName": None,
+                          "referenceId": "1234-videoStillUrl",
+                          "remoteUrl": "http://image.jpg",
+                          "id": 4650033445001,
+                          "type": "VIDEO_STILL"
+                      },
+	              "name": "Testa Video",
+                      "renditions": [{
+		          "referenceId": None,
+		          "displayName": None,
+		          "url": "http://video.mp4",
+		          "encodingRate": 1084000,
+		          "frameWidth": 640,
+		          "audioOnly": False,
+		          "controllerType": "DEFAULT",
+		          "videoDuration": 244000,
+		          "videoCodec": "H264",
+		          "videoContainer": "MP4",
+		          "frameHeight": 360,
+		          "remoteStreamName": None,
+		          "remoteUrl": "http://video.mp4",
+		          "uploadTimestampMillis": 1449508687502,
+		          "id": 4650027261001,
+		          "size": 33044327
+		      }],
+		      "length": 244000,
+		      "FLVURL": "http://flvurl.m3u8",
+		      "customFields": {},
+		      "thumbnail": {
+			      "displayName": None,
+			      "referenceId": "1234-thumbnailSmallImage",
+			      "remoteUrl": "http://image.jpg",
+			      "id": 4650033945001,
+			      "type": "THUMBNAIL"
+		      }
+                    } 
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+
+        yield self.integration.submit_new_videos()
+
+        # Make sure that the last processed date was updated
+        self.assertEquals(self.integration.platform.last_process_date,
+                          1449514583.914)
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
+            1449514583.914)
+
+    @tornado.testing.gen_test
     def test_typical_bc_account(self):
         self.integration.platform.last_process_date = \
           1420080300l
