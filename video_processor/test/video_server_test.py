@@ -33,7 +33,7 @@ import tornado.httpclient
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import unittest
 import urllib
-from utils.imageutils import PILImageUtils
+from cvutils import imageutils
 import utils.neon
 from utils.options import define, options
 from utils import statemon
@@ -273,9 +273,9 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
         # Mock out the image download
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.im_download_mock = self.im_download_mocker.start()
-        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         image_future = concurrent.futures.Future()
         image_future.set_result(self.random_image)
         self.im_download_mock.return_value = image_future

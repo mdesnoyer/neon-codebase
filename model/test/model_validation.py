@@ -537,7 +537,7 @@ if __name__ == '__main__':
     if options.show_extremes:
         show_extremes(img_files, scores, copy.deepcopy(mod.predictor))
 
-    if options.show_filter_analysis:
-        show_filter_analysis(img_files, scores, model.filters.TextFilter(0.02))
+    # if options.show_filter_analysis:
+    #     show_filter_analysis(img_files, scores, model.filters.TextFilter(0.02))
 
     plt.show()

@@ -52,6 +52,12 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 publish_date = last_processed_date = InputSanitizer.sanitize_string(video['firstPublishDate'])
                 title = InputSanitizer.sanitize_string(video.get('title', 'no title'))
                 duration = video.get('duration', None)
+                if duration:
+                    ts = time.strptime(duration, "%H:%M:%S")
+                    duration = datetime.timedelta(hours=ts.tm_hour, 
+                                                  minutes=ts.tm_min, 
+                                                  seconds=ts.tm_sec).total_seconds()
+
                 thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
                 custom_data = self._build_custom_data_from_topics(video['topics'])
                 video_src = self._find_best_cdn_url(video['cdnUrls'])

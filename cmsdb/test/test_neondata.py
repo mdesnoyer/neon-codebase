@@ -31,7 +31,7 @@ from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 import utils.neon
 from utils.options import options
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import unittest
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.redis 
@@ -2504,7 +2504,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                                        rank=-1,
                                        frameno=35)
 
-        with patch('cmsdb.neondata.utils.imageutils.PILImageUtils') \
+        with patch('cmsdb.neondata.cvutils.imageutils.PILImageUtils') \
           as pil_mock:
             image_future = Future()
             image_future.set_result(self.image)

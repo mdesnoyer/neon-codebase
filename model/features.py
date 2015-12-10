@@ -17,12 +17,11 @@ import logging
 import numpy as np
 import os
 import os.path
-from . import TextDetectionPy
 import utils.obj
-import utils.pycvutils
+from utils import pycvutils
 from model.colorname import ColorName
 from model.parse_faces import DetectFaces, FindAndParseFaces
-from score_eyes import ScoreEyes
+from model.score_eyes import ScoreEyes
 
 _log = logging.getLogger(__name__)
 
@@ -117,9 +116,9 @@ class GistGenerator(FeatureGenerator):
 
     def generate(self, image):
         # leargist needs a PIL image in RGB format
-        rimage = utils.pycvutils.resize_and_crop(image, self.image_size[0],
+        rimage = pycvutils.resize_and_crop(image, self.image_size[0],
                                                  self.image_size[1])
-        pimage = utils.pycvutils.to_pil(rimage)
+        pimage = pycvutils.to_pil(rimage)
         return leargist.color_gist(pimage)
 
 class ColorNameGenerator(FeatureGenerator):
@@ -153,7 +152,7 @@ class BlurGenerator(RegionFeatureGenerator):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
 
@@ -167,7 +166,7 @@ class BlurGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -198,7 +197,7 @@ class SADGenerator(RegionFeatureGenerator):
         super(SADGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=self.crop_frac)
 
@@ -212,7 +211,7 @@ class SADGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
@@ -249,7 +248,7 @@ class ActionGenerator(RegionFeatureGenerator):
     by computing the cross-correlation. In other words, we want frames that
     occur are local minima in the action. Let's see if it works.
     '''
-    def __init__(self, SAD_gen, action_vec=[1, 0, -1, 0, 1]):
+    def __init__(self, SAD_gen=None, action_vec=[1, 0, -1, 0, 1]):
         '''
         SAD_gen is a region feature generator for SAD.
 
@@ -258,6 +257,9 @@ class ActionGenerator(RegionFeatureGenerator):
         absolute differences and surrounded by comparatively more 'action.'
         '''
         self._action_vec = action_vec
+        if SAD_gen is None:
+            SAD_gen = SADGenerator()
+        self._SAD_gen = SAD_gen
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -269,9 +271,9 @@ class ActionGenerator(RegionFeatureGenerator):
         return hash(self.action_vec)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
-        SADs = SAD_gen.compute_many(images)
+        SADs = self.SAD_gen.compute_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
 
 class FaceGenerator(RegionFeatureGenerator):
@@ -303,7 +305,7 @@ class FaceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -342,7 +344,7 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -367,7 +369,7 @@ class VibranceGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480):
         super(VibranceGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(max_height=self.max_height)
+        self.prep = pycvutils.ImagePrep(max_height=self.max_height)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -379,7 +381,7 @@ class VibranceGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -392,7 +394,7 @@ class VibranceGenerator(RegionFeatureGenerator):
                 return np.mean(img)
             # convert to HSV
             feat_vec.append(np.mean(cv2.cvtColor(
-                                        img, cv2.cv.CV_BGR2HSV)[:,:,1:]))
+                                        img, cv2.COLOR_BGR2HSV)[:,:,1:]))
         return np.array(feat_vec)
 
     def get_feat_name(self):
@@ -405,11 +407,11 @@ class TextGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
         self._max_variation = max_variation
-        self.mser = cv2.MSER(_max_variation=self._max_variation)
+        self.mser = cv2.MSER_create(_max_variation=self._max_variation)
 
     def __cmp__(self, other):
         typediff = cmp(self.__class__.__name__, other.__class__.__name__)
@@ -426,8 +428,8 @@ class TextGenerator(RegionFeatureGenerator):
 
     def generate_many(self, images, fonly=False):
         if self.mser is None:
-            self.mser = cv2.MSER(_max_variation=self._max_variation)
-        if not type(images) == list:
+            self.mser = cv2.MSER_create(_max_variation=self._max_variation)
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -439,7 +441,7 @@ class TextGenerator(RegionFeatureGenerator):
 
     def _text_quant(self, img):
         '''quantifies the amount of text in an image (approx) by area'''
-        regions = self.mser.detect(img, None)
+        regions = self.mser.detectRegions(img, None)
         area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
         area /= (1. * img.shape[0] * img.shape[1])
         return area
@@ -458,7 +460,7 @@ class TextGeneratorOld(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=None):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
 
@@ -472,7 +474,7 @@ class TextGeneratorOld(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
@@ -496,7 +498,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
     def __init__(self, max_height=480, crop_frac=.8):
         super(PixelVarGenerator, self).__init__()
         self.max_height = max_height
-        self.prep = utils.pycvutils.ImagePrep(
+        self.prep = pycvutils.ImagePrep(
                         max_height=self.max_height,
                         crop_frac=crop_frac)
 
@@ -510,14 +512,14 @@ class PixelVarGenerator(RegionFeatureGenerator):
         return hash(self.max_height)
 
     def generate_many(self, images, fonly=False):
-        if not type(images) == list:
+        if not type(images) is list:
             images = [images]
         if fonly:
             images = images[:1]
         feat_vec = []
         for img in images:
             img = self.prep(img)
-            feat_vec.append(np.max(np.var(np.var(img,0),0)))
+            feat_vec.append(np.max(np.var(img,(0,1))))
         return np.array(feat_vec)
 
     def get_feat_name(self):

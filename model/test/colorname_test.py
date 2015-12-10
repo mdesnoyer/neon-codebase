@@ -8,7 +8,6 @@ if sys.path[0] != __base_path__:
 
 import cv2
 import unittest
-import model
 import numpy as np
 import sys
 import random

@@ -390,7 +390,7 @@ class JobManager(object):
             elif job.video_size:
                 approx_video_length = job.video_size * 8.0 / 1024 / 800
             deadline = datetime.datetime.now() + datetime.timedelta(
-                seconds=approx_video_length*2.0)
+                seconds=approx_video_length*3.0)
             with self._lock:
                 self.running_jobs.append(
                     ((job.api_request.job_id, job.api_request.api_key),

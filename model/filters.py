@@ -14,9 +14,8 @@ import scipy.ndimage.filters
 from sklearn import svm 
 from sklearn.externals import joblib
 import tempfile 
-from . import TextDetectionPy
 import utils.obj
-import utils.pycvutils
+from utils import pycvutils
 import dlib
 from score_eyes import ScoreEyes
 from parse_faces import FindAndParseFaces
@@ -458,35 +457,6 @@ class InterlaceFilter(Filter):
     def short_description(self):
         return 'interlace'
 
-class TextFilter(Filter):
-    '''Filters on large amounts of text in the image.'''
-
-    def __init__(self, frac_thresh=0.03, max_height=480):
-        super(TextFilter, self).__init__(max_height)
-        self.frac_thresh = frac_thresh
-
-    def _accept_impl(self, image, frameno, video):
-        return self.score(image) < self.frac_thresh
-
-    def score(self, image):
-
-        # Cut out the bottom 20% of the image because it often has tickers
-        cut_image = image[0:int(image.shape[0]*.82), :, :]
-    
-        text_image = TextDetectionPy.TextDetection(cut_image)
-        
-
-        return (float(np.count_nonzero(text_image)) /
-                (text_image.shape[0] * text_image.shape[1]))
-
-    def accept_score(self, image, frameno=None, video=None):
-        score = self.score(image)
-        accepted = score < self.frac_thresh
-        return (accepted, score)
-
-    def short_description(self):
-        return 'text'
-
 class DeltaStdDevFilter(VideoFilter):
     def __init__(self, upper_thresh = 0.76, lower_thresh=-0.74):
         super(DeltaStdDevFilter,self).__init__()
@@ -504,7 +474,7 @@ class DeltaStdDevFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
  
         # get one after frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno+1)
+        sucess, cur_frame = pycvutils.seek_video(video, frameno+1)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
             return True
@@ -512,7 +482,7 @@ class DeltaStdDevFilter(VideoFilter):
         std_devs[2] = np.std(frame) if moreData else 0.
         
         # get one before frameno
-        sucess, cur_frame = utils.pycvutils.seek_video(video, frameno-1,
+        sucess, cur_frame = pycvutils.seek_video(video, frameno-1,
                                                        cur_frame=cur_frame)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -520,7 +490,7 @@ class DeltaStdDevFilter(VideoFilter):
         moreData,frame = video.read() 
         std_devs[0] = np.std(frame) if moreData else 0.
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame,
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame,
                                                        cur_frame=cur_frame)
    
         # compute stats
@@ -578,7 +548,7 @@ class CrossFadeFilter(VideoFilter):
         last_frame = video.get(cv2.cv.CV_CAP_PROP_POS_FRAMES)
 
         # Get the frame in the future of this one
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno + self.dframe)
         if not sucess:
             return float('inf'), float('inf')
@@ -588,7 +558,7 @@ class CrossFadeFilter(VideoFilter):
         future_frame = self._resize_image(future_frame)
 
         # Get the frame in the past
-        sucess, cur_frame = utils.pycvutils.seek_video(video,
+        sucess, cur_frame = pycvutils.seek_video(video,
                                                        frameno - self.dframe)
         if not sucess:
             # We couldn't grab the frame, so let the image pass this filter
@@ -598,7 +568,7 @@ class CrossFadeFilter(VideoFilter):
             return float('inf'), float('inf')
         past_frame = self._resize_image(past_frame)
 
-        sucess, cur_frame = utils.pycvutils.seek_video(video, last_frame)
+        sucess, cur_frame = pycvutils.seek_video(video, last_frame)
 
         A = np.transpose(np.vstack((np.ravel(past_frame),
                                     np.ravel(future_frame))))

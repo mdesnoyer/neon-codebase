@@ -29,7 +29,7 @@ from mock import patch
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
 from StringIO import StringIO
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
 import video_processor.video_processing_queue
@@ -809,7 +809,7 @@ class TestVideoHandler(TestControllersBase):
             self.cdn_mocker.start().create().upload)
         self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.random_image = PILImageUtils.create_random_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
@@ -863,6 +863,42 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_video_exists_in_db(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertEquals(video.key, internal_video_id)
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_thumbnail_exists_in_db(self):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        thumbnail_id = video.thumbnail_ids[0]
+        thumbnail = neondata.ThumbnailMetadata.get(thumbnail_id)
+        self.assertEquals(thumbnail_id, thumbnail.key) 
         cmsdb_download_image_mocker.stop()
 
     @tornado.testing.gen_test
@@ -1299,7 +1335,7 @@ class TestThumbnailHandler(TestControllersBase):
             self.cdn_mocker.start().create().upload)
         self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
         self.im_download_mocker = patch(
-            'utils.imageutils.PILImageUtils.download_image')
+            'cvutils.imageutils.PILImageUtils.download_image')
         self.random_image = PILImageUtils.create_random_image(480, 640)
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
