@@ -1219,7 +1219,100 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
 
         response = cargs[0]
         return response.url, json.loads(response.body)
+    
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_one(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 0
+        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
 
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1410012300)
+        self.assertEquals(bp.video_submit_retries, 1)
+        submit_video_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_two(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+            x.video_submit_retries = 1
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 1
+        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1410012300)
+        self.assertEquals(bp.video_submit_retries, 2)
+        submit_video_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_max(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+            x.video_submit_retries = 3
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 3
+        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        # should reset in this case
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1420080400.000)
+        self.assertEquals(bp.video_submit_retries, 0)
+        submit_video_mocker.stop()
+        
     @tornado.testing.gen_test
     def test_bc_account_with_custom_last_mod_date_updated(self):
         def _create_platform(x): 

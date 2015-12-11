@@ -25,6 +25,9 @@ from utils import statemon
 define('max_vids_for_new_account', default=100, 
        help='Maximum videos to process for a new account')
 
+define('max_submit_retries', default=3, 
+       help='Maximum times we will retry a video submit before passing on it.')
+
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
 statemon.define('unexpected_submition_error', int)
@@ -278,22 +281,42 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                            'Brightcove for platform %s: %s' % 
                            (self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
-
             if (self.platform.last_process_date is not None and 
                 int(item['lastModifiedDate']) <=  
                 (self.platform.last_process_date * 1000)):
                 # No new videos
                 break
-
             try: 
                 yield self.submit_one_video_object(item, skip_old_video=True)
             except integrations.ovp.OVPCustomRefIDError: 
                 pass 
             except integrations.ovp.OVPRefIDError: 
                 pass 
-            except Exception: 
-                yield self.update_last_processed_date(last_mod_date)  
+            except Exception as e:
+                # we got an unknown error from somewhere, it could be video,
+                #  server, or api related -- we will retry it on the next goaround 
+                #  if we have not reached the max retries for this video, otherwise 
+                #  we pass and move on
+                def _increase_retries(x): 
+                    x.video_submit_retries += 1
 
+                if self.platform.video_submit_retries < options.max_submit_retries:
+                    # update last_process_date, so we start on this video next time
+                    yield self.update_last_processed_date(last_mod_date) 
+                    self.platform = yield tornado.gen.Task(
+                        neondata.BrightcovePlatform.modify,
+                        self.platform.neon_api_key,
+                        self.platform.integration_id,
+                        _increase_retries)
+                    return  
+                else:
+                    _log.error('Unknown error, reached max retries from '
+                               'Brightcove for account %s: item %s: %s' % 
+                               (self.platform.neon_api_key, item, e))
+                    statemon.state.define_and_increment(
+                        'submit_video_bc_error.%s' % self.platform.neon_api_key)
+                    pass 
+             
             count += 1
             last_mod_date = max(last_mod_date,
                                 int(item['lastModifiedDate']))
@@ -308,13 +331,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine 
     def update_last_processed_date(self, last_mod_date):
         if last_mod_date is not None:
-            def _set_mod_date(x):
+            def _set_mod_date_and_retries(x):
                 x.last_process_date = last_mod_date / 1000.0
+                x.video_submit_retries = 0
             self.platform = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,
                 self.platform.integration_id,
-                _set_mod_date)
+                _set_mod_date_and_retries)
             
             _log.debug(
                 'updated last process date for account %s integration %s'
