@@ -188,15 +188,20 @@ class PostgresDB(tornado.web.RequestHandler):
        connected to the postgres db. 
     ''' 
     class _PostgresDB: 
-        def __init__(self): 
-            self.host = options.db_address
+        def __init__(self):
+            self.old_host = self.host = options.db_address
             self.port = options.db_port
             self.name = options.db_name
             self.user = options.db_user
             # keeps track of the io_loops we have seen, mapped from 
             # id -> pool
             self.io_loop_dict = {}
-             
+        
+        @staticmethod 
+        def set_current_host(): 
+            self.old_host = self.host 
+            self.host = options.db_address  
+        
         @tornado.gen.coroutine
         def get_connection(self): 
             '''gets a connection to postgres, this is ioloop based 
