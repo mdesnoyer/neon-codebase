@@ -28,7 +28,6 @@ from utils import statemon
 import utils.sync
 
 from utils.options import define, options
-define("cmsapi_host", default="services.neon-lab.com", help="cmsapi server", type=str)
 define("account", default="159", help="account id", type=str)
 define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
 define("sleep", default=1800, type=float,
@@ -150,11 +149,9 @@ class JobManager(object):
         '''
         create random video processing request to Neon
         '''
-
-        video_api_formater = "http://%s/api/v2/%s/videos"
         headers = {"X-Neon-API-Key" : api_key,
                    "Content-Type" : "application/json"}
-        request_url = video_api_formater % (options.cmsapi_host, account_id)
+        request_url = '/api/v2/%s/videos' % account_id
         v = int(time.time())
         self.video_id = video_id or ("test%d" % v)
         video_title = "monitoring"

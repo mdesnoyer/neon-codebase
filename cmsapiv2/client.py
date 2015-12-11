@@ -14,6 +14,7 @@ import logging
 import simplejson as json
 import tornado.gen
 import tornado.httpclient
+import urlparse
 import utils.http
 from utils.options import define, options
 
@@ -44,8 +45,9 @@ class Client(object):
                 request = tornado.httpclient.HTTPRequest(
                     'https://%s/api/v2/authenticate' % options.auth_host,
                     method='POST',
-                    body=json.puts({'username' : self.username,
-                                    'password' : self.password}))
+                    headers={'Content-Type' : 'application/json'},
+                    body=json.dumps({'username' : self.username,
+                                     'password' : self.password}))
             else:
                 request = tornado.httpclient.HTTPRequest(
                     'https://%s/api/v2/authenticate' % options.auth_host,
@@ -72,7 +74,7 @@ class Client(object):
                 
 
     @tornado.gen.coroutine
-    def send_request(self, request, **send_kwargs):
+    def send_request(self, request, cur_try=0, **send_kwargs):
         '''Sends a request to the APIv2
 
         Inputs:
@@ -96,17 +98,20 @@ class Client(object):
         request.headers['Authorization'] = 'Bearer %s' % self.access_token
         parse = urlparse.urlsplit(request.url)
         if not parse.scheme:
-            parse.scheme = 'https'
+            parse = [x for x in parse]
+            parse[0] = 'https'
             parse = urlparse.urlsplit(urlparse.urlunsplit(parse))
-            parse.netloc = options.api_host
+            parse = [x for x in parse]
+            parse[1] = options.api_host
         request.url = urlparse.urlunsplit(parse)
         
         response = yield utils.http.send_request(request, async=True,
                                                  **send_kwargs)
         if response.error:
-            if response.error.code == 401:
+            if response.error.code == 401 and cur_try == 0:
                 # Our token probably timed out
                 self.access_token = None
-                response = yield self.send_request(request, **send_kwargs)
+                response = yield self.send_request(request, cur_try=cur_try+1,
+                                                   **send_kwargs)
 
         raise tornado.gen.Return(response)

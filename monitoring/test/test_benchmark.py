@@ -52,7 +52,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.send_request_mock = self._future_wrap_mock(
             self.send_request_patcher.start(), require_async_kw=True)
         def _handle_http_request(req, **kw):
-                return self.isp_call_mock(req)
+            return self.isp_call_mock(req)
         self.send_request_mock.side_effect = _handle_http_request
         
 
