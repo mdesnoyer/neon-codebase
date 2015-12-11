@@ -2565,6 +2565,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
         yield account.add_default_thumbnail(self.image, async=True)
         self.assertGreater(self.mock_crop_and_resize.call_count, 0)
+        self.smartcrop_patcher.stop()
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
