@@ -10,6 +10,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import atexit
+import cmsapiv2.client
 from cmsdb import neondata
 import functools
 import json
@@ -40,6 +41,8 @@ define("test_video", default="https://neon-test.s3.amazonaws.com/output.mp4",
        help='Video to test with')
 define("callback_port", default=8080,
        help='Port to listen with the callback receiver on')
+define("cmsapi_user", default=None, help='User to submit jobs with')
+define("cmsapi_pass", default=None, help='Password for the cmsapi')
 
 # counters
 statemon.define('total_time_to_isp', float)
@@ -88,7 +91,7 @@ class JobManager(object):
         if self.job_id is not None:
             np = yield tornado.gen.Task(neondata.NeonPlatform.get,
                                         options.api_key, '0')
-            yield np.delete_all_video_related_data(video_id,
+            yield np.delete_all_video_related_data(self.video_id,
                                                    really_delete_keys=True,
                                                    async=True)
             self.job_id = None
@@ -122,7 +125,7 @@ class JobManager(object):
                                            options.api_key,
                                            video_id=video_id)
 
-        yield [self.wait_for_job_serving(), self.wait_for_callback()]
+        yield [self.wait_for_callback(), self.wait_for_job_serving()]
         
         yield self.wait_for_isp_image()
 
@@ -167,8 +170,14 @@ class JobManager(object):
         req = tornado.httpclient.HTTPRequest(request_url, method='POST', 
                                              headers=headers,
                                              body=json.dumps(data))
+        client = cmsapiv2.client.Client(options.cmsapi_user,
+                                        options.cmsapi_pass)
         try:
-            res = yield utils.http.send_request(req, ntries=1)
+            res = yield client.send_request(req, ntries=1)
+            if res.error:
+                _log.error('Error submitting job: %s' % res.error)
+                statemon.state.job_submission_error = 1
+                raise SubmissionError
         except tornado.httpclient.HTTPError as e:
             _log.error('Error submitting job: %s' % e)
             statemon.state.job_submission_error = 1
@@ -188,7 +197,7 @@ class JobManager(object):
         job_finished = False
         while not job_serving and not self._stopped:
             request = yield tornado.gen.Task(neondata.NeonApiRequest.get,
-                                             job_id, options.api_key)
+                                             self.job_id, options.api_key)
             if request:
                 if (not job_finished and 
                     request.state == neondata.RequestState.FINISHED):
@@ -235,7 +244,7 @@ class JobManager(object):
                 if cb['processing_state'] == neondata.RequestState.SERVING:
                     callback_seen = True
                 else:
-                    _log.warn('Unexpected callback received: %s' %
+                    _log.warn('Incorrect callback received: %s' %
                               cb)
                     statemon.state.increment('incorrect_callback')
             elif time.time() > (self.start_time + options.serving_timeout):
@@ -257,15 +266,15 @@ class JobManager(object):
         isp_ready = False
         vid_obj = yield tornado.gen.Task(
             neondata.VideoMetadata.get,
-            neondata.InternalVideoID.generate(options.api_key, video_id))
+            neondata.InternalVideoID.generate(options.api_key, self.video_id))
         while not isp_ready and not self._stopped:
             isp_ready = yield vid_obj.image_available_in_isp(async=True)
 
-            if time.time() > (isp_start + options.isp_timeout):
-                _log.error('Too long for image to appear in ISP')
-                statemon.state.not_available_in_isp = 1
-                raise RunningTooLongError
             if not isp_ready:
+                if time.time() > (isp_start + options.isp_timeout):
+                    _log.error('Too long for image to appear in ISP')
+                    statemon.state.not_available_in_isp = 1
+                    raise RunningTooLongError
                 yield tornado.gen.sleep(1.0)
 
         isp_serving = time.time() - isp_start 
@@ -278,7 +287,7 @@ class CallbackCollector(object):
         self._callbacks = {} # Callbacks that have been received
 
     def add_callback(self, callback_obj):
-        self._callbacks[callback_obj.video_id] = callback_obj
+        self._callbacks[callback_obj['video_id']] = callback_obj
 
     def get_callback(self, video_id):
         '''Retrieves a callback object that we received.
@@ -303,11 +312,11 @@ class CallbackHandler(tornado.web.RequestHandler):
     def put(self, *args, **kwargs):
         try:
             self.collector.add_callback(json.loads(self.request.body))
+            self.set_status(200)
         except Exception as e:
             _log.error('Bad callback received: %s %s' % (e, self.request.body))
             statemon.state.increment('incorrect_callback')
             self.set_status(400)
-        self.set_status(200)
         self.finish()
 
 class Benchmarker(object):

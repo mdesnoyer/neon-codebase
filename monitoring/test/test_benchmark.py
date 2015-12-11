@@ -34,25 +34,26 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         super(BenchmarkTest, self).setUp()
 
         # Mock out the http calls for creating the job and checking the isp
-        
-        self.create_job_mock = MagicMock()
+        self.create_job_patcher = patch('monitoring.benchmark_neon_pipeline.cmsapiv2.client')
+        self.create_job_mock = self._future_wrap_mock(
+            self.create_job_patcher.start().Client().send_request)
         self.create_job_mock.side_effect = \
-          lambda x: tornado.httpclient.HTTPResponse(
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
               x, 200, buffer='{"job_id": "myjobid"}')
+
+        # Mock out the isp request
         self.isp_call_mock = MagicMock()
         self.isp_call_mock.side_effect = \
           lambda x: tornado.httpclient.HTTPResponse(
               x, code=200, effective_url="http://www.where.com/neontntid.jpg")
 
-        # Mock out the isp request
+        # Mock out the http requests
         self.send_request_patcher = patch('utils.http.send_request')
         self.send_request_mock = self._future_wrap_mock(
             self.send_request_patcher.start(), require_async_kw=True)
-        def _handle_http_request(req):
-            if req.url.endswith('/videos'):
-                return self.create_job_mock(req)
-            else:
+        def _handle_http_request(req, **kw):
                 return self.isp_call_mock(req)
+        self.send_request_mock.side_effect = _handle_http_request
         
 
         self.redis = test_utils.redis.RedisServer()
@@ -89,6 +90,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.benchmarker.job_manager.stop()
         self.benchmarker.timer.stop()
         self.send_request_patcher.stop()
+        self.create_job_patcher.stop()
         statemon.state._reset_values()
         options._set('monitoring.benchmark_neon_pipeline.api_key',
                      self.old_api_key)
@@ -143,11 +145,17 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             0)
 
     @tornado.testing.gen_test
+    def test_bad_callback_received(self):
+        with self.assertRaisesRegexp(tornado.httpclient.HTTPError, 'HTTP 400'):
+            yield self._send_callback({
+                'thumb_id': 'tid1',
+                'processing_state': neondata.RequestState.SERVING})
+            
+    @tornado.testing.gen_test
     def test_job_not_serving(self):
         with self.assertLogExists(logging.ERROR,
                                   'Job took too long to reach serving state'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
 
@@ -164,8 +172,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         with self.assertLogExists(logging.ERROR,
                                   'Job took too long to reach serving state'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
 
@@ -192,7 +199,8 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         with self.assertLogExists(logging.ERROR,
                                   'Job failed with response'):
-            with self.assertRaises(benchmark_neon_pipeline.JobFailed):
+            with self.assertLogExists(logging.WARNING,
+                                      'Incorrect callback received:'):
                 yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
@@ -201,21 +209,32 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_failed'), 1)
         self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.time_to_callback'),
+            'monitoring.benchmark_neon_pipeline.incorrect_callback'),
             0)
 
     @tornado.testing.gen_test
     def test_error_submitting_job(self):
         self.create_job_mock.side_effect = [
-            tornado.httpclient.HTTPError(400, 'Cannot submit')]
+            tornado.httpclient.HTTPError(400, 'Cannot submit'),
+            tornado.httpclient.HTTPResponse(
+                tornado.httpclient.HTTPRequest('http://server'),
+                code=401,
+                error=tornado.httpclient.HTTPError(401))]
 
         with self.assertLogExists(logging.ERROR, 'Error submitting job'):
-            with self.assertRaises(benchmark_neon_pipeline.SubmissionError):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_submission_error'), 1)
+
+        with self.assertLogExists(logging.ERROR, 'Error submitting job'):
+            yield self.benchmarker.job_manager.run_test_job('vid1')
+
+        # Make sure that statemon is set correctly
+        self.assertEquals(statemon.state.get(
+            'monitoring.benchmark_neon_pipeline.job_submission_error'), 1)
+
 
     @tornado.testing.gen_test
     def test_isp_timeout(self):
@@ -231,8 +250,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         with self.assertLogExists(logging.ERROR,
                                   'Too long for image to appear in ISP'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
 
@@ -255,8 +273,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         with self.assertLogExists(logging.ERROR, 
                                   'Timeout waiting for the callback'):
-            with self.assertRaises(benchmark_neon_pipeline.RunningTooLongError):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
         

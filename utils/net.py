@@ -28,5 +28,10 @@ def get_local_ip():
     try:
         sock.connect(('8.8.8.8', 0))
         return sock.getsockname()[0]
+    except socket.error as e:
+        if e.errno == 101:
+            # Network unreachable
+            return '127.0.0.1'
+        raise
     finally:
         sock.close()

@@ -51,7 +51,7 @@ class Client(object):
                     'https://%s/api/v2/authenticate' % options.auth_host,
                     method='POST',
                     headers={ 'Authorization' : 
-                              'Bearer %s' % self.refresh_token}
+                              'Bearer %s' % self.refresh_token},
                     body='')
             response = yield utils.http.send_request(request,
                                                      no_retry_codes=[401],
