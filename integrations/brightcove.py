@@ -25,6 +25,9 @@ from utils import statemon
 define('max_vids_for_new_account', default=100, 
        help='Maximum videos to process for a new account')
 
+define('max_submit_retries', default=3, 
+       help='Maximum times we will retry a video submit before passing on it.')
+
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
 statemon.define('unexpected_submition_error', int)
@@ -255,6 +258,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         count = 0
         last_mod_date = None
+
         while True:
             if (self.platform.last_process_date is None and 
                 count >= options.max_vids_for_new_account):
@@ -277,36 +281,72 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                            'Brightcove for platform %s: %s' % 
                            (self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
-
             if (self.platform.last_process_date is not None and 
                 int(item['lastModifiedDate']) <=  
                 (self.platform.last_process_date * 1000)):
                 # No new videos
                 break
+            try: 
+                yield self.submit_one_video_object(item, skip_old_video=True)
+            except integrations.ovp.OVPCustomRefIDError: 
+                pass 
+            except integrations.ovp.OVPRefIDError: 
+                pass 
+            except Exception as e:
+                # we got an unknown error from somewhere, it could be video,
+                #  server, or api related -- we will retry it on the next goaround 
+                #  if we have not reached the max retries for this video, otherwise 
+                #  we pass and move on
+                def _increase_retries(x): 
+                    x.video_submit_retries += 1
 
-            yield self.submit_one_video_object(item, skip_old_video=True)
-
+                if self.platform.video_submit_retries < options.max_submit_retries:
+                    # update last_process_date, so we start on this video next time
+                    yield self.update_last_processed_date(last_mod_date, 
+                                                          reset_retries=False) 
+                    self.platform = yield tornado.gen.Task(
+                        neondata.BrightcovePlatform.modify,
+                        self.platform.neon_api_key,
+                        self.platform.integration_id,
+                        _increase_retries)
+                    return  
+                else:
+                    _log.error('Unknown error, reached max retries from '
+                               'Brightcove for account %s: item %s: %s' % 
+                               (self.platform.neon_api_key, item, e))
+                    statemon.state.define_and_increment(
+                        'submit_video_bc_error.%s' % self.platform.neon_api_key)
+                    pass 
+             
             count += 1
             last_mod_date = max(last_mod_date,
                                 int(item['lastModifiedDate']))
 
-        if last_mod_date is not None:
-            def _set_mod_date(x):
-                x.last_process_date = last_mod_date / 1000.0
-            self.platform = yield tornado.gen.Task(
-                neondata.BrightcovePlatform.modify,
-                self.platform.neon_api_key,
-                self.platform.integration_id,
-                _set_mod_date)
-            
-            _log.debug(
-                'updated last process date for account %s integration %s'
-                % (self.platform.neon_api_key, self.platform.integration_id))
+        yield self.update_last_processed_date(last_mod_date) 
 
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.submit_playlist_videos()
         yield self.submit_new_videos()
+
+    @tornado.gen.coroutine 
+    def update_last_processed_date(self, 
+                                   last_mod_date, 
+                                   reset_retries=True):
+        if last_mod_date is not None:
+            def _set_mod_date_and_retries(x):
+                x.last_process_date = last_mod_date / 1000.0
+                if reset_retries: 
+                    x.video_submit_retries = 0
+            self.platform = yield tornado.gen.Task(
+                neondata.BrightcovePlatform.modify,
+                self.platform.neon_api_key,
+                self.platform.integration_id,
+                _set_mod_date_and_retries)
+            
+            _log.debug(
+                'updated last process date for account %s integration %s'
+                 % (self.platform.neon_api_key, self.platform.integration_id))
 
     @tornado.gen.coroutine
     def submit_many_videos(self, vid_objs, grab_new_thumb=True,
@@ -400,7 +440,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                        % (vid_obj['id'], self.platform.neon_api_key))
                 statemon.state.increment('cant_get_refid')
                 _log.error_n(msg)
-                raise integrations.ovp.OVPError(msg)
+                raise integrations.ovp.OVPRefIDError(msg)
         elif (self.platform.id_field == 
               neondata.BrightcovePlatform.BRIGHTCOVE_ID):
             video_id = vid_obj['id']
@@ -414,7 +454,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         self.platform.neon_api_key))
                 _log.error_n(msg)
                 statemon.state.increment('cant_get_custom_id')
-                raise integrations.ovp.OVPError(msg)
+                raise integrations.ovp.OVPCustomRefIDError(msg)
         video_id = unicode(video_id)
 
         # Get the published date

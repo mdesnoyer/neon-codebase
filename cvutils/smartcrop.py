@@ -478,7 +478,8 @@ class SmartCrop(object):
         if self.with_text_detection:
             cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
         else:
-            cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
+            cropped_im = self.image[new_y:new_y+new_height,
+                                    new_x:new_x+new_width]
 
         resized_im = cv2.resize(cropped_im, (w, h))
         return resized_im
