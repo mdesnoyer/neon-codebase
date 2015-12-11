@@ -302,7 +302,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
                 if self.platform.video_submit_retries < options.max_submit_retries:
                     # update last_process_date, so we start on this video next time
-                    yield self.update_last_processed_date(last_mod_date) 
+                    yield self.update_last_processed_date(last_mod_date, 
+                                                          reset_retries=False) 
                     self.platform = yield tornado.gen.Task(
                         neondata.BrightcovePlatform.modify,
                         self.platform.neon_api_key,
@@ -329,11 +330,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         yield self.submit_new_videos()
 
     @tornado.gen.coroutine 
-    def update_last_processed_date(self, last_mod_date):
+    def update_last_processed_date(self, 
+                                   last_mod_date, 
+                                   reset_retries=True):
         if last_mod_date is not None:
             def _set_mod_date_and_retries(x):
                 x.last_process_date = last_mod_date / 1000.0
-                x.video_submit_retries = 0
+                if reset_retries: 
+                    x.video_submit_retries = 0
             self.platform = yield tornado.gen.Task(
                 neondata.BrightcovePlatform.modify,
                 self.platform.neon_api_key,
