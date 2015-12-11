@@ -35,7 +35,7 @@ import tornado.httpserver
 import tornado.gen
 import tornado.httpclient
 import urllib
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 
 from utils.options import define, options

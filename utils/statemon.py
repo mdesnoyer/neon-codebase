@@ -165,6 +165,26 @@ class State(object):
                   stack_depth=1):
         '''Decrements the state variable.'''
         self.increment(name, -diff, ref, safe, stack_depth+1)
+
+    def define_and_increment(self, name, diff=1, typ=int, safe=True,
+                             stack_depth=1):
+        '''Increments a variable, but if it doesn't exist, it is created.
+
+        Inputs:
+        name - Name of the variable
+        typ - Type of variable it should be
+        diff - Amount to increment
+        safe - If True, the increment is done with a thread lock.
+        stack_depth - The stack depth to your module
+        '''
+        global_name = self._local2global(name, stack_depth=stack_depth+1)
+
+        if global_name not in self._vars:
+            with self._lock:
+                self.define(name, typ, stack_depth=stack_depth+2)
+
+        ref = self._vars[global_name]
+        self.increment(ref=ref, diff=diff, safe=safe)
     
     def get_all_variables(self):
         ''' return dict of all variables being monitored '''

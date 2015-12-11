@@ -37,7 +37,7 @@ from tornado.httpclient import HTTPResponse, HTTPRequest
 import tornado.ioloop
 import utils.neon
 from utils.options import options
-from utils.imageutils import PILImageUtils
+from cvutils.imageutils import PILImageUtils
 import unittest
 import uuid
 import test_utils.mock_boto_s3 as boto_mock
@@ -52,6 +52,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         ExperimentState, NeonApiRequest, CDNHostingMetadata,\
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
+from cvutils import smartcrop
+import numpy as np
 
 _log = logging.getLogger(__name__)
 
@@ -1841,7 +1843,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
     def test_callback_with_experiment_state(self, http_mock):
       fetch_mock = self._future_wrap_mock(http_mock.send_request,
                                           require_async_kw=True)
-      fetch_mock.side_effect = lambda x: HTTPResponse(x, 200)
+      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
       request = NeonApiRequest('j1', 'key1', 'vid1',
                                http_callback='http://some.where')
       request.state = neondata.RequestState.SERVING
@@ -1885,39 +1887,37 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
       # Check when isp returns a 204 because it doesn't have the video
       fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      with self.assertLogExists(logging.DEBUG, 'Image not available in '):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
       cargs, kwargs = fetch_mock.call_args
       found_request = cargs[0]
-      self.assertEqual(found_request.method, 'HEAD')
       self.assertTrue(found_request.follow_redirects)
 
       # Check when the image is there
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200, effective_url="http://www.where.com/neontntid.jpg")
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=200)
       is_avail = yield video.image_available_in_isp(async=True)
       self.assertTrue(is_avail)
 
-      # Check when the image is the default url
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200,
-          effective_url="http://www.where.com/neontnacct1_default_thumb.jpg")
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
-
-      # Check when the redirect url is invalid
-      fetch_mock.side_effect = \
-        lambda x: HTTPResponse(
-          x, code=200, effective_url="http://www.where.com/badthumb.jpg")
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      # Check when there was an http error that was not raised
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=500)
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
 
       # Check on a raised http error
       fetch_mock.side_effect = [tornado.httpclient.HTTPError(400, 'Bad error')]
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertFalse(is_avail)
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
+
+    @tornado.testing.gen_test
+    def test_account_missing_when_checking_isp(self):
+      video = VideoMetadata('acct1_v1')
+      with self.assertLogExists(logging.ERROR,
+                                'Cannot find the neon user account'):
+        with self.assertRaises(neondata.DBStateError):
+          yield video.image_available_in_isp()
       
       
             
@@ -2310,6 +2310,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
+
         # Create the necessary buckets so that we can write to them
         self.s3conn.create_bucket('n3.neon-images.com')
         self.s3conn.create_bucket('customer-bucket')
@@ -2318,11 +2319,24 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # Setup the CDN information in the database
         VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
                       i_id='i6').save()
+        neon_cdnhosting_metadata = NeonCDNHostingMetadata(do_salt=False)
+        neon_cdnhosting_metadata.crop_with_saliency = False
+        neon_cdnhosting_metadata.crop_with_face_detection = False
+        neon_cdnhosting_metadata.crop_with_text_detection = False
+        s3_cdnhosting_metadata = \
+            S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                 do_salt=False)
+        s3_cdnhosting_metadata.crop_with_saliency = False
+        s3_cdnhosting_metadata.crop_with_face_detection = False
+        s3_cdnhosting_metadata.crop_with_text_detection = False
+
         cdn_list = CDNHostingMetadataList(
             CDNHostingMetadataList.create_key('acct1', 'i6'), 
-            [ NeonCDNHostingMetadata(do_salt=False),
-              S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                   do_salt=False) ])
+            [neon_cdnhosting_metadata,
+             s3_cdnhosting_metadata])
+            # [ NeonCDNHostingMetadata(do_salt=False),
+            #   S3CDNHostingMetadata(bucket_name='customer-bucket',
+            #                        do_salt=False) ])
         cdn_list.save()
 
         thumb_info = ThumbnailMetadata(None, 'acct1_vid1',
@@ -2513,7 +2527,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
                                        rank=-1,
                                        frameno=35)
 
-        with patch('cmsdb.neondata.utils.imageutils.PILImageUtils') \
+        with patch('cmsdb.neondata.cvutils.imageutils.PILImageUtils') \
           as pil_mock:
             image_future = Future()
             image_future.set_result(self.image)
@@ -2544,11 +2558,21 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_add_account_default_thumb(self):
+        _log.info('here**')
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
         account = NeonUserAccount('a1')
 
+        self.smartcrop_patcher = patch('cvutils.smartcrop.SmartCrop')
+        self.mock_crop_and_resize = self.smartcrop_patcher.start()
+        self.mock_responses = MagicMock()
+        mock_image = PILImageUtils.create_random_image(540, 640)
+        self.mock_crop_and_resize().crop_and_resize.side_effect = \
+            lambda x, *kw: np.array(PILImageUtils.create_random_image(540, 640))
+
         yield account.add_default_thumbnail(self.image, async=True)
+        self.assertGreater(self.mock_crop_and_resize.call_count, 0)
+        self.smartcrop_patcher.stop()
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
@@ -2574,6 +2598,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # If we try to add another image as the default, we should
         # throw an error
         new_image = PILImageUtils.create_random_image(540, 640)
+
+
         with self.assertRaises(ValueError):
             yield account.add_default_thumbnail(new_image, async=True)
 

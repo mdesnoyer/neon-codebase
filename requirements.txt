@@ -17,7 +17,7 @@ pygeoip==0.2.7
 pyleargist==2.0.5
 Pympler==0.3.1
 redis==2.10.3
-#scipy==0.9.0
+scipy==0.9.0
 shortuuid==0.3
 simplejson==2.3.2
 svmlight==0.4
@@ -46,3 +46,5 @@ queries==1.7.5
 PyJWT==1.4.0
 momoko==2.2.0
 xlwt==1.0.0
+dill==0.2.4
+passlib==1.6.5

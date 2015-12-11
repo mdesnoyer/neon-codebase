@@ -41,6 +41,7 @@ import logging
 import momoko
 import multiprocessing
 import psycopg2
+from passlib.hash import sha256_crypt
 from PIL import Image
 import queries 
 import random
@@ -61,7 +62,8 @@ import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 import utils.botoutils
 import utils.logs
-from utils.imageutils import PILImageUtils
+import cvutils.imageutils
+from cvutils.imageutils import PILImageUtils
 import utils.neon
 from utils.options import define, options
 from utils import statemon
@@ -109,6 +111,10 @@ define("hash_size", default=64, type=int,
 
 # Other parameters
 define('send_callbacks', default=1, help='If 1, callbacks are sent')
+
+define('isp_host', default='isp-usw-388475351.us-west-2.elb.amazonaws.com',
+       help=('Host address to get to the ISP that is checked for if images '
+             'are there'))
 
 statemon.define('subscription_errors', int)
 statemon.define('pubsub_errors', int)
@@ -1224,7 +1230,17 @@ class DefaultSizes(object):
     HEIGHT = 90 
 
 class ServingControllerType(object): 
-    IMAGEPLATFORM = 'imageplatform' 
+    IMAGEPLATFORM = 'imageplatform'
+
+class AccessLevels(object):
+    NONE = 0 
+    READ = 1 
+    UPDATE = 2 
+    CREATE = 4 
+    DELETE = 8
+    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
+    ADMIN = 16 
+    GLOBAL_ADMIN = 32
 
 ##############################################################################
 class StoredObject(object):
@@ -2154,9 +2170,15 @@ class NamespacedStoredObject(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False):
+        def _do_modify(raw_mappings):
+            # Need to convert the keys in the mapping to the ids of the objects
+            mod_mappings = dict(((v.get_id(), v) for v in 
+                                 raw_mappings.itervalues()))
+            return func(mod_mappings)
+
         rv = yield super(NamespacedStoredObject, cls).modify_many(
                                  [cls.format_key(x) for x in keys],
-                                 func,
+                                 _do_modify,
                                  create_missing=create_missing, async=True)
         raise tornado.gen.Return(rv) 
 
@@ -2200,6 +2222,11 @@ class DefaultedStoredObject(NamespacedStoredObject):
             create_default=True,
             log_missing=log_missing,
             callback=callback)
+
+    @classmethod
+    def modify_many(cls, keys, func, create_missing=None, callback=None):
+        return super(DefaultedStoredObject, cls).modify_many(
+            keys, func, create_missing=True, callback=callback)
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -2323,7 +2350,7 @@ class InternalVideoID(object):
     ''' Internal Video ID Generator '''
     NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
 
-    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.]+'
+    VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.~]+'
     VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
     
     @staticmethod
@@ -2400,6 +2427,51 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         else:
             return format_tuple(cls.get(tai))
 
+class User(NamespacedStoredObject): 
+    ''' User 
+    
+    These are users that can used across multiple systems most notably 
+    the API and the current UI. 
+
+    Each of these can be attached to a NeonUserAccount (misnamed, but this 
+    is our Application/Customer layer). This will grant the User access to 
+    anything the NeonUserAccount can access.  
+        
+    Users can be associated to many NeonUserAccounts     
+    ''' 
+    def __init__(self, 
+                 username, 
+                 password='password', 
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+ 
+        super(User, self).__init__(username)
+
+        # here for the conversion to postgres, not used yet  
+        self.user_id = uuid.uuid1().hex
+
+        # the users username, chosen by them, redis key 
+        self.username = username
+
+        # the users password_hash, we don't store plain text passwords 
+        self.password_hash = sha256_crypt.encrypt(password)
+
+        # short-lived JWtoken that will give user access to API calls 
+        self.access_token = None
+
+        # longer-lived JWtoken that will allow a user to refresh a token
+        # this token should only be sent over HTTPS to the auth endpoints
+        # for now this is not encrypted 
+        self.refresh_token = None
+
+        # access level granted to this user, uses class AccessLevels 
+        self.access_level = access_level 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return User.__name__
+        
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
 
@@ -2417,7 +2489,8 @@ class NeonUserAccount(NamespacedStoredObject):
                  name=None, 
                  abtest=True, 
                  serving_enabled=True, 
-                 serving_controller=ServingControllerType.IMAGEPLATFORM):
+                 serving_controller=ServingControllerType.IMAGEPLATFORM, 
+                 users=[]):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
@@ -2457,7 +2530,11 @@ class NeonUserAccount(NamespacedStoredObject):
 
         # What controller is used to serve the image? Default to imageplatform
         self.serving_controller = serving_controller
-    
+
+        # What users are privy to the information assoicated to this NeonUserAccount
+        # simply a list of usernames 
+        self.users = users
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2685,6 +2762,113 @@ class NeonUserAccount(NamespacedStoredObject):
                                  page_size=max_request_size,
                                  skip_missing=True))
 
+# define a ProcessingStrategy, that will dictate the behavior of the model.
+class ProcessingStrategy(DefaultedStoredObject):
+    '''
+    Defines the model parameters with which a client wishes their data to be
+    analyzed.
+
+    NOTE: The majority of these parameters share their names with the
+    parameters that are used to initialize local_video_searcher. For any
+    parameter for which this is the case, see local_video_searcher.py for
+    more elaborate documentation.
+    '''
+    def __init__(self, account_id, processing_time_ratio=2.5,
+                 local_search_width=32, local_search_step=4, n_thumbs=5,
+                 feat_score_weight=2.0, mixing_samples=40, max_variety=True,
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+        super(ProcessingStrategy, self).__init__(account_id)
+
+        # The processing time ratio dictates the maximum amount of time the
+        # video can spend in processing, which is given by:
+        #
+        # max_processing_time = (length of video in seconds * 
+        #                        processing_time_ratio)
+        self.processing_time_ratio = processing_time_ratio
+
+        # (this should rarely need to be changed)
+        # Local search width is the size of the local search regions. If the
+        # local_search_step is x, then for any frame which starts a local
+        # search region i, the frames searched are given by
+        # 
+        # i : i + local_search_width in steps of x.
+        self.local_search_width = local_search_width
+
+        # (this should rarely need to be changed)
+        # Local search step gives the step size between frames that undergo
+        # analysis in a local search region. See the documentation for
+        # local search width for the documentation.
+        self.local_search_step = local_search_step
+
+        # The number of thumbs that are desired as output from the video
+        # searching process.
+        self.n_thumbs = n_thumbs
+
+        # (this should rarely need to be changed)
+        # feat_score_weight is a multiplier that allows the feature score to
+        # be combined with the valence score. This is given by:
+        # 
+        # combined score = (valence score) + 
+        #                  (feat_score_weight * feature score)
+        self.feat_score_weight = feat_score_weight
+
+        # (this should rarely need to be changed)
+        # Mixing samples is the number of initial samples to take to get
+        # estimates for the running statistics.
+        self.mixing_samples = mixing_samples
+
+        # (this should rarely need to be changed)
+        # max variety determines whether or not the model should pay attention
+        # to the content of the images with respect to the variety of the top
+        # thumbnails.
+        self.max_variety = max_variety
+
+        # startend clip determines how much of the video should be 'clipped'
+        # prior to the analysis, to exclude things like titleframes and
+        # credit rolls.
+        self.startend_clip = startend_clip
+
+        # adapt improve is a boolean that determines whether or not we should
+        # be using CLAHE (contrast-limited adaptive histogram equalization) to
+        # improve frames. 
+        self.adapt_improve = adapt_improve
+
+        # analysis crop dictates the region of the image that should be
+        # excluded prior to the analysis. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
+        self.analysis_crop = analysis_crop
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ProcessingStrategy.__name__
+
 class ExperimentStrategy(DefaultedStoredObject):
     '''Stores information about the experimental strategy to use.
 
@@ -2702,7 +2886,7 @@ class ExperimentStrategy(DefaultedStoredObject):
                  baseline_type=ThumbnailType.RANDOM,
                  chosen_thumb_overrides=False,
                  override_when_done=True,
-                 experiment_type=MULTIARMED_BANDIT,
+                 experiment_type=SEQUENTIAL,
                  impression_type=MetricType.VIEWS,
                  conversion_type=MetricType.CLICKS,
                  max_neon_thumbs=None):
@@ -2724,8 +2908,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         self.min_conversion = min_conversion
 
         # Fraction adjusting power rate. When this number is 0, it is
-        # equivalent to standard t-test, when it is 1.0, it is the
-        # regular multi-bandit problem.
+        # equivalent to all the serving fractions being the same,
+        # while if it is 1.0, the serving fraction will be controlled
+        # by the strategy.
         self.frac_adjust_rate = frac_adjust_rate
 
         # If True, a baseline of baseline_type will always be used in the
@@ -2813,7 +2998,11 @@ class CDNHostingMetadata(NamespacedStoredObject):
     
     def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
-                 rendition_sizes=None):
+                 rendition_sizes=None,
+                 source_crop=None,
+                 crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
 
         self.key = key
 
@@ -2830,6 +3019,39 @@ class CDNHostingMetadata(NamespacedStoredObject):
 
         # Should the images be added to ThumbnailServingURL object?
         self.update_serving_urls = update_serving_urls
+
+        # source crop specifies the region of the image from which
+        # the result will originate. It can be expressed in three ways:
+        #
+        # All methods are performed by specifying floats x.
+        #
+        # Method one: A single float x, 0 < x <= 1.0
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
+        # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
+        #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
+        #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
+        #
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
+        #         as a list.
+        #           NOTE:
+        #         In contrast to the other methods, the floats specify how
+        #         much to remove from each side (rather than how much to leave
+        #         in). So they are all between 0 and 0.5 (although higher
+        #         values are possible, they will no longer be with respect to
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
+        #         For example, to remove the bottom 1/3rd of an image, you
+        #         would specify [0., 0., .3333, 0.]
+        self.source_crop = source_crop
+        self.crop_with_saliency = crop_with_saliency
+        self.crop_with_face_detection = crop_with_face_detection
+        self.crop_with_text_detection = crop_with_text_detection
 
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
@@ -3400,13 +3622,14 @@ class BrightcoveIntegration(AbstractIntegration):
     BRIGHTCOVE_ID = '_bc_id'
     
     def __init__(self, i_id=None, a_id='', p_id=None, 
-                rtoken=None, wtoken=None, auto_update=False,
+                rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None):
+                oldest_video_allowed=None, 
+                video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
 
@@ -3415,7 +3638,6 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
-        self.auto_update = auto_update 
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date 
         self.linked_youtube_account = False
@@ -3441,72 +3663,19 @@ class BrightcoveIntegration(AbstractIntegration):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
+
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
         return "brightcove_integration"
 
     def get_api(self, video_server_uri=None):
-        '''Return the Brightcove API object for this integration.'''
+        '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token, self.auto_update,
-            self.last_process_date, neon_video_server=video_server_uri,
-            account_created=self.account_created, callback_url=self.callback_url)
-
-    def create_job(self, vid, callback):
-        ''' Create neon job for particular video '''
-        def created_job(result):
-            if not result.error:
-                try:
-                    job_id = tornado.escape.json_decode(result.body)["job_id"]
-                    self.add_video(vid, job_id)
-                    self.save(callback)
-                except Exception,e:
-                    callback(False)
-            else:
-                callback(False)
-        
-        vserver = options.video_server
-        self.get_api(vserver).create_video_request(vid, self.integration_id,
-                                            created_job)
-
-    def check_feed_and_create_api_requests(self):
-        ''' Use this only after you retreive the object from DB '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        bc.create_neon_api_requests(self.integration_id)    
-        bc.create_requests_unscheduled_videos(self.integration_id)
-
-    def check_feed_and_create_request_by_tag(self):
-        ''' Temp method to support backward compatibility '''
-        self.get_api().create_brightcove_request_by_tag(self.integration_id)
-
-    def check_playlist_feed_and_create_requests(self):
-        ''' Get playlists and create requests '''
-        
-        for pid in self.playlist_feed_ids:
-            self.get_api().create_request_from_playlist(pid, self.integration_id)
-
-    @tornado.gen.coroutine
-    def verify_token_and_create_requests_for_video(self, n):
-        ''' Method to verify brightcove token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with brightcove vid metadata
-        '''
-
-        vserver = options.video_server
-        bc = self.get_api(vserver)
-        val = yield bc.verify_token_and_create_requests(
-            self.integration_id, n)
-        raise tornado.gen.Return(val)
-
-    def sync_individual_video_metadata(self):
-        ''' sync video metadata from bcove individually using 
-        find_video_id api '''
-        self.get_api().bcove_api.sync_individual_video_metadata(
-            self.integration_id)
+            self.neon_api_key, self.publisher_id, 
+            self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
@@ -3517,17 +3686,24 @@ class BrightcoveIntegration(AbstractIntegration):
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
-    @staticmethod
-    def find_all_videos(token, limit, callback=None):
-        ''' find all brightcove videos '''
+class CNNIntegration(AbstractIntegration):
+    ''' CNN Integration class '''
 
-        # Get the names and IDs of recently published videos:
-        url = 'http://api.brightcove.com/services/library?\
-                command=find_all_videos&sort_by=publish_date&token=' + token
-        http_client = tornado.httpclient.AsyncHTTPClient()
-        req = tornado.httpclient.HTTPRequest(url=url, method="GET", 
-                request_timeout=60.0, connect_timeout=10.0)
-        http_client.fetch(req, callback)
+    def __init__(self, 
+                 account_id='',
+                 api_key_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(CNNIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the api_key required to make requests to cnn api - external
+        self.api_key_ref = api_key_ref
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
@@ -3542,7 +3718,8 @@ class BrightcovePlatform(AbstractPlatform):
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None):
+                oldest_video_allowed=None, 
+                video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
 
@@ -3577,6 +3754,9 @@ class BrightcovePlatform(AbstractPlatform):
         # A ISO date string of the oldest video publication date to
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
+
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
 
     @classmethod
     def get_ovp(cls):
@@ -3738,8 +3918,7 @@ class OoyalaIntegration(AbstractIntegration):
                  a_id='', 
                  p_code=None, 
                  api_key=None, 
-                 api_secret=None, 
-                 auto_update=False): 
+                 api_secret=None): 
         '''
         Init ooyala platform 
         
@@ -3747,15 +3926,12 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-
         super(OoyalaIntegration, self).__init__()
- 
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
         self.api_secret = api_secret 
-        self.auto_update = auto_update 
-    
+ 
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
@@ -3770,25 +3946,7 @@ class OoyalaIntegration(AbstractIntegration):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
-    def check_feed_and_create_requests(self):
-        '''
-        #check feed and create requests
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo.process_publisher_feed(copy.deepcopy(self)) 
-
-    #verify token and create requests on signup
-    def create_video_requests_on_signup(self, n, callback=None):
-        ''' Method to verify ooyala token on account creation 
-            And create requests for processing
-            @return: Callback returns job id, along with ooyala vid metadata
-        '''
-        oo = ooyala_api.OoyalaAPI(self.ooyala_api_key, self.api_secret,
-                neon_video_server=options.video_server)
-        oo._create_video_requests_on_signup(copy.deepcopy(self), n, callback) 
+            return signature 
     
 # DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
@@ -3804,9 +3962,6 @@ class OoyalaPlatform(AbstractPlatform):
         for api calls to ooyala 
 
         '''
-
-        #if i_id is None: 
-        #    i_id = uuid.uuid1().hex
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
  
@@ -3844,7 +3999,6 @@ class OoyalaPlatform(AbstractPlatform):
             signature = urllib.quote_plus(signature)
             return signature 
     
-
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4062,8 +4216,8 @@ class NeonApiRequest(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
-        '''Save the default thumbnail by attaching it to a video.
-The video metadata for this request must be in the database already.
+        '''Save the default thumbnail by attaching it to a video. The video
+        metadata for this request must be in the database already.
 
         Inputs:
         cdn_metadata - If known, the metadata to save to the cdn.
@@ -4160,7 +4314,6 @@ The video metadata for this request must be in the database already.
                 # Send the callback
                 self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
-                send_kwargs['async'] = True
                 cb_request = tornado.httpclient.HTTPRequest(
                     url=self.callback_url,
                     method='PUT',
@@ -4168,17 +4321,26 @@ The video metadata for this request must be in the database already.
                     body=response.to_json(),
                     request_timeout=20.0,
                     connect_timeout=10.0)
-                cb_response = yield utils.http.send_request(cb_request,
-                                                            **send_kwargs)
+                cb_response = yield utils.http.send_request(
+                    cb_request,
+                    no_retry_codes=[405],
+                    async=True,
+                    **send_kwargs)
                 if cb_response.error:
                     # Now try a POST for backwards compatibility
                     cb_request.method='POST'
                     cb_response = yield utils.http.send_request(cb_request,
+                                                                async=True,
                                                                 **send_kwargs)
                     if cb_response.error:
+                        statemon.state.define_and_increment(
+                            'callback_error.%s' % self.api_key)
+                                                            
                         statemon.state.increment('callback_error')
-                        _log.warn('Error when sending callback to %s: %s' %
-                                  (self.callback_url, cb_response.error))
+                        _log.warn('Error when sending callback to %s for '
+                                  'video %s: %s' %
+                                  (self.callback_url, self.video_id,
+                                   cb_response.error))
                         new_callback_state = CallbackState.ERROR
                     else:
                        statemon.state.increment('sucessful_callbacks')
@@ -4579,7 +4741,9 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is slow.
+                       images. If this is None, it is looked up, which is 
+                       slow. If a source_crop is requested, the image is also
+                       cropped here.
         
         '''        
         image = PILImageUtils.convert_to_rgb(image)
@@ -4669,14 +4833,36 @@ class ThumbnailMetadata(StoredObject):
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
-    def __init__(self, thumbnail_id, serving_frac=None, ctr=None):
+    def __init__(self, thumbnail_id, serving_frac=None, ctr=None,
+                 imp=None, conv=None, serving_history=None):
         super(ThumbnailStatus, self).__init__(thumbnail_id)
 
         # The fraction of traffic this thumbnail will get
         self.serving_frac = serving_frac
 
-        # The currently click through rate for this thumbnail
+        # List of (time, serving_frac) tuples
+        self.serving_history = serving_history or []
+
+        # The current click through rate for this thumbnail
         self.ctr = ctr
+
+        # The number of impressions this thumbnail received
+        self.imp = imp
+
+        # The number of conversions this thumbnail received
+        self.conv = conv
+
+    def set_serving_frac(self, serving_frac):
+        '''Sets the serving fraction. Returns true if it is new.'''
+        if (self.serving_frac is None or 
+            abs(serving_frac - self.serving_frac) > 1e-3):
+            self.serving_frac = serving_frac
+            self.serving_history.append(
+                (datetime.datetime.utcnow().isoformat(),
+                 serving_frac))
+            return True
+        return False
+            
 
     @classmethod
     def _baseclass_name(cls):
@@ -4785,7 +4971,8 @@ class VideoMetadata(StoredObject):
                        object.
         '''
         thumb.video_id = self.key
-        yield thumb.add_image_data(image, self, cdn_metadata, async=True)
+        yield thumb.add_image_data(image, self, cdn_metadata, 
+                                   async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
         # to the two objects are atomic. For now, put in the thumbnail
@@ -4817,7 +5004,7 @@ class VideoMetadata(StoredObject):
     @tornado.gen.coroutine
     def download_image_from_url(self, image_url): 
         try:
-            image = yield utils.imageutils.PILImageUtils.download_image(image_url,
+            image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
         except IOError, e:
             msg = "IOError while downloading image %s: %s" % (
@@ -4948,38 +5135,38 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def image_available_in_isp(self):
-        try:               
-            url = yield self.get_serving_url(save=False, async=True)
-            if url is None:
-                _log.error('No serving url specified for video %s' % video_id)
-                raise tornado.gen.Return(False)
-
-            req = tornado.httpclient.HTTPRequest(url, method='HEAD', 
-                                                 follow_redirects=True)
-            http_client = tornado.httpclient.AsyncHTTPClient()
-            res = yield utils.http.send_request(req, async=True)
-
-            if res.code != 200:
-                _log.debug('Image not available in ISP yet. Code %s' %
-                           res.code)
-                raise tornado.gen.Return(False)
-     
-            effective_url = res.effective_url
-            urlRegex = re.compile('neontn(.*)\.jpe?g')
-            urlSearch = urlRegex.search(res.effective_url)
-            if urlSearch is None:
-                _log.warn('Invalid effective url found for video %s: %s' %
-                          (self.key, res.effective_url))
-                raise tornado.gen.Return(False)
-
+        try:
             neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
                                                        self.get_account_id())
-            if urlSearch.group(1) == neon_user_account.default_thumbnail_id:
-                _log.debug('Still redirecting to the account default url')
+            if neon_user_account is None:
+                msg = ('Cannot find the neon user account %s for video %s. '
+                       'This should never happen' % 
+                       (self.get_account_id(), self.key))
+                _log.error(msg)
+                raise DBStateError(msg)
+                
+            request = tornado.httpclient.HTTPRequest(
+                'http://%s/v1/video?%s' % (
+                    options.isp_host,
+                    urllib.urlencode({
+                        'video_id' : InternalVideoID.to_external(self.key),
+                        'publisher_id' : neon_user_account.tracker_account_id
+                        })),
+                follow_redirects=True)
+            res = yield utils.http.send_request(request, async=True)
+
+            if res.code != 200:
+                if res.code != 204:
+                    _log.error('Unexpected response looking up video %s on '
+                               'isp: %s' % (self.key, res))
+                else:
+                    _log.debug('Image not available in ISP yet.')
                 raise tornado.gen.Return(False)
+                
             raise tornado.gen.Return(True)
         except tornado.httpclient.HTTPError as e: 
-            pass
+            _log.error('Unexpected response looking up video %s on '
+                       'isp: %s' % (self.key, e))
 
         raise tornado.gen.Return(False)
     

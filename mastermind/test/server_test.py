@@ -1662,7 +1662,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.callback_mock = MagicMock()
         self.isp_mock = MagicMock()
         def _handle_http(x, **kw):
-            if x.method == 'HEAD':
+            if '/v1/video?' in x.url:
                 return self.isp_mock(x, **kw)
             else:
                 return self.callback_mock(x, **kw)
@@ -2010,7 +2010,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
         self.callback_mock = MagicMock()
         self.isp_mock = MagicMock()
         def _handle_http(x, **kw):
-            if x.method == 'HEAD':
+            if '/v1/video?' in x.url:
                 return self.isp_mock(x, **kw)
             else:
                 return self.callback_mock(x, **kw)

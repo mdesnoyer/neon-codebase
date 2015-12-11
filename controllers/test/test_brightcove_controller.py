@@ -23,7 +23,7 @@ from tornado.gen import YieldPoint, Task
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 import unittest
-from utils import imageutils
+from cvutils import imageutils
 
 
 class TestScheduler(test_utils.neontest.TestCase):

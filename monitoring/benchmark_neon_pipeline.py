@@ -89,7 +89,7 @@ def create_neon_api_request(account_id, api_key, video_id=None):
         _log.error('Error submitting job: %s' % e)
         statemon.state.job_submission_error = 1
         raise SubmissionError
-    api_resp = json.loads(res.buffer)
+    api_resp = json.loads(res.body)
     raise tornado.gen.Return((video_id, api_resp["job_id"]))
 
 @utils.sync.optional_sync
@@ -129,8 +129,8 @@ def monitor_neon_pipeline(video_id=None):
                     neondata.RequestState.INT_ERROR,
                     neondata.RequestState.CUSTOMER_ERROR]:
                     statemon.state.job_failed = 1
-                    _log.error('Job failed with response: %s' %
-                               request.response)
+                    _log.error('Job failed with state %s with response: %s' %
+                               (request.state, request.response))
                     raise JobFailed
             else:
                 _log.warn("request data not found in db")
@@ -203,7 +203,7 @@ def main():
     
     while True:
         try:
-            yield monitor_neon_pipeline(async=True)
+            monitor_neon_pipeline()
             statemon.state.unexpected_exception_thrown = 0
         except JobError as e:
             # Logging already done

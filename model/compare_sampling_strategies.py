@@ -81,10 +81,10 @@ if __name__ == '__main__':
                       help='Video to process')
     
     options, args = parser.parse_args()
-    if options.model == None:
+    if options.model is None:
         print 'Need model'
         exit()
-    if options.video != None:
+    if options.video is not None:
         main(options.video,options.model)
     else:
         i = 0
