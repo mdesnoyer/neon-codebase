@@ -26,7 +26,6 @@ if __name__ == '__main__':
         '/data/neon/cache')
     filt = filters.CascadeFilter([filters.BlurryFilter(),
                                   filters.UniformColorFilter(),
-                                  filters.TextFilter(0.025),
                                   filters.CrossFadeFilter(max_height=480)],
                                   max_height=480)
     haarF = '/data/model_data/haar_cascades/haarcascade_frontalface_alt2.xml'

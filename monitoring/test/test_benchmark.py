@@ -198,7 +198,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(cb_response.code, 200)
 
         with self.assertLogExists(logging.ERROR,
-                                  'Job failed with response'):
+                                  'Job failed with state'):
             with self.assertLogExists(logging.WARNING,
                                       'Incorrect callback received:'):
                 yield self.benchmarker.job_manager.run_test_job('vid1')

@@ -209,8 +209,8 @@ class JobManager(object):
                     neondata.RequestState.INT_ERROR,
                     neondata.RequestState.CUSTOMER_ERROR]:
                     statemon.state.job_failed = 1
-                    _log.error('Job failed with response: %s' %
-                               request.response)
+                    _log.error('Job failed with state %s with response: %s' %
+                               (request.state, request.response))
                     raise JobFailed
             else:
                 _log.warn("request data not found in db")
@@ -350,7 +350,7 @@ def main():
     
     signal.signal(signal.SIGTERM, lambda sig, y: 
                   io_loop.add_callback_from_signal(io_loop.spawn_callback,
-                                                   Benchmarker.shutdown))
+                                                   benchmarker.shutdown))
 
     Benchmarker.start()
     io_loop.start()
