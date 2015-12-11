@@ -3117,7 +3117,8 @@ class BrightcoveIntegration(AbstractIntegration):
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None):
+                oldest_video_allowed=None, 
+                video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
 
@@ -3150,6 +3151,9 @@ class BrightcoveIntegration(AbstractIntegration):
         # A ISO date string of the oldest video publication date to
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
+
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
 
     @classmethod
     def get_ovp(cls):
@@ -3203,7 +3207,8 @@ class BrightcovePlatform(AbstractPlatform):
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None):
+                oldest_video_allowed=None, 
+                video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
 
@@ -3238,6 +3243,9 @@ class BrightcovePlatform(AbstractPlatform):
         # A ISO date string of the oldest video publication date to
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
+
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
 
     @classmethod
     def get_ovp(cls):
