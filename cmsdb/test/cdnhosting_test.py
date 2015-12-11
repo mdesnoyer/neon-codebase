@@ -333,6 +333,9 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, False, False, sizes)
+        self.metadata.crop_with_saliency = False
+        self.metadata.crop_with_face_detection = False
+        self.metadata.crop_with_text_detection = False
 
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHostingWithServingUrls, self).setUp()
@@ -459,7 +462,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(len(list(self.bucket.list())), 1)
 
-    @tornado.testing.gen_test(timeout=20)
+    @tornado.testing.gen_test
     def test_change_rendition_sizes(self):
         # Upload 640x480 & 160x90
         hoster = cmsdb.cdnhosting.CDNHosting.create(self.metadata)

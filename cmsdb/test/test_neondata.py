@@ -45,6 +45,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         ExperimentState, NeonApiRequest, CDNHostingMetadata,\
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
+from cvutils import smartcrop
+import numpy as np
 
 _log = logging.getLogger(__name__)
 
@@ -2299,8 +2301,9 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.redis.stop()
         super(TestAddingImageData, self).tearDown()
 
-    @tornado.testing.gen_test(timeout=20)
+    @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
+
         # Create the necessary buckets so that we can write to them
         self.s3conn.create_bucket('n3.neon-images.com')
         self.s3conn.create_bucket('customer-bucket')
@@ -2309,11 +2312,24 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # Setup the CDN information in the database
         VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
                       i_id='i6').save()
+        neon_cdnhosting_metadata = NeonCDNHostingMetadata(do_salt=False)
+        neon_cdnhosting_metadata.crop_with_saliency = False
+        neon_cdnhosting_metadata.crop_with_face_detection = False
+        neon_cdnhosting_metadata.crop_with_text_detection = False
+        s3_cdnhosting_metadata = \
+            S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                 do_salt=False)
+        s3_cdnhosting_metadata.crop_with_saliency = False
+        s3_cdnhosting_metadata.crop_with_face_detection = False
+        s3_cdnhosting_metadata.crop_with_text_detection = False
+
         cdn_list = CDNHostingMetadataList(
             CDNHostingMetadataList.create_key('acct1', 'i6'), 
-            [ NeonCDNHostingMetadata(do_salt=False),
-              S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                   do_salt=False) ])
+            [neon_cdnhosting_metadata,
+             s3_cdnhosting_metadata])
+            # [ NeonCDNHostingMetadata(do_salt=False),
+            #   S3CDNHostingMetadata(bucket_name='customer-bucket',
+            #                        do_salt=False) ])
         cdn_list.save()
 
         thumb_info = ThumbnailMetadata(None, 'acct1_vid1',
@@ -2533,13 +2549,22 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEqual(ThumbnailMetadata.get(thumb_info.key).video_id,
                          'acct1_vid1')
 
-    @tornado.testing.gen_test(timeout=20)
+    @tornado.testing.gen_test
     def test_add_account_default_thumb(self):
+        _log.info('here**')
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
         account = NeonUserAccount('a1')
 
+        self.smartcrop_patcher = patch('cvutils.smartcrop.SmartCrop')
+        self.mock_crop_and_resize = self.smartcrop_patcher.start()
+        self.mock_responses = MagicMock()
+        mock_image = PILImageUtils.create_random_image(540, 640)
+        self.mock_crop_and_resize().crop_and_resize.side_effect = \
+            lambda x, *kw: np.array(PILImageUtils.create_random_image(540, 640))
+
         yield account.add_default_thumbnail(self.image, async=True)
+        self.assertGreater(self.mock_crop_and_resize.call_count, 0)
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
@@ -2565,6 +2590,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # If we try to add another image as the default, we should
         # throw an error
         new_image = PILImageUtils.create_random_image(540, 640)
+
+
         with self.assertRaises(ValueError):
             yield account.add_default_thumbnail(new_image, async=True)
 
