@@ -67,11 +67,11 @@ class SQSQueueMock(object):
         messages = []
 
         i = 0
-        while i < num_messages and len(prev_data) > 0:
+        while i < num_messages:
             with self.lock:
                 try:
-                    msg = self.message_queue(i)
-                    for attr in attributes_to_return:
+                    msg = self.message_queue[i]
+                    for attr in attributes:
                         try:
                             msg.attributes[attr] = self.attributes[attr]
                         except KeyError:
