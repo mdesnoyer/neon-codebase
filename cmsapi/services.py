@@ -1673,7 +1673,11 @@ class HealthCheckHandler(tornado.web.RequestHandler):
             # Make a call to video server health check
             client_url = 'http://%s:8081/healthcheck'\
                             % options.video_server 
-            req = tornado.httpclient.HTTPRequest(url=client_url,
+            #TODO: Get the api key so we can use this url instead of client_url
+            #client_url uses the video server still, while the url below will
+            #connect to SQS via cmsapiv2
+            #url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, api_key)
+            req = tornado.httpclient.HTTPRequest(url=url,
                                                  method="GET",
                                                  request_timeout=5.0)
             result = yield tornado.gen.Task(utils.http.send_request, req)

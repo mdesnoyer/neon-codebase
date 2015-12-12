@@ -49,8 +49,6 @@ from apiv2 import *
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
-define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
-define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
 define('video_queue_region', default='us-east-1', help='region of the SQS queue to connect to')
 

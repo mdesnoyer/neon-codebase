@@ -90,8 +90,6 @@ statemon.define('randomframe_extraction_error', int)
 # ======== Parameters  =======================#
 from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
-define('video_server', default="localhost:8081", type=str,
-       help="host:port of the video processing server")
 define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
