@@ -376,9 +376,14 @@ def collect_stats(thumb_info, video_info,
                         base_rank = cur_thumb.rank
             if base_thumb is not None:
                 break
+        found_neon = any([thumb_info[x].type == 'neon' 
+                          for x in video.thumbnail_ids])
         if (not options.show_bad_experiment_vids and 
-            (base_thumb is None or not(extra_conv[base_thumb.key] != 0).any())):
-            # We don't want to include videos without a baseline or an entry in             # the experiment
+            (base_thumb is None or 
+             (not found_neon) or
+             (not(extra_conv[base_thumb.key] != 0).any()))):
+            # We don't want to include videos without a baseline or an
+            # entry in the experiment
             continue
 
         thumb_stats = pandas.DataFrame({

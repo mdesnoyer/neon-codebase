@@ -75,27 +75,12 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                 index=zscore.index)
             p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
-            if use_cmsdb_ctrs and exp_end and max(cum_imp.index) > exp_end:
-                # The experiment has ended, so assume the ctrs in the
-                # database are correct
+            if exp_end and max(cum_imp.index) > exp_end:
+                # Use the time in the cmsdb to flag when the
+                # experiment finished.
                 exp_end = exp_end.replace(minute=0, second=0, microsecond=0)
-                idx = cum_imp.iloc[cum_imp.index > exp_end].index[0]
-                stats['p_value'][base][top] = np.max(p_value)
-                if thumb_ctrs[base] > 0.0:
-                    stats['lift'][base][top] = (
-                        (thumb_ctrs[top] - thumb_ctrs[base]) /
-                        thumb_ctrs[base])
-                if (thumb_ctrs[top] < 1e-8 or
-                    not np.isfinite(cum_ctr[top][idx])):
-                    stats['revlift'][base][top] = 0.0
-                else:
-                    stats['revlift'][base][top] = (
-                        1 - (thumb_ctrs[base] / thumb_ctrs[top]))
-                stats['xtra_conv_at_sig'][base][top] = (
-                    cum_conv[top][idx] - cum_imp[top][idx] *
-                    cum_ctr[base][idx])
+                idx = cum_imp.iloc[cum_imp.index >= exp_end].index[0]
             else:
-
                 # Find where the first hour of statististical significance is
                 sig = p_value[(p_value > 0.95) & (cum_imp[base] > 500) & 
                               (cum_imp[top] > 500) & (cum_conv[base] > 5) &
@@ -112,6 +97,24 @@ def calc_lift_at_first_significant_hour(impressions, conversions,
                 else:
                     idx = sig.index[0]
 
+            if use_cmsdb_ctrs and exp_end and max(cum_imp.index) > exp_end:
+                # The experiment has ended, so use the ctrs in the
+                # database (as mastermind saw them)
+                stats['p_value'][base][top] = np.max(p_value)
+                if thumb_ctrs[base] > 0.0:
+                    stats['lift'][base][top] = (
+                        (thumb_ctrs[top] - thumb_ctrs[base]) /
+                        thumb_ctrs[base])
+                if (thumb_ctrs[top] < 1e-8 or
+                    not np.isfinite(cum_ctr[top][idx])):
+                    stats['revlift'][base][top] = 0.0
+                else:
+                    stats['revlift'][base][top] = (
+                        1 - (thumb_ctrs[base] / thumb_ctrs[top]))
+                stats['xtra_conv_at_sig'][base][top] = (
+                    cum_conv[top][idx] - cum_imp[top][idx] *
+                    cum_ctr[base][idx])
+            else:
                 stats['p_value'][base][top] = p_value[idx]
                 stats['lift'][base][top] = ((
                     cum_ctr[top][idx] - cum_ctr[base][idx]) /
