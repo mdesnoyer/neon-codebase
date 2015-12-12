@@ -297,6 +297,7 @@ class VideoProcessor(object):
             url_parse[2] = urllib.quote(url_parse[2])
             req = urllib2.Request(urlparse.urlunparse(url_parse),
                                   headers=self.headers)
+            import pdb; pdb.set_trace()
             response = urllib2.urlopen(req, timeout=self.timeout)
             last_time = time.time()
             data = response.read(CHUNK_SIZE)
