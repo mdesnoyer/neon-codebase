@@ -204,10 +204,10 @@ class PostgresDB(tornado.web.RequestHandler):
             self.io_loop_dict = {}
         
         @staticmethod 
-        def set_current_host(): 
+        def _set_current_host(): 
             self.old_host = self.host 
-            self.host = options.db_address  
-        
+            self.host = options.db_address 
+         
         @tornado.gen.coroutine
         def get_connection(self): 
             '''gets a connection to postgres, this is ioloop based 
@@ -220,6 +220,24 @@ class PostgresDB(tornado.web.RequestHandler):
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = id(current_io_loop)
             dict_item = self.io_loop_dict.get(io_loop_id)
+            def _get_momoko_pool(size=1,
+                                 auto_shrink=True, 
+                                 cursor_factory=psycopg2.extras.RealDictCursor):
+                current_io_loop = tornado.ioloop.IOLoop.current()
+                pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
+                                   ioloop=current_io_loop, 
+                                   size=size, 
+                                   max_size=options.pool_size,
+                                   auto_shrink=auto_shrink,  
+                                   cursor_factory=cursor_factory)
+                return pool
+
+            def _get_momoko_db(cursor_factory=psycopg2.extras.RealDictCursor): 
+                current_io_loop = tornado.ioloop.IOLoop.current()
+                conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
+                                         ioloop=current_io_loop,
+                                         cursor_factory=cursor_factory)
+                return conn
 
             if dict_item is None: 
                 # this is the first time we've seen this io_loop just 
@@ -227,24 +245,36 @@ class PostgresDB(tornado.web.RequestHandler):
                 item = {}
                 item['pool'] = None 
                 self.io_loop_dict[io_loop_id] = item 
- 
-                db = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
-                                       ioloop=current_io_loop,
-                                       cursor_factory=psycopg2.extras.RealDictCursor)
-                conn = yield self._get_momoko_connection(db) 
+                db = _get_momoko_db()
+                try:  
+                    conn = yield self._get_momoko_connection(db) 
+                except psycopg2.OperationalError as e:
+                    if self.host is not str(options.db_address):
+                        _set_current_host()  
+                        db = _get_momoko_db()
+                        conn = yield self._get_momoko_connection(db) 
+                    else: 
+                        _log.error('todo error')  
+                        raise 
             else:
                 # we have seen this ioloop before, it has a pool use it 
-                if dict_item['pool'] is None: 
-                    db = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
-                                     ioloop=current_io_loop, 
-                                     size=1, 
-                                     max_size=options.get('cmsdb.neondata.pool_size'),
-                                     auto_shrink=True,  
-                                     cursor_factory=psycopg2.extras.RealDictCursor)
-                    dict_item['pool'] = yield db.connect()
-                
+                if dict_item['pool'] is None:
+                    pool = _get_momoko_pool()  
+                    dict_item['pool'] = yield pool.connect()
                 pool = dict_item['pool']
-                conn = yield self._get_momoko_connection(pool, True)
+                try: 
+                    conn = yield self._get_momoko_connection(pool, True)
+                except psycopg2.OperationalError as e: 
+                    if self.host is not str(options.db_address):
+                         _set_current_host()  
+                         pool.close() 
+                         pool = _get_momoko_pool()  
+                         dict_item['pool'] = yield pool.connect()
+                         conn = yield self._get_momoko_connection(pool, True)
+                    else: 
+                         _log.error('todo error')  
+                         raise 
+                        
             raise tornado.gen.Return(conn)
 
         @tornado.gen.coroutine
@@ -283,8 +313,9 @@ class PostgresDB(tornado.web.RequestHandler):
                                (int(i+1), e))
             if conn: 
                 raise tornado.gen.Return(conn)
-            else:  
+            else: 
                 _log.error('Unable to get a connection to Postgres Database')
+                raise psycopg2.OperationalError
     
     instance = None 
     
@@ -661,10 +692,10 @@ def _erase_all_data():
 class PostgresPubSub(object):
     class _PostgresPubSub: 
         def __init__(self): 
-            self.host = options.get('cmsdb.neondata.db_address')
-            self.port = options.get('cmsdb.neondata.db_port')
-            self.name = options.get('cmsdb.neondata.db_name')
-            self.user = options.get('cmsdb.neondata.db_user')
+            #self.host = options.get('cmsdb.neondata.db_address')
+            #self.port = options.get('cmsdb.neondata.db_port')
+            #self.name = options.get('cmsdb.neondata.db_name')
+            #self.user = options.get('cmsdb.neondata.db_user')
 
             self.channels = {} 
         
@@ -674,9 +705,9 @@ class PostgresPubSub(object):
                
                just use the PostgresDB class to get a connection
                to the database 
-            ''' 
-            db = PostgresDB() 
-            conn = yield db.get_connection()
+            '''
+            self.db = PostgresDB() 
+            conn = yield self.db.get_connection()
             raise tornado.gen.Return(conn)
         
         @tornado.gen.coroutine 
@@ -704,7 +735,7 @@ class PostgresPubSub(object):
                     payload = notification.payload
                     notifications.append(payload) 
 
-                future = tornado.concurrent.Future()
+                future = concurrent.futures.Future()
                 future.set_result(notifications)
                 channel = self.channels[channel_name]
                 callback_functions = channel['callback_functions'] 
@@ -750,10 +781,6 @@ class PostgresPubSub(object):
             if channel_name in self.channels:
                 self.channels[channel_name]['callback_functions'].append(func) 
             else: 
-                _log.info(
-                    'Opening a new listener on postgres at %s for channel %s' %
-                    (self.host, channel_name))
-                statemon.state.increment('postgres_listeners')
                 try: 
                     momoko_conn = yield self._connect()
                     yield momoko_conn.execute('LISTEN %s' % channel_name)
@@ -766,6 +793,10 @@ class PostgresPubSub(object):
                     io_loop.add_handler(momoko_conn.connection.fileno(), 
                                         lambda fd, events: self._receive_notification(fd, events, channel_name), 
                                         io_loop.READ) 
+                    _log.info(
+                        'Opening a new listener on postgres at %s for channel %s' %
+                        (self.db.host, channel_name))
+                    statemon.state.increment('postgres_listeners')
                 except psycopg2.Error as e: 
                     _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
                                    % (channel_name, e)) 
@@ -786,7 +817,7 @@ class PostgresPubSub(object):
             '''
             _log.info(
                 'Unlistening on postgres at %s for channel %s' %
-                (self.host, channel_name))
+                (self.db.host, channel_name))
             try: 
                 channel = self.channels[channel_name] 
                 connection = channel['connection']
