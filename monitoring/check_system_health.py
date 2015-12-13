@@ -21,11 +21,9 @@ import resource
 import signal
 import socket
 import subprocess
+import utils.monitor
 import utils.neon
 from utils.options import options, define
-
-define('carbon_server', default='54.225.235.97', help='carbon ip address')
-define('carbon_port', default=8090, type=int, help='carbon port')
 
 def get_proc_memory():
     '''
@@ -88,22 +86,6 @@ def get_loadavg():
         length = len(output)
         return output[length - 3:length]
 
-def send_data(name, value):
-    '''
-    Format metric name/val pair and send the data to the carbon server
-    '''
-    
-    node = platform.node().replace('.', '-')
-    timestamp = int(time.time())
-    message = 'system.%s.%s %s %d\n' % (node, name, value, timestamp)
-    sock = socket.socket()
-    try:
-        sock.connect((options.carbon_server, options.carbon_port))
-        sock.sendall(message)
-        sock.close()
-    except Exception, e:
-        pass
-
 def main():
     delay = 60
     utils.neon.InitNeon()
@@ -117,14 +99,14 @@ def main():
     while True:
         
         try:
-            send_data("cpu", get_cpu_usage())
-            send_data("memory_used", get_system_memory())
+            utils.monitor.send_data("cpu", get_cpu_usage())
+            utils.monitor.send_data("memory_used", get_system_memory())
             d_root, d_mnt = get_disk_usage()
-            send_data("disk_used_root", d_root) 
-            send_data("disk_used_mnt", d_mnt)
+            utils.monitor.send_data("disk_used_root", d_root) 
+            utils.monitor.send_data("disk_used_mnt", d_mnt)
             b_sent, b_recv = get_network_usage()
-            send_data("network_bytes_sent", b_sent)
-            send_data("network_bytes_recv", b_recv)
+            utils.monitor.send_data("network_bytes_sent", b_sent)
+            utils.monitor.send_data("network_bytes_recv", b_recv)
         except:
             pass
 
