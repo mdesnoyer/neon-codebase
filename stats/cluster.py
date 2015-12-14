@@ -734,10 +734,10 @@ class Cluster():
                 master_group = igroup
                 break
         if master_group is None:
-            raise MasterMissingError("Could not find master instance group"
+            raise MasterMissingError("Could not find master instance group")
                                      
         for instance in emr_iterator(conn, 'instances', self.cluster_id,
-                                     master_group.id):
+                                     instance_group_id=master_group.id):
             if (instance.status.state == 'RUNNING'):
                 self.master_id = instance.ec2instanceid
                 if options.use_public_ip and instance.publicipaddress:
