@@ -97,6 +97,7 @@ define('async_pool_size', type=int, default=10,
 
 define("db_address", default="localhost", type=str, help="postgresql database address")
 define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_password", default="", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
@@ -199,14 +200,17 @@ class PostgresDB(tornado.web.RequestHandler):
             self.port = options.db_port
             self.name = options.db_name
             self.user = options.db_user
+            self.password = options.db_password
             # keeps track of the io_loops we have seen, mapped from 
             # id -> pool
             self.io_loop_dict = {}
         
-        @staticmethod 
-        def _set_current_host(): 
+        def _set_current_host(self): 
             self.old_host = self.host 
-            self.host = options.db_address 
+            self.host = options.db_address
+
+        #def _cleanup_io_loop_dict(self): 
+             
          
         @tornado.gen.coroutine
         def get_connection(self): 
@@ -218,13 +222,13 @@ class PostgresDB(tornado.web.RequestHandler):
             # grab the io loop
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
-            io_loop_id = id(current_io_loop)
+            io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
             def _get_momoko_pool(size=1,
                                  auto_shrink=True, 
                                  cursor_factory=psycopg2.extras.RealDictCursor):
                 current_io_loop = tornado.ioloop.IOLoop.current()
-                pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port), 
+                pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s password=%s' % (self.name, self.user, self.host, self.port, self.password), 
                                    ioloop=current_io_loop, 
                                    size=size, 
                                    max_size=options.pool_size,
@@ -234,7 +238,7 @@ class PostgresDB(tornado.web.RequestHandler):
 
             def _get_momoko_db(cursor_factory=psycopg2.extras.RealDictCursor): 
                 current_io_loop = tornado.ioloop.IOLoop.current()
-                conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s' % (self.name, self.user, self.host, self.port),
+                conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s password=%s' % (self.name, self.user, self.host, self.port, self.password),
                                          ioloop=current_io_loop,
                                          cursor_factory=cursor_factory)
                 return conn
@@ -250,14 +254,20 @@ class PostgresDB(tornado.web.RequestHandler):
                     conn = yield self._get_momoko_connection(db) 
                 except psycopg2.OperationalError as e:
                     if self.host is not str(options.db_address):
-                        _set_current_host()  
+                        self._set_current_host()  
                         db = _get_momoko_db()
                         conn = yield self._get_momoko_connection(db) 
                     else: 
-                        _log.error('todo error')  
-                        raise 
+                        _log.error('Unable to get a postgres connection for host %s : %s' 
+                                   % (self.host, e))  
+                        raise
+                except Exception as e: 
+                    _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
+                               % (self.host, e))  
+                    raise 
+                 
             else:
-                # we have seen this ioloop before, it has a pool use it 
+                # we have seen this ioloop before, it has a pool use it
                 if dict_item['pool'] is None:
                     pool = _get_momoko_pool()  
                     dict_item['pool'] = yield pool.connect()
@@ -266,15 +276,19 @@ class PostgresDB(tornado.web.RequestHandler):
                     conn = yield self._get_momoko_connection(pool, True)
                 except psycopg2.OperationalError as e: 
                     if self.host is not str(options.db_address):
-                         _set_current_host()  
-                         pool.close() 
-                         pool = _get_momoko_pool()  
-                         dict_item['pool'] = yield pool.connect()
-                         conn = yield self._get_momoko_connection(pool, True)
+                        self._set_current_host()  
+                        pool.close() 
+                        pool = _get_momoko_pool()  
+                        dict_item['pool'] = yield pool.connect()
+                        conn = yield self._get_momoko_connection(pool, True)
                     else: 
-                         _log.error('todo error')  
-                         raise 
-                        
+                        _log.error('Unable to get a postgres connection for host %s : %s' 
+                                    % (self.host, e))  
+                        raise 
+                except Exception as e: 
+                    _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
+                               % (self.host, e))  
+                    raise 
             raise tornado.gen.Return(conn)
 
         @tornado.gen.coroutine
@@ -288,12 +302,13 @@ class PostgresDB(tornado.web.RequestHandler):
             without a pool 
             '''  
             current_io_loop = tornado.ioloop.IOLoop.current()
-            io_loop_id = id(current_io_loop)
+            #io_loop_id = id(current_io_loop)
+            io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
             pool = dict_item['pool']
-            if pool is None: 
+            if pool is None:
                 conn.close()
-            else: 
+            else:
                 pool.putconn(conn) 
              
         @tornado.gen.coroutine 
@@ -1344,7 +1359,6 @@ class StoredObject(object):
             self.created = str(datetime.datetime.utcnow())
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
-
         if self.key is None:
             raise ValueError("key not set")
 
@@ -1368,13 +1382,12 @@ class StoredObject(object):
                                                         value, 
                                                         self.account_id)
                 result = yield conn.execute(query) 
-
             except Exception as e: 
                 rv = False
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
                 statemon.state.increment('postgres_unknown_errors')
-            
-            db.return_connection(conn)
+
+            yield db.return_connection(conn)
             raise tornado.gen.Return(rv)
         else: 
             db_connection = DBConnection.get(self)
@@ -4728,6 +4741,12 @@ class ThumbnailMetadata(StoredObject):
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ThumbnailMetadata.__name__
+
     def _set_keyname(self):
         '''Key the set by the video id'''
         return 'objset:%s' % self.key.rpartition('_')[0]
@@ -4952,6 +4971,12 @@ class VideoMetadata(StoredObject):
     def _set_keyname(self):
         '''Key by the account id'''
         return 'objset:%s' % self.get_account_id()
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoMetadata.__name__
 
     @classmethod
     def is_valid_key(cls, key):
