@@ -302,14 +302,17 @@ class PostgresDB(tornado.web.RequestHandler):
             without a pool 
             '''  
             current_io_loop = tornado.ioloop.IOLoop.current()
-            #io_loop_id = id(current_io_loop)
             io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
             pool = dict_item['pool']
-            if pool is None:
-                conn.close()
-            else:
-                pool.putconn(conn) 
+            try: 
+                if pool is None:
+                    conn.close()
+                else:
+                    pool.putconn(conn) 
+            except Exception as e: 
+                _log.exception('Unknown Error : trying to close connection %s. ' % e) 
+                
              
         @tornado.gen.coroutine 
         def _get_momoko_connection(self, db, is_pool=False):
@@ -322,7 +325,7 @@ class PostgresDB(tornado.web.RequestHandler):
                     else: 
                         conn = yield db.connect()
                     break
-                except psycopg2.OperationalError as e: 
+                except Exception as e: 
                     time.sleep(0.3) 
                     _log.error('Retrying PG connection : attempt=%d : exception=%s' % 
                                (int(i+1), e))
@@ -330,7 +333,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 raise tornado.gen.Return(conn)
             else: 
                 _log.error('Unable to get a connection to Postgres Database')
-                raise psycopg2.OperationalError
+                raise psycopg2.OperationalError('Unable to get a connection') 
     
     instance = None 
     
@@ -1709,14 +1712,21 @@ class StoredObject(object):
             finally:
                 sql_statements = []
                 for key, obj in mappings.iteritems():
-                   if obj is not None and obj != orig_objects.get(key, None):
-                        obj.updated = str(datetime.datetime.utcnow()) 
+                   original_object = orig_objects.get(key, None)
+                   if obj is not None and original_object is None: 
+                       obj.updated = str(datetime.datetime.utcnow())
+                       query = "INSERT INTO %s (_data, _type) \
+                                VALUES('%s', '%s')" % (obj._baseclass_name().lower(), 
+                                                       obj.to_json(), 
+                                                       obj._baseclass_name())
+                   elif obj is not None and obj != original_object:
+                        obj.updated = str(datetime.datetime.utcnow())
                         query = "UPDATE %s \
                                  SET _data = '%s' \
                                  WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), 
                                                                 obj.to_json(), 
                                                                 key) 
-                        sql_statements.append(query) 
+                   sql_statements.append(query) 
     
                 cursor = yield conn.transaction(sql_statements)
                 db.return_connection(conn)

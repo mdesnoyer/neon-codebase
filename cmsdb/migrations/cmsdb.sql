@@ -30,18 +30,6 @@ SET default_tablespace = '';
 SET default_with_oids = false;
 
 --
--- Name: brightcoveintegration; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE brightcoveplatform (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE brightcoveplatform OWNER TO pgadmin;
-
---
 -- Name: abstractintegration; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -64,6 +52,18 @@ CREATE TABLE abstractplatform (
 
 
 ALTER TABLE abstractplatform OWNER TO pgadmin;
+
+--
+-- Name: brightcoveplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE brightcoveplatform (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE brightcoveplatform OWNER TO pgadmin;
 
 --
 -- Name: cdnhostingmetadatalist; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
@@ -150,6 +150,28 @@ CREATE TABLE ooyalaintegration (
 ALTER TABLE ooyalaintegration OWNER TO pgadmin;
 
 --
+-- Name: ooyalaplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE ooyalaplatform (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE ooyalaplatform OWNER TO pgadmin;
+
+--
+-- Name: request; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+-- here for backwards compatibility, NeonApiRequest._baseclass_name() == request
+--
+
+CREATE TABLE request (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+--
 -- Name: thumbnailmetadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -184,18 +206,6 @@ CREATE TABLE thumbnailstatus (
 
 
 ALTER TABLE thumbnailstatus OWNER TO pgadmin;
-
---
--- Name: thumbnailurlmapper; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE thumbnailurlmapper (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE thumbnailurlmapper OWNER TO pgadmin;
 
 --
 -- Name: videometadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
@@ -241,12 +251,18 @@ COPY brightcoveplatform (_data, _type) FROM stdin;
 \.
 
 --
+-- Data for Name: ooyalaplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY ooyalaplatform (_data, _type) FROM stdin;
+\.
+
+--
 -- Data for Name: cdnhostingmetadatalist; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 
 COPY cdnhostingmetadatalist (_data, _type) FROM stdin;
 \.
-
 
 --
 -- Data for Name: experimentstrategy; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -295,6 +311,12 @@ COPY neonuseraccount (_data, _type) FROM stdin;
 COPY ooyalaintegration (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: request; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY request (_data, _type) FROM stdin;
+\.
 
 --
 -- Data for Name: thumbnailmetadata; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -321,14 +343,6 @@ COPY thumbnailstatus (_data, _type) FROM stdin;
 
 
 --
--- Data for Name: thumbnailurlmapper; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
-
-COPY thumbnailurlmapper (_data, _type) FROM stdin;
-\.
-
-
---
 -- Data for Name: videometadata; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 
@@ -351,6 +365,7 @@ COPY videostatus (_data, _type) FROM stdin;
 CREATE UNIQUE INDEX account_id ON neonuseraccount USING btree (((_data ->> 'account_id'::text)));
 CREATE UNIQUE INDEX api_key ON neonuseraccount USING btree (((_data ->> 'api_key'::text)));
 CREATE UNIQUE INDEX video_id ON thumbnailmetadata USING btree (((_data ->> 'video_id'::text)));
+CREATE UNIQUE INDEX video_key ON videometadata USING btree (((_data ->> 'key'::text)));
 
 --
 -- Name: public; Type: ACL; Schema: -; Owner: pgadmin
@@ -429,6 +444,16 @@ AFTER INSERT OR UPDATE OR DELETE
 ON ooyalaintegration
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
+CREATE TRIGGER ooyalaplatform_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON ooyalaplatform
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER request_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON request
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
 CREATE TRIGGER thumbnailmetadata_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON thumbnailmetadata
@@ -442,11 +467,6 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER thumbnailstatus_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON thumbnailstatus
-FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
-
-CREATE TRIGGER thumbnailurlmapper_notify_trig
-AFTER INSERT OR UPDATE OR DELETE
-ON thumbnailurlmapper
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 CREATE TRIGGER videometadata_notify_trig
