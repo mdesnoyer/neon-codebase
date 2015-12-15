@@ -184,8 +184,8 @@ class PeriodicCoroutineTimer(object):
         self._ioloop = io_loop or tornado.ioloop.IOLoop.current()
         self._callback = callback
         self._callback_time = callback_time / 1000.
-        self._stopped = True
-        self._running = False
+        self._stopped = True  # Is the time active or stopped
+        self._running = False # Are we in the middle of a call?
         self._cur_future = None
 
     def start(self):

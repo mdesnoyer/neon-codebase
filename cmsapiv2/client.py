@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..')))
 
+from cmsapiv2.apiv2 import ResponseCode
 import logging
 import simplejson as json
 import tornado.gen
@@ -55,9 +56,10 @@ class Client(object):
                     headers={ 'Authorization' : 
                               'Bearer %s' % self.refresh_token},
                     body='')
-            response = yield utils.http.send_request(request,
-                                                     no_retry_codes=[401],
-                                                     async=True)
+            response = yield utils.http.send_request(
+                request,
+                no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
+                async=True)
             if response.error:
                 if self.refresh_token is None:
                     # Could not authenticate
@@ -91,7 +93,7 @@ class Client(object):
             raise tornado.gen.Return(response)
 
         no_retry_codes = send_kwargs.get('no_retry_codes', [])
-        no_retry_codes.append(401)
+        no_retry_codes.append(ResponseCode.HTTP_UNAUTHORIZED)
         send_kwargs['no_retry_codes'] = no_retry_codes
 
         # Adjust the request
