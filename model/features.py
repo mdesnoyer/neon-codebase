@@ -60,9 +60,40 @@ class RegionFeatureGenerator(FeatureGenerator):
     '''
     def __init__(self):
         super(RegionFeatureGenerator, self).__init__()
-        self.__version__ = 1
+        self.__version__ = 2
         self.max_height = None
         self.crop_frac = None
+        self.thresh = None
+
+    def _process_images(self, images, fonly):
+        '''
+        Casts the images to a list, but first checks to ensure that they are
+        not numpy arrays.
+        '''
+        if type(images).__module__ == np.__name__:
+            return [images]
+        images = list(images)
+        if fonly:
+            images = images[:1]
+        images = [self.prep(x) for x in images]
+        return images
+
+    def _get_prep(self):
+        self.prep = utils.pycvutils.ImagePrep(
+                            max_height=self.max_height,
+                            crop_frac=self.crop_frac)
+
+    def __cmp__(self, other):
+        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
+        if not typediff:
+            return typediff
+        self_cmp_tup = (self.max_height, self.crop_frac, self.thresh)
+        other_cmp_tup = (other.max_height, other.crop_frac, other.thresh)
+        return cmp(self_cmp_tup, other_cmp_tup)
+
+    def __hash__(self):
+        self_cmp_tup = (self.max_height, self.crop_frac, self.thresh)
+        return hash(self_cmp_tup)
 
     def generate_many(self, images, fonly=False):
         '''
@@ -79,6 +110,13 @@ class RegionFeatureGenerator(FeatureGenerator):
             1D/2D numpy feature object of N[xF] elements,
             where F is the number of features.
         '''
+        images = self._process_images(images, fonly)
+        feat_vec = []
+        for img in images:
+            feat_vec.append(self._feat_calc(img))
+        return np.array(feat_vec)
+
+    def _feat_calc(self, image):
         raise NotImplementedError()
 
     def get_feat_name(self):
@@ -154,41 +192,12 @@ class BlurGenerator(RegionFeatureGenerator):
         super(BlurGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
         self.thresh = thresh
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            feat_vec.append(self._comp_blur(img))
-        return np.array(feat_vec)
-
-    def _comp_blur_var(self, image):
+    def _feat_calc(self, image):
         '''
-        Computes the blur as the variance of the laplacian.
-        '''
-        return cv2.Laplacian(image, cv2.CV_32F).var()
-
-    def _comp_blur(self, image):
-        '''
-        Something more in-line with what mark does.
+        Computes blur as the thresholded percentile of the laplacian.
         '''
         # account for variations in brightness
         #image = cv2.equalizeHist(image)
@@ -210,23 +219,10 @@ class SADGenerator(RegionFeatureGenerator):
         super(SADGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
-
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
+        self._get_prep()
 
     def generate_many(self, images, fonly=False):
-        images = list(images)
+        images = self._process_images(images, fonly)
         # theres an edge case, in which only one image is obtained--in this
         # case, reject return a score of np.inf. This can occur if, for
         # instance, the previous filters reject all but one frame.
@@ -261,6 +257,8 @@ class ActionGenerator(RegionFeatureGenerator):
     Scores scenes based on whether or not they are at a relative action peak
     by computing the cross-correlation. In other words, we want frames that
     occur are local minima in the action. Let's see if it works.
+
+    NOT CURRENTLY IMPLEMENTED
     '''
     def __init__(self, SAD_gen=None, action_vec=[1, 0, -1, 0, 1]):
         '''
@@ -286,6 +284,7 @@ class ActionGenerator(RegionFeatureGenerator):
         return hash(self.action_vec)
 
     def generate_many(self, images, fonly=False):
+        raise NotImplementedError()
         images = list(images)
         SADs = self._SAD_gen.generate_many(images)
         return np.correlate(SADs, self._action_vec, mode='same')
@@ -312,24 +311,8 @@ class FaceGenerator(RegionFeatureGenerator):
         self.prep = MSFP.prep
         self.max_height = MSFP.max_height
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        return cmp(self.max_height, other.max_height)
-
-    def __hash__(self):
-        return hash(self.max_height)
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            feat_vec.append(self.MSFP.get_faces(img))
-        return np.array(feat_vec)
+    def _feat_calc(self, image):
+        return self.MSFP.get_faces(image)
 
     def get_feat_name(self):
         return 'faces'
@@ -349,30 +332,14 @@ class ClosedEyeGenerator(RegionFeatureGenerator):
         self.prep = MSFP.prep
         self.max_height = MSFP.max_height
         self.scoreEyes = ScoreEyes(classifier)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        return cmp(self.max_height, other.max_height)
-
-    def __hash__(self):
-        return hash(self.max_height)
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            eyes = self.MSFP.get_eyes(img)
-            if not len(eyes):
-                feat_vec.append(0)
-                continue
-            classif, scores = self.scoreEyes.classifyScore(eyes)
-            feat_vec.append(np.min(scores))
-        return np.array(feat_vec)
+    def _feat_calc(self, image):
+        eyes = self.MSFP.get_eyes(image)
+        if not len(eyes):
+            return 0
+        classif, scores = self.scoreEyes.classifyScore(eyes)
+        return np.min(scores)
 
     def get_feat_name(self):
         return 'eyes'
@@ -394,25 +361,7 @@ class FacialBlurGenerator(RegionFeatureGenerator):
         self.thresh = thresh
         self.max_height = MSFP.max_height
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        return cmp(self.max_height, other.max_height)
-
-    def __hash__(self):
-        return hash(self.max_height)
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            feat_vec.append(self._get_face_blur(img))
-        return np.array(feat_vec)
-
-    def _get_face_blur(self, image):
+    def _feat_calc(self, image):
         faces = self.MSFP.get_face_subimages(image)
         if not len(faces):
             return 0
@@ -450,31 +399,9 @@ class VibranceGenerator(RegionFeatureGenerator):
         super(VibranceGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            feat_vec.append(self._mean_vibrance(img))
-        return np.array(feat_vec)
-
-    def _mean_vibrance(self, image):
+    def _feat_calc(self, image):
         # check to see if the image is black and white. if so, its vibrance
         # is defined to be zero
         if len(image.shape) < 3:
@@ -496,32 +423,9 @@ class BrightnessGenerator(RegionFeatureGenerator):
         super(BrightnessGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        if not type(images) is list:
-            images = [images]
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            feat_vec.append(self._mean_brightness(img))
-        return np.array(feat_vec)
-
-    def _mean_brightness(self, image):
+    def _feat_calc(self, image):
         if len(image.shape) < 3:
             return np.mean(image)
         elif image.shape[2] == 1:
@@ -540,32 +444,9 @@ class SaturationGenerator(RegionFeatureGenerator):
         super(SaturationGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = utils.pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        if not type(images) is list:
-            images = [images]
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            feat_vec.append(self._mean_saturation(img))
-        return np.array(feat_vec)
-
-    def _mean_saturation(self, image):
+    def _feat_calc(self, image):
         if len(image.shape) < 3:
             return 0.
         elif image.shape[2] == 1:
@@ -584,42 +465,15 @@ class TextGenerator(RegionFeatureGenerator):
         super(TextGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
         self._max_variation = max_variation
         self.mser = cv2.MSER(_max_variation=self._max_variation)
-
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        if self.crop_frac != other.crop_frac:
-            return cmp(self.crop_frac, other.crop_frac)
-        return cmp(self.max_variation, other.max_variation)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
 
     def __getstate__(self):
         self.mser = None
         return self.__dict__.copy()
 
-    def generate_many(self, images, fonly=False):
-        if self.mser is None:
-            self.mser = cv2.MSER_create(_max_variation=self._max_variation)
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            feat_vec.append(self._text_quant(img))
-        return np.array(feat_vec)
-
-    def _text_quant(self, img):
+    def _feat_calc(self, img):
         '''quantifies the amount of text in an image (approx) by area'''
         regions = self.mser.detectRegions(img, None)
         area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
@@ -637,32 +491,9 @@ class EntropyGenerator(RegionFeatureGenerator):
         super(EntropyGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            feat_vec.append(self._img_entropy(img))
-        return np.array(feat_vec)
-
-    def _img_entropy(self, img):
+    def _feat_calc(self, img):
         gen_hist = lambda img, i: cv2.calcHist([img], [i], None, [256],
                                                [0, 256])
         if (len(img.shape) < 3):
@@ -687,20 +518,7 @@ class TextGeneratorSlow(RegionFeatureGenerator):
         super(TextGeneratorSlow, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
-
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
+        self._get_prep()
 
     def generate_many(self, images, fonly=False):
         images = list(images)
@@ -727,30 +545,10 @@ class PixelVarGenerator(RegionFeatureGenerator):
         super(PixelVarGenerator, self).__init__()
         self.max_height = max_height
         self.crop_frac = crop_frac
-        self.prep = pycvutils.ImagePrep(
-                        max_height=self.max_height,
-                        crop_frac=self.crop_frac)
+        self._get_prep()
 
-    def __cmp__(self, other):
-        typediff = cmp(self.__class__.__name__, other.__class__.__name__)
-        if typediff != 0:
-            return typediff
-        if self.max_height != other.max_height:
-            return cmp(self.max_height, other.max_height)
-        return cmp(self.crop_frac, other.crop_frac)
-
-    def __hash__(self):
-        return hash([str(self.max_height) + str(self.crop_frac)])
-
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            feat_vec.append(np.max(np.var(img,(0,1))))
-        return np.array(feat_vec)
+    def _feat_calc(self, image):
+        return np.max(np.var(img,(0, 1)))
 
     def get_feat_name(self):
         return 'pixvar'
