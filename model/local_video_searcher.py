@@ -1,4 +1,4 @@
-'''
+"""
 ==============================================================================
 New video searcher. Implements:
     - local search (to circumvent closed-eyes, blurry, etc...)
@@ -21,17 +21,13 @@ and as such we shouldn't be filtering out frames before this can occur. What
 we're going to do when and if we have more than one temporal filter is an
 open question.
 ==============================================================================
-'''
+"""
 
-import hashlib
 import heapq
 import logging
 import os
 import sys
-import threading
 from time import time
-import traceback
-from Queue import Queue
 from itertools import permutations
 from collections import OrderedDict as odict
 from collections import defaultdict as ddict
@@ -43,16 +39,11 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import cv2
-import ffvideo
 import model.errors
-import model.features as feat
 import numpy as np
-import utils.obj
 from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
-from utils.pycvutils import seek_video
-from model.metropolisHastingsSearch import ThumbnailResultObject
 from model.metropolisHastingsSearch import MCMH_rpl
 
 _log = logging.getLogger(__name__)
@@ -62,19 +53,20 @@ statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
 
-MINIMIZE = -1     # flag for statistics where better = smaller
-NORMALIZE = 0     # flag for statistics where better = closer to mean
-MAXIMIZE = 1      # flag for statistics where better = larger
-PEN_LOW_HALF = -2 # flag for statistics where better > median
-PEN_HIGH_HALF = 2 # flag for statistics where better < median
-PEN_ZERO = 3   # flag for statistics as (x > 0)
+MINIMIZE = -1  # flag for statistics where better = smaller
+NORMALIZE = 0  # flag for statistics where better = closer to mean
+MAXIMIZE = 1  # flag for statistics where better = larger
+PEN_LOW_HALF = -2  # flag for statistics where better > median
+PEN_HIGH_HALF = 2  # flag for statistics where better < median
+PEN_ZERO = 3  # flag for statistics as (x > 0)
 
 TESTING = False
 TESTING_DIR = None
 CUR_TESTING_DIR = None
 
+
 def get_feat_score_transfer_func(max_penalty, median=0.3):
-    '''
+    """
     Returns a function that maps a feature score to another score that will be
     multiplicatively combined with the score and the other transferred feature
     scores. Thus, max_penalty is the maximum amount the final score may be
@@ -92,31 +84,34 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     between the max penalty and no penalty. So if it's value is 0.4, then an
     image in the 40th percentile of the rankings is penalized with half the
     maximum penalty
-    '''
-    k = 7. # this is the slope of the transfer function.
+    """
+    k = 7.  # this is the slope of the transfer function.
     c = max_penalty
     x0 = median
+
     def calcL(k, x0, c):
-        numer = (c-1)*np.exp(-k*x0)*(np.exp(k*x0)+1)*(np.exp(k*x0)+np.exp(k))
-        return -(numer / (np.exp(k)-1))
+        numer = (c - 1) * np.exp(-k * x0) * (np.exp(k * x0) + 1) * (np.exp(k * x0) + np.exp(k))
+        return -(numer / (np.exp(k) - 1))
 
     def calcZ(k, x0, c):
-        numer = -c * (np.exp(k*x0) + 1) + np.exp(k*(x0-1)) + 1
-        return numer / (np.exp(k*(x0-1)) - np.exp(k*x0))
+        numer = -c * (np.exp(k * x0) + 1) + np.exp(k * (x0 - 1)) + 1
+        return numer / (np.exp(k * (x0 - 1)) - np.exp(k * x0))
 
     L = calcL(k, x0, c)
     Z = calcZ(k, x0, c)
-    return lambda x: Z + (L / (1+np.exp(-k*(x-x0))))
+    return lambda x: Z + (L / (1 + np.exp(-k * (x - x0))))
+
 
 class Statistics(object):
-    '''
+    """
     Replicates (to a degree) the functionality of the true running statistics
     objects (which are in the utils folder under runningstat). This is because
     it is unlikely that we will ever need to maintain a very large number of
     measurements.
 
     If init is not None, it initializes with the values provided.
-    '''
+    """
+
     def __init__(self, max_size=5000, init=None):
         """
         Parameters:
@@ -136,9 +131,9 @@ class Statistics(object):
             self.push(init)
 
     def push(self, x):
-        '''
+        """
         pushes a value onto x
-        '''
+        """
         self._update_var = True
         self._update_mean = True
         self._update_median = True
@@ -151,7 +146,7 @@ class Statistics(object):
             self._vals[idx] = x
         else:
             self._vals[self._count] = x
-            self._count += 1 # increment count
+            self._count += 1  # increment count
 
     @property
     def var(self):
@@ -181,19 +176,20 @@ class Statistics(object):
         return self._p_median
 
     def rank(self, x):
-        '''Returns the rank of x'''
+        """Returns the rank of x"""
         quant = np.sum(self._vals[:self._count] < x)
-        return quant * 1./max(1, self._count)
+        return quant * 1. / max(1, self._count)
 
     def percentile(self, x):
-        '''Returns the xth percentile of the stored elements. x may be a float
+        """Returns the xth percentile of the stored elements. x may be a float
         between 0 and 100, inclusive. This is fairly computationally
         expensive, however it's only being used when new thumbnails are being
-        added to the top thumbnails list.'''
+        added to the top thumbnails list."""
         return np.percentile(self._vals[:self._count], x)
 
+
 class ColorStatistics(object):
-    '''
+    """
     Similar to the Statistics object (defined below), but in lieu of storing
     numeric values, it stores color histograms. This will allow us to
     establish a lower bound on the allowable distances--by empirically
@@ -202,12 +198,13 @@ class ColorStatistics(object):
 
     IMPORTANTLY, this flavor of the running statistic does NOT support
     initialization with a set of ColorName objects.
-    '''
+    """
+
     def __init__(self, max_size=150):
-        '''
+        """
         Parameters:
             max_size = the maximum number of color histograms to store.
-        '''
+        """
         self._ColObjs = []
         self._max_size = max_size
         self._count = 0
@@ -215,10 +212,10 @@ class ColorStatistics(object):
         self._prep = pycvutils.ImagePrep(max_side=480)
 
     def push(self, img):
-        '''
+        """
         Add an image into the statistics object. Unlike the vanilla Statistics
         object, this does *not* support pushing multiple items simultaneously.
-        '''
+        """
         cn = ColorName(self._prep(img))
         for pcn in self._ColObjs:
             self._dists.push(pcn.dist(cn))
@@ -239,17 +236,19 @@ class ColorStatistics(object):
         return self._dists.mean
 
     def percentile(self, x):
-        '''
+        """
         The notion of Rank doesnt have much meaning in this sense, since
         we are measuring how different the thumbnails are from each other
         in the aggregate.
-        '''
+        """
         return self._dists.percentile(x)
+
 
 class MultiplicativeCombiner(object):
     '''
     Multiplicatively combines feature scores
     '''
+
     def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
                  combine=lambda x: np.prod(x),
                  dependencies=ddict(lambda: [])):
@@ -270,19 +269,19 @@ class MultiplicativeCombiner(object):
         Note: if a statistic has an entry in both the stats and weights dict,
             then weights dict takes precedence.
         '''
-        #self.weight_dict = weight_dict
+        # self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         # compute the transfer functions
         self._trans_funcs = dict()
         self.name = 'Multiplicative combiner'
         for feat in weight_valence:
-            max_pen = 1-penalties[feat]
+            max_pen = 1 - penalties[feat]
             self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
         self._combine = combine
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
-        self.result_combine = lambda ms, fs, w: ms*fs
+        self.result_combine = lambda ms, fs, w: ms * fs
         self.dependencies = dependencies
 
     def _set_stats_dict(self, stats_dict):
@@ -307,7 +306,7 @@ class MultiplicativeCombiner(object):
             if self.weight_valence.has_key(feat_name):
                 valence = self.weight_valence[feat_name]
             else:
-                _log.error('No valence defined for feature %s'%(feat_name))
+                _log.error('No valence defined for feature %s' % (feat_name))
                 raise
             for v in feat_vec:
                 if valence == PEN_ZERO:
@@ -317,7 +316,7 @@ class MultiplicativeCombiner(object):
                 if valence == MINIMIZE:
                     rank = 1. - rank
                 if valence == NORMALIZE:
-                    rank = 1. - abs(0.5 - rank)*2
+                    rank = 1. - abs(0.5 - rank) * 2
                 if valence == PEN_LOW_HALF:
                     rank = 1. + min(0, rank - 0.5) * 2
                 if valence == PEN_HIGH_HALF:
@@ -335,7 +334,7 @@ class MultiplicativeCombiner(object):
             if self.weight_valence.has_key(feat_name):
                 valence = self.weight_valence[feat_name]
             else:
-                _log.error('No valence defined for feature %s'%(feat_name))
+                _log.error('No valence defined for feature %s' % (feat_name))
                 raise
             if valence == MINIMIZE:
                 rankfunc = lambda x: 1. - stat_obj.rank(x)
@@ -372,7 +371,7 @@ class MultiplicativeCombiner(object):
                         break
             if incl:
                 funcs.append(self._compute_stats_score_func(
-                                feat_name, feat_val))
+                        feat_name, feat_val))
         return lambda: self._combine([x() for x in funcs])
 
     def get_indy_funcs(self, feat_dict):
@@ -392,7 +391,7 @@ class MultiplicativeCombiner(object):
                         break
             if incl:
                 funcs_dict[feat_name] = self._compute_stats_score_func(
-                                feat_name, feat_val)
+                        feat_name, feat_val)
         return funcs_dict
 
     def combine_scores(self, feat_dict):
@@ -417,12 +416,14 @@ class MultiplicativeCombiner(object):
             comb_scores.append(self.combine_scores_func(feat_dict)())
         return comb_scores
 
+
 class AdditiveCombiner(object):
     '''
     Combines arbitrary feature vectors according to either (1) predefined
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
+
     def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
                  combine=lambda x: np.sum(x)):
         '''
@@ -468,7 +469,7 @@ class AdditiveCombiner(object):
             if self.weight_valence.has_key(feat_name):
                 valence = self.weight_valence[feat_name]
             else:
-                valence = MINIMIZE # assume you are trying to maximize it
+                valence = MINIMIZE  # assume you are trying to maximize it
             for v in feat_vec:
                 if valence == PEN_NONZERO:
                     rank = int(v > 0)
@@ -477,7 +478,7 @@ class AdditiveCombiner(object):
                 if valence == MINIMIZE:
                     rank = 1. - rank
                 if valence == NORMALIZE:
-                    rank = 1. - abs(0.5 - rank)*2
+                    rank = 1. - abs(0.5 - rank) * 2
                 if valence == PEN_LOW_HALF:
                     rank = 1. + min(0, rank - 0.5) * 2
                 if valence == PEN_HIGH_HALF:
@@ -486,7 +487,7 @@ class AdditiveCombiner(object):
             return vals
 
         else:
-            return [(x * self.weight_dict[feat_name])**2 for x in feat_vec]
+            return [(x * self.weight_dict[feat_name]) ** 2 for x in feat_vec]
         return feat_vec
 
     def _compute_stats_score_func(self, feat_name, feat_val):
@@ -511,9 +512,9 @@ class AdditiveCombiner(object):
                 rankfunc = lambda x: stat_obj.rank(x)
             elif valence == PEN_NONZERO:
                 rankfunc = lambda x: x > 0
-            return lambda: rankfunc(feat_val)**2 * self.weight_dict[feat_name]
+            return lambda: rankfunc(feat_val) ** 2 * self.weight_dict[feat_name]
         else:
-            return lambda: (feat_val * self.weight_dict[feat_name])**2
+            return lambda: (feat_val * self.weight_dict[feat_name]) ** 2
 
     def combine_scores_func(self, feat_dict):
         '''This will return a list of functions that can be evaluated lazily,
@@ -522,10 +523,10 @@ class AdditiveCombiner(object):
         of analysis was changed.'''
         funcs = []
         tot_pos = float(np.sum(
-                            [self.weight_dict[x] for x in feat_dict.keys()]))
+                [self.weight_dict[x] for x in feat_dict.keys()]))
         for feat_name, feat_val in feat_dict.iteritems():
             funcs.append(self._compute_stats_score_func(feat_name, feat_val))
-        return lambda: sum([x() for x in funcs])/tot_pos
+        return lambda: sum([x() for x in funcs]) / tot_pos
 
     def get_indy_funcs(self, feat_dict):
         '''Testing function that returns individual transfer functions, so
@@ -544,15 +545,16 @@ class AdditiveCombiner(object):
 
         stat_scores = []
         tot_pos = float(np.sum(
-                            [self.weight_dict[x] for x in feat_dict.keys()]))
+                [self.weight_dict[x] for x in feat_dict.keys()]))
         for k, v in feat_dict.iteritems():
             stat_scores.append(self._compute_stat_score(k, v))
         comb_scores = []
         for x in zip(*stat_scores):
             comb_score = self._combine(x)
-            comb_score /= tot_pos # normalize
+            comb_score /= tot_pos  # normalize
             comb_scores.append(comb_score)
         return comb_scores
+
 
 class _Result(object):
     '''
@@ -567,6 +569,7 @@ class _Result(object):
     three arguments: model score (ms), feature score (fs), and feature
     score weight (w) and return a float.
     '''
+
     def __init__(self, frameno=None, score=-np.inf, image=None,
                  feat_score=None, meta=None,
                  feat_score_weight=None, feat_score_func=None,
@@ -575,7 +578,7 @@ class _Result(object):
         if score and frameno:
             self._defined = True
             _log.debug(('Instantiating result object at frame %i with'
-                           ' score %.3f')%(frameno, score))
+                        ' score %.3f') % (frameno, score))
         self.score = score
         self.frameno = frameno
         self._feat_score = feat_score
@@ -624,12 +627,12 @@ class _Result(object):
         if not self._defined:
             return 'Undefined Top Result object'
         if self.feat_score:
-            return 'Result fr:%i sc:%.2f feat sc:%.2f comb sc:%.2f'%(
-                        self.frameno, self.score, self.feat_score,
-                        self.comb_score)
+            return 'Result fr:%i sc:%.2f feat sc:%.2f comb sc:%.2f' % (
+                self.frameno, self.score, self.feat_score,
+                self.comb_score)
         else:
-            return 'Result fr:%i sc:%.2f feat sc:N/A comb sc:%.2f'%(
-                        self.frameno, self.score, self.comb_score)
+            return 'Result fr:%i sc:%.2f feat sc:N/A comb sc:%.2f' % (
+                self.frameno, self.score, self.comb_score)
 
     def dist(self, other):
         if type(self) is not type(other):
@@ -642,8 +645,9 @@ class _Result(object):
         if not other._defined:
             return np.inf
         if self._hash == other._hash:
-            return np.inf # the same object is infinitely different from itself
+            return np.inf  # the same object is infinitely different from itself
         return self._color_name.dist(other._color_name)
+
 
 class ResultsList(object):
     '''
@@ -668,6 +672,7 @@ class ResultsList(object):
 
         *** Both min_acceptable and max_rejectable may be functions.
     '''
+
     def __init__(self, n_thumbs=5, max_variety=True, min_acceptable=0.02,
                  max_rejectable=0.2, feat_score_weight=0.,
                  adapt_improve=False, combination_function=None):
@@ -682,7 +687,7 @@ class ResultsList(object):
         self._combination_function = combination_function
         if adapt_improve:
             self._clipLimit = 1.0
-            self._tileGridSize = (8,8)
+            self._tileGridSize = (8, 8)
             self.clahe = cv2.createCLAHE(clipLimit=self._clipLimit,
                                          tileGridSize=self._tileGridSize)
 
@@ -710,32 +715,32 @@ class ResultsList(object):
             return
         if TESTING_DIR is None:
             return
-        cur_sc_str = ' '.join(['%.3f'%x.feat_score for x in self.results
+        cur_sc_str = ' '.join(['%.3f' % x.feat_score for x in self.results
                                if x._defined])
-        cur_comb_str = ' '.join(['%.3f'%x.comb_score for x in self.results
-                               if x._defined])
+        cur_comb_str = ' '.join(['%.3f' % x.comb_score for x in self.results
+                                 if x._defined])
         _log.info('Current feat scores for top thumbs: ' + cur_sc_str)
         _log.info('Current comb scores for top thumbs: ' + cur_comb_str)
-        _log.debug('TESTING ENABLED: saving %s'%res)
-        fname = '%04i_'%(self._considered_thumbs)
-        fname += '%05i_'%(res.frameno)
-        fname += '%04.2f_'%(res.score)
+        _log.debug('TESTING ENABLED: saving %s' % res)
+        fname = '%04i_' % (self._considered_thumbs)
+        fname += '%05i_' % (res.frameno)
+        fname += '%04.2f_' % (res.score)
         if res._feat_score is None:
             fname += 'NA_'
         else:
-            fname += '%04.2f_'%(res.feat_score)
-        fname += '%04.2f_'%(res.comb_score)
+            fname += '%04.2f_' % (res.feat_score)
+        fname += '%04.2f_' % (res.comb_score)
         if reason == 'accept':
-            fname += 'accepted_replacing_%i.jpg'%(idx)
+            fname += 'accepted_replacing_%i.jpg' % (idx)
         elif reason is not None:
-            fname += '%s.jpg'%(reason)
+            fname += '%s.jpg' % (reason)
         else:
             fname += 'rejected.jpg'
         fname = os.path.join(CUR_TESTING_DIR, fname)
         cv2.imwrite(fname, res.image)
 
     def reset(self, n_thumbs=None):
-        _log.debug('Result object of size %i resetting'%(self.n_thumbs))
+        _log.debug('Result object of size %i resetting' % (self.n_thumbs))
         if n_thumbs is not None:
             self.n_thumbs = n_thumbs
         self.results = [_Result() for x in range(self.n_thumbs)]
@@ -761,8 +766,8 @@ class ResultsList(object):
                       combination_function=self._combination_function)
         self._considered_thumbs += 1
         if score < self.min:
-            _log.debug('Frame %i [%.3f] rejected due to score'%(frameno,
-                                                                   score))
+            _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
+                                                                  score))
             self._write_testing_frame(res, 'score_too_low')
             return False
         if not self._max_variety:
@@ -795,7 +800,7 @@ class ResultsList(object):
         '''
         old = self.results[idx]
         self.results[idx] = res
-        _log.info('%s is replacing %s'%(res, old))
+        _log.info('%s is replacing %s' % (res, old))
         self._update_dists(idx)
         self._update_min()
         self._write_testing_frame(res, 'accept', idx)
@@ -805,7 +810,7 @@ class ResultsList(object):
         '''auto-improves the main image of a result object via
         _improve_raw_img'''
         if self._adapt_improve:
-            _log.debug('Adaptively improving %s'%(res))
+            _log.debug('Adaptively improving %s' % (res))
             res.image = self._improve_raw_img(res.image)
 
     def _improve_raw_img(self, image):
@@ -817,7 +822,7 @@ class ResultsList(object):
             else:
                 # convert to HSV, apply to last channel
                 img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-                img[:,:,2] = self.clahe.apply(img[:,:,2])
+                img[:, :, 2] = self.clahe.apply(img[:, :, 2])
                 return cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
         else:
             return image
@@ -830,7 +835,7 @@ class ResultsList(object):
         rejected.
         '''
         repl_idx = [x for x in range(len(self.results)) if
-                        self.results[x] < res]
+                    self.results[x] < res]
         # get dists as they are now
         mdists = np.min(self.dists[repl_idx], 1)
         # get the distances of the candidate to the current results
@@ -841,7 +846,7 @@ class ResultsList(object):
         if dists[arg_srt_idx[0]] > self.max_rejectable:
             _log.debug(('%s thumbnail is sufficiently different from the '
                         'other thumbnails given the variety seen in the '
-                        'video to be accepted')%(res))
+                        'video to be accepted') % (res))
             return self._push_over_lowest(res)
 
         if dists[arg_srt_idx[0]] < self.min_acceptable:
@@ -852,22 +857,22 @@ class ResultsList(object):
                 # the other thumbs and its score is higher than the least
                 # different thumbs.
                 if (self.results[arg_srt_idx[0]].comb_score <
-                    res.comb_score):
+                        res.comb_score):
                     # replace the closest one.
                     return self._replace(arg_srt_idx[0], res)
                 else:
                     _log.debug('Most similar thumb is better than candidate')
                     self._write_testing_frame(res, ('too_similar_to_all_but_'
-                                        'one_but_most_similar_has_higher_'
-                                        'score'))
+                                                    'one_but_most_similar_has_higher_'
+                                                    'score'))
                     return False
             else:
 
                 # i.e., if the new thumbnail will be below the minimum
                 # acceptable distance AND it will not increase the global
-                #minimum distance
+                # minimum distance
                 _log.debug(('%s is insufficiently different given the variety'
-                            ' seen in the video so far.')%(res))
+                            ' seen in the video so far.') % (res))
                 self._write_testing_frame(res, 'below_sim_threshold')
                 return False
         # if there are any undefined thumbnails, replace them.
@@ -881,7 +886,7 @@ class ResultsList(object):
         for idx in sco_by_idx:
             if self.results[idx].comb_score > res.comb_score:
                 # none of the current thumbnails can be replaced
-                _log.debug('There are no low-scoring less-varied thumbnails for %s'%(res))
+                _log.debug('There are no low-scoring less-varied thumbnails for %s' % (res))
                 self._write_testing_frame(res, 'none_replaceable')
                 return False
             # see if you can replace it
@@ -904,7 +909,7 @@ class ResultsList(object):
         for res in self.results:
             if res.score < new_min:
                 new_min = res.score
-        _log.debug('New minimum score is %.3f'%(new_min))
+        _log.debug('New minimum score is %.3f' % (new_min))
         self.min = new_min
 
     def get_results(self):
@@ -922,6 +927,7 @@ class ResultsList(object):
             image = self._improve_raw_img(res_obj.image)
             res.append([image, res_obj.score, res_obj.frameno])
         return res
+
 
 class LocalSearcher(object):
     def __init__(self, predictor, face_finder,
@@ -1057,8 +1063,8 @@ class LocalSearcher(object):
             global TESTING_DIR
             TESTING_DIR = testing_dir
         self._reset()
-        self.analysis_crop = None # this, if necessary at all, will be set
-                                  # by update_processing_strategy
+        self.analysis_crop = None  # this, if necessary at all, will be set
+        # by update_processing_strategy
 
         # determine the generators to cache.
         for f in feature_generators:
@@ -1141,14 +1147,14 @@ class LocalSearcher(object):
         # define the variation measures and requirements
         f_min_var_acc = 0.015
         f_max_var_rej = lambda: min(0.1,
-                                        self.col_stat.percentile(
-                                            100./self.n_thumbs))
+                                    self.col_stat.percentile(
+                                            100. / self.n_thumbs))
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
-                           max_rejectable=f_max_var_rej,
-                           feat_score_weight=self._feat_score_weight,
-                           adapt_improve=self.adapt_improve,
-                           max_variety=self.max_variety,
-                            combination_function=self.combiner.result_combine)
+                                   max_rejectable=f_max_var_rej,
+                                   feat_score_weight=self._feat_score_weight,
+                                   adapt_improve=self.adapt_improve,
+                                   max_variety=self.max_variety,
+                                   combination_function=self.combiner.result_combine)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
@@ -1162,29 +1168,29 @@ class LocalSearcher(object):
         self.num_frames = num_frames
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /
-                            self._orig_local_search_step)
+                          self._orig_local_search_step)
         # self.local_search_width = min(self.orig_local_search_width,
         #                                 max(search_divisor, (((
         #                                     self.num_frames/search_divsor)/
         #                                     self.n_thumbs) *
         #                                     search_divisor)))
         self.local_search_width = min(self._orig_local_search_width,
-                                        max(search_divisor,
-                                            self.num_frames / self.n_thumbs))
+                                      max(search_divisor,
+                                          self.num_frames / self.n_thumbs))
         self.local_search_step = max(1, self.local_search_width /
-                                            search_divisor)
-        _log.info('Search width: %i'%(self.local_search_width))
-        _log.info('Search step: %i'%(self.local_search_step))
+                                     search_divisor)
+        _log.info('Search width: %i' % (self.local_search_width))
+        _log.info('Search step: %i' % (self.local_search_step))
         video_time = float(num_frames) / fps
         self.search_algo.start(num_frames, self.local_search_width)
         start_time = time()
         max_processing_time = self.processing_time_ratio * video_time
-        _log.info('Starting search of %s with %i frames, for %s seconds'%(
-                        video_name, num_frames, max_processing_time))
+        _log.info('Starting search of %s with %i frames, for %s seconds' % (
+            video_name, num_frames, max_processing_time))
         self._mix()
         while (time() - start_time) < max_processing_time:
             r = self._step()
-            if r == False:
+            if not r:
                 # you've searched as much as possible
                 break
         if len(self._queue):
@@ -1194,9 +1200,9 @@ class LocalSearcher(object):
                 _log.info('No analyses remain to be done.')
                 break
             mean_score, (start_frame, end_frame, start_score,
-                end_score) = heapq.heappop(self._queue)
+                         end_score) = heapq.heappop(self._queue)
             self._conduct_local_search(start_frame, end_frame, start_score,
-                end_score, from_queue=True)
+                                       end_score, from_queue=True)
         raw_results = self.results.get_results()
         # format it into the expected format
         results = []
@@ -1205,13 +1211,13 @@ class LocalSearcher(object):
                                 '')
             results.append(formatted_result)
         try:
-            perc_samp = self.search_algo.n_samples * 100./self.search_algo.N
-            _log.info('%.2f%% of video sampled'%perc_samp)
+            perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
+            _log.info('%.2f%% of video sampled' % perc_samp)
         except:
             _log.info('Unknown percentage of video sampled')
         try:
-            perc_srch = self._searched * 100./(self.search_algo.N-1)
-            _log.info('%.2f%% of video searched'%perc_srch)
+            perc_srch = self._searched * 100. / (self.search_algo.N - 1)
+            _log.info('%.2f%% of video searched' % perc_srch)
         except:
             _log.info('Unknown percentage of video searched')
         return results
@@ -1227,12 +1233,12 @@ class LocalSearcher(object):
                                        end_score):
                 return
         if not from_queue:
-            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]'%(
-                    start_frame, start_score, end_frame, end_score))
+            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]' % (
+                start_frame, start_score, end_frame, end_score))
         else:
             _log.debug(('Local search of %i [%.3f] <---> %i [%.3f] '
-                        '[from queue]')%(
-                    start_frame, start_score, end_frame, end_score))
+                        '[from queue]') % (
+                           start_frame, start_score, end_frame, end_score))
         gold, framenos = self.get_search_frame(start_frame)
         if gold is None:
             # uh-oh, something went wrong! In this case, the search region
@@ -1257,7 +1263,7 @@ class LocalSearcher(object):
             n_rej = np.sum(np.logical_not(accepted))
             n_acc = np.sum(accepted)
             _log.debug(('Filter for feature %s has '
-                        'has rejected %i frames, %i remain'%(
+                        'has rejected %i frames, %i remain' % (
                             f.feature, n_rej, n_acc)))
             if not np.any(accepted):
                 _log.debug('No frames accepted by filters')
@@ -1286,8 +1292,8 @@ class LocalSearcher(object):
         best_frameno = framenos[np.argmax(comb)]
         best_frame = frames[np.argmax(comb)]
         best_gold = gold[np.argmax(comb)]
-        best_feat_dict = {x:frame_feats[x][np.argmax(comb)] for x in
-                                frame_feats.keys()}
+        best_feat_dict = {x: frame_feats[x][np.argmax(comb)] for x in
+                          frame_feats.keys()}
         feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
         indi_framescore = self.predictor.predict(best_frame)
         inter_framescore = (start_score + end_score) / 2
@@ -1303,22 +1309,22 @@ class LocalSearcher(object):
                     continue
                 for cfidx, fval in enumerate(cfeats):
                     if ((framenos[cfidx] == start_frame) and
-                        (framenos[cfidx] == end_frame)):
+                            (framenos[cfidx] == end_frame)):
                         # then it's already been measured
                         continue
                     self.stats[featName].push(fval)
         elif (self.use_best_data and
-              (best_frameno != start_frame) and
-              (best_frameno != end_frame)):
+                  (best_frameno != start_frame) and
+                  (best_frameno != end_frame)):
             # save the data from the best identified thumb
             for featName, featVal in best_feat_dict.iteritems():
                 self.stats[featName].push(featVal)
 
         _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
                     ' is %i with interp score %.3f and with feature score '
-                    '%.3f')%(start_frame,
-                            start_score, end_frame, end_score, best_frameno,
-                            framescore, np.max(comb)))
+                    '%.3f') % (start_frame,
+                               start_score, end_frame, end_score, best_frameno,
+                               framescore, np.max(comb)))
         # the selected frame (whatever it may be) will be assigned
         # the score equal to mean of its boundary frames.
         # push the frame into the results object. Ensure that the analysis
@@ -1342,7 +1348,7 @@ class LocalSearcher(object):
         variance, mean frame xdiff, etc.
         '''
         frames = self.get_seq_frames(
-                    [frameno, frameno + self.local_search_step])
+                [frameno, frameno + self.local_search_step])
         if frames is None:
             # uh-oh, something went wrong! Update the knowledge state of the
             # search algo with the knowledge that the frame is bad.
@@ -1358,7 +1364,7 @@ class LocalSearcher(object):
         # update the knowledge about its variance
         self.col_stat.push(frames[0])
         self.stats['score'].push(frame_score)
-        _log.debug('Took sample at %i, score is %.3f'%(frameno, frame_score))
+        _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
         # update the search algo's knowledge
         self.search_algo.update(frameno, frame_score)
 
@@ -1383,7 +1389,7 @@ class LocalSearcher(object):
             _log.debug('Interval cannot be admitted to results')
         _log.debug('Placing rejected interval into queue')
         heapq.heappush(self._queue, (-mean_score, (start_frame, end_frame,
-                                           start_score, end_score)))
+                                                   start_score, end_score)))
         return False
 
     def _step(self):
@@ -1396,13 +1402,13 @@ class LocalSearcher(object):
                 self._take_sample(meta)
             except Exception as e:
                 _log.exception(('Problem obtaining sample of %s! '
-                                'Error: %s')%(str(meta), e))
+                                'Error: %s') % (str(meta), e))
         else:
             try:
                 self._conduct_local_search(*meta)
             except Exception as e:
                 _log.exception(('Problem conducting local search of %s! '
-                                'Error: %s')%(str(meta), e))
+                                'Error: %s') % (str(meta), e))
         return True
 
     def _update_color_stats(self, images):
@@ -1415,7 +1421,7 @@ class LocalSearcher(object):
             dists.append(i.dist(j))
         self._tot_colorname_val[0] = np.sum(dists)
         self._tot_colorname_val[1] = len(dists)
-        self._colorname_stat = (self._tot_colorname_val[0] * 1./
+        self._colorname_stat = (self._tot_colorname_val[0] * 1. /
                                 self._tot_colorname_val[1])
 
     def _mix(self):
@@ -1423,15 +1429,15 @@ class LocalSearcher(object):
         'mix' takes a number of equispaced samples from the video. This is
         inspired from the notion of mixing for a Markov chain.
         '''
-        _log.info('Mixing before search begins for %i frames'%(
-                                                    self.mixing_samples))
+        _log.info('Mixing before search begins for %i frames' % (
+            self.mixing_samples))
         num_frames = self.mixing_samples
         samples = np.linspace(0, self.num_frames,
-                              self.mixing_samples+2).astype(int)
-        samples = samples[1:-1] # trim off ends
+                              self.mixing_samples + 2).astype(int)
+        samples = samples[1:-1]  # trim off ends
         samples = [self.search_algo.get_nearest(x) for x in samples]
         samples = list(np.unique(samples))
-        _log.info('Taking %i initial samples'%(len(samples)))
+        _log.info('Taking %i initial samples' % (len(samples)))
         # we need to be able to compute the SAD, so we need to
         # also insert local search steps
         for frameno in samples:
@@ -1440,12 +1446,12 @@ class LocalSearcher(object):
     def _get_frame(self, f):
         try:
             more_data, self.cur_frame = pycvutils.seek_video(
-                                        self.video, f,
-                                        cur_frame=self.cur_frame)
+                    self.video, f,
+                    cur_frame=self.cur_frame)
             if not more_data:
                 if self.cur_frame is None:
                     raise model.errors.VideoReadError(
-                        "Could not read the video")
+                            "Could not read the video")
             more_data, frame = self.video.read()
         except model.errors.VideoReadError:
             statemon.state.increment('cv_video_read_error')
@@ -1456,7 +1462,8 @@ class LocalSearcher(object):
             statemon.state.increment('video_processing_error')
             frame = None
         return frame
-    #-------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
     # OBTAINING FRAMES FROM THE VIDEO
     def get_seq_frames(self, framenos):
         '''
@@ -1481,8 +1488,8 @@ class LocalSearcher(object):
         Obtains a region from the video.
         '''
         frame_idxs = [start]
-        for i in range(num-1):
-            frame_idxs.append(frame_idxs[-1]+step)
+        for i in range(num - 1):
+            frame_idxs.append(frame_idxs[-1] + step)
         frames = self.get_seq_frames(frame_idxs)
         return frames
 
@@ -1500,7 +1507,7 @@ class LocalSearcher(object):
         return frames, frameno
 
     # END OBTAINING FRAMES FROM THE VIDEO
-    #-------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
     def __getstate__(self):
         self._reset()
