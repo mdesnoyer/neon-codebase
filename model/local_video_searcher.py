@@ -1,9 +1,133 @@
 """
 ==============================================================================
-New video searcher. Implements:
-    - local search (to circumvent closed-eyes, blurry, etc...)
-    - Metropolis-Hastings sampling
-    - Inverse filter / score order (3x speedup)
+Local Video Searcher
+
+Nick Dufour
+12/15/2015
+==============================================================================
+OVERVIEW......................................................................
+    
+    The local searcher is the next iteration of the video search, which makes
+a number of changes in addition to "local search." This is a brief outline of
+how the search proceeds:
+
+(1) The video is partitioned into "search frames"
+(2) Samples from the video are obtained via the Metropolis-Hastings Monte
+    Carlo search. 
+(3) The function either executes a sampling or a local search.
+    (3a)    Sampling occurs if a local search cannot be conducted. The frame
+            is extracted, and the features are added to the set of statistics
+            that consistute the algorithms knowledge of the video so far.
+    (3b)    A local search can be conducted, at which point some number of
+            equispaced samples are taken. The features are extracted, and then
+            the best is valence scored. It is then potentially added to the
+            results list.
+
+==============================================================================
+LOCAL SEARCH..................................................................
+
+    In local search, a region of the video bounded on either side by a search
+frame is partitioned into equispaced samples. For each sample, the features
+are extracted and combined according to the combiner function or object
+specified into a combined score. The sample frame with the maximal combined
+score is then assessed in terms of valence. If the valence is sufficiently
+high, it is submitted to the results object to determine if it can replace
+any of the current top thumbnails.
+
+    Regions are locally searched if (a) both sides of the region (which are
+search frames) have been sampled and (b) if the estimated score of the region
+is sufficiently high (by averaging the score of the search frames). 
+
+==============================================================================
+FEATURE EXTRACTION............................................................
+
+    Feature extraction is performed by regional feature generators. Some
+features, like the SAD ("Sum of absolute differences") generator, require
+multiple frames to compute. 
+
+==============================================================================
+COMBINER......................................................................
+
+    The combiner accepts and arbitrary feature vector and returns a combined
+score. The nature of this combination is either multiplicative or additive,
+depending on the combiner used. In the multiplicative case, transfer functions
+are used to move the feature vector to the combined score. 
+
+    Feature scores are not directly taken from the output of the feature
+generators. Some frames, dictacted by the arguments to the local search, are
+added to running statistics. Then, for a given frame, the feature scores are
+given by applying a transfer function to that frame's rank (expressed as a
+ratio from 0 to 1, where 1 is the best) in the list of observed statistics.
+
+    Thus the combiner initially accepts a vector of raw feature scores and
+converts it to a vector of ranked feature values. Alternatively, the combiner
+may instead return a vector of anonymous functions that return these ranks
+when evaluated. This is useful as the rank score may not be the same as more
+'knowledge' is added during processing. 
+
+    The scores are further modulated either by transfer functions or by
+feature weights. Further, a weight valence is specified indicating which rank
+is the best one. There are many of these, which are described at the beginning
+of the script. For example, one might be "MAXIMIZE," in which case the closer
+a frame is to the top frame as ranked by a particular feature, the better. 
+
+    In the multiplicative setting, the combined feature score varies from 0
+to 1, and multiplies the final valence score (thereby attenuating it by some
+amount). In the additive setting, the combined feature score over a greater
+domain and is simply added to the valence score after being multiplied by the
+combined score weight.
+
+    Finally, in the multiplicative setting, there is a chance that some
+features are undefined or irrelevant to a particular frame. For instance, if
+a frame has no faces, then its closed eye score will necessarily be zero. Thus
+the combiner may be provided with a dependencies dictionary, which is a 
+dictionary of feature names to [feature_name, lambda] pairs. Given two
+features x and y, and dependencies[x] = [y, lambda_func] the value of x only 
+affects the combined score if lambda_func(y_val) == True.
+
+==============================================================================
+TRANSFER FUNCTIONS............................................................
+
+    In the multiplicative setting, transfer functions are used to map the
+feature value ranks to an appropriate score. They are lambda functions that 
+accept a value x in [0, 1] and map it to a logistic curve. The logistic curve
+can be modulated by specifying a max penalty, whereby the curve is logistic
+and we have:
+                    f(0) = 1 - max penalty
+                    f(1) = 1
+
+    Each feature has its own transfer function. Suppose there are N features
+and feature i value v_i has transfer function f_i and max penalty 0.2. Then
+the final combined score of an arbitrary image x with valence score v will be
+
+    final score = v * f_1(v_1) * ... * f_i(v_i) * ... * f_N(v_N)
+
+if v_i = 0, then this effectively becomes 
+
+    final score = v * f_1(v_1) * ... * (1 - 0.2) * ... * f_N(v_N)
+                = v * f_1(v_1) * ... * (    0.8) * ... * f_N(v_N)
+
+hence this feature can reduce the combined score by a factor of (at most) 0.8.
+It follows that larger max penalties mean that this feature has greater
+importance, since the final score is penalized more if a given frame is ranked
+poorly in terms of that feature. 
+
+==============================================================================
+ADDITITIONAL NOTES............................................................
+
+    Replicate images are prevented in a piecewise manner from entering the top
+N thumbnails if the fail certain tests using they are not sufficiently 'far'
+away from the other thumbnails (excluding the one the thumbnail would replace)
+where 'far' is the pairwise Jensen-Shannon divergence of the two ColorName
+histograms.
+    
+    Frames are sampled randomly from a distribution governed by the knowledge
+of the searcher over the video. This is performed by Metropolis-Hastings
+search, where frames are more likely to be sampled if they are between other
+high scoring frames. This is not strictly a 'true' metropolist-hastings
+search, I just adopted the methodology of sampling from an uncomputable 
+distribution.  
+
 ==============================================================================
 NOTES:
 This no longer inherits from the VideoSearcher() object, I'm not
