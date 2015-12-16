@@ -58,12 +58,13 @@ class RegionFeatureGenerator(FeatureGenerator):
     replicates the functionality of FeatureGenerator but over
     a list of images
     '''
-    def __init__(self):
+    def __init__(self, max_height=None, crop_frac=None, thresh=None):
         super(RegionFeatureGenerator, self).__init__()
         self.__version__ = 2
-        self.max_height = None
-        self.crop_frac = None
-        self.thresh = None
+        self.max_height = max_height
+        self.crop_frac = crop_frac
+        self.thresh = thresh
+        self._get_prep()
 
     def _process_images(self, images, fonly):
         '''
@@ -189,11 +190,9 @@ class BlurGenerator(RegionFeatureGenerator):
     '''
     def __init__(self, max_height=512, crop_frac=[.125, .125, .125, .125],
                  thresh=99.):
-        super(BlurGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
-        self.thresh = thresh
+        super(BlurGenerator, self).__init__(max_height=max_height,
+                                            crop_frac=crop_frac,
+                                            thresh=thresh)
 
     def _feat_calc(self, image):
         '''
@@ -216,10 +215,8 @@ class SADGenerator(RegionFeatureGenerator):
     and -2 to -1, respectively
     '''
     def __init__(self, max_height=512, crop_frac=[0.,0.,0.25,0.]):
-        super(SADGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(SADGenerator, self).__init__(max_height=max_height,
+                                            crop_frac=crop_frac)
 
     def generate_many(self, images, fonly=False):
         images = self._process_images(images, fonly)
@@ -396,10 +393,8 @@ class VibranceGenerator(RegionFeatureGenerator):
     Returns the mean "vibrance" (average of saturation + value) of an image.
     '''
     def __init__(self, max_height=480, crop_frac=None):
-        super(VibranceGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(VibranceGenerator, self).__init__(max_height=max_height,
+                                                crop_frac=crop_frac)
 
     def _feat_calc(self, image):
         # check to see if the image is black and white. if so, its vibrance
@@ -420,10 +415,8 @@ class BrightnessGenerator(RegionFeatureGenerator):
     Returns the average brightness of an image.
     '''
     def __init__(self, max_height=480, crop_frac=None):
-        super(BrightnessGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(BrightnessGenerator, self).__init__(max_height=max_height,
+                                                  crop_frac=crop_frac)
 
     def _feat_calc(self, image):
         if len(image.shape) < 3:
@@ -441,10 +434,8 @@ class SaturationGenerator(RegionFeatureGenerator):
     Returns the average brightness of an image.
     '''
     def __init__(self, max_height=480, crop_frac=None):
-        super(SaturationGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(SaturationGenerator, self).__init__(max_height=max_height,
+                                                  crop_frac=crop_frac)
 
     def _feat_calc(self, image):
         if len(image.shape) < 3:
@@ -457,41 +448,37 @@ class SaturationGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'saturation'
 
-class TextGenerator(RegionFeatureGenerator):
-    '''
-    New implementation, which relies on MSER
-    '''
-    def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
-        super(TextGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
-        self._max_variation = max_variation
-        self.mser = cv2.MSER(_max_variation=self._max_variation)
+# class TextGenerator(RegionFeatureGenerator):
+#     '''
+#     New implementation, which relies on MSER
+#     '''
+#     def __init__(self, max_height=480, crop_frac=None, max_variation=0.05):
+#         super(TextGenerator, self).__init__(max_height=max_height,
+#                                             crop_frac=crop_frac)
+#         self._max_variation = max_variation
+#         self.mser = cv2.MSER(_max_variation=self._max_variation)
 
-    def __getstate__(self):
-        self.mser = None
-        return self.__dict__.copy()
+#     def __getstate__(self):
+#         self.mser = None
+#         return self.__dict__.copy()
 
-    def _feat_calc(self, img):
-        '''quantifies the amount of text in an image (approx) by area'''
-        regions = self.mser.detectRegions(img, None)
-        area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
-        area /= (1. * img.shape[0] * img.shape[1])
-        return area
+#     def _feat_calc(self, img):
+#         '''quantifies the amount of text in an image (approx) by area'''
+#         regions = self.mser.detectRegions(img, None)
+#         area = np.sum([cv2.contourArea(x.reshape(-1, 1, 2)) for x in regions])
+#         area /= (1. * img.shape[0] * img.shape[1])
+#         return area
 
-    def get_feat_name(self):
-        return 'text'
+#     def get_feat_name(self):
+#         return 'text'
 
 class EntropyGenerator(RegionFeatureGenerator):
     '''
     Returns the per-image maximum channelwise entropy.
     '''
     def __init__(self, max_height=512, crop_frac=None):
-        super(EntropyGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(EntropyGenerator, self).__init__(max_height=max_height,
+                                               crop_frac=crop_frac)
 
     def _feat_calc(self, img):
         gen_hist = lambda img, i: cv2.calcHist([img], [i], None, [256],
@@ -506,35 +493,33 @@ class EntropyGenerator(RegionFeatureGenerator):
     def get_feat_name(self):
         return 'entropy'
 
-class TextGeneratorSlow(RegionFeatureGenerator):
-    '''
-    Returns the quantity of text per frame given a sequence
-    of frames.
+# class TextGeneratorSlow(RegionFeatureGenerator):
+#     '''
+#     Returns the quantity of text per frame given a sequence
+#     of frames.
 
-    Unlike the normal text filter, this does not chop off the
-    bottom quadrant (at least, not be default)
-    '''
-    def __init__(self, max_height=480, crop_frac=None):
-        super(TextGeneratorSlow, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+#     Unlike the normal text filter, this does not chop off the
+#     bottom quadrant (at least, not be default)
+#     '''
+#     def __init__(self, max_height=480, crop_frac=None):
+#         super(TextGeneratorSlow, self).__init__(max_height=max_height,
+#                                                 crop_frac=crop_frac)
 
-    def generate_many(self, images, fonly=False):
-        images = list(images)
-        if fonly:
-            images = images[:1]
-        feat_vec = []
-        for img in images:
-            img = self.prep(img)
-            text_image = TextDetectionPy.TextDetection(img)
-            score = (float(np.count_nonzero(text_image)) /
-                (text_image.shape[0] * text_image.shape[1]))
-            feat_vec.append(score)
-        return np.array(feat_vec)
+#     def generate_many(self, images, fonly=False):
+#         images = list(images)
+#         if fonly:
+#             images = images[:1]
+#         feat_vec = []
+#         for img in images:
+#             img = self.prep(img)
+#             text_image = TextDetectionPy.TextDetection(img)
+#             score = (float(np.count_nonzero(text_image)) /
+#                 (text_image.shape[0] * text_image.shape[1]))
+#             feat_vec.append(score)
+#         return np.array(feat_vec)
 
-    def get_feat_name(self):
-        return 'text'
+#     def get_feat_name(self):
+#         return 'text'
 
 class PixelVarGenerator(RegionFeatureGenerator):
     '''
@@ -542,10 +527,8 @@ class PixelVarGenerator(RegionFeatureGenerator):
     every image in a sequence
     '''
     def __init__(self, max_height=480, crop_frac=None):
-        super(PixelVarGenerator, self).__init__()
-        self.max_height = max_height
-        self.crop_frac = crop_frac
-        self._get_prep()
+        super(PixelVarGenerator, self).__init__(max_height=max_height,
+                                                crop_frac=crop_frac)
 
     def _feat_calc(self, image):
         return np.max(np.var(img,(0, 1)))
