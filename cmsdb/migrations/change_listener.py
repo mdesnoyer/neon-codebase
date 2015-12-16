@@ -48,7 +48,7 @@ def subscribe_to_db_changes():
         def modify_me(x): 
             x.__dict__ = obj.__dict__
         if op == 'set': 
-            obj.modify(obj.api_key, obj.i_id, modify_me) 
+            yield obj.modify(obj.api_key, obj.i_id, modify_me, async=True) 
         options._set('cmsdb.neondata.wants_postgres', 0)
 
     neondata.NeonUserAccount.subscribe_to_changes(change_handler_normal)
