@@ -1274,11 +1274,11 @@ class LocalSearcher(object):
                                     self.col_stat.percentile(
                                             100. / self.n_thumbs))
         self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
-                                   max_rejectable=f_max_var_rej,
-                                   feat_score_weight=self._feat_score_weight,
-                                   adapt_improve=self.adapt_improve,
-                                   max_variety=self.max_variety,
-                                   combination_function=self.combiner.result_combine)
+                           max_rejectable=f_max_var_rej,
+                           feat_score_weight=self._feat_score_weight,
+                           adapt_improve=self.adapt_improve,
+                           max_variety=self.max_variety,
+                           combination_function=self.combiner.result_combine)
         # maintain results as:
         # (score, rtuple, frameno, colorHist)
         #
