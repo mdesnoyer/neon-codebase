@@ -843,8 +843,8 @@ class ResultsList(object):
                                if x._defined])
         cur_comb_str = ' '.join(['%.3f' % x.comb_score for x in self.results
                                  if x._defined])
-        _log.info('Current feat scores for top thumbs: ' + cur_sc_str)
-        _log.info('Current comb scores for top thumbs: ' + cur_comb_str)
+        _log.debug('Current feat scores for top thumbs: ' + cur_sc_str)
+        _log.debug('Current comb scores for top thumbs: ' + cur_comb_str)
         _log.debug('TESTING ENABLED: saving %s' % res)
         fname = '%04i_' % (self._considered_thumbs)
         fname += '%05i_' % (res.frameno)
