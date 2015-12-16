@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-''' 
+'''
+    Script responsible for moving everything in our Redis store to 
+       Postgres on Amazon RDS  
 ''' 
 import os.path
 import sys
@@ -11,22 +13,11 @@ from cmsdb import neondata
 from contextlib import closing
 import logging
 import psycopg2
-from subprocess import call
-import tornado.httpserver
-import tornado.ioloop
-import tornado.web
-import tornado.escape
-import tornado.gen
-import tornado.httpclient
 import utils
 import utils.neon
 from utils.options import define, options
 
 _log = logging.getLogger(__name__)
-
-#define("pg_db_name", default="cmsdb", type=str, help="PG Database Name")
-#define("pg_db_user", default="pgadmin", type=str, help="PG Database User")
-#define("pg_db_port", default=5432, type=int, help="PG Database Port")
 
 def move_abstract_integrations(): 
     ''' 

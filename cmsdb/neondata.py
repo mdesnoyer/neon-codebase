@@ -1719,14 +1719,15 @@ class StoredObject(object):
                                 VALUES('%s', '%s')" % (obj._baseclass_name().lower(), 
                                                        obj.to_json(), 
                                                        obj._baseclass_name())
+                       sql_statements.append(query) 
                    elif obj is not None and obj != original_object:
-                        obj.updated = str(datetime.datetime.utcnow())
-                        query = "UPDATE %s \
-                                 SET _data = '%s' \
-                                 WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), 
-                                                                obj.to_json(), 
-                                                                key) 
-                   sql_statements.append(query) 
+                       obj.updated = str(datetime.datetime.utcnow())
+                       query = "UPDATE %s \
+                                SET _data = '%s' \
+                                WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), 
+                                                               obj.to_json(), 
+                                                               key) 
+                       sql_statements.append(query) 
     
                 cursor = yield conn.transaction(sql_statements)
                 db.return_connection(conn)
