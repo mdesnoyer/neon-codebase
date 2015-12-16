@@ -480,14 +480,14 @@ class EntropyGenerator(RegionFeatureGenerator):
         super(EntropyGenerator, self).__init__(max_height=max_height,
                                                crop_frac=crop_frac)
 
-    def _feat_calc(self, img):
-        gen_hist = lambda img, i: cv2.calcHist([img], [i], None, [256],
+    def _feat_calc(self, image):
+        gen_hist = lambda image, i: cv2.calcHist([image], [i], None, [256],
                                                [0, 256])
-        if (len(img.shape) < 3):
+        if (len(image.shape) < 3):
             rng = [0]
         else:
-            rng = range(img.shape[-1])
-        entr = [entropy(gen_hist(img, i))[0] for i in rng]
+            rng = range(image.shape[-1])
+        entr = [entropy(gen_hist(image, i))[0] for i in rng]
         return np.max(entr)
 
     def get_feat_name(self):
@@ -531,7 +531,7 @@ class PixelVarGenerator(RegionFeatureGenerator):
                                                 crop_frac=crop_frac)
 
     def _feat_calc(self, image):
-        return np.max(np.var(img,(0, 1)))
+        return np.max(np.var(image,(0, 1)))
 
     def get_feat_name(self):
         return 'pixvar'
