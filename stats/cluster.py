@@ -463,7 +463,7 @@ class Cluster():
         wait_count = 0
         while (emrconn.describe_step(self.cluster_id, step_id).status.state in
                ['PENDING', 'RUNNING']):
-            if wait_count > 40:
+            if wait_count > 80:
                 _log.error('Timeout when waiting for EMR to send the job %s '
                            'to Haddop' % step_id)
                 _log.error('stderr was:\n %s' %
