@@ -1367,20 +1367,15 @@ class StoredObject(object):
     def to_json(self):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.to_dict())
-
+    
     def get_json_data(self):
         '''
             for postgres we only want the _data field, since we 
             have a column that is named _data we do not want _data->_data
+
+            override this if you need something custom to get _data
         '''
-        try:  
-            return json.dumps(self.to_dict()['_data']) 
-        except TypeError:
-            try: 
-                return json.dumps(json.loads(self.to_json())['_data'])
-            except TypeError: 
-                return json.dumps(self, default=lambda o: o.__dict__) 
-        _log.error('Unable to parse the json for postgres entry') 
+        return json.dumps(self.to_dict()['_data']) 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3049,7 +3044,9 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return CDNHostingMetadataList.__name__
-
+    
+    def get_json_data(self):
+        return json.dumps(json.loads(self.to_json())['_data'])
 
 class CDNHostingMetadata(NamespacedStoredObject):
     '''
