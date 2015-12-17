@@ -67,7 +67,8 @@ def move_neon_user_accounts():
     accts = neondata.NeonUserAccount.get_all()
     options._set('cmsdb.neondata.wants_postgres', 1) 
     for acct in accts:
-        try: 
+        try:
+            #import pdb; pdb.set_trace() 
             acct.save() 
             api_key = neondata.NeonApiKey(acct.account_id, 
                                           acct.neon_api_key) 
@@ -95,34 +96,71 @@ def move_neon_videos_and_thumbnails():
              VideoStatus
     '''  
     accts = neondata.NeonUserAccount.get_all()
-    for acct in accts: 
-        videos = list(acct.iterate_all_videos())
-        for v in videos:
-            options._set('cmsdb.neondata.wants_postgres', 0) 
-            try: 
+    for acct in accts:
+        #print acct 
+        #import pdb; pdb.set_trace()
+        #videos = list(acct.iterate_all_videos())
+        for v in acct.iterate_all_videos():
+            options._set('cmsdb.neondata.wants_postgres', 0)
+            try:
                 tnails = neondata.ThumbnailMetadata.get_many(v.thumbnail_ids)
-                api_request = neondata.NeonApiRequest.get(v.job_id, acct.neon_api_key)
+                if v.job_id: 
+                    api_request = neondata.NeonApiRequest.get(v.job_id, acct.neon_api_key)
                 tnail_statuses = neondata.ThumbnailStatus.get_many(v.thumbnail_ids)
+                tnail_serving_urls = neondata.ThumbnailServingURLs.get_many(v.thumbnail_ids) 
                 video_status = neondata.VideoStatus.get(v.key)  
                 options._set('cmsdb.neondata.wants_postgres', 1) 
-                for t in tnails: 
-                    t.save() 
-                for ts in tnail_statuses: 
-                    ts.save() 
-                video_status.save() 
-                v.save()
-                api_request.save() 
+                for t in tnails:
+                    try:  
+                        if t: 
+                            t.save() 
+                    except Exception as e: 
+                        _log.exception('Error saving thumbnail %s to postgres %s' % (t,e)) 
+                        pass 
+                for ts in tnail_statuses:
+                    try: 
+                        if ts:  
+                            ts.save() 
+                    except Exception as e: 
+                        _log.exception('Error saving thumbnail_status %s to postgres %s' % (ts,e)) 
+                        pass 
+                for tsu in tnail_serving_urls:
+                    try: 
+                        if tsu:  
+                            tsu.save() 
+                    except Exception as e:
+                        _log.exception('Error saving thumbnail_serving_url %s to postgres %s' % (tsu,e)) 
+                        pass
+                try:  
+                    video_status.save() 
+                except Exception as e: 
+                    _log.exception('Error saving video_status %s to postgres %s' % (video_status,e)) 
+                    pass
+                
+                try: 
+                    v.save()
+                except Exception as e:
+                    _log.exception('Error saving video %s to postgres %s' % (v,e)) 
+                    pass
+
+                try: 
+                    api_request.save() 
+                except Exception as e: 
+                    _log.exception('Error saving api_request %s to postgres %s' % (api_request,e)) 
+                    pass
+
+                options._set('cmsdb.neondata.wants_postgres', 0)
             except Exception as e: 
-                _log.exception('Error saving video %s to postgres %s' % (v,e)) 
+                _log.exception('Error pulling information for video %s while saving to postgres %s' % (v,e)) 
                 pass
 
 def main():
-    move_neon_user_accounts()
+    #move_neon_user_accounts()
     move_neon_videos_and_thumbnails()
-    move_abstract_integrations()
-    move_abstract_platforms()
-    move_cdn_hosting_metadata_lists()
-    move_experiment_strategies()
+    #move_abstract_integrations()
+    #move_abstract_platforms()
+    #move_cdn_hosting_metadata_lists()
+    #move_experiment_strategies()
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

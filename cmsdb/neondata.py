@@ -333,7 +333,21 @@ class PostgresDB(tornado.web.RequestHandler):
                 raise tornado.gen.Return(conn)
             else: 
                 _log.error('Unable to get a connection to Postgres Database')
-                raise psycopg2.OperationalError('Unable to get a connection') 
+                raise psycopg2.OperationalError('Unable to get a connection')
+
+        def get_insert_json_query_tuple(self, obj):
+            query = "INSERT INTO " + obj._baseclass_name().lower() + \
+                     " (_data, _type) " \
+                     " VALUES(%s, %s)"  
+            params = (obj.get_json_data(), obj.__class__.__name__)
+            return (query, params)
+
+        def get_update_json_query_tuple(self, obj):
+            query = "UPDATE " + obj._baseclass_name().lower() + \
+                    " SET _data = %s " \
+                    " WHERE _data->>'key' = %s" 
+            params = (obj.get_json_data(), obj.key)   
+            return (query, params)
     
     instance = None 
     
@@ -1354,6 +1368,12 @@ class StoredObject(object):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.to_dict())
 
+    def get_json_data(self):
+        try:  
+            return json.dumps(self.to_dict()['_data']) 
+        except TypeError:
+            return json.dumps(self, default=lambda o: o.__dict__) 
+
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(self):
@@ -1369,22 +1389,14 @@ class StoredObject(object):
             rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
-            query = "INSERT INTO %s (_data, _type) \
-                     VALUES('%s', '%s')" % (self._baseclass_name().lower(), 
-                                            value, 
-                                            self._baseclass_name())
-            
+            query_tuple = db.get_insert_json_query_tuple(self)
             try:  
-                result = yield conn.execute(query)
+                result = yield conn.execute(query_tuple[0], query_tuple[1])
             except psycopg2.IntegrityError as e:  
                 # since upsert is not available until postgres 9.5 
                 # we need to do an update here
-                query = "UPDATE %s \
-                         SET _data = '%s' \
-                         WHERE _data->>'key' = '%s'" % (self._baseclass_name().lower(), 
-                                                        value, 
-                                                        self.account_id)
-                result = yield conn.execute(query) 
+                query_tuple = db.get_update_json_query_tuple(self)
+                result = yield conn.execute(query_tuple[0], query_tuple[1]) 
             except Exception as e: 
                 rv = False
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
@@ -1715,19 +1727,12 @@ class StoredObject(object):
                    original_object = orig_objects.get(key, None)
                    if obj is not None and original_object is None: 
                        obj.updated = str(datetime.datetime.utcnow())
-                       query = "INSERT INTO %s (_data, _type) \
-                                VALUES('%s', '%s')" % (obj._baseclass_name().lower(), 
-                                                       obj.to_json(), 
-                                                       obj._baseclass_name())
-                       sql_statements.append(query) 
+                       query_tuple = db.get_insert_json_query_tuple(obj)
+                       sql_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
                        obj.updated = str(datetime.datetime.utcnow())
-                       query = "UPDATE %s \
-                                SET _data = '%s' \
-                                WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), 
-                                                               obj.to_json(), 
-                                                               key) 
-                       sql_statements.append(query) 
+                       query_tuple = db.get_update_json_query_tuple(obj)
+                       sql_statements.append(query_tuple) 
     
                 cursor = yield conn.transaction(sql_statements)
                 db.return_connection(conn)
@@ -1793,11 +1798,8 @@ class StoredObject(object):
             conn = yield db.get_connection()
             sql_statements = [] 
             for obj in objects:
-                query = "INSERT INTO %s (_data, _type) \
-                         VALUES('%s', '%s')" % (cls.__name__.lower(), 
-                                                obj.to_json(), 
-                                                cls.__name__)
-                sql_statements.append(query)
+                query_tuple = db.get_insert_json_query_tuple(obj)
+                sql_statements.append(query_tuple)
             try:  
                 cursor = yield conn.transaction(sql_statements)
             except psycopg2.IntegrityError as e: 
@@ -2525,7 +2527,7 @@ class User(NamespacedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return User.__name__
+        return 'users' 
         
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
@@ -4212,12 +4214,14 @@ class NeonApiRequest(NamespacedStoredObject):
         #TODO:validate supported methods
 
     @classmethod
-    def get(cls, job_id, api_key, log_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, job_id, api_key, log_missing=True):
         ''' get instance '''
-        return super(NeonApiRequest, cls).get(
-            cls._generate_subkey(job_id, api_key),
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).get(cls._generate_subkey(job_id, api_key),
+                                                  log_missing=log_missing,
+                                                  async=True) 
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_many(cls, keys, log_missing=True, callback=None):

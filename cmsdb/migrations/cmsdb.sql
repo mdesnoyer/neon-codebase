@@ -208,6 +208,18 @@ CREATE TABLE thumbnailstatus (
 ALTER TABLE thumbnailstatus OWNER TO pgadmin;
 
 --
+-- Name: user; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE users (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE users OWNER TO pgadmin;
+
+--
 -- Name: videometadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -341,6 +353,13 @@ COPY thumbnailservingurls (_data, _type) FROM stdin;
 COPY thumbnailstatus (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY users (_data, _type) FROM stdin;
+\.
+
 
 --
 -- Data for Name: videometadata; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -362,10 +381,9 @@ COPY videostatus (_data, _type) FROM stdin;
 -- Name: account_id; Type: INDEX; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
-CREATE UNIQUE INDEX account_id ON neonuseraccount USING btree (((_data ->> 'account_id'::text)));
-CREATE UNIQUE INDEX api_key ON neonuseraccount USING btree (((_data ->> 'api_key'::text)));
-CREATE UNIQUE INDEX video_id ON thumbnailmetadata USING btree (((_data ->> 'video_id'::text)));
-CREATE UNIQUE INDEX video_key ON videometadata USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX thumbnailmetadata_key ON thumbnailmetadata USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
 
 --
 -- Name: public; Type: ACL; Schema: -; Owner: pgadmin
@@ -467,6 +485,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER thumbnailstatus_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON thumbnailstatus
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER users_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON users
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 CREATE TRIGGER videometadata_notify_trig
