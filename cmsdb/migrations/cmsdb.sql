@@ -208,6 +208,18 @@ CREATE TABLE thumbnailstatus (
 ALTER TABLE thumbnailstatus OWNER TO pgadmin;
 
 --
+-- Name: trackeraccountidmapper; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE trackeraccountidmapper (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE thumbnailstatus OWNER TO pgadmin;
+
+--
 -- Name: user; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -242,6 +254,18 @@ CREATE TABLE videostatus (
 
 
 ALTER TABLE videostatus OWNER TO pgadmin;
+
+--
+-- Name: youtubeplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE youtubeplatform (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE youtubeplatform OWNER TO pgadmin;
 
 -- Data for Name: abstractintegration; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
@@ -354,6 +378,13 @@ COPY thumbnailstatus (_data, _type) FROM stdin;
 \.
 
 --
+-- Data for Name: trackeraccountidmapper; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY trackeraccountidmapper (_data, _type) FROM stdin;
+\.
+
+--
 -- Data for Name: users; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 
@@ -374,6 +405,13 @@ COPY videometadata (_data, _type) FROM stdin;
 --
 
 COPY videostatus (_data, _type) FROM stdin;
+\.
+
+--
+-- Data for Name: youtubeplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY youtubeplatform (_data, _type) FROM stdin;
 \.
 
 
@@ -487,6 +525,11 @@ AFTER INSERT OR UPDATE OR DELETE
 ON thumbnailstatus
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
+CREATE TRIGGER trackeraccountidmapper_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON trackeraccountidmapper
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
 CREATE TRIGGER users_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON users
@@ -500,6 +543,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER videostatus_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON videostatus
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER youtubeplatform_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON youtubeplatform
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

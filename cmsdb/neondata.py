@@ -28,6 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import code
 import collections
+from collections import OrderedDict 
 import concurrent.futures
 import contextlib
 import copy
@@ -219,28 +220,27 @@ class PostgresDB(tornado.web.RequestHandler):
             however, since we have optional_sync (which creates a new ioloop) 
             we have to manage how the pools/connections are created.  
             '''
-            # grab the io loop
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
+            
             def _get_momoko_pool(size=1,
-                                 auto_shrink=True, 
-                                 cursor_factory=psycopg2.extras.RealDictCursor):
+                                 auto_shrink=True):
                 current_io_loop = tornado.ioloop.IOLoop.current()
                 pool = momoko.Pool(dsn='dbname=%s user=%s host=%s port=%s password=%s' % (self.name, self.user, self.host, self.port, self.password), 
                                    ioloop=current_io_loop, 
                                    size=size, 
                                    max_size=options.pool_size,
                                    auto_shrink=auto_shrink,  
-                                   cursor_factory=cursor_factory)
+                                   cursor_factory=psycopg2.extras.RealDictCursor)
                 return pool
 
-            def _get_momoko_db(cursor_factory=psycopg2.extras.RealDictCursor): 
+            def _get_momoko_db(): 
                 current_io_loop = tornado.ioloop.IOLoop.current()
                 conn = momoko.Connection(dsn='dbname=%s user=%s host=%s port=%s password=%s' % (self.name, self.user, self.host, self.port, self.password),
                                          ioloop=current_io_loop,
-                                         cursor_factory=cursor_factory)
+                                         cursor_factory=psycopg2.extras.RealDictCursor)
                 return conn
 
             if dict_item is None: 
@@ -291,7 +291,6 @@ class PostgresDB(tornado.web.RequestHandler):
                     raise 
             raise tornado.gen.Return(conn)
 
-        @tornado.gen.coroutine
         def return_connection(self, conn): 
             '''
             call this to return connections you are done with 
@@ -1405,7 +1404,7 @@ class StoredObject(object):
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
                 statemon.state.increment('postgres_unknown_errors')
 
-            yield db.return_connection(conn)
+            db.return_connection(conn)
             raise tornado.gen.Return(rv)
         else: 
             db_connection = DBConnection.get(self)
@@ -1597,25 +1596,28 @@ class StoredObject(object):
 
         if options.wants_postgres:
             rv = []
-            obj_map = {}  
+            obj_map = OrderedDict() 
             db = PostgresDB()
             conn = yield db.get_connection()
+               
             query = "SELECT _data, _type \
                      FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (cls.__name__.lower(), 
+                     WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
 
             cursor = yield conn.execute(query)
+            import pdb; pdb.set_trace()
 
-            def _map_new_results(results): 
+            def _map_new_results(results):
                 for key in keys: 
                     obj_map[key] = None 
                 for result in results:
                     obj_key = result['_data']['key'] 
-                    obj_map[obj_key] = result['_data'] 
+                    #obj_map[obj_key] = result['_data'] 
+                    obj_map[obj_key] = result
  
             def _build_return_items(): 
-                for key, item in obj_map.iteritems(): 
+                for key, item in obj_map.iteritems():
                     if item: 
                         obj = cls._create(key, item) 
                     else:
@@ -1724,12 +1726,14 @@ class StoredObject(object):
             mappings = {}
             orig_objects = {}
             key_sets = collections.defaultdict(list)
+             
             for key in keys:
                 query = "SELECT _data \
                          FROM %s \
                          WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), key)
 
                 cursor = yield conn.execute(query)
+                import pdb; pdb.set_trace()
                 item = cursor.fetchone()
                 if item is None:
                     if create_missing:
@@ -1907,8 +1911,9 @@ class StoredObject(object):
                          WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
                                               key)
                 sql_statements.append(query) 
-            #TODO figure out rv 
+            #TODO figure out rv
             cursor = yield conn.transaction(sql_statements)
+            db.return_connection(conn)  
         else:  
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -2162,10 +2167,12 @@ class NamespacedStoredObject(StoredObject):
     @tornado.gen.coroutine
     def get(cls, key, create_default=False, log_missing=True):
         '''Return the object for a given key.'''
-        return super(NamespacedStoredObject, cls).get(
-            cls.format_key(key),
-            create_default=create_default,
-            log_missing=log_missing)
+        rv = yield super(NamespacedStoredObject, cls).get(
+                         cls.format_key(key),
+                         create_default=create_default,
+                         log_missing=log_missing, 
+                         async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
     @utils.sync.optional_sync
@@ -2175,10 +2182,12 @@ class NamespacedStoredObject(StoredObject):
 
         Each key must be a tuple
         '''
-        return super(NamespacedStoredObject, cls).get_many(
-            [cls.format_key(x) for x in keys],
-            create_default=create_default,
-            log_missing=log_missing)
+        rv = yield super(NamespacedStoredObject, cls).get_many(
+                         [cls.format_key(x) for x in keys],
+                         create_default=create_default,
+                         log_missing=log_missing, 
+                         async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2221,6 +2230,7 @@ class NamespacedStoredObject(StoredObject):
         or just use it synchronously like a normal iterator.
         '''
         keys = yield cls.get_all_keys(async=True)
+        import pdb; pdb.set_trace()
         raise tornado.gen.Return(
             StoredObjectIterator(cls, keys, page_size=max_request_size,
                                  max_results=max_results, skip_missing=True))
@@ -2230,12 +2240,25 @@ class NamespacedStoredObject(StoredObject):
     @tornado.gen.coroutine
     def get_all_keys(cls):
         '''Return all the keys in the database for this object type.'''
-        db_connection = DBConnection.get(cls)
-        raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-            set_name=cls._set_keyname())
+        if options.wants_postgres: 
+            rv = True  
+            db = PostgresDB()
+            conn = yield db.get_connection()
 
-        raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
-                                  x is not None])
+            query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
+            cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+            keys_list = [i[0] for i in cursor.fetchall()]
+            db.return_connection(conn)
+            rv = [x.partition('_')[2] for x in keys_list if
+                                      x is not None]
+
+            raise tornado.gen.Return(rv) 
+        else: 
+            db_connection = DBConnection.get(cls)
+            raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                              set_name=cls._set_keyname())
+            raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
+                                      x is not None])
 
     @classmethod
     @utils.sync.optional_sync
@@ -2782,10 +2805,28 @@ class NeonUserAccount(NamespacedStoredObject):
     @tornado.gen.coroutine
     def get_internal_video_ids(self):
         '''Return the list of internal videos ids for this account.'''
-        db_connection = DBConnection.get(self)
-        vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                      set_name='objset:%s' % self.neon_api_key)
-        raise tornado.gen.Return(list(vids))
+        if options.wants_postgres:
+            rv = True  
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            # right now, we are gonna do this with a LIKE query on the 
+            # indexed key field, however, as data grows it may become 
+            # necessary to store account_id/api_key on the object or table : 
+            # index that, and query based on that
+            query = "SELECT _data->>'key' FROM " + VideoMetadata._baseclass_name().lower() + \
+                    " WHERE _data->>'key' LIKE %s" 
+            # what a mess...escaping 'hack' 
+            params = [self.neon_api_key+'%']
+            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+            rv = [i[0] for i in cursor.fetchall()]
+
+            db.return_connection(conn)
+            raise tornado.gen.Return(rv) 
+        else: 
+            db_connection = DBConnection.get(self)
+            vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                          set_name='objset:%s' % self.neon_api_key)
+            raise tornado.gen.Return(list(vids))
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2814,12 +2855,27 @@ class NeonUserAccount(NamespacedStoredObject):
     def get_all_job_keys(self):
         '''Return a list of (job_id, api_key) of all the jobs for this account.
         '''
-        db_connection = DBConnection.get(self)
-        base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                           set_name='objset:request:%s' % 
-                                           self.neon_api_key)
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            base_class_name = NeonApiRequest._baseclass_name().lower()
 
-        raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
+            query = "SELECT _data->>'key' FROM " + base_class_name + \
+                    " WHERE _data->>'key' LIKE %s"
+ 
+            params = [base_class_name+'_'+self.neon_api_key+'_%']
+            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+            tuple_to_list = [i[0] for i in cursor.fetchall()]
+            db.return_connection(conn)
+
+            raise tornado.gen.Return([x.split('_')[:0:-1] for x in tuple_to_list])
+        else:  
+            db_connection = DBConnection.get(self)
+            base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                               set_name='objset:request:%s' % 
+                                               self.neon_api_key)
+
+            raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3553,6 +3609,7 @@ class AbstractPlatform(NamespacedStoredObject):
         yt_keys = yield YoutubePlatform._get_all_keys_impl(async=True)
 
         keys = neon_keys + bc_keys + oo_keys + yt_keys
+        import pdb; pdb.set_trace()
 
         raise tornado.gen.Return(keys)
 
@@ -3561,7 +3618,6 @@ class AbstractPlatform(NamespacedStoredObject):
     @tornado.gen.coroutine
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
-
         raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_') 
                                   for x in keys])
 
@@ -4250,15 +4306,18 @@ class NeonApiRequest(NamespacedStoredObject):
         raise tornado.gen.Return(rv) 
 
     @classmethod
-    def get_many(cls, keys, log_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, keys, log_missing=True):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
         '''
-        return super(NeonApiRequest, cls).get_many(
-            [cls._generate_subkey(*k) for k in keys],
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).get_many(
+                          [cls._generate_subkey(*k) for k in keys],
+                          log_missing=log_missing,
+                          async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_all(cls):
@@ -5185,7 +5244,8 @@ class VideoMetadata(StoredObject):
                 request_idx.append(cur_idx)
             cur_idx += 1
           
-        requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        #requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        requests = yield NeonApiRequest.get_many(request_keys, async=True)  
         for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
         raise tornado.gen.Return(retval)
