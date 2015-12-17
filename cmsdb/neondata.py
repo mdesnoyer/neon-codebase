@@ -1596,7 +1596,8 @@ class StoredObject(object):
             raise tornado.gen.Return([])
 
         if options.wants_postgres:
-            results = [] 
+            rv = []
+            obj_map = {}  
             db = PostgresDB()
             conn = yield db.get_connection()
             query = "SELECT _data, _type \
@@ -1605,18 +1606,37 @@ class StoredObject(object):
                                                     ",".join("'{0}'".format(k) for k in keys))
 
             cursor = yield conn.execute(query)
-            import pdb; pdb.set_trace()
-            for result in cursor:
-                obj = cls._create(result['_data']['key'], result)
-                results.append(obj) 
-            
+
+            def _map_new_results(results): 
+                for key in keys: 
+                    obj_map[key] = None 
+                for result in results:
+                    obj_key = result['_data']['key'] 
+                    obj_map[obj_key] = result['_data'] 
+ 
+            def _build_return_items(): 
+                for key, item in obj_map.iteritems(): 
+                    if item: 
+                        obj = cls._create(key, item) 
+                    else:
+                        if log_missing:
+                            _log.warn('No %s for %s' % (cls.__name__, key))
+                        if create_default:
+                            obj = cls(key)
+                        else:
+                            obj = None
+                    rv.append(obj) 
+                  
+            _map_new_results(cursor.fetchall())
+            _build_return_items() 
             db.return_connection(conn)
-            raise tornado.gen.Return(results)
+
+            raise tornado.gen.Return(rv)
         else: 
             db_connection = DBConnection.get(cls)
     
             def _process(results):
-                mappings = [] 
+                mappings = []
                 for key, item in zip(keys, results):
                     if item:
                         obj = cls._create(key, json.loads(item))
