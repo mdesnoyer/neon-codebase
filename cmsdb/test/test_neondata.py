@@ -58,21 +58,17 @@ import numpy as np
 
 _log = logging.getLogger(__name__)
 
-class TestNeondata(test_utils.neontest.AsyncTestCase):
-    '''
-    Neondata class tester
-    '''
+class TestNeondataDataSpecific(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        super(TestNeondata, self).setUp()
+        super(TestNeondataDataSpecific, self).setUp()
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
         self.maxDiff = 5000
         logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
-        neondata.PubSubConnection.clear_singleton_instance()
         self.redis.stop()
-        super(TestNeondata, self).tearDown()
+        super(TestNeondataDataSpecific, self).tearDown()
 
     def test_neon_api_key(self):
         ''' test api key generation '''
@@ -181,7 +177,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
         found_jobs = list(na.iterate_all_jobs(max_request_size=1))
         self.assertEqual(sorted(found_jobs), sorted(requests1))
-        
 
     @tornado.testing.gen_test
     def test_iterate_all_videos_async(self):
@@ -371,118 +366,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         api_key = NeonApiKey.get_api_key('acct1')
         self.assertEqual(na.neon_api_key, api_key)
 
-    @unittest.skip('TODO(Sunil): add this test')
-    def test_add_platform_with_bad_account_id(self):
-        pass
-    
-    def test_dbconn_singleton(self):
-        bp = BrightcovePlatform('2','3', 'test')
-        self.bp_conn = DBConnection.get(bp)
-
-        bp2 = BrightcovePlatform('12','13','test')
-        self.bp_conn2 = DBConnection.get(bp2)
-
-
-        vm = VideoMetadata('test1', None, None, None,
-                None, None, None, None)
-        self.vm_conn = DBConnection.get(vm)
-
-        vm2 = VideoMetadata('test2', None, None, None, 
-                None, None, None, None)
-        self.vm_conn2 = DBConnection.get(vm2)
-        
-        self.assertEqual(self.bp_conn, self.bp_conn2)
-        self.assertEqual(self.vm_conn, self.vm_conn2)
-
-        self.assertNotEqual(self.bp_conn, self.vm_conn)
-
-    #TODO: Test Async DB Connection
-    
-    def test_db_connection(self):
-        ''' 
-        DB Connection test
-        '''
-        ap = AbstractPlatform('a1', 'i1')
-        db = DBConnection.get(ap)
-        key = "fookey"
-        val = "fooval"
-        self.assertTrue(db.blocking_conn.set(key, val))
-        self.assertEqual(db.blocking_conn.get(key), val)
-        self.assertTrue(db.blocking_conn.delete(key))
-
-    def test_concurrent_requests(self):
-        ''' Make concurrent requests to the db 
-            verify that singleton instance doesnt cause race condition
-        '''
-        def db_operation(key):
-            ''' db op '''
-            resultQ.put(db.blocking_conn.get(key))
-
-        ap = AbstractPlatform('a1', 'i1')
-        db = DBConnection.get(ap)
-        key = "fookey"
-        val = "fooval"*1000
-        nkeys = 100
-        for i in range(nkeys):
-            db.blocking_conn.set(key+"%s"%i, val+"%s"%i)
-       
-        resultQ =  multiprocessing.Queue()
-        threads = []
-        for n in range(nkeys):
-            thread = threading.Thread(target=db_operation, args=(key+"%s"%n,))
-            threads.append(thread)
-            thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        results = []
-        for i in range(nkeys):
-            results.append(resultQ.get())  
-
-        #Make sure that each of the thread retrieved a key
-        #and did not have an exception
-        self.assertTrue(None not in results)
-
-    def test_delete_all_video_related_data(self):
-        # create all video related objects
-        
-        na = NeonUserAccount('ta1')
-        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
-                                       create_missing=True)
-        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
-                                 create_missing=True)
-        na.add_platform(bp)
-        na.add_platform(np)
-        na.save()
-
-        req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
-        i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        tid = i_vid + "_t1"
-        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
-                              None, None, None)
-        vid = VideoMetadata(i_vid, [thumb.key],
-                           'job1', 'v0.mp4', 0, 0, None, '0')
-        req.save()
-        ThumbnailMetadata.save_all([thumb])
-        VideoMetadata.save_all([vid])
-        NeonPlatform.modify(na.neon_api_key, '0',
-                            lambda x: x.add_video('dummyv', 'dummyjob'))
-        np = NeonPlatform.modify(na.neon_api_key, '0',
-                                 lambda x: x.add_video('vid1', 'job1'))
-        np.delete_all_video_related_data('vid1', really_delete_keys=True)
-        
-        # check the keys have been deleted
-        self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
-        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
-        self.assertIsNone(VideoMetadata.get(i_vid))
-
-        # verify account
-        np = NeonPlatform.get(na.neon_api_key, '0')
-        self.assertListEqual(np.get_videos(), [u'dummyv'])
-        
-        #TODO: Add more failure test cases
-
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
         input1.add_serving_url(
@@ -569,65 +452,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                           'http://n3.neon-images.com/fF7/neontnb6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8_w160_h90.jpg')
         self.assertEquals(obj.get_thumbnail_id(),
                           'b6rpyj7bkp2wfn0s4mdt5xc8_caf4beb275ce81ec61347ae57d91dcc8_a7eaead18140903cd4c21d43113f38b8')
-        
-
-    def test_too_many_open_connections_sync(self):
-        self.maxDiff = 10000
-
-        def _get_open_connection_list():
-            fd_list = subprocess.check_output(
-                ['lsof', '-a', '-d0-65535', 
-                 '-p', str(os.getpid())]).split('\n')
-            fd_list = [x.split() for x in fd_list if x]
-            return [x for x in fd_list if 
-                    x[7] == 'TCP' and 'localhost:%d' % self.redis.port in x[8]]
-                
-        
-        # When making calls on various objects, there should only be
-        # one connection per object type to the redis server. We're
-        # just going to make sure that that is the case
-
-        get_func = lambda x: x.get('key')
-        
-        obj_types = [
-            (VideoMetadata('key'), get_func),
-            (ThumbnailMetadata('key'), get_func),
-            (TrackerAccountIDMapper('key'), get_func),
-            (ThumbnailServingURLs('key'), get_func),
-            (ExperimentStrategy('key'), get_func),
-            (NeonUserAccount('key', 'api'),
-             lambda x: x.get('key')),
-            (NeonPlatform('api', '0', 'a'),
-             lambda x: x.get('api', '0')),
-            (BrightcovePlatform('api', 'i1', 'a'),
-             lambda x: x.get('api', 'i1')),
-            (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
-             lambda x: x.get('api', 'i2'))
-             ]
-
-        for obj, read_func in obj_types:
-            # Start by saving the object
-            if isinstance(obj, AbstractPlatform):
-                obj.modify('api', obj.integration_id, lambda x: x,
-                           create_missing=True)
-            else:
-                obj.save()
-
-            # Now find the number of open file descriptors
-            start_fd_list = _get_open_connection_list()
-
-            def nop(x): pass
-
-            # Run the func a bunch of times
-            for i in range(10):
-                read_func(obj)
-
-            # Check the file descriptors
-            end_fd_list = _get_open_connection_list()
-            if len(start_fd_list) != len(end_fd_list):
-                # This will give us more information if it fails
-                self.assertEqual(start_fd_list, end_fd_list)
-
     def test_hosting_metadata(self):
         '''
         Test saving and retrieving CDNHostingMetadataList object
@@ -1076,7 +900,492 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
                 elif key is 'updated':  
                     self.assertLess(value, value_two) 
                 else: 
-                    self.assertEquals(value, value_two) 
+                    self.assertEquals(value, value_two)
+ 
+    @tornado.testing.gen_test
+    def test_creating_list_of_videos_async(self):
+      yield tornado.gen.Task(VideoMetadata('a1_v1').save)
+      yield tornado.gen.Task(VideoMetadata.save_all, [
+        VideoMetadata('a1_v2'),
+        VideoMetadata('a2_v1'),
+        VideoMetadata('a2_v2'),
+        VideoMetadata('a2_v3')])
+      yield tornado.gen.Task(
+        VideoMetadata.modify, 'a2_v4', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(VideoMetadata)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        VideoMetadata('a1_v1')._set_keyname()),
+        ['a1_v1', 'a1_v2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        VideoMetadata('a2_v1')._set_keyname()),
+        ['a2_v1', 'a2_v2', 'a2_v3', 'a2_v4'])
+
+      # Now delete some
+      yield tornado.gen.Task(VideoMetadata.delete_many,
+                             ['a1_v2', 'a2_v2'])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        VideoMetadata('a1_v1')._set_keyname()),
+        ['a1_v1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        VideoMetadata('a2_v1')._set_keyname()),
+        ['a2_v1', 'a2_v3', 'a2_v4'])
+
+    def test_creating_list_of_thumbs_sync(self):
+      ThumbnailMetadata('a1_v1_t1').save()
+      ThumbnailMetadata.save_all([
+        ThumbnailMetadata('a1_v1_t2'),
+        ThumbnailMetadata('a1_v2_t1'),
+        ThumbnailMetadata('a1_v2_t2'),
+        ThumbnailMetadata('a1_v2_t3')])
+      ThumbnailMetadata.modify('a1_v2_t4', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(ThumbnailMetadata)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
+        ['a1_v1_t1', 'a1_v1_t2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
+        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
+
+      # Now delete some
+      ThumbnailMetadata.delete_many(['a1_v1_t2', 'a1_v2_t2'])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
+        ['a1_v1_t1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
+        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
+
+    @tornado.testing.gen_test
+    def test_creating_list_of_thumbs_async(self):
+      yield tornado.gen.Task(ThumbnailMetadata('a1_v1_t1').save)
+      yield tornado.gen.Task(ThumbnailMetadata.save_all, [
+        ThumbnailMetadata('a1_v1_t2'),
+        ThumbnailMetadata('a1_v2_t1'),
+        ThumbnailMetadata('a1_v2_t2'),
+        ThumbnailMetadata('a1_v2_t3')])
+      yield tornado.gen.Task(
+        ThumbnailMetadata.modify, 'a1_v2_t4', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(ThumbnailMetadata)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
+        ['a1_v1_t1', 'a1_v1_t2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
+        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
+
+      # Now delete some
+      yield tornado.gen.Task(ThumbnailMetadata.delete_many,
+                             ['a1_v1_t2', 'a1_v2_t2'])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
+        ['a1_v1_t1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
+        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_requests_sync(self):
+      NeonApiRequest('j1', 'a1').save()
+      NeonApiRequest.save_all([
+        NeonApiRequest('j1', 'a2'),
+        NeonApiRequest('j2', 'a2'),
+        NeonApiRequest('j3', 'a2'),
+        NeonApiRequest('j2', 'a1')])
+      NeonApiRequest.modify('j4', 'a2', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonApiRequest)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1', 'request_a1_j2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
+
+      # Now delete some
+      NeonApiRequest.delete_many([('j2', 'a1'), ('j2', 'a2')])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_requests_async(self):
+      yield tornado.gen.Task(NeonApiRequest('j1', 'a1').save)
+      yield tornado.gen.Task(NeonApiRequest.save_all, [
+        NeonApiRequest('j1', 'a2'),
+        NeonApiRequest('j2', 'a2'),
+        NeonApiRequest('j3', 'a2'),
+        NeonApiRequest('j2', 'a1')])
+      yield tornado.gen.Task(NeonApiRequest.modify,
+                             'j4', 'a2', lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonApiRequest)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1', 'request_a1_j2'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
+
+      # Now delete some
+      yield tornado.gen.Task(NeonApiRequest.delete_many,
+                             [('j2', 'a1'), ('j2', 'a2')])
+
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a1')._set_keyname()),
+        ['request_a1_j1'])
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonApiRequest('j1', 'a2')._set_keyname()),
+        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_namespaced_objects_sync(self):
+      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
+      objs[0].save()
+      NeonUserAccount.save_all(objs[1:3])
+      NeonUserAccount.modify(objs[3].neon_api_key,
+                             lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonUserAccount)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [x.key for x in objs])
+
+      # Now delete some
+      NeonUserAccount.delete_many([x.neon_api_key for x in objs[1:3]])
+      
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [objs[0].key, objs[3].key])
+
+    @tornado.testing.gen_test
+    def test_create_list_of_namespaced_objects_async(self):
+      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
+      yield tornado.gen.Task(objs[0].save)
+      yield tornado.gen.Task(NeonUserAccount.save_all, objs[1:3])
+      yield tornado.gen.Task(NeonUserAccount.modify, 
+                             objs[3].neon_api_key,
+                             lambda x: x, create_missing=True)
+
+      conn = neondata.DBConnection.get(NeonUserAccount)
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [x.key for x in objs])
+
+      # Now delete some
+      yield tornado.gen.Task(NeonUserAccount.delete_many,
+                             [x.neon_api_key for x in objs[1:3]])
+      
+      self.assertItemsEqual(conn.blocking_conn.smembers(
+        NeonUserAccount('a1')._set_keyname()),
+        [objs[0].key, objs[3].key])
+
+    @tornado.testing.gen_test
+    def test_send_invalid_callback(self):
+      request = NeonApiRequest('j1', 'key1', http_callback='null')
+      request.save()
+
+      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
+        yield request.send_callback(async=True)
+
+      # Make sure the state is correct now
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.ERROR)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
+    def test_callback_with_experiment_state(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+      request = NeonApiRequest('j1', 'key1', 'vid1',
+                               http_callback='http://some.where')
+      request.state = neondata.RequestState.SERVING
+      request.response['framenos'] = [34, 61]
+      request.response['serving_url'] = 'http://some_serving_url.com'
+      request.save()
+      neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
+                           winner_tid='key1_vid1_t2').save()
+
+      yield request.send_callback(async=True)
+
+      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+                        neondata.CallbackState.SUCESS)
+
+      # Check the callback
+      self.assertTrue(fetch_mock.called)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      response_dict = json.loads(found_request.body)
+      self.assertDictContainsSubset(
+        {'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.RequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.COMPLETE,
+         'winner_thumbnail' : 'key1_vid1_t2'},
+        response_dict)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
+    def test_image_in_isp(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+
+      acct = NeonUserAccount('a1', 'acct1')
+      acct.default_thumbnail_id = 'acct1_default_thumb'
+      acct.save()
+      video = VideoMetadata('acct1_v1')
+
+      # Check when isp returns a 204 because it doesn't have the video
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
+      with self.assertLogExists(logging.DEBUG, 'Image not available in '):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      self.assertTrue(found_request.follow_redirects)
+
+      # Check when the image is there
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=200)
+      is_avail = yield video.image_available_in_isp(async=True)
+      self.assertTrue(is_avail)
+
+      # Check when there was an http error that was not raised
+      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=500)
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
+
+      # Check on a raised http error
+      fetch_mock.side_effect = [tornado.httpclient.HTTPError(400, 'Bad error')]
+      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
+        is_avail = yield video.image_available_in_isp(async=True)
+        self.assertFalse(is_avail)
+
+    @tornado.testing.gen_test
+    def test_account_missing_when_checking_isp(self):
+      video = VideoMetadata('acct1_v1')
+      with self.assertLogExists(logging.ERROR,
+                                'Cannot find the neon user account'):
+        with self.assertRaises(neondata.DBStateError):
+          yield video.image_available_in_isp()
+
+class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
+    def setUp(self): 
+        super(TestPGNeondataDataSpecific, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @classmethod
+    def tearDown(cls): 
+        cls.postgresql.clear_all_tables()
+
+class TestNeondata(test_utils.neontest.AsyncTestCase):
+    '''
+    Neondata class tester
+    '''
+    def setUp(self):
+        super(TestNeondata, self).setUp()
+        self.redis = test_utils.redis.RedisServer()
+        self.redis.start()
+        self.maxDiff = 5000
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
+
+    def tearDown(self):
+        neondata.PubSubConnection.clear_singleton_instance()
+        self.redis.stop()
+        super(TestNeondata, self).tearDown()
+
+    #@unittest.skip('TODO(Sunil): add this test')
+    #def test_add_platform_with_bad_account_id(self):
+    #    pass
+    
+    def test_dbconn_singleton(self):
+        bp = BrightcovePlatform('2','3', 'test')
+        self.bp_conn = DBConnection.get(bp)
+
+        bp2 = BrightcovePlatform('12','13','test')
+        self.bp_conn2 = DBConnection.get(bp2)
+
+
+        vm = VideoMetadata('test1', None, None, None,
+                None, None, None, None)
+        self.vm_conn = DBConnection.get(vm)
+
+        vm2 = VideoMetadata('test2', None, None, None, 
+                None, None, None, None)
+        self.vm_conn2 = DBConnection.get(vm2)
+        
+        self.assertEqual(self.bp_conn, self.bp_conn2)
+        self.assertEqual(self.vm_conn, self.vm_conn2)
+
+        self.assertNotEqual(self.bp_conn, self.vm_conn)
+
+    #TODO: Test Async DB Connection
+    
+    def test_db_connection(self):
+        ''' 
+        DB Connection test
+        '''
+        ap = AbstractPlatform('a1', 'i1')
+        db = DBConnection.get(ap)
+        key = "fookey"
+        val = "fooval"
+        self.assertTrue(db.blocking_conn.set(key, val))
+        self.assertEqual(db.blocking_conn.get(key), val)
+        self.assertTrue(db.blocking_conn.delete(key))
+
+    def test_concurrent_requests(self):
+        ''' Make concurrent requests to the db 
+            verify that singleton instance doesnt cause race condition
+        '''
+        def db_operation(key):
+            ''' db op '''
+            resultQ.put(db.blocking_conn.get(key))
+
+        ap = AbstractPlatform('a1', 'i1')
+        db = DBConnection.get(ap)
+        key = "fookey"
+        val = "fooval"*1000
+        nkeys = 100
+        for i in range(nkeys):
+            db.blocking_conn.set(key+"%s"%i, val+"%s"%i)
+       
+        resultQ =  multiprocessing.Queue()
+        threads = []
+        for n in range(nkeys):
+            thread = threading.Thread(target=db_operation, args=(key+"%s"%n,))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        results = []
+        for i in range(nkeys):
+            results.append(resultQ.get())  
+
+        #Make sure that each of the thread retrieved a key
+        #and did not have an exception
+        self.assertTrue(None not in results)
+
+    def test_delete_all_video_related_data(self):
+        # create all video related objects
+        
+        na = NeonUserAccount('ta1')
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
+        na.add_platform(bp)
+        na.add_platform(np)
+        na.save()
+
+        req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
+        i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        tid = i_vid + "_t1"
+        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
+                              None, None, None)
+        vid = VideoMetadata(i_vid, [thumb.key],
+                           'job1', 'v0.mp4', 0, 0, None, '0')
+        req.save()
+        ThumbnailMetadata.save_all([thumb])
+        VideoMetadata.save_all([vid])
+        NeonPlatform.modify(na.neon_api_key, '0',
+                            lambda x: x.add_video('dummyv', 'dummyjob'))
+        np = NeonPlatform.modify(na.neon_api_key, '0',
+                                 lambda x: x.add_video('vid1', 'job1'))
+        np.delete_all_video_related_data('vid1', really_delete_keys=True)
+        
+        # check the keys have been deleted
+        self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
+        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
+        self.assertIsNone(VideoMetadata.get(i_vid))
+
+        # verify account
+        np = NeonPlatform.get(na.neon_api_key, '0')
+        self.assertListEqual(np.get_videos(), [u'dummyv'])
+        
+        #TODO: Add more failure test cases
+
+    def test_too_many_open_connections_sync(self):
+        self.maxDiff = 10000
+
+        def _get_open_connection_list():
+            fd_list = subprocess.check_output(
+                ['lsof', '-a', '-d0-65535', 
+                 '-p', str(os.getpid())]).split('\n')
+            fd_list = [x.split() for x in fd_list if x]
+            return [x for x in fd_list if 
+                    x[7] == 'TCP' and 'localhost:%d' % self.redis.port in x[8]]
+                
+        
+        # When making calls on various objects, there should only be
+        # one connection per object type to the redis server. We're
+        # just going to make sure that that is the case
+
+        get_func = lambda x: x.get('key')
+        
+        obj_types = [
+            (VideoMetadata('key'), get_func),
+            (ThumbnailMetadata('key'), get_func),
+            (TrackerAccountIDMapper('key'), get_func),
+            (ThumbnailServingURLs('key'), get_func),
+            (ExperimentStrategy('key'), get_func),
+            (NeonUserAccount('key', 'api'),
+             lambda x: x.get('key')),
+            (NeonPlatform('api', '0', 'a'),
+             lambda x: x.get('api', '0')),
+            (BrightcovePlatform('api', 'i1', 'a'),
+             lambda x: x.get('api', 'i1')),
+            (OoyalaPlatform('api', 'i2', 'a', 'b', 'c', 'd', 'e'),
+             lambda x: x.get('api', 'i2'))
+             ]
+
+        for obj, read_func in obj_types:
+            # Start by saving the object
+            if isinstance(obj, AbstractPlatform):
+                obj.modify('api', obj.integration_id, lambda x: x,
+                           create_missing=True)
+            else:
+                obj.save()
+
+            # Now find the number of open file descriptors
+            start_fd_list = _get_open_connection_list()
+
+            def nop(x): pass
+
+            # Run the func a bunch of times
+            for i in range(10):
+                read_func(obj)
+
+            # Check the file descriptors
+            end_fd_list = _get_open_connection_list()
+            if len(start_fd_list) != len(end_fd_list):
+                # This will give us more information if it fails
+                self.assertEqual(start_fd_list, end_fd_list)
 
     class ChangeTrap:
         '''Helper class to test subscribing to changes.'''
@@ -1640,288 +1949,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         VideoMetadata('a2_v1')._set_keyname()),
         ['a2_v1', 'a2_v3', 'a2_v4'])
 
-    @tornado.testing.gen_test
-    def test_creating_list_of_videos_async(self):
-      yield tornado.gen.Task(VideoMetadata('a1_v1').save)
-      yield tornado.gen.Task(VideoMetadata.save_all, [
-        VideoMetadata('a1_v2'),
-        VideoMetadata('a2_v1'),
-        VideoMetadata('a2_v2'),
-        VideoMetadata('a2_v3')])
-      yield tornado.gen.Task(
-        VideoMetadata.modify, 'a2_v4', lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(VideoMetadata)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        VideoMetadata('a1_v1')._set_keyname()),
-        ['a1_v1', 'a1_v2'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v2', 'a2_v3', 'a2_v4'])
-
-      # Now delete some
-      yield tornado.gen.Task(VideoMetadata.delete_many,
-                             ['a1_v2', 'a2_v2'])
-
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        VideoMetadata('a1_v1')._set_keyname()),
-        ['a1_v1'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        VideoMetadata('a2_v1')._set_keyname()),
-        ['a2_v1', 'a2_v3', 'a2_v4'])
-
-    def test_creating_list_of_thumbs_sync(self):
-      ThumbnailMetadata('a1_v1_t1').save()
-      ThumbnailMetadata.save_all([
-        ThumbnailMetadata('a1_v1_t2'),
-        ThumbnailMetadata('a1_v2_t1'),
-        ThumbnailMetadata('a1_v2_t2'),
-        ThumbnailMetadata('a1_v2_t3')])
-      ThumbnailMetadata.modify('a1_v2_t4', lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(ThumbnailMetadata)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
-        ['a1_v1_t1', 'a1_v1_t2'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
-
-      # Now delete some
-      ThumbnailMetadata.delete_many(['a1_v1_t2', 'a1_v2_t2'])
-
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
-        ['a1_v1_t1'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
-
-    @tornado.testing.gen_test
-    def test_creating_list_of_thumbs_async(self):
-      yield tornado.gen.Task(ThumbnailMetadata('a1_v1_t1').save)
-      yield tornado.gen.Task(ThumbnailMetadata.save_all, [
-        ThumbnailMetadata('a1_v1_t2'),
-        ThumbnailMetadata('a1_v2_t1'),
-        ThumbnailMetadata('a1_v2_t2'),
-        ThumbnailMetadata('a1_v2_t3')])
-      yield tornado.gen.Task(
-        ThumbnailMetadata.modify, 'a1_v2_t4', lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(ThumbnailMetadata)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
-        ['a1_v1_t1', 'a1_v1_t2'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t2', 'a1_v2_t3', 'a1_v2_t4'])
-
-      # Now delete some
-      yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                             ['a1_v1_t2', 'a1_v2_t2'])
-
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v1_t1')._set_keyname()),
-        ['a1_v1_t1'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        ThumbnailMetadata('a1_v2_t1')._set_keyname()),
-        ['a1_v2_t1', 'a1_v2_t3', 'a1_v2_t4'])
-
-    @tornado.testing.gen_test
-    def test_create_list_of_requests_sync(self):
-      NeonApiRequest('j1', 'a1').save()
-      NeonApiRequest.save_all([
-        NeonApiRequest('j1', 'a2'),
-        NeonApiRequest('j2', 'a2'),
-        NeonApiRequest('j3', 'a2'),
-        NeonApiRequest('j2', 'a1')])
-      NeonApiRequest.modify('j4', 'a2', lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(NeonApiRequest)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a1')._set_keyname()),
-        ['request_a1_j1', 'request_a1_j2'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a2')._set_keyname()),
-        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
-
-      # Now delete some
-      NeonApiRequest.delete_many([('j2', 'a1'), ('j2', 'a2')])
-
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a1')._set_keyname()),
-        ['request_a1_j1'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a2')._set_keyname()),
-        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
-
-    @tornado.testing.gen_test
-    def test_create_list_of_requests_async(self):
-      yield tornado.gen.Task(NeonApiRequest('j1', 'a1').save)
-      yield tornado.gen.Task(NeonApiRequest.save_all, [
-        NeonApiRequest('j1', 'a2'),
-        NeonApiRequest('j2', 'a2'),
-        NeonApiRequest('j3', 'a2'),
-        NeonApiRequest('j2', 'a1')])
-      yield tornado.gen.Task(NeonApiRequest.modify,
-                             'j4', 'a2', lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(NeonApiRequest)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a1')._set_keyname()),
-        ['request_a1_j1', 'request_a1_j2'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a2')._set_keyname()),
-        ['request_a2_j1', 'request_a2_j2', 'request_a2_j3', 'request_a2_j4'])
-
-      # Now delete some
-      yield tornado.gen.Task(NeonApiRequest.delete_many,
-                             [('j2', 'a1'), ('j2', 'a2')])
-
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a1')._set_keyname()),
-        ['request_a1_j1'])
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonApiRequest('j1', 'a2')._set_keyname()),
-        ['request_a2_j1', 'request_a2_j3', 'request_a2_j4'])
-
-    @tornado.testing.gen_test
-    def test_create_list_of_namespaced_objects_sync(self):
-      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
-      objs[0].save()
-      NeonUserAccount.save_all(objs[1:3])
-      NeonUserAccount.modify(objs[3].neon_api_key,
-                             lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(NeonUserAccount)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonUserAccount('a1')._set_keyname()),
-        [x.key for x in objs])
-
-      # Now delete some
-      NeonUserAccount.delete_many([x.neon_api_key for x in objs[1:3]])
-      
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonUserAccount('a1')._set_keyname()),
-        [objs[0].key, objs[3].key])
-
-    @tornado.testing.gen_test
-    def test_create_list_of_namespaced_objects_async(self):
-      objs = [NeonUserAccount('a%i' % i) for i in range(4)]
-      yield tornado.gen.Task(objs[0].save)
-      yield tornado.gen.Task(NeonUserAccount.save_all, objs[1:3])
-      yield tornado.gen.Task(NeonUserAccount.modify, 
-                             objs[3].neon_api_key,
-                             lambda x: x, create_missing=True)
-
-      conn = neondata.DBConnection.get(NeonUserAccount)
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonUserAccount('a1')._set_keyname()),
-        [x.key for x in objs])
-
-      # Now delete some
-      yield tornado.gen.Task(NeonUserAccount.delete_many,
-                             [x.neon_api_key for x in objs[1:3]])
-      
-      self.assertItemsEqual(conn.blocking_conn.smembers(
-        NeonUserAccount('a1')._set_keyname()),
-        [objs[0].key, objs[3].key])
-
-    @tornado.testing.gen_test
-    def test_send_invalid_callback(self):
-      request = NeonApiRequest('j1', 'key1', http_callback='null')
-      request.save()
-
-      with self.assertLogExists(logging.ERROR, 'Invalid callback url '):
-        yield request.send_callback(async=True)
-
-      # Make sure the state is correct now
-      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
-                        neondata.CallbackState.ERROR)
-
-    @patch('cmsdb.neondata.utils.http')
-    @tornado.testing.gen_test
-    def test_callback_with_experiment_state(self, http_mock):
-      fetch_mock = self._future_wrap_mock(http_mock.send_request,
-                                          require_async_kw=True)
-      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
-      request = NeonApiRequest('j1', 'key1', 'vid1',
-                               http_callback='http://some.where')
-      request.state = neondata.RequestState.SERVING
-      request.response['framenos'] = [34, 61]
-      request.response['serving_url'] = 'http://some_serving_url.com'
-      request.save()
-      neondata.VideoStatus('key1_vid1', neondata.ExperimentState.COMPLETE,
-                           winner_tid='key1_vid1_t2').save()
-
-      yield request.send_callback(async=True)
-
-      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
-                        neondata.CallbackState.SUCESS)
-
-      # Check the callback
-      self.assertTrue(fetch_mock.called)
-      cargs, kwargs = fetch_mock.call_args
-      found_request = cargs[0]
-      response_dict = json.loads(found_request.body)
-      self.assertDictContainsSubset(
-        {'job_id' : 'j1',
-         'video_id' : 'vid1',
-         'error': None,
-         'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
-         'processing_state' : neondata.RequestState.SERVING,
-         'experiment_state' : neondata.ExperimentState.COMPLETE,
-         'winner_thumbnail' : 'key1_vid1_t2'},
-        response_dict)
-
-    @patch('cmsdb.neondata.utils.http')
-    @tornado.testing.gen_test
-    def test_image_in_isp(self, http_mock):
-      fetch_mock = self._future_wrap_mock(http_mock.send_request,
-                                          require_async_kw=True)
-
-      acct = NeonUserAccount('a1', 'acct1')
-      acct.default_thumbnail_id = 'acct1_default_thumb'
-      acct.save()
-      video = VideoMetadata('acct1_v1')
-
-      # Check when isp returns a 204 because it doesn't have the video
-      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=204)
-      with self.assertLogExists(logging.DEBUG, 'Image not available in '):
-        is_avail = yield video.image_available_in_isp(async=True)
-        self.assertFalse(is_avail)
-      cargs, kwargs = fetch_mock.call_args
-      found_request = cargs[0]
-      self.assertTrue(found_request.follow_redirects)
-
-      # Check when the image is there
-      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=200)
-      is_avail = yield video.image_available_in_isp(async=True)
-      self.assertTrue(is_avail)
-
-      # Check when there was an http error that was not raised
-      fetch_mock.side_effect = lambda x: HTTPResponse(x, code=500)
-      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
-        is_avail = yield video.image_available_in_isp(async=True)
-        self.assertFalse(is_avail)
-
-      # Check on a raised http error
-      fetch_mock.side_effect = [tornado.httpclient.HTTPError(400, 'Bad error')]
-      with self.assertLogExists(logging.ERROR, 'Unexpected response looking'):
-        is_avail = yield video.image_available_in_isp(async=True)
-        self.assertFalse(is_avail)
-
-    @tornado.testing.gen_test
-    def test_account_missing_when_checking_isp(self):
-      video = VideoMetadata('acct1_v1')
-      with self.assertLogExists(logging.ERROR,
-                                'Cannot find the neon user account'):
-        with self.assertRaises(neondata.DBStateError):
-          yield video.image_available_in_isp()
-      
-      
-            
 class TestDbConnectionHandling(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDbConnectionHandling, self).setUp()
@@ -2108,7 +2135,8 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertEqual(ThumbnailMetadata.get_video_id(tid), vid)
         self.assertEqual(tdata.rank, 0)
         self.assertEqual(tdata.urls, ['one.jpg', 'two.jpg'])
-
+    
+    @tornado.testing.gen_test
     def test_atomic_modify(self):
         vid = InternalVideoID.generate('api1', 'vid1')
         tid = ThumbnailID.generate(self.image, vid)
@@ -2127,19 +2155,9 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         def setphash(thumb): thumb.phash = 'hash'
         def setrank(thumb): thumb.rank = 6
 
-        counters = [1, 2]
-        def wrapped_callback(param):
-            counters.pop()
-            self.stop()
-
-        ThumbnailMetadata.modify(tid, setphash, callback=wrapped_callback)
-        ThumbnailMetadata.modify(tid, setrank, callback=wrapped_callback)
+        yield ThumbnailMetadata.modify(tid, setphash, async=True)
+        yield ThumbnailMetadata.modify(tid, setrank, async=True)
         
-        # if len(counters) is not 0, call self.wait() to service the other
-        # callbacks  
-        while len(counters) > 0:
-            self.wait()
-
         thumb = ThumbnailMetadata.get(tid)
         self.assertEqual(thumb.phash, 'hash')
         self.assertEqual(thumb.rank, 6)
@@ -2623,6 +2641,30 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.assertEquals(tmeta2.width, 640)
         self.assertEquals(tmeta2.height, 540)
         self.assertIsNotNone(tmeta2.phash)
+
+class TestPGThumbnailHelperClass(TestThumbnailHelperClass):
+    def setUp(self): 
+        super(TestPGThumbnailHelperClass, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @classmethod
+    def tearDown(cls): 
+        cls.postgresql.clear_all_tables()
+    
+    def test_thumbnail_mapper(self):
+        # we are not carrying over the thumbnail url mapper 
+        self.assertEquals(1,1) 
 
 class TestPGAddingImageData(TestAddingImageData): 
     def setUp(self): 

@@ -1369,10 +1369,18 @@ class StoredObject(object):
         return json.dumps(self, default=lambda o: o.to_dict())
 
     def get_json_data(self):
+        '''
+            for postgres we only want the _data field, since we 
+            have a column that is named _data we do not want _data->_data
+        '''
         try:  
             return json.dumps(self.to_dict()['_data']) 
         except TypeError:
-            return json.dumps(self, default=lambda o: o.__dict__) 
+            try: 
+                return json.dumps(json.loads(self.to_json())['_data'])
+            except TypeError: 
+                return json.dumps(self, default=lambda o: o.__dict__) 
+        _log.error('Unable to parse the json for postgres entry') 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1602,6 +1610,7 @@ class StoredObject(object):
                                                     ",".join("'{0}'".format(k) for k in keys))
 
             cursor = yield conn.execute(query)
+            import pdb; pdb.set_trace()
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
                 results.append(obj) 
@@ -4853,7 +4862,7 @@ class ThumbnailMetadata(StoredObject):
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
-            
+        
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
         yield [x.upload(image, self.key, s3_url, async=True) for x in hosters]
 
