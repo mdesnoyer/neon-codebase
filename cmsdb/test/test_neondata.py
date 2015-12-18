@@ -1183,6 +1183,41 @@ class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
         self.postgresql.clear_all_tables()
         super(TestPGNeondataDataSpecific, self).tearDown()
 
+    def test_default_bcplatform_settings(self):
+        ''' override from base due to saving 
+            as abstractplatform now ''' 
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform(na.neon_api_key, 'iid', 'aid')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'abstractplatform_%s_iid' % bp.neon_api_key)
+
+        # Make sure that save and regenerating creates the same object
+        def _set_acct(x):
+            x.account_id = 'aid'
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'iid', _set_acct,
+                                       create_missing=True)
+
+        bp2 = BrightcovePlatform.get(na.neon_api_key, 'iid')
+        self.assertEqual(bp.__dict__, bp2.__dict__)
+
+    def test_bcplatform_with_callback(self):
+        ''' override from base due to saving 
+            as abstractplatform now ''' 
+        na = NeonUserAccount('acct1')
+        bp = BrightcovePlatform('aid', 'iid', na.neon_api_key,
+                                callback_url='http://www.callback.com')
+
+        self.assertFalse(bp.abtest)
+        self.assertFalse(bp.auto_update)
+        self.assertTrue(bp.serving_enabled)
+        self.assertNotEqual(bp.neon_api_key, '')
+        self.assertEqual(bp.key, 'abstractplatform_%s_iid' % bp.neon_api_key)
+        self.assertEqual(bp.callback_url, 'http://www.callback.com')
+
 class TestNeondata(test_utils.neontest.AsyncTestCase):
     '''
     Neondata class tester
@@ -2805,6 +2840,7 @@ class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
     @classmethod
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)

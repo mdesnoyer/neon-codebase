@@ -1604,9 +1604,7 @@ class StoredObject(object):
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
-
             cursor = yield conn.execute(query)
-            import pdb; pdb.set_trace()
 
             def _map_new_results(results):
                 for key in keys: 
@@ -1733,7 +1731,6 @@ class StoredObject(object):
                          WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), key)
 
                 cursor = yield conn.execute(query)
-                import pdb; pdb.set_trace()
                 item = cursor.fetchone()
                 if item is None:
                     if create_missing:
@@ -2230,7 +2227,6 @@ class NamespacedStoredObject(StoredObject):
         or just use it synchronously like a normal iterator.
         '''
         keys = yield cls.get_all_keys(async=True)
-        import pdb; pdb.set_trace()
         raise tornado.gen.Return(
             StoredObjectIterator(cls, keys, page_size=max_request_size,
                                  max_results=max_results, skip_missing=True))
@@ -2251,7 +2247,6 @@ class NamespacedStoredObject(StoredObject):
             db.return_connection(conn)
             rv = [x.partition('_')[2] for x in keys_list if
                                       x is not None]
-
             raise tornado.gen.Return(rv) 
         else: 
             db_connection = DBConnection.get(cls)
@@ -3609,7 +3604,6 @@ class AbstractPlatform(NamespacedStoredObject):
         yt_keys = yield YoutubePlatform._get_all_keys_impl(async=True)
 
         keys = neon_keys + bc_keys + oo_keys + yt_keys
-        import pdb; pdb.set_trace()
 
         raise tornado.gen.Return(keys)
 
@@ -3717,7 +3711,7 @@ class AbstractPlatform(NamespacedStoredObject):
             # delete the serving urls
             yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
                                    vm.thumbnail_ids)
-        
+
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
@@ -3753,6 +3747,13 @@ class NeonPlatform(AbstractPlatform):
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
+
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return NeonPlatform.__name__
 
 class BrightcoveIntegration(AbstractIntegration):
     ''' Brightcove Integration class '''
@@ -3936,6 +3937,13 @@ class BrightcovePlatform(AbstractPlatform):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
 
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return BrightcovePlatform.__name__
+
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
@@ -4048,6 +4056,13 @@ class YoutubePlatform(AbstractPlatform):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
 
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return YoutubePlatform.__name__
+
 class OoyalaIntegration(AbstractIntegration):
     '''
     OOYALA Integration
@@ -4144,6 +4159,13 @@ class OoyalaPlatform(AbstractPlatform):
     def get_all_keys(cls):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
+
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return OoyalaPlatform.__name__
 
 #######################
 # Request Blobs 
