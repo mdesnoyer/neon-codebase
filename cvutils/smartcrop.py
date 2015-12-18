@@ -160,7 +160,8 @@ class SmartCrop(object):
         The sliding window avoids text at the bottom of the image, and avoids
         cropping faces, maximizes the saliency.
         '''
-        (height, width, elem) = self.image.shape
+        height = self.image.shape[0]
+        width = self.image.shape[1]
         if self.with_text_detection:
             text_boxes = self.get_text_boxes()
         if self.with_saliency:
@@ -208,7 +209,8 @@ class SmartCrop(object):
             return hoverlaps and voverlaps
 
         top_text = new_height - 1
-        while current_end <= w and cut_vertical: # current_end is not inclusive.
+        # import ipdb; ipdb.set_trace()
+        while current_end <= width and cut_vertical: # current_end is not inclusive.
             # First check if there are text boxes included, if so, shring the
             # region. Find the top of all box areas.
             for t_box in text_boxes:

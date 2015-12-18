@@ -11,8 +11,8 @@ sys.path.insert(0,  os.path.abspath(
 import unittest
 from cvutils import smartcrop
 from cvutils import imageutils
-from model import features
-from model.colorname import JSD
+# from model import features
+# from model.colorname import JSD
 
 class TestSmartCrop(unittest.TestCase):
     def setUp(self):
@@ -67,3 +67,15 @@ class TestSmartCrop(unittest.TestCase):
         gist_cropped = gist.generate(cropped_im)
         gist_expected = gist.generate(expected_resize)
         self.assertLess(JSD(gist_cropped, gist_expected), 0.01)
+
+    def test_sliding_window_saliency(self):
+        ''' Test the saliency cropping algorithm.
+        '''
+        # create the image asymetrical
+        test_im = np.zeros((360, 600, 3), dtype=np.uint8)
+        saliency_line = np.append(np.zeros(27), np.append(range(1, 256), np.arange(255, 1, -0.8))).astype(np.uint8)
+        saliency_im = np.repeat(np.array([saliency_line]), 360, axis=0)
+        smart_crop = smartcrop.SmartCrop(test_im, with_text_detection=False, with_face_detection=False)
+        smart_crop._saliency_map = saliency_im
+        smart_crop._text_boxes = []
+        cropped_im = smart_crop.sliding_window_crop_and_resize(300, 300)
