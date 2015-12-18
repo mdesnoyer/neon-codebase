@@ -164,6 +164,8 @@ class SmartCrop(object):
         width = self.image.shape[1]
         if self.with_text_detection:
             text_boxes = self.get_text_boxes()
+        else:
+            text_boxes = []
         if self.with_saliency:
             saliency_map = self.get_saliency_map()
         if self.with_face_detection:
@@ -213,6 +215,7 @@ class SmartCrop(object):
         while current_end <= width and cut_vertical: # current_end is not inclusive.
             # First check if there are text boxes included, if so, shring the
             # region. Find the top of all box areas.
+            top_text = new_height
             for t_box in text_boxes:
                 if is_overlap(t_box, [current_x, 0, new_width, new_height]):
                     if top_text > t_box[1]: # t_box height.
