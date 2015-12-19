@@ -1,9 +1,10 @@
+#!/usr/bin/env python
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
                                          '..'))
 if sys.path[0] != __base_path__:
-        sys.path.insert(0, __base_path__)
+    sys.path.insert(0, __base_path__)
 
 from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
@@ -2103,7 +2104,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
                                headers=header)
         response = self.wait() 
         rjson = json.loads(response.body) 
-        self.assertEquals(response.code, 404)
+        self.assertEquals(response.code, 401)
 
     def test_invalid_user_wrong_password(self):
         url = '/api/v2/authenticate' 
@@ -2116,7 +2117,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
                                headers=header)
         response = self.wait() 
         rjson = json.loads(response.body) 
-        self.assertEquals(response.code, 404)
+        self.assertEquals(response.code, 401)
 
     @tornado.testing.gen_test
     def test_token_returned(self): 
@@ -2237,6 +2238,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header)
         rjson2 = json.loads(response.body)
+        refresh_token2 = rjson2['refresh_token']
+        self.assertEquals(refresh_token, refresh_token2) 
         user = yield tornado.gen.Task(neondata.User.get, TestRefreshTokenHandler.username)
         # verify that the access_token was indeed updated 
         self.assertNotEquals(user.access_token, rjson1['access_token'])
