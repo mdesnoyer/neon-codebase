@@ -40,9 +40,13 @@ def move_abstract_platforms():
     '''  
     platforms = neondata.AbstractPlatform.get_all()
     options._set('cmsdb.neondata.wants_postgres', 1)
+    def modify_me(x):
+        current_key = x.key  
+        x.__dict__ = p.__dict__ 
+        x.key = current_key 
     for p in platforms: 
         try: 
-            p.modify(p.key, p.integration_id, lambda x: x, create_missing=True)
+            p.modify(p.key, p.integration_id, modify_me, create_missing=True)
         except Exception as e:
             _log.exception('Error saving platform %s to postgres %s' % (p,e)) 
             pass  
@@ -156,9 +160,9 @@ def move_neon_videos_and_thumbnails():
 
 def main():
     #move_neon_user_accounts()
-    move_neon_videos_and_thumbnails()
+    #move_neon_videos_and_thumbnails()
     #move_abstract_integrations()
-    #move_abstract_platforms()
+    move_abstract_platforms()
     #move_cdn_hosting_metadata_lists()
     #move_experiment_strategies()
 

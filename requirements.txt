@@ -44,7 +44,7 @@ scikit-learn==0.16.1
 psycopg2==2.6.1
 queries==1.7.5
 PyJWT==1.4.0
-momoko==2.2.0
+momoko==2.2.2
 xlwt==1.0.0
 dill==0.2.4
 passlib==1.6.5

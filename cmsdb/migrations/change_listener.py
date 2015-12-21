@@ -27,6 +27,7 @@ from utils.options import define, options
 
 _log = logging.getLogger(__name__)
 
+import pdb; pdb.set_trace()
 @tornado.gen.coroutine 
 def subscribe_to_db_changes(): 
     @tornado.gen.coroutine
@@ -35,9 +36,14 @@ def subscribe_to_db_changes():
         # modify this thing, otherwise leave it alone
         options._set('cmsdb.neondata.wants_postgres', 1)
         def modify_me(x): 
+            current_key = x.key 
             x.__dict__ = obj.__dict__
+            x.key = current_key
         if op == 'set':
-            yield obj.modify(key, modify_me, async=True) 
+            try: 
+                yield obj.modify(key, modify_me, async=True) 
+            except Exception as e: 
+                print e  
         options._set('cmsdb.neondata.wants_postgres', 0)
 
     @tornado.gen.coroutine
@@ -45,10 +51,15 @@ def subscribe_to_db_changes():
         # since platforms are keyed differently we will 
         # just use another handler  
         options._set('cmsdb.neondata.wants_postgres', 1)
-        def modify_me(x): 
+        def modify_me(x):
+            current_key = x.key 
             x.__dict__ = obj.__dict__
-        if op == 'set': 
-            yield obj.modify(obj.api_key, obj.i_id, modify_me, async=True) 
+            x.key = current_key
+        if op == 'set':
+            try:  
+                yield obj.modify(obj.api_key, obj.i_id, modify_me, async=True) 
+            except Exception as e: 
+                print e
         options._set('cmsdb.neondata.wants_postgres', 0)
 
     neondata.NeonUserAccount.subscribe_to_changes(change_handler_normal)
@@ -65,8 +76,6 @@ def subscribe_to_db_changes():
     neondata.VideoStatus.subscribe_to_changes(change_handler_normal) 
 
     neondata.AbstractPlatform.subscribe_to_changes(change_handler_platform)
-    neondata.BrightcovePlatform.subscribe_to_changes(change_handler_platform)
-    neondata.OoyalaPlatform.subscribe_to_changes(change_handler_platform)
      
 def main():
     subscribe_to_db_changes()  
