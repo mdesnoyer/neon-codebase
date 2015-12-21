@@ -59,7 +59,7 @@ class TestSmartCrop(unittest.TestCase):
         smart_crop = smartcrop.SmartCrop(saliency_im)
         cropped_im = smart_crop.crop_and_resize(300, 300)
         expected_crop = saliency_im[0:saliency_im.shape[0], \
-                                    saliency_im.shape[1] - saliency_im.shape[0] + 1:saliency_im.shape[1]]
+            saliency_im.shape[1] - saliency_im.shape[0] + 1:saliency_im.shape[1]]
         expected_resize = cv2.resize(expected_crop, (300, 300))
                 
         gist = features.MemCachedFeatures.create_shared_cache(
@@ -73,9 +73,26 @@ class TestSmartCrop(unittest.TestCase):
         '''
         # create the image asymetrical
         test_im = np.zeros((360, 600, 3), dtype=np.uint8)
-        saliency_line = np.append(np.zeros(27), np.append(range(1, 256), np.arange(255, 1, -0.8))).astype(np.uint8)
+        saliency_line = np.append(np.append(range(1, 256), np.arange(255, 1, -0.8)),
+                                  np.zeros(27)).astype(np.uint8)
         saliency_im = np.repeat(np.array([saliency_line]), 360, axis=0)
-        smart_crop = smartcrop.SmartCrop(test_im, with_text_detection=False, with_face_detection=False)
+        smart_crop = smartcrop.SmartCrop(test_im,
+            with_text_detection=False, with_face_detection=False)
         smart_crop._saliency_map = saliency_im
         smart_crop._text_boxes = []
-        cropped_im = smart_crop.sliding_window_crop_and_resize(300, 300)
+        (new_x, new_y, new_width, new_height) = \
+            smart_crop.sliding_window_crop_and_resize(300, 300)
+        cropped_im = saliency_im[new_y:new_y+new_height,
+                                    new_x:new_x+new_width]
+        cv2.imshow('cropped saliency', cropped_im)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        self.assertLess(new_x, 120)
+        self.assertEqual(new_y, 0)
+        self.assertEqual(new_height, 360)
+        self.assertEqual(new_width, 360)
+
+    def test_center_saliency_bias(self):
+        test_im = np.zeros((360, 600, 3), dtype=np.uint8)
+        im_saliency = smartcrop.ImageSignatureSaliency(test_im)
+        im_saliency._create_center_bias(360, 600)        

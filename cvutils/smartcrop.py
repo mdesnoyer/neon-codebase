@@ -80,12 +80,45 @@ class ImageSignatureSaliency(object):
         self.smooth_map = cv2.GaussianBlur(out_map_resized,
                                       (map_size/20*2+1, map_size/20*2+1),
                                       map_size/15.0)
+
+        # Makde the saliency map to be more weighted towards to the center.
+        bias_filter = self._create_center_bias(self.map_height, self.map_width)
+        self.smooth_map *= bias_filter
         self.smooth_map = np.uint8((self.smooth_map - np.min(self.smooth_map)) /
                               (np.max(self.smooth_map) - np.min(self.smooth_map)) * 255)
 
     def get_saliency_map(self):
         return cv2.resize(self.smooth_map,
                           (self.src.shape[1], self.src.shape[0]))
+
+    def _create_center_bias(self, height, width):
+        '''For a given input im, create the rule of third filter match to size.
+        Adding a gaussian shaped boost horizontally at the third left and right.
+        '''
+        target_filter = np.ones((height, width))
+        # A Gaussian sample is created 4/3 width of the image width. The samples
+        # are done symatrically. To get a rule of third bias, we either take the
+        # array from the start or from the end. Then the center of the original
+        # curve will be the new peaks located at the thrids of the target_filter.
+
+        ppf_begin = 0.12
+        ppf_end = 1 - ppf_begin
+        x = np.linspace(norm.ppf(ppf_begin), norm.ppf(ppf_end), width)
+        gaussian_x = np.array([norm.pdf(x)]) # make the sample 2d array
+        gaussian_array_h = np.repeat(gaussian_x, height, axis=0)
+        y = np.linspace(norm.ppf(ppf_begin), norm.ppf(ppf_end), height)
+        gaussian_y = np.array([norm.pdf(y)]) # make the sample 2d array        
+        gaussian_array_v = np.repeat(gaussian_y, width, axis=0)
+        gaussian_array_v = np.transpose(gaussian_array_v)
+
+        gaussian_array = gaussian_array_h * gaussian_array_v
+
+        # Normalize the filter
+        bias_filter = gaussian_array / gaussian_array.max()
+
+        # cv2.imshow('filter', bias_filter)
+        # cv2.waitKey(0)
+        return bias_filter
 
     def draw_resized_im(self):
         ''' This function is to show the bounderies of the saliency. '''
@@ -152,10 +185,12 @@ class SmartCrop(object):
         target_filter[:, 0:width/2] = gaussian_array[:, 0:width/2]
         target_filter[:, width/2:] = gaussian_array[:, -(width-width/2):]
         # Normalize the filter
+        # cv2.imshow('filter', target_filter/target_filter.max())
+        # cv2.waitKey(0)
         target_filter = target_filter / sum(target_filter)
         return target_filter
 
-    def sliding_window_crop_and_resize(self, h, w):
+    def saliency_crop(self, h, w):
         '''Using a sliding window to decide what's the optimal crop region.
         The sliding window avoids text at the bottom of the image, and avoids
         cropping faces, maximizes the saliency.
@@ -182,75 +217,90 @@ class SmartCrop(object):
         center_horizontal = width / 2
         center_vertical = height / 2
         new_x = center_horizontal - new_width / 2
-        new_y = center_vertical - height / 2
+        new_y = center_vertical - new_height / 2
 
-        saliency_sum_array = []
-        rectangle_array = []
+        if self.with_saliency:
+            fil = self.create_rule_of_third_filter(new_height, new_width)
+            # import ipdb; ipdb.set_trace()
+            filter_result = cv2.filter2D(saliency_map, cv2.CV_32F, fil)
+            # search horizontally, since the result is the same dimension as
+            # the saliency_map, we take the truncated end. It is 1D vector.
+            filter_line = filter_result[new_y + new_height - 1,
+                                        width - new_width:]
+            print filter_line
+            # Find the max.
+            max_loc = np.argmax(filter_line)
+            new_x = max_loc
 
-        current_x = 0
-        current_end = current_x + new_width
+        return (new_x, new_y, new_width, new_height)
 
-        def is_overlap(rect1, rect2):
-            '''rect is formatted as [x, y, w, h], returns if they are overlap.
-            '''
-            r1_left = rect1[0]
-            r1_top = rect1[1]
-            r1_right = rect1[0] + rect1[2]
-            r1_bottom = rect1[1] + rect1[3]
+        # saliency_sum_array = []
+        # rectangle_array = []
 
-            r2_left = rect2[0]
-            r2_top = rect2[1]
-            r2_right = rect2[0] + rect2[2]
-            r2_bottom = rect2[1] + rect2[3]
-            hoverlaps = True
-            voverlaps = True
-            if (r1_left > r2_right) or (r1_right < r2_left):
-                hoverlaps = False
-            if (r1_top < r2_bottom) or (r1_bottom > r2_top):
-                voverlaps = False
-            return hoverlaps and voverlaps
+        # current_x = 0
+        # current_end = current_x + new_width
 
-        top_text = new_height - 1
-        # import ipdb; ipdb.set_trace()
-        while current_end <= width and cut_vertical: # current_end is not inclusive.
-            # First check if there are text boxes included, if so, shring the
-            # region. Find the top of all box areas.
-            top_text = new_height
-            for t_box in text_boxes:
-                if is_overlap(t_box, [current_x, 0, new_width, new_height]):
-                    if top_text > t_box[1]: # t_box height.
-                        top_text = t_box[1]
+        # def is_overlap(rect1, rect2):
+        #     '''rect is formatted as [x, y, w, h], returns if they are overlap.
+        #     '''
+        #     r1_left = rect1[0]
+        #     r1_top = rect1[1]
+        #     r1_right = rect1[0] + rect1[2]
+        #     r1_bottom = rect1[1] + rect1[3]
 
-            # Resize the sliding window to exclude the text box basing on
-            # top_text.
-            no_text_height = new_height - (height - top_text)
-            no_text_width = int(no_text_height / float(new_height) * new_width)
-            current_end = current_x + no_text_width
+        #     r2_left = rect2[0]
+        #     r2_top = rect2[1]
+        #     r2_right = rect2[0] + rect2[2]
+        #     r2_bottom = rect2[1] + rect2[3]
+        #     hoverlaps = True
+        #     voverlaps = True
+        #     if (r1_left > r2_right) or (r1_right < r2_left):
+        #         hoverlaps = False
+        #     if (r1_top < r2_bottom) or (r1_bottom > r2_top):
+        #         voverlaps = False
+        #     return hoverlaps and voverlaps
 
-            rectangle_array.append([current_x, 0, no_text_width, no_text_height])
-            # We still need to check the current_end, as the condition may
-            # still change.
-            if current_end > w:
-                saliency_sum_array.append(0)
-            elif self._face_cut_length(current_x, current_end - 1, faces) > 0:
-                # Faces are being cut.
-                saliency_sum_array.append(0)
-            else:
-                fil = self.create_rule_of_third_filter(no_text_height, no_text_width)
-                sub_saliency = saliency_map[0:no_text_height, current_x:current_end]
-                saliency_sum_array.append(sum(fil * sub_saliency))
+        # top_text = new_height - 1
+        # # import ipdb; ipdb.set_trace()
+        # while current_end <= width and cut_vertical: # current_end is not inclusive.
+        #     # First check if there are text boxes included, if so, shring the
+        #     # region. Find the top of all box areas.
+        #     top_text = new_height
+        #     for t_box in text_boxes:
+        #         if is_overlap(t_box, [current_x, 0, new_width, new_height]):
+        #             if top_text > t_box[1]: # t_box height.
+        #                 top_text = t_box[1]
 
-        max_saliency_index = np.argmax(saliency_sum_array)
-        # If face cut is not avoidable, all saliency sum will be equal to 0,
-        # then we will only center cut the image.
-        if saliency_sum_array[max_saliency_index] == 0:
-            cropped_im = self.image[new_y:new_y+new_height,
-                                    new_x:new_x+new_width]
-        else:
-            cx, cy, cw, ch = rectangle_array[max_saliency_index]
-            cropped_im = self.image[cx:cx+cw, cy:cy+ch]
-        resized_im = cv2.resize(cropped_im, (w, h))
-        return resized_im
+        #     # Resize the sliding window to exclude the text box basing on
+        #     # top_text.
+        #     no_text_height = new_height - (height - top_text)
+        #     no_text_width = int(no_text_height / float(new_height) * new_width)
+        #     current_end = current_x + no_text_width
+
+        #     rectangle_array.append([current_x, 0, no_text_width, no_text_height])
+        #     # We still need to check the current_end, as the condition may
+        #     # still change.
+        #     if current_end > w:
+        #         saliency_sum_array.append(0)
+        #     elif self._face_cut_length(current_x, current_end - 1, faces) > 0:
+        #         # Faces are being cut.
+        #         saliency_sum_array.append(0)
+        #     else:
+        #         fil = self.create_rule_of_third_filter(no_text_height, no_text_width)
+        #         sub_saliency = saliency_map[0:no_text_height, current_x:current_end]
+        #         saliency_sum_array.append(sum(fil * sub_saliency))
+
+        # max_saliency_index = np.argmax(saliency_sum_array)
+        # # If face cut is not avoidable, all saliency sum will be equal to 0,
+        # # then we will only center cut the image.
+        # if saliency_sum_array[max_saliency_index] == 0:
+        #     cropped_im = self.image[new_y:new_y+new_height,
+        #                             new_x:new_x+new_width]
+        # else:
+        #     cx, cy, cw, ch = rectangle_array[max_saliency_index]
+        #     cropped_im = self.image[cx:cx+cw, cy:cy+ch]
+        # resized_im = cv2.resize(cropped_im, (w, h))
+        # return resized_im
 
     def get_saliency_map(self):
         if self._saliency_map is None:
@@ -582,7 +632,11 @@ class SmartCrop(object):
 
 
         if self.with_saliency:
-            (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
+            # saliency_adjust is a conservative way to crop, it trims the
+            # unused boundaries.
+            # (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
+            # saliency_crop using convolution to decide how to center the crop.
+            (new_x, new_y, new_width, new_height) = self.saliency_crop(h, w)
 
         if self.with_face_detection:
             # tic()
