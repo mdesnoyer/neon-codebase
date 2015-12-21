@@ -2915,15 +2915,77 @@ class BasePGNormalObject(object):
 
     @tornado.testing.gen_test 
     def test_save_duplicate_objects(self):     
-        self.assertEquals(1,1)
- 
+        unique_id = uuid.uuid1().hex 
+        so1 = self._get_object_type()(unique_id) 
+        so2 = self._get_object_type()(unique_id) 
+        yield so1.save(async=True) 
+        yield so2.save(async=True)  
+        get_obj_one = yield self._get_get_function(so1) 
+        get_obj_two = yield self._get_get_function(so2) 
+        self.assertEquals(get_obj_one.key,get_obj_two.key)
+    
+    @tornado.testing.gen_test 
+    def test_save_all_objects(self):    
+        key1 = uuid.uuid1().hex
+        key2 = uuid.uuid1().hex 
+        so1 = self._get_object_type()(key1)
+        so2 = self._get_object_type()(key2)
+        self._get_object_type().save_all([so1, so2])
+        get_obj_one = yield self._get_get_function(so1) 
+        get_obj_two = yield self._get_get_function(so2) 
+        self.assertEquals(get_obj_one.key,so1.key)
+        self.assertEquals(get_obj_two.key,so2.key)
+     
+    @tornado.testing.gen_test 
+    def test_get_many_objects(self):     
+        so1 = self._get_object_type()(uuid.uuid1().hex)
+        so2 = self._get_object_type()(uuid.uuid1().hex)
+        self._get_object_type().save_all([so1, so2])
+        results = yield self._get_object_type().get_many([so1.key,so2.key], async=True)
+        self.assertEquals(len(results), 2)
+
     @tornado.testing.gen_test 
     def test_modify_many_objects(self):     
         self.assertEquals(1,1)
  
     @tornado.testing.gen_test 
     def test_modify_object(self):     
-        self.assertEquals(1,1) 
+        self.assertEquals(1,1)
+
+    @tornado.testing.gen_test 
+    def test_delete_object(self):  
+        so1 = self._get_object_type()(uuid.uuid1().hex) 
+        yield self._get_object_type().delete(so1.key, async=True) 
+        get1 = yield self._get_object_type().get(so1.key, async=True)
+        self.assertEquals(None, get1)
+
+    @tornado.testing.gen_test 
+    def test_delete_many_objects(self): 
+        so1 = self._get_object_type()(uuid.uuid1().hex)
+        so2 = self._get_object_type()(uuid.uuid1().hex)
+        yield self._get_object_type().delete_many([so1.key,so2.key], async=True) 
+        get1 = yield self._get_object_type().get(so1.key, async=True)
+        self.assertEquals(None, get1)
+        get2 = yield self._get_object_type().get(so2.key, async=True)
+        self.assertEquals(None, get2)
+
+    @tornado.testing.gen_test
+    def test_delete_many_objects_key_dne(self): 
+        so1 = self._get_object_type()(uuid.uuid1().hex)
+        so2 = self._get_object_type()(uuid.uuid1().hex)
+        yield self._get_object_type().delete_many([so1.key,so2.key,'dne'], async=True) 
+        get1 = yield self._get_object_type().get(so1.key, async=True)
+        self.assertEquals(None, get1)
+        get2 = yield self._get_object_type().get(so2.key, async=True)
+        self.assertEquals(None, get2)
+
+    @tornado.testing.gen_test
+    def test_modify_object(self):
+        modify_me = MagicMock()  
+        so = self._get_object_type()(uuid.uuid1().hex)
+        yield so.save(async=True)
+        self._get_object_type().modify_many([so.key], modify_me) 
+        modify_me.assert_called_with({so}, ANY, ANY)
 
 class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
@@ -2949,30 +3011,6 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     def _get_object_type(cls): 
         return VideoMetadata
 
-class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
-    def setUp(self): 
-        super(test_utils.neontest.AsyncTestCase, self).setUp()
-
-    @classmethod
-    def setUpClass(cls):
-        BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-    
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
-    
-    @classmethod 
-    def _get_object_type(cls): 
-        return User
-    
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
@@ -3005,6 +3043,30 @@ class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
         yield request.save(async=True) 
         out_of_db = yield request.get(request.job_id, 'a1', async=True) 
         self.assertEquals(out_of_db.key, request.key) 
+
+class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @classmethod
+    def tearDown(cls): 
+        cls.postgresql.clear_all_tables()
+
+    @classmethod
+    def _get_object_type(cls): 
+        return User
     
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
@@ -3031,32 +3093,11 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         return NeonUserAccount
         
     @tornado.testing.gen_test 
-    def test_save_neon_user_account(self):
-        so = neondata.NeonUserAccount(uuid.uuid1().hex)
-        rv = yield so.save(async=True)
-        self.assertTrue(rv)
-
-    @tornado.testing.gen_test 
     def test_get_api_key_successfully(self):
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         yield so.save(async=True)
         so2 = neondata.NeonUserAccount(so.account_id)
         self.assertEquals(so.neon_api_key, so2.neon_api_key) 
-
-    @tornado.testing.gen_test 
-    def test_save_duplicate_neon_user_accounts(self):
-        user_id = uuid.uuid1().hex 
-        so1 = neondata.NeonUserAccount(user_id) 
-        so2 = neondata.NeonUserAccount(user_id) 
-        yield so1.save(async=True) 
-        yield so2.save(async=True)  
-    
-    @tornado.testing.gen_test 
-    def test_get_neon_user_account(self):
-        so = neondata.NeonUserAccount(uuid.uuid1().hex)
-        yield so.save(async=True)
-        get_me = yield so.get(so.key, async=True)
-        self.assertEquals(so.account_id, get_me.account_id)
 
     @tornado.testing.gen_test 
     def test_mm_neon_user_account(self):
@@ -3069,95 +3110,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         neondata.NeonUserAccount.modify_many([so.key], _m_me) 
         get_me = yield so.get(so.key, async=True)
         self.assertEquals('asdfaafds', get_me.neon_api_key)
-
-    @tornado.testing.gen_test 
-    def test_save_all_neon_user_account(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so3 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        neondata.NeonUserAccount.save_all([so1, so2, so3])
-        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
-        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
-        get3 = yield neondata.NeonUserAccount.get(so3.key, async=True)
-        self.assertEquals(so1.account_id, get1.account_id)
-        self.assertEquals(so2.account_id, get2.account_id)
-        self.assertEquals(so3.account_id, get3.account_id)
-
-    @tornado.testing.gen_test 
-    def test_save_all_neon_user_account_with_dupe(self):
-        aid = uuid.uuid1().hex   
-        so1 = neondata.NeonUserAccount(aid)
-        so2 = neondata.NeonUserAccount(aid)
-        neondata.NeonUserAccount.save_all([so1, so2])
-
-    @tornado.testing.gen_test 
-    def test_delete_neon_user_account(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex) 
-        yield neondata.NeonUserAccount.delete(so1.key, async=True) 
-        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
-        self.assertEquals(None, get1)
- 
-    @tornado.testing.gen_test 
-    def test_delete_many_neon_user_accounts(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        yield neondata.NeonUserAccount.delete_many([so1.key,so2.key], async=True) 
-        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
-        self.assertEquals(None, get1)
-        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
-        self.assertEquals(None, get2)
-
-    @tornado.testing.gen_test 
-    def test_delete_many_neon_user_accounts_key_dne(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        yield neondata.NeonUserAccount.delete_many([so1.key,so2.key,'dne'], async=True) 
-        get1 = yield neondata.NeonUserAccount.get(so1.key, async=True)
-        self.assertEquals(None, get1)
-        get2 = yield neondata.NeonUserAccount.get(so2.key, async=True)
-        self.assertEquals(None, get2)
-
-    @tornado.testing.gen_test 
-    def test_get_many_neon_user_accounts(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        neondata.NeonUserAccount.save_all([so1, so2])
-        results = yield neondata.NeonUserAccount.get_many([so1.key,so2.key], async=True)
-        self.assertEquals(len(results), 2)
- 
-    @tornado.testing.gen_test 
-    def test_get_many_with_pattern_neon_user_accounts(self):
-        so1 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        so2 = neondata.NeonUserAccount(uuid.uuid1().hex)
-        neondata.NeonUserAccount.save_all([so1, so2])
-        results = yield neondata.NeonUserAccount.get_many_with_pattern('neonuseraccount_*', async=True)
-        # Due to only wanting to load the database one time, we are going to end up with 
-        # a weird amount of results here. Just assume that the results array is not empty 
-        self.assertGreater(len(results), 0)      
-    '''
-    @tornado.testing.gen_test 
-    def test_normal_save(self):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        so = neondata.NeonUserAccount(uuid.uuid1().hex)
-        blah = yield so.save(async=True)
-        get1 = yield neondata.NeonUserAccount.get(so.key, async=True)
-        import pdb; pdb.set_trace()
-        options._set('cmsdb.neondata.wants_postgres', 1)
-
-    @tornado.testing.gen_test 
-    def test_normal_bc_save(self):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        def _initialize_bc_plat(x):
-            x.account_id = '123'
-            x.publisher_id = '123'
-            x.read_token = 'abc'
-            x.write_token = 'def'
-            x.last_process_date = time.time()
-        bc = yield tornado.gen.Task(
-              neondata.BrightcovePlatform.modify,
-              '45', '82',
-              _initialize_bc_plat)
-     '''
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -1905,7 +1905,7 @@ class StoredObject(object):
             sql_statements = []
             for key in keys:
                 query = "DELETE FROM %s \
-                         WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), 
+                         WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
                                               key)
                 sql_statements.append(query) 
             #TODO figure out rv
