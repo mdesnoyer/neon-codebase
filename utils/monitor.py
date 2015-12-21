@@ -9,6 +9,7 @@ from options import options, define
 
 define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
+define("secondary_server", default=None, help="Not really a server, but prevents global name overrides", type=str)
 define("sleep_interval", default=60, help="time between stats", type=int)
 
 def send_data(name, value):
@@ -20,7 +21,17 @@ def send_data(name, value):
         
     node = platform.node().replace('.', '-')
     timestamp = int(time.time())
-    data = 'system.%s.%s %s %d\n' % (node, name, value, timestamp)
+    if options.secondary_server: 
+        data = 'system.%s.%s.%s %s %d\n' % (node, 
+                                            options.secondary_server, 
+                                            name, 
+                                            value, 
+                                            timestamp)
+    else: 
+        data = 'system.%s.%s %s %d\n' % (node, 
+                                         name, 
+                                         value, 
+                                         timestamp)
     sock = socket.socket()
     sock.settimeout(20)
     try:
