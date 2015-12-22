@@ -9,7 +9,7 @@ from options import options, define
 
 define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
-define("secondary_server", default=None, help="Not really a server, but prevents global name overrides", type=str)
+define("service_name", default=None, help="Not really a server, but prevents global name overrides", type=str)
 define("sleep_interval", default=60, help="time between stats", type=int)
 
 def send_data(name, value):
@@ -21,9 +21,9 @@ def send_data(name, value):
         
     node = platform.node().replace('.', '-')
     timestamp = int(time.time())
-    if options.secondary_server: 
+    if options.service_name: 
         data = 'system.%s.%s.%s %s %d\n' % (node, 
-                                            options.secondary_server, 
+                                            options.service_name, 
                                             name, 
                                             value, 
                                             timestamp)
