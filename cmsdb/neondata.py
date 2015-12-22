@@ -3194,6 +3194,25 @@ class CNNIntegration(AbstractIntegration):
         # the api_key required to make requests to cnn api - external
         self.api_key_ref = api_key_ref
 
+class FoxIntegration(AbstractIntegration):
+    ''' Fox Integration class '''
+
+    def __init__(self, 
+                 account_id='',
+                 feed_pid_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(FoxIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
+        self.account_id = account_id
+        # the feed_pid_ref required by the fox api - external
+        self.feed_pid_ref = feed_pid_ref
+
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
