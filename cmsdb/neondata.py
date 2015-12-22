@@ -1378,7 +1378,7 @@ class StoredObject(object):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def save(self):
+    def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
         if not hasattr(self, 'created'): 
             self.created = str(datetime.datetime.utcnow())
@@ -1397,8 +1397,9 @@ class StoredObject(object):
             except psycopg2.IntegrityError as e:  
                 # since upsert is not available until postgres 9.5 
                 # we need to do an update here
-                query_tuple = db.get_update_json_query_tuple(self)
-                result = yield conn.execute(query_tuple[0], query_tuple[1]) 
+                if overwrite_existing_object: 
+                    query_tuple = db.get_update_json_query_tuple(self)
+                    result = yield conn.execute(query_tuple[0], query_tuple[1]) 
             except Exception as e: 
                 rv = False
                 _log.exception('an unknown error occurred when saving an object %s' % e) 
