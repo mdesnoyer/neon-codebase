@@ -463,7 +463,7 @@ class Cluster():
         wait_count = 0
         while (emrconn.describe_step(self.cluster_id, step_id).status.state in
                ['PENDING', 'RUNNING']):
-            if wait_count > 40:
+            if wait_count > 80:
                 _log.error('Timeout when waiting for EMR to send the job %s '
                            'to Haddop' % step_id)
                 _log.error('stderr was:\n %s' %
@@ -726,15 +726,25 @@ class Cluster():
         conn = EmrConnection()
         
         self.master_ip = None
-        self.master_id = \
-          conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in emr_iterator(conn, 'instances', self.cluster_id):
-            if (instance.status.state == 'RUNNING' and 
-                instance.ec2instanceid == self.master_id):
+
+        # Get the master instance group
+        master_group = None
+        for igroup in emr_iterator(conn, 'instance_groups', self.cluster_id):
+            if igroup.instancegrouptype == 'MASTER':
+                master_group = igroup
+                break
+        if master_group is None:
+            raise MasterMissingError("Could not find master instance group")
+                                     
+        for instance in emr_iterator(conn, 'instances', self.cluster_id,
+                                     instance_group_id=master_group.id):
+            if (instance.status.state == 'RUNNING'):
+                self.master_id = instance.ec2instanceid
                 if options.use_public_ip and instance.publicipaddress:
                     self.master_ip = instance.publicipaddress
                 else:
                     self.master_ip = instance.privateipaddress
+                break
 
         if self.master_ip is None:
             raise MasterMissingError("Could not find the master ip")
@@ -850,18 +860,20 @@ class Cluster():
                        'cluster-role' : Cluster.ROLE_BOOTING})
 
         _log.info('Waiting until cluster %s is ready' % self.cluster_id)
-        cur_state = conn.describe_jobflow(self.cluster_id)
-        while cur_state.state != 'WAITING':
-            if cur_state.state in ['TERMINATING', 'TERMINATED',
-                             'TERMINATED_WITH_ERRORS', 'FAILED']:
+        cur_cluster = conn.describe_cluster(self.cluster_id)
+        while cur_cluster.status.state != 'WAITING':
+            if cur_cluster.status.state in ['TERMINATING', 'TERMINATED',
+                                            'TERMINATED_WITH_ERRORS',
+                                            'FAILED']:
                 msg = ('Cluster could not start because: %s',
-                           cur_state.laststatechangereason)
+                        cur_cluster.status.laststatechangereason)
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
-            _log.info('Cluster is booting. State: %s' % cur_state.state)
+            _log.info('Cluster is booting. State: %s' % 
+                      cur_cluster.status.state)
             time.sleep(30.0)
-            cur_state = conn.describe_jobflow(self.cluster_id)
+            cur_cluster = conn.describe_cluster(self.cluster_id)
 
         _log.info('Making the new cluster primary')
         for cluster in emr_iterator(conn, 'clusters'):
