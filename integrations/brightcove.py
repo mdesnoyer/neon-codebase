@@ -252,7 +252,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             from_date=from_date,
             _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             sort_by='MODIFIED_DATE',
-            sort_order='DESC',
+            sort_order='ASC',
             video_fields=BrightcoveIntegration.get_submit_video_fields(),
             custom_fields=self.get_custom_fields())
 
