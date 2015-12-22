@@ -9,7 +9,7 @@ from options import options, define
 
 define("carbon_server", default="127.0.0.1", help="Montioring server", type=str)
 define("carbon_port", default=8090, help="Monitoring port", type=int)
-define("service_name", default=None, help="Not really a server, but prevents global name overrides", type=str)
+define("service_name", default=None, help="Two+ services running at once step on statemon, this solves it", type=str)
 define("sleep_interval", default=60, help="time between stats", type=int)
 
 def send_data(name, value):
