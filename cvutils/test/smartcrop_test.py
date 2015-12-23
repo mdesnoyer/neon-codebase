@@ -11,8 +11,8 @@ sys.path.insert(0,  os.path.abspath(
 import unittest
 from cvutils import smartcrop
 from cvutils import imageutils
-# from model import features
-# from model.colorname import JSD
+from model import features
+from model.colorname import JSD
 
 class TestSmartCrop(unittest.TestCase):
     def setUp(self):
@@ -81,7 +81,7 @@ class TestSmartCrop(unittest.TestCase):
         smart_crop._saliency_map = saliency_im
         smart_crop._text_boxes = []
         (new_x, new_y, new_width, new_height) = \
-            smart_crop.sliding_window_crop_and_resize(300, 300)
+            smart_crop.saliency_crop(300, 300)
         cropped_im = saliency_im[new_y:new_y+new_height,
                                     new_x:new_x+new_width]
         cv2.imshow('cropped saliency', cropped_im)
@@ -96,3 +96,17 @@ class TestSmartCrop(unittest.TestCase):
         test_im = np.zeros((360, 600, 3), dtype=np.uint8)
         im_saliency = smartcrop.ImageSignatureSaliency(test_im)
         im_saliency._create_center_bias(360, 600)        
+
+    def test_face_zeros(self):
+        test_im = np.zeros((50, 100, 3), dtype=np.uint8)
+        smart_crop = smartcrop.SmartCrop(test_im)
+        faces = np.array([[40, 20, 20, 20],
+                          [10, 20, 10, 10]])
+        loc_array = smart_crop._get_face_zeros(faces, 100, 50)
+        target = np.ones(51)
+        for x in xrange(51):
+            right_x = x + 50 - 1
+            if smart_crop._face_cut_length(x, right_x, faces) > 0:
+                target[x] = 0
+        np.testing.assert_array_equal(target, loc_array)
+
