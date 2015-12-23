@@ -1543,9 +1543,6 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
             1420080300l)
 
-        # Make sure that no video was submitted
-        self.assertEquals(self.submit_mock.call_count, 0)
-
     @tornado.testing.gen_test
     def test_get_custom_platform_id(self):
         def _set_platform(x):
