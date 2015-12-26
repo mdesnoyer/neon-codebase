@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 '''
-Ingests changes from Brightcove into our system
+Ingests changes from Any Service into our system
 
-Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Copyright 2015 Neon Labs
 '''
 import os.path
@@ -32,8 +31,8 @@ import utils.ps
 from utils import statemon
 import utils.sync
 
-define("poll_period", default=300.0, help="Period (s) to poll brightcove",
-       type=float)
+define("poll_period", default=300.0, help="Period (s) to poll service", type=float)
+define("service_name", default=None, help="Which service to start", type=str)
 
 statemon.define('unexpected_exception', int)
 statemon.define('unexpected_processing_error', int)
@@ -44,15 +43,47 @@ statemon.define('slow_update', int)
 
 _log = logging.getLogger(__name__)
 
+def get_platform_object(): 
+    '''Takes the service_name option and returns 
+         the correct neondata.platform/integration object 
+    '''
+    types = { 
+              'fox' : neondata.FoxIntegration, 
+              'cnn' : neondata.CNNIntegration, 
+              'brightcove' : neondata.BrightcovePlatform 
+            } 
+    try: 
+        return types[options.service_name] 
+    except KeyError as e: 
+        _log.error('Service not available for Ingestion : %s' % e)
+        raise     
+
+def get_integration_object(): 
+    '''Takes the service_name option and returns 
+         the correct integrations.integration object 
+    ''' 
+    types = { 
+              'fox' : integrations.fox.FoxIntegration, 
+              'cnn' : integrations.cnn.CNNIntegration, 
+              'brightcove' : integrations.brightcove.BrightcoveIntegration 
+            } 
+    try: 
+        return types[options.service_name] 
+    except KeyError as e: 
+        _log.error('Service not available for Ingestion : %s' % e)
+        raise     
+
 @tornado.gen.coroutine
 def process_one_account(api_key, integration_id, slow_limit=600.0):
-    '''Processes one Brightcove account.'''
-    _log.debug('Processing Brightcove platform for account %s, integration %s'
-               % (api_key, integration_id))
+    '''Processes one account.'''
+    _log.debug('Processing %s platform for account %s, integration %s'
+               % (options.service_name, api_key, integration_id))
     start_time = datetime.datetime.now()
 
-    platform = yield tornado.gen.Task(neondata.BrightcovePlatform.get,
-                                      api_key, integration_id)
+    pi_obj = get_platform_object() 
+    integration_obj = get_integration_object()
+
+    platform = yield tornado.gen.Task(pi_obj.get, api_key, integration_id)
     if platform is None:
         _log.error('Could not find platform %s for account %s' %
                    (integration_id, api_key))
@@ -65,8 +96,7 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
                                       platform.neon_api_key)
         account_id = acct.account_id
 
-    integration = integrations.brightcove.BrightcoveIntegration(
-        account_id, platform)
+    integration = integration_object(account_id, platform)
     try:
         yield integration.process_publisher_stream()
     except integrations.exceptions.IntegrationError as e:
@@ -138,7 +168,7 @@ def main():
     
     atexit.register(ioloop.stop)
     atexit.register(manager.stop)
-    _log.info('Starting Brightcove ingester')
+    _log.info('Starting Ingester')
     ioloop.start()
 
     _log.info('Finished program')
