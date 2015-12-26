@@ -54,18 +54,6 @@ CREATE TABLE abstractplatform (
 ALTER TABLE abstractplatform OWNER TO pgadmin;
 
 --
--- Name: brightcoveplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE brightcoveplatform (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE brightcoveplatform OWNER TO pgadmin;
-
---
 -- Name: cdnhostingmetadatalist; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -136,30 +124,6 @@ CREATE TABLE neonuseraccount (
 
 
 ALTER TABLE neonuseraccount OWNER TO pgadmin;
-
---
--- Name: ooyalaintegration; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE ooyalaintegration (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE ooyalaintegration OWNER TO pgadmin;
-
---
--- Name: ooyalaplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE ooyalaplatform (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE ooyalaplatform OWNER TO pgadmin;
 
 --
 -- Name: request; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
@@ -255,18 +219,6 @@ CREATE TABLE videostatus (
 
 ALTER TABLE videostatus OWNER TO pgadmin;
 
---
--- Name: youtubeplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
---
-
-CREATE TABLE youtubeplatform (
-    _data jsonb,
-    _type character varying(128) NOT NULL
-);
-
-
-ALTER TABLE youtubeplatform OWNER TO pgadmin;
-
 -- Data for Name: abstractintegration; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 
@@ -279,19 +231,6 @@ COPY abstractintegration (_data, _type) FROM stdin;
 COPY abstractplatform (_data, _type) FROM stdin;
 \.
 
---
--- Data for Name: brightcoveplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
-
-COPY brightcoveplatform (_data, _type) FROM stdin;
-\.
-
---
--- Data for Name: ooyalaplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
-
-COPY ooyalaplatform (_data, _type) FROM stdin;
-\.
 
 --
 -- Data for Name: cdnhostingmetadatalist; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -321,14 +260,6 @@ COPY neonapikey (_data, _type) FROM stdin;
 --
 
 COPY neonapirequest (_data, _type) FROM stdin;
-\.
-
-
---
--- Data for Name: neonplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
-
-COPY neonplatform (_data, _type) FROM stdin;
 \.
 
 
@@ -407,18 +338,9 @@ COPY videometadata (_data, _type) FROM stdin;
 COPY videostatus (_data, _type) FROM stdin;
 \.
 
---
--- Data for Name: youtubeplatform; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
 
-COPY youtubeplatform (_data, _type) FROM stdin;
-\.
-
-
---
--- Name: account_id; Type: INDEX; Schema: public; Owner: pgadmin; Tablespace: 
---
-
+CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailmetadata_key ON thumbnailmetadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
@@ -460,11 +382,6 @@ AFTER INSERT OR UPDATE OR DELETE
 ON abstractintegration
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
-CREATE TRIGGER brightcoveplatform_notify_trig
-AFTER INSERT OR UPDATE OR DELETE
-ON brightcoveplatform
-FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
-
 CREATE TRIGGER cdnhostingmetadatalist_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON cdnhostingmetadatalist
@@ -493,16 +410,6 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER neonuseraccount_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON neonuseraccount
-FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
-
-CREATE TRIGGER ooyalaintegration_notify_trig
-AFTER INSERT OR UPDATE OR DELETE
-ON ooyalaintegration
-FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
-
-CREATE TRIGGER ooyalaplatform_notify_trig
-AFTER INSERT OR UPDATE OR DELETE
-ON ooyalaplatform
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 CREATE TRIGGER request_notify_trig
@@ -543,11 +450,6 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER videostatus_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON videostatus
-FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
-
-CREATE TRIGGER youtubeplatform_notify_trig
-AFTER INSERT OR UPDATE OR DELETE
-ON youtubeplatform
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

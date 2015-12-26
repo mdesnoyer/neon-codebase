@@ -27,7 +27,6 @@ from utils.options import define, options
 
 _log = logging.getLogger(__name__)
 
-import pdb; pdb.set_trace()
 @tornado.gen.coroutine 
 def subscribe_to_db_changes(): 
     @tornado.gen.coroutine
@@ -43,23 +42,33 @@ def subscribe_to_db_changes():
             try: 
                 yield obj.modify(key, modify_me, async=True) 
             except Exception as e: 
-                print e  
+                _log.error('exception while saving changing object %s : %s' % (obj, e))
+                pass  
         options._set('cmsdb.neondata.wants_postgres', 0)
 
     @tornado.gen.coroutine
     def change_handler_platform(key, obj, op):
         # since platforms are keyed differently we will 
         # just use another handler  
+        obj.key.replace('brightcoveplatform', 'abstractplatform') 
+        obj.key.replace('neonplatform', 'abstractplatform') 
+        obj.key.replace('ooyalaplatform', 'abstractplatform') 
+        obj.key.replace('youtubeplatform', 'abstractplatform') 
         options._set('cmsdb.neondata.wants_postgres', 1)
         def modify_me(x):
             current_key = x.key 
             x.__dict__ = obj.__dict__
             x.key = current_key
         if op == 'set':
-            try:  
-                yield obj.modify(obj.api_key, obj.i_id, modify_me, async=True) 
+            try: 
+                yield obj.modify(obj.neon_api_key, 
+                                 obj.integration_id, 
+                                 modify_me, 
+                                 create_missing=True,
+                                 async=True) 
             except Exception as e: 
-                print e
+                _log.error('exception while saving changing platform %s : %s' % (obj, e))
+                pass
         options._set('cmsdb.neondata.wants_postgres', 0)
 
     neondata.NeonUserAccount.subscribe_to_changes(change_handler_normal)

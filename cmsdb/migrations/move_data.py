@@ -28,7 +28,7 @@ def move_abstract_integrations():
     options._set('cmsdb.neondata.wants_postgres', 1)
     for i in integrations: 
         try: 
-            i.save()
+            i.save(overwrite_existing_object=False)
         except Exception as e: 
             _log.exception('Error saving integration %s to postgres %s' % (i,e))  
             pass 
@@ -59,7 +59,7 @@ def move_experiment_strategies():
     options._set('cmsdb.neondata.wants_postgres', 1)
     for s in strategies: 
         try: 
-            s.save()
+            s.save(overwrite_existing_object=False)
         except Exception as e:
             _log.exception('Error saving exp stratgey %s to postgres %s' % (p,e)) 
             pass  
@@ -73,10 +73,10 @@ def move_neon_user_accounts():
     for acct in accts:
         try:
             #import pdb; pdb.set_trace() 
-            acct.save() 
+            acct.save(overwrite_existing_object=False) 
             api_key = neondata.NeonApiKey(acct.account_id, 
                                           acct.neon_api_key) 
-            api_key.save() 
+            api_key.save(overwrite_existing_object=False) 
         except Exception as e: 
             _log.exception('Error saving account %s to postgres %s' % (acct,e))
             pass  
@@ -89,7 +89,7 @@ def move_cdn_hosting_metadata_lists():
     options._set('cmsdb.neondata.wants_postgres', 1)
     for c in cdns: 
         try: 
-            c.save() 
+            c.save(overwrite_existing_object=False) 
         except Exception as e:
             _log.exception('Error saving cdnhostingmetadatalist %s to postgres %s' % (p,e)) 
             pass  
@@ -117,38 +117,38 @@ def move_neon_videos_and_thumbnails():
                 for t in tnails:
                     try:  
                         if t: 
-                            t.save() 
+                            t.save(overwrite_existing_object=False) 
                     except Exception as e: 
                         _log.exception('Error saving thumbnail %s to postgres %s' % (t,e)) 
                         pass 
                 for ts in tnail_statuses:
                     try: 
                         if ts:  
-                            ts.save() 
+                            ts.save(overwrite_existing_object=False) 
                     except Exception as e: 
                         _log.exception('Error saving thumbnail_status %s to postgres %s' % (ts,e)) 
                         pass 
                 for tsu in tnail_serving_urls:
                     try: 
                         if tsu:  
-                            tsu.save() 
+                            tsu.save(overwrite_existing_object=False) 
                     except Exception as e:
                         _log.exception('Error saving thumbnail_serving_url %s to postgres %s' % (tsu,e)) 
                         pass
                 try:  
-                    video_status.save() 
+                    video_status.save(overwrite_existing_object=False) 
                 except Exception as e: 
                     _log.exception('Error saving video_status %s to postgres %s' % (video_status,e)) 
                     pass
                 
                 try: 
-                    v.save()
+                    v.save(overwrite_existing_object=False)
                 except Exception as e:
                     _log.exception('Error saving video %s to postgres %s' % (v,e)) 
                     pass
 
                 try: 
-                    api_request.save() 
+                    api_request.save(overwrite_existing_object=False) 
                 except Exception as e: 
                     _log.exception('Error saving api_request %s to postgres %s' % (api_request,e)) 
                     pass

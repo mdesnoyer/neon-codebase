@@ -1727,7 +1727,7 @@ class StoredObject(object):
             key_sets = collections.defaultdict(list)
              
             for key in keys:
-                query = "SELECT _data \
+                query = "SELECT _data, _type \
                          FROM %s \
                          WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), key)
 
@@ -1742,8 +1742,10 @@ class StoredObject(object):
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
-                    cur_obj = create_class._create(key, item['_data'])
-                    orig_objects[key] = create_class._create(key, item['_data'])
+                    #cur_obj = create_class._create(key, item['_data'])
+                    cur_obj = create_class._create(key, item)
+                    #orig_objects[key] = create_class._create(key, item['_data'])
+                    orig_objects[key] = create_class._create(key, item)
                 mappings[key] = cur_obj
             try:
                 func(mappings)

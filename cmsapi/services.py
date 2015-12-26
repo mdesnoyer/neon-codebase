@@ -976,7 +976,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         #1 Get job ids for the videos from account, get the request status
         platform_account = yield tornado.gen.Task(self.get_platform_account, 
                             i_type, i_id)
-
         if not platform_account:
             _log.error("key=get_video_status_%s msg=account not found" % i_type)
             statemon.state.increment('account_not_found')
@@ -985,7 +984,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         #return all videos in the account
         if vids is None:
-            vids = platform_account.get_videos()
+            user = yield neondata.NeonUserAccount.get(self.api_key, async=True)
+            internal_video_ids = yield user.get_internal_video_ids(async=True)
+            #import pdb; pdb.set_trace()
+            vids_one = [neondata.InternalVideoID.to_external(i) for i in internal_video_ids]  
+            vids_two = platform_account.get_videos()
+            import pdb; pdb.set_trace()
         
         # No videos in the account
         if not vids:
@@ -1408,7 +1412,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     400)
             return
 
-        vids = platform_account.get_videos()
+        #vids = platform_account.get_videos()
+        user = yield neondata.NeonUserAccount.get(self.api_key, async=True)
+        internal_video_ids = yield user.get_internal_video_ids(async=True)
+        vids = [neondata.InternalVideoID.to_external(i) for i in internal_video_ids]  
         if not vids:
             vids = []
         data = json.dumps({ "videoids" : vids})
