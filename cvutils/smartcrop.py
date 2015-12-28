@@ -554,7 +554,7 @@ class SmartCrop(object):
                 x_loc_array[face_x:min(im_width - crop_width + 1, face_x_end) + 1] = 0
         return x_loc_array
 
-    def saliency_conv_crop(self, saliency_map, h, w):
+    def saliency_face_crop(self, saliency_map, h, w):
         height = saliency_map.shape[0]
         width = saliency_map.shape[1]
         # Get the default crop locations.
@@ -569,6 +569,11 @@ class SmartCrop(object):
         new_x = center_horizontal - new_width / 2
         new_y = center_vertical - height / 2
 
+        if self.with_face_detection:
+            faces = self.detect_faces()
+            # Get the vector of starting cropping location
+            face_zero_vector = self._get_face_zeros(faces, width, new_width)
+
         if self.with_saliency:
             fil = self.create_rule_of_third_filter(new_height, new_width)
             # import ipdb; ipdb.set_trace()
@@ -577,12 +582,20 @@ class SmartCrop(object):
             # the saliency_map, we take the truncated end. It is 1D vector.
             filter_line = filter_result[new_y + new_height - 1,
                                         width - new_width:]
+
+            if self.with_face_detection:
+                # Zero out locations that faces are cut
+                filter_line *= face_zero_vector
+
             # Find the max.
             max_loc = np.argmax(filter_line)
-            new_x = max_loc
+            # If all filter_line is zero, for example, too many faces, can't
+            # avoiding cut face, then we just center the cut. Otherwise, we
+            # maximize the saliency overlap.
+            if filter_line[max_loc] > 0:
+                new_x = max_loc
 
         return (new_x, new_y, new_width, new_height)
-
 
 
     def crop_and_resize_alt(self, h, w):
@@ -593,9 +606,13 @@ class SmartCrop(object):
         height = self.image.shape[0]
         width = self.image.shape[1]
 
+        saliency_map = np.zeros((height, width))
         if self.with_saliency:
             saliency_map = self.get_saliency_map()
-            self.saliency_conv_crop(saliency_map, h, w)
+        
+        # Crop the image area to maximize saliency and avoid cropping faces.
+        (new_x, new_y, new_width, new_height) = \
+            self.saliency_face_crop(saliency_map, h, w)
 
         # Get the image with text cropped
         is_text_cut = False
@@ -611,6 +628,12 @@ class SmartCrop(object):
                 is_text_cut = True
                 upper_text_y = min(upper_text_y_array) - 3
                 text_cropped_im = self.image[0:upper_text_y, :]
+
+        if is_text_cut:
+            saliency_map_with_text_cut = saliency_map[0:upper_text_y, :]
+            (new_x_text, new_y_text, new_width_text, new_height_text) = \
+                self.saliency_face_crop(saliency_map, h, w)
+
 
 
 
