@@ -36,8 +36,65 @@ class CMSAPIError(IntegrationError): pass
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
-        self.account_id = account_id # Neon account id
-        self.platform = platform # An AbstractPlatform object
+        # Neon Account ID 
+        self.account_id = account_id 
+        # An AbstractPlatform Object 
+        self.platform = platform 
+    
+    @tornado.gen.coroutine 
+    def submit_many_videos(self, videos): 
+        '''Submits many videos utilizing child class functions 
+
+        Parameters: 
+        videos - json object of many videos
+
+        Returns: 
+        dictionary of video_info => { video_id -> job_ids }
+        ''' 
+        added_jobs = 0
+        for video in videos:
+            try:  
+                video_id = self.get_video_id(video) 
+                video_url = self.get_video_url(video) 
+                callback_url = self.get_video_callback_url(video) 
+                video_title = self.get_video_title(video)
+                thumbnail_info = self.get_video_thumbnail_info(video)
+                if thumbnail_info['thumb_ref']:  
+                    thumb_id = thumbnail_info['thumb_ref'] 
+                if thumbnail_info['thumb_url']: 
+                    default_thumbnail = thumbnail_info['thumb_url'] 
+                custom_data = self.get_custom_data(video) 
+                duration = self.get_duration(video) 
+                publish_date = self.get_publish_date(video) 
+
+                existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                        neondata.InternalVideoID.generate(self.account_id, video_id))
+                if not existing_video:
+                    response = yield self.submit_video(video_id=video_id, 
+                                                       video_url=video_src, 
+                                                       external_thumbnail_id=thumb_id, 
+                                                       custom_data=custom_data, 
+                                                       duration=duration, 
+                                                       publish_date=publish_date, 
+                                                       video_title=unicode(title), 
+                                                       default_thumbnail=thumb)
+                    if response['job_id']:
+                        added_jobs += 1
+            except KeyError as e:
+                # let's continue here, we do not have enough to submit 
+                pass 
+            except Exception as e: 
+                statemon.state.increment('unexpected_submission_error')
+                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e))
+                pass
+
+        if last_processed_date:
+            def _modify_me(x): 
+                x.last_process_date = last_processed_date 
+            yield tornado.gen.Task(self.platform.modify, self.platform.integration_id, _modify_me)
+
+        _log.info('Added %d jobs for integration' % added_jobs) 
+        raise tornado.gen.Return(self.platform)
 
     @tornado.gen.coroutine
     def submit_video(self, video_id, video_url,
@@ -126,5 +183,73 @@ class OVPIntegration(object):
         Inputs:
         internal_video_id - The internal video id of the video to modify
         thumb_metadata - The thumbnail metadata of the thumbnail to show
+        '''
+        raise NotImplementedError()
+
+    def get_video_id(self, video):
+        '''Find the video_id in the video object
+          
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_url(self, video):
+        '''Find the video_url in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_callback_url(self, video):
+        '''Find the video_callback_url in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_title(self, video):
+        '''Find the video_title in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_custom_data(self, video):
+        '''Find custom_data in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_duration(self, video):
+        '''Find duration in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_thumbnail_info(self, video):
+        '''Find the default_thumbnail in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+
+           thumbnail_info expects thumb_ref (external_id) and 
+             thumb_url (external_url) in a python object eg 
+           thumb_info['thumb_ref'] = '1233124' 
+           thumb_info['thumb_url'] = 'http://meisaurl.com' 
         '''
         raise NotImplementedError()
