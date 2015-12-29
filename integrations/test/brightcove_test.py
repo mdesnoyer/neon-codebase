@@ -1415,7 +1415,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1437,7 +1437,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 46, 40),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1503,7 +1503,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(1980, 1, 1),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1542,9 +1542,6 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
             1420080300l)
-
-        # Make sure that no video was submitted
-        self.assertEquals(self.submit_mock.call_count, 0)
 
     @tornado.testing.gen_test
     def test_get_custom_platform_id(self):
@@ -1586,7 +1583,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 

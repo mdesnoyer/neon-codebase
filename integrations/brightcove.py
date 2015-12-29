@@ -252,7 +252,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             from_date=from_date,
             _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             sort_by='MODIFIED_DATE',
-            sort_order='DESC',
+            sort_order='ASC',
             video_fields=BrightcoveIntegration.get_submit_video_fields(),
             custom_fields=self.get_custom_fields())
 
@@ -281,11 +281,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                            'Brightcove for platform %s: %s' % 
                            (self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
-            if (self.platform.last_process_date is not None and 
-                int(item['lastModifiedDate']) <=  
-                (self.platform.last_process_date * 1000)):
-                # No new videos
-                break
             try: 
                 yield self.submit_one_video_object(item, skip_old_video=True)
             except integrations.ovp.OVPCustomRefIDError: 
@@ -335,7 +330,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                                    reset_retries=True):
         if last_mod_date is not None:
             def _set_mod_date_and_retries(x):
-                x.last_process_date = last_mod_date / 1000.0
+                new_date = last_mod_date / 1000.0 
+                if new_date > x.last_process_date: 
+                    x.last_process_date = new_date
                 if reset_retries: 
                     x.video_submit_retries = 0
             self.platform = yield tornado.gen.Task(
