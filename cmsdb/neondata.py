@@ -2772,7 +2772,8 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, 
+                       video_submit_retries=0):
         
         integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
@@ -2780,6 +2781,9 @@ class AbstractIntegration(NamespacedStoredObject):
         
         # should this integration be used 
         self.enabled = enabled
+        
+        # how many times have we tried to submit the current video
+        self.video_submit_retries = video_submit_retries
 
     @classmethod
     def _baseclass_name(cls):

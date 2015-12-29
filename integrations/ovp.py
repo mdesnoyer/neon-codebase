@@ -22,6 +22,9 @@ import utils.sync
 
 statemon.define('job_submission_error', int)
 statemon.define('new_job_submitted', int)
+statemon.define('unexpected_submission_error', int)
+define('max_submit_retries', default=3, 
+       help='Maximum times we will retry a video submit before passing on it.')
 
 define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
@@ -38,8 +41,10 @@ class OVPIntegration(object):
     def __init__(self, account_id, platform):
         # Neon Account ID 
         self.account_id = account_id 
-        # An AbstractPlatform Object 
-        self.platform = platform 
+        # An AbstractPlatform or AbstractIntegration Object 
+        self.platform = platform
+        # hacky to make generic work for dual keyed platform objects 
+        self.is_platform_dual_keyed = False
     
     @tornado.gen.coroutine 
     def submit_many_videos(self, videos): 
@@ -50,10 +55,16 @@ class OVPIntegration(object):
 
         Returns: 
         dictionary of video_info => { video_id -> job_ids }
-        ''' 
+        '''
         added_jobs = 0
-        for video in videos:
+        last_processed_date = None
+        self.set_video_iter(videos)
+  
+        while True:   
             try:  
+                video = self.get_next_video_item() 
+                if isinstance(video, StopIteration):
+                    break
                 video_id = self.get_video_id(video) 
                 video_url = self.get_video_url(video) 
                 callback_url = self.get_video_callback_url(video) 
@@ -63,38 +74,95 @@ class OVPIntegration(object):
                     thumb_id = thumbnail_info['thumb_ref'] 
                 if thumbnail_info['thumb_url']: 
                     default_thumbnail = thumbnail_info['thumb_url'] 
-                custom_data = self.get_custom_data(video) 
-                duration = self.get_duration(video) 
-                publish_date = self.get_publish_date(video) 
+                custom_data = self.get_video_custom_data(video) 
+                duration = self.get_video_duration(video) 
+                publish_date = last_processed_date = self.get_video_publish_date(video) 
 
                 existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
                                                         neondata.InternalVideoID.generate(self.account_id, video_id))
                 if not existing_video:
                     response = yield self.submit_video(video_id=video_id, 
-                                                       video_url=video_src, 
+                                                       video_url=video_url, 
+                                                       callback_url=callback_url,
                                                        external_thumbnail_id=thumb_id, 
                                                        custom_data=custom_data, 
                                                        duration=duration, 
                                                        publish_date=publish_date, 
-                                                       video_title=unicode(title), 
-                                                       default_thumbnail=thumb)
+                                                       video_title=unicode(video_title), 
+                                                       default_thumbnail=default_thumbnail)
                     if response['job_id']:
                         added_jobs += 1
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
                 pass 
-            except Exception as e: 
-                statemon.state.increment('unexpected_submission_error')
-                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e))
-                pass
+            except OVPCustomRefIDError: 
+                pass 
+            except OVPRefIDError: 
+                pass 
+            except Exception as e:
+                # we got an unknown error from somewhere, it could be video,
+                #  server, or api related -- we will retry it on the next goaround 
+                #  if we have not reached the max retries for this video, otherwise 
+                #  we pass and move on
+                def _increase_retries(x):
+                    x.video_submit_retries += 1
 
-        if last_processed_date:
-            def _modify_me(x): 
-                x.last_process_date = last_processed_date 
-            yield tornado.gen.Task(self.platform.modify, self.platform.integration_id, _modify_me)
-
-        _log.info('Added %d jobs for integration' % added_jobs) 
+                if self.platform.video_submit_retries < options.max_submit_retries:
+                    # update last_process_date, so we start on this video next time
+                    yield self.update_last_processed_date(last_processed_date, 
+                                                          reset_retries=False)
+                    if self.is_platform_dual_keyed:  
+                        self.platform = yield tornado.gen.Task(
+                            self.platform.modify,
+                            self.platform.neon_api_key,
+                            self.platform.integration_id,
+                            _increase_retries)
+                    else: 
+                        self.platform = yield tornado.gen.Task(
+                            self.platform.modify,
+                            self.platform.integration_id,
+                            _increase_retries)
+                    _log.info('Added %d jobs for integration before failure.' % added_jobs)
+                    return  
+                else:
+                    _log.error('Unknown error, reached max retries on '
+                               'video submit for account %s: item %s: %s' % 
+                               (self.account_id, item, e))
+                    statemon.state.define_and_increment(
+                        'submit_video_bc_error.%s' % self.account_id)
+                    pass 
+        
+        yield self.update_last_processed_date(last_processed_date) 
+        _log.info('Added %d jobs for integration' % added_jobs)
+ 
         raise tornado.gen.Return(self.platform)
+    
+    @tornado.gen.coroutine 
+    def update_last_processed_date(self, 
+                                   last_mod_date, 
+                                   reset_retries=True):
+        if last_mod_date is not None:
+            def _set_mod_date_and_retries(x):
+                new_date = last_mod_date 
+                if new_date > x.last_process_date: 
+                    x.last_process_date = new_date
+                if reset_retries: 
+                    x.video_submit_retries = 0
+            if self.is_platform_dual_keyed: 
+                self.platform = yield tornado.gen.Task(
+                    self.platform.modify,
+                    self.platform.neon_api_key,
+                    self.platform.integration_id,
+                    _set_mod_date_and_retries)
+            else: 
+                self.platform = yield tornado.gen.Task(
+                    self.platform.modify,
+                    self.platform.integration_id,
+                    _set_mod_date_and_retries)
+            
+            _log.debug(
+                'updated last process date for account %s integration %s'
+                 % (self.account_id, self.platform.integration_id))
 
     @tornado.gen.coroutine
     def submit_video(self, video_id, video_url,
@@ -232,6 +300,15 @@ class OVPIntegration(object):
         raise NotImplementedError()
 
     def get_video_duration(self, video):
+        '''Find duration in the video object
+
+           If using submit_many_videos: 
+             Child classes must implement this even if it 
+             is just to return None 
+        '''
+        raise NotImplementedError()
+
+    def get_video_publish_date(self, video):
         '''Find duration in the video object
 
            If using submit_many_videos: 

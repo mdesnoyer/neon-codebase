@@ -40,57 +40,16 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         self.platform = integration
         self.platform.neon_api_key = account_id
 
+        self.video_iter = None         
+ 
     @tornado.gen.coroutine 
     def submit_new_videos(self):
         search_results = yield self.api.search(dateutil.parser.parse(self.last_process_date))
-        #added_jobs = 0
         videos = search_results['docs'] 
-        last_processed_date = None 
         _log.info('Processing %d videos for cnn' % (len(videos)))
-        self.submit_many_videos(videos) 
-        '''  
-        for video in videos:
-            try:
-                video_id = InputSanitizer.sanitize_string(video['videoId'].replace('/', '~')) 
-                publish_date = last_processed_date = InputSanitizer.sanitize_string(video['firstPublishDate'])
-                title = InputSanitizer.sanitize_string(video.get('title', 'no title'))
-                duration = video.get('duration', None)
-                if duration:
-                    ts = time.strptime(duration, "%H:%M:%S")
-                    duration = datetime.timedelta(hours=ts.tm_hour, 
-                                                  minutes=ts.tm_min, 
-                                                  seconds=ts.tm_sec).total_seconds()
-
-                thumb, thumb_id = self._get_best_image_info(video['relatedMedia'])
-                custom_data = self._build_custom_data_from_topics(video['topics'])
-                video_src = self._find_best_cdn_url(video['cdnUrls'])
-                existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                        neondata.InternalVideoID.generate(self.account_id, video_id))
-                if not existing_video:
-                    response = yield self.submit_video(video_id=video_id, 
-                                                       video_url=video_src, 
-                                                       external_thumbnail_id=thumb_id, 
-                                                       custom_data=custom_data, 
-                                                       duration=duration, 
-                                                       publish_date=publish_date, 
-                                                       video_title=unicode(title), 
-                                                       default_thumbnail=thumb)
-                    if response['job_id']:
-                        added_jobs += 1
-            except KeyError as e:
-                # let's continue here, we do not have enough to submit 
-                pass 
-            except Exception as e: 
-                statemon.state.increment('unexpected_submission_error')
-                _log.exception('Unknown error occured on video_id %s exception = %s' % (video_id, e))
-                pass
-        '''  
-        if last_processed_date:
-            def _modify_me(x): 
-                x.last_process_date = last_processed_date 
-            yield tornado.gen.Task(neondata.CNNIntegration.modify, self.platform.integration_id, _modify_me)
-
-        _log.info('Added %d jobs for cnn integration' % added_jobs) 
+        yield self.submit_many_videos(videos)
+ 
+        #_log.info('Added %d jobs for cnn integration' % added_jobs) 
         raise tornado.gen.Return(self.platform)
 
     def get_video_id(self, video):
@@ -123,11 +82,27 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                                           seconds=ts.tm_sec).total_seconds()
         return duration
 
+    def get_video_publish_date(self, video):
+        '''override from ovp'''
+        return video['firstPublishDate'] 
+
     def get_video_thumbnail_info(self, video):
         '''override from ovp''' 
         thumb_url, thumb_ref = self._get_best_image_info(video['relatedMedia'])
         return { 'thumb_url' : thumb_url, 
-                 'thumb_ref' : thumb_ref } 
+                 'thumb_ref' : thumb_ref }
+
+    def set_video_iter(self, videos):
+        self.video_iter = iter(videos) 
+  
+    def get_next_video_item(self):
+        video = None 
+        try:  
+            video = self.video_iter.next()
+        except StopIteration: 
+            video = StopIteration('hacky')
+  
+        return video  
                 
     @staticmethod
     def _get_best_image_info(media_json):

@@ -101,8 +101,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def test_submit_one_failure(self):
         response = self.create_search_response(2)
         self.cnn_api_mock.side_effect = [response]
-        self.submit_mock.side_effect = [Exception('on noes not again'), 
-                                        {"job_id": "job1"}]
+        self.submit_mock.side_effect = [{"job_id": "job1"}, 
+                                        Exception('on noes not again')]
         with self.assertLogExists(logging.INFO, 'Added 1 jobs'): 
             yield self.external_integration.submit_new_videos()
         self.assertEquals(self.submit_mock.call_count, 2)

@@ -77,6 +77,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         self.bc_api = brightcove_api.BrightcoveApi(
             self.platform.neon_api_key, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
+        self.is_platform_dual_keyed = True 
 
     @staticmethod
     def get_submit_video_fields():
