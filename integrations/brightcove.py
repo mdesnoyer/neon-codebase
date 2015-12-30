@@ -305,8 +305,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return self.platform.callback_url
 
     def get_video_title(self, video):
-        '''override from ovp''' 
-        return unicode(video['name'])
+        '''override from ovp'''
+        video_title = video.get('name', '') 
+        return unicode(video_title) 
 
     def get_video_custom_data(self, video):
         '''override from ovp''' 
@@ -391,7 +392,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         raise tornado.gen.Return(video)  
 
     def skip_old_video(self, publish_date):
-        rv = False    
+        rv = False
+        import pdb; pdb.set_trace()     
         if (self.skip_old_videos and 
             publish_date is not None and 
             self.platform.oldest_video_allowed is not None and

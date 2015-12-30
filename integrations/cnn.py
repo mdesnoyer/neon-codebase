@@ -47,7 +47,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         videos = search_results['docs'] 
         _log.info('Processing %d videos for cnn' % (len(videos)))
         self.set_video_iter(videos) 
-        yield self.submit_ovp_videos(self.get_next_video_item)
+        yield self.submit_ovp_videos(self.get_next_video_item, grab_new_thumb=False)
  
         #_log.info('Added %d jobs for cnn integration' % added_jobs) 
         raise tornado.gen.Return(self.platform)

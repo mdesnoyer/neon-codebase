@@ -55,7 +55,10 @@ class OVPIntegration(object):
         self.video_iter = None         
  
     @tornado.gen.coroutine 
-    def submit_ovp_videos(self, iter_func, continue_on_error=False): 
+    def submit_ovp_videos(self, 
+                          iter_func, 
+                          continue_on_error=False, 
+                          grab_new_thumb=True): 
         '''Submits many videos utilizing child class functions 
 
         Parameters: 
@@ -80,44 +83,12 @@ class OVPIntegration(object):
                 video = yield iter_func()
                 if isinstance(video, StopIteration):
                     break
-                video_id = InputSanitizer.sanitize_string(self.get_video_id(video)) 
-                video_url = InputSanitizer.sanitize_string(self.get_video_url(video)) 
-                callback_url = self.get_video_callback_url(video) 
-                video_title = InputSanitizer.sanitize_string(self.get_video_title(video))
-                thumbnail_info = self.get_video_thumbnail_info(video)
-                if thumbnail_info['thumb_ref']:  
-                    thumb_id = thumbnail_info['thumb_ref'] 
-                if thumbnail_info['thumb_url']: 
-                    default_thumbnail = thumbnail_info['thumb_url'] 
-                custom_data = self.get_video_custom_data(video) 
-                duration = self.get_video_duration(video) 
-                publish_date = self.get_video_publish_date(video)
-                if (video_url is None or 
-                    duration < 0 or 
-                    video_url.endswith('.m3u8') or 
-                    video_url.startswith('rtmp://') or 
-                    video_url.endswith('.csmil')):
-                    _log.warn_n('Video ID %s for account %s is a live stream' 
-                                 % (video_id, self.account_id))
-                    continue
-                
-                if not self.skip_old_video(publish_date): 
-                    existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                            neondata.InternalVideoID.generate(self.account_id, video_id))
-                    if not existing_video:
-                        response = yield self.submit_video(video_id=video_id, 
-                                                           video_url=video_url, 
-                                                           callback_url=callback_url,
-                                                           external_thumbnail_id=thumb_id, 
-                                                           custom_data=custom_data, 
-                                                           duration=duration, 
-                                                           publish_date=publish_date, 
-                                                           video_title=unicode(video_title), 
-                                                           default_thumbnail=default_thumbnail)
-                        
-                        video_tuple_list.append((video_id, response['job_id'])) 
-                        if response['job_id']:
-                            added_jobs += 1
+
+                job_id = yield self.submit_one_video_object(video, 
+                                                            grab_new_thumb=grab_new_thumb) 
+                if job_id: 
+                    video_tuple_list.append((self.get_video_id(video), job_id))
+                    added_jobs += 1 
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
                 pass 
@@ -171,6 +142,78 @@ class OVPIntegration(object):
  
         raise tornado.gen.Return(video_tuple_list)
     
+    '''  
+    @tornado.gen.coroutine 
+    def submit_one_video_object(self, 
+                                video, 
+                                grab_new_thumb=True): 
+        try: 
+            job_id = yield self._submit_one_video_object_impl(video, 
+                                                              grab_new_thumb=grab_new_thumb)
+        except integrations.ovp.CMSAPIError as e: 
+            raise 
+        except integrations.ovp.OVPError as e: 
+            raise 
+        except Exception as e: 
+            raise 
+    '''
+    @tornado.gen.coroutine 
+    def submit_one_video_object(self, 
+                                video, 
+                                grab_new_thumb=True):
+        rv = None
+  
+        video_id = InputSanitizer.sanitize_string(self.get_video_id(video)) 
+        video_url = InputSanitizer.sanitize_string(self.get_video_url(video)) 
+        callback_url = self.get_video_callback_url(video) 
+        video_title = InputSanitizer.sanitize_string(self.get_video_title(video))
+        thumbnail_info = self.get_video_thumbnail_info(video)
+        #thumb_id = None
+         
+        #if thumbnail_info['thumb_ref']:  
+        thumb_id = thumbnail_info['thumb_ref']
+        #if thumbnail_info['thumb_url']: 
+        default_thumbnail = thumbnail_info['thumb_url']
+        custom_data = self.get_video_custom_data(video) 
+        duration = self.get_video_duration(video) 
+        publish_date = self.get_video_publish_date(video)
+        if (video_url is None or 
+            duration < 0 or 
+            video_url.endswith('.m3u8') or 
+            video_url.startswith('rtmp://') or 
+            video_url.endswith('.csmil')):
+            _log.warn_n('Video ID %s for account %s is a live stream' 
+                             % (video_id, self.account_id))
+
+            raise tornado.gen.Return(rv) 
+                
+        if not self.skip_old_video(publish_date): 
+            existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                    neondata.InternalVideoID.generate(self.account_id, video_id))
+        if existing_video is None:
+            response = yield self.submit_video(video_id=video_id, 
+                                               video_url=video_url, 
+                                               callback_url=callback_url,
+                                               external_thumbnail_id=thumb_id, 
+                                               custom_data=custom_data, 
+                                               duration=duration, 
+                                               publish_date=publish_date, 
+                                               video_title=unicode(video_title), 
+                                               default_thumbnail=default_thumbnail)
+                        
+            if response['job_id']:
+                rv = response['job_id'] 
+                #rv = (video_id, response['job_id'])
+        else: 
+            import pdb; pdb.set_trace()
+            job_id = existing_video.job_id 
+            if job_id is not None: 
+                yield self._update_video_info(video, video_id, job_id)
+            if grab_new_thumb: 
+                yield self._grab_new_thumb(video, video_id)  
+
+        raise tornado.gen.Return(rv) 
+      
     @tornado.gen.coroutine 
     def update_last_processed_date(self, 
                                    last_mod_date, 
@@ -259,6 +302,49 @@ class OVPIntegration(object):
                   % (self.platform.neon_api_key, video_id))
         statemon.state.increment('new_job_submitted')
         raise tornado.gen.Return(json.loads(response.body))
+    
+    @tornado.gen.coroutine
+    def _update_video_info(self, data, video_id, job_id):
+        '''Update information in the database about the video.
+
+        Inputs:
+        data - A video object from any service
+        video_id - The external video id
+        '''
+
+        # Get the data that could be updated
+        video_id = neondata.InternalVideoID.generate(
+            self.platform.neon_api_key, video_id)
+        publish_date = self.get_video_publish_date(data) 
+        if publish_date is not None:
+            publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
+        video_title = self.get_video_title(data) 
+
+        # Update the video object
+        def _update_publish_date(x):
+            x.publish_date = publish_date
+            x.job_id = job_id
+        video = yield tornado.gen.Task(
+            neondata.VideoMetadata.modify,
+            video_id,
+            _update_publish_date)
+
+        # Update the request object
+        def _update_request(x):
+            x.publish_date = publish_date
+            x.video_title = video_title
+        yield tornado.gen.Task(
+            neondata.NeonApiRequest.modify,
+            job_id, self.platform.neon_api_key, _update_request)
+
+    @tornado.gen.coroutine
+    def _grab_new_thumb(self, data, video_id):
+        '''get a new thumbnail from your service.
+           
+           implement if you need the functionality, and 
+           pass in grab_new_thumb=True to submit_ovp_videos 
+        '''
+        raise NotImplementedError()
 
     @tornado.gen.coroutine
     def lookup_and_submit_videos(self, ovp_video_ids):
