@@ -52,7 +52,9 @@ class OVPIntegration(object):
         # specify whether we want an async iterator  
         self.wants_async_iter = False
         # must be set to your video iterator for submit_ovp_videos 
-        self.video_iter = None         
+        self.video_iter = None
+        # if the platform needs videos on it, TODO remove this 
+        self.needs_platform_videos = False          
  
     @tornado.gen.coroutine 
     def submit_ovp_videos(self, 
@@ -68,6 +70,7 @@ class OVPIntegration(object):
         dictionary of video_info => { video_id -> job_ids }
         '''
         added_jobs = 0
+        video_dict = {} 
         video_tuple_list = []  
         last_processed_date = None
 
@@ -85,9 +88,9 @@ class OVPIntegration(object):
                     break
 
                 job_id = yield self.submit_one_video_object(video, 
-                                                            grab_new_thumb=grab_new_thumb) 
+                                                            grab_new_thumb=grab_new_thumb)
                 if job_id: 
-                    video_tuple_list.append((self.get_video_id(video), job_id))
+                    video_dict[self.get_video_id(video)] = job_id 
                     added_jobs += 1 
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
@@ -97,13 +100,16 @@ class OVPIntegration(object):
             except OVPRefIDError: 
                 pass
             except OVPError:
+                if continue_on_error: 
+                    continue 
                 raise  
             except Exception as e:
                 # we got an unknown error from somewhere, it could be video,
                 #  server, or api related -- we will retry it on the next goaround 
                 #  if we have not reached the max retries for this video, otherwise 
                 #  we pass and move on
-                if continue_on_error: 
+                if continue_on_error:
+                    video_dict[self.get_video_id(video)] = e  
                     continue
  
                 def _increase_retries(x):
@@ -140,9 +146,8 @@ class OVPIntegration(object):
         yield self.update_last_processed_date(last_processed_date) 
         _log.info('Added %d jobs for integration' % added_jobs)
  
-        raise tornado.gen.Return(video_tuple_list)
+        raise tornado.gen.Return(video_dict)
     
-    '''  
     @tornado.gen.coroutine 
     def submit_one_video_object(self, 
                                 video, 
@@ -150,33 +155,26 @@ class OVPIntegration(object):
         try: 
             job_id = yield self._submit_one_video_object_impl(video, 
                                                               grab_new_thumb=grab_new_thumb)
-        except integrations.ovp.CMSAPIError as e: 
+        except CMSAPIError as e: 
             raise 
-        except integrations.ovp.OVPError as e: 
+        except OVPError as e: 
             raise 
-        except Exception as e: 
-            raise 
-    '''
+        except Exception as e:
+            _log.exception('Unexpected error submitting video %s' % video)
+            statemon.state.increment('unexpected_submission_error') 
+            raise
+
+        raise tornado.gen.Return(job_id)  
+ 
     @tornado.gen.coroutine 
-    def submit_one_video_object(self, 
-                                video, 
-                                grab_new_thumb=True):
+    def _submit_one_video_object_impl(self, 
+                                      video, 
+                                      grab_new_thumb=True):
         rv = None
   
         video_id = InputSanitizer.sanitize_string(self.get_video_id(video)) 
         video_url = InputSanitizer.sanitize_string(self.get_video_url(video)) 
-        callback_url = self.get_video_callback_url(video) 
-        video_title = InputSanitizer.sanitize_string(self.get_video_title(video))
-        thumbnail_info = self.get_video_thumbnail_info(video)
-        #thumb_id = None
-         
-        #if thumbnail_info['thumb_ref']:  
-        thumb_id = thumbnail_info['thumb_ref']
-        #if thumbnail_info['thumb_url']: 
-        default_thumbnail = thumbnail_info['thumb_url']
-        custom_data = self.get_video_custom_data(video) 
-        duration = self.get_video_duration(video) 
-        publish_date = self.get_video_publish_date(video)
+        duration = self.get_video_duration(video)
         if (video_url is None or 
             duration < 0 or 
             video_url.endswith('.m3u8') or 
@@ -186,29 +184,64 @@ class OVPIntegration(object):
                              % (video_id, self.account_id))
 
             raise tornado.gen.Return(rv) 
-                
-        if not self.skip_old_video(publish_date): 
-            existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                    neondata.InternalVideoID.generate(self.account_id, video_id))
-        if existing_video is None:
-            response = yield self.submit_video(video_id=video_id, 
-                                               video_url=video_url, 
-                                               callback_url=callback_url,
-                                               external_thumbnail_id=thumb_id, 
-                                               custom_data=custom_data, 
-                                               duration=duration, 
-                                               publish_date=publish_date, 
-                                               video_title=unicode(video_title), 
-                                               default_thumbnail=default_thumbnail)
-                        
-            if response['job_id']:
-                rv = response['job_id'] 
-                #rv = (video_id, response['job_id'])
-        else: 
-            import pdb; pdb.set_trace()
-            job_id = existing_video.job_id 
-            if job_id is not None: 
-                yield self._update_video_info(video, video_id, job_id)
+        callback_url = self.get_video_callback_url(video) 
+        video_title = InputSanitizer.sanitize_string(self.get_video_title(video))
+        thumbnail_info = self.get_video_thumbnail_info(video)
+        thumb_id = thumbnail_info['thumb_ref']
+        default_thumbnail = thumbnail_info['thumb_url']
+        custom_data = self.get_video_custom_data(video) 
+        publish_date = self.get_video_publish_date(video)
+        
+        if self.skip_old_video(publish_date, video_id): 
+            raise tornado.gen.Return(rv) 
+        
+        if publish_date is not None: 
+            try: 
+                publish_date = publish_date.isoformat()
+            except AttributeError as e:
+                # already a string, leave it alone
+                pass 
+        existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                neondata.InternalVideoID.generate(self.platform.neon_api_key, video_id))
+       
+        # TODO this won't be necessary once videos are removed from platforms
+        if not self.does_video_exist(existing_video, video_id):
+            try:       
+                response = yield self.submit_video(video_id=video_id, 
+                                                   video_url=video_url, 
+                                                   callback_url=callback_url,
+                                                   external_thumbnail_id=thumb_id, 
+                                                   custom_data=custom_data, 
+                                                   duration=duration, 
+                                                   publish_date=publish_date, 
+                                                   video_title=unicode(video_title), 
+                                                   default_thumbnail=default_thumbnail)
+                 
+                if response['job_id']:
+                    rv = response['job_id']
+            except Exception as e:
+                if existing_video is not None: 
+                    rv = existing_video.job_id  
+                raise e
+            finally:
+                # TODO: Remove this hack once videos aren't attached to
+                # platform objects.
+                # HACK: Add the video to the platform object because our call 
+                # will put it on the NeonPlatform object.
+                if self.needs_platform_videos: 
+                    if rv is not None: 
+                        self.platform = yield tornado.gen.Task(self.platform.modify, 
+                                                               self.platform.neon_api_key, 
+                                                               self.platform.integration_id, 
+                                                               lambda x: x.add_video(video_id, rv)) 
+        else:
+            if existing_video: 
+                rv = existing_video.job_id 
+            if rv is None:
+                # TODO remove this when platform videos are no more! 
+                rv = self.platform.videos[video_id]  
+            if rv is not None: 
+                yield self._update_video_info(video, video_id, rv)
             if grab_new_thumb: 
                 yield self._grab_new_thumb(video, video_id)  
 
@@ -315,7 +348,7 @@ class OVPIntegration(object):
         # Get the data that could be updated
         video_id = neondata.InternalVideoID.generate(
             self.platform.neon_api_key, video_id)
-        publish_date = self.get_video_publish_date(data) 
+        publish_date = self.get_video_publish_date(data)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
         video_title = self.get_video_title(data) 
@@ -478,7 +511,16 @@ class OVPIntegration(object):
         ''' 
         raise NotImplementedError()
 
-    def skip_old_video(self, publish_date=None):
+    def does_video_exist(self, video_meta, video_ref): 
+        ''' function here until we remove videos from 
+            platform objects   
+
+           If using submit_many_videos: 
+             Child classes must implement this 
+        ''' 
+        raise NotImplementedError()
+ 
+    def skip_old_video(self, publish_date=None, video_id=None):
         '''should we skip the old videos 
            
            defaults to False, override if you want 

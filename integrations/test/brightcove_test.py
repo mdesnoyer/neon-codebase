@@ -706,7 +706,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_submit_old_video(self):
         self.platform.oldest_video_allowed = '2015-01-01'
-
+        self.integration.skip_old_videos = True 
         with self.assertLogExists(logging.INFO, 'Skipped video.*old'):
             job_id = yield self.integration.submit_one_video_object(
                 { 'id' : 'v1',
@@ -727,8 +727,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                 },
                 'FLVURL' : 'http://video.mp4',
                 'publishedDate' : "1413657557000"
-                },
-                skip_old_video=True)
+                })
 
         self.assertIsNone(job_id)
 
@@ -899,31 +898,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.integration.platform.videos['465972'],
                           job_id)
 
-        # Now try a video without a reference id
-        with self.assertLogExists(logging.ERROR, 
-                                  'No valid id in custom field .* in video'):
-            with self.assertRaises(integrations.ovp.OVPError):
-                yield self.integration.submit_one_video_object(
-                    { 'id' : 'v1',
-                      'referenceId': None,
-                      'name' : 'Some video',
-                      'length' : 100,
-                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-                      'videoStill' : {
-                          'id' : 'still_id',
-                          'referenceId' : None,
-                          'remoteUrl' : None
-                          },
-                      'FLVURL' : 'http://video.mp4',
-                      'customFields' : {
-                          'mediaapiid' : None,
-                          }
-                      })
-
     @tornado.testing.gen_test
     def test_submit_live_video_feeds(self):
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -931,10 +909,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.mp4'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -942,10 +920,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.m3u8'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -953,10 +931,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.csmil'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -964,7 +942,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'rtmp://video.mp4'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
 class TestChooseDownloadUrl(test_utils.neontest.TestCase):
     def setUp(self):      
@@ -1905,7 +1883,6 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
 
         results = yield self.integration.lookup_and_submit_videos(
             [1234567, 'v2'], continue_on_error=True)
-
         self.assertEquals(results['v2'], 'job1')
         self.assertIsInstance(results[1234567], integrations.ovp.CMSAPIError)
 

@@ -78,7 +78,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             self.platform.neon_api_key, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
         self.is_platform_dual_keyed = True
-        self.skip_old_videos = False 
+        self.skip_old_videos = False
+        self.needs_platform_videos = True  
 
     @staticmethod
     def get_submit_video_fields():
@@ -193,7 +194,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             raise integrations.ovp.OVPError(e)
             
         self.set_video_iter_with_videos(bc_video_info) 
-        retval = yield self.submit_ovp_videos(self.get_next_video_item_playlist)
+        retval = yield self.submit_ovp_videos(self.get_next_video_item_playlist, 
+                                              continue_on_error=continue_on_error)
 
         raise tornado.gen.Return(retval)
 
@@ -247,22 +249,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         self.skip_old_videos = True
         self.set_video_iter()  
         video_tuple_list = yield self.submit_ovp_videos(self.get_next_video_item_normal)
-        
-        if video_tuple_list:   
-            for item in video_tuple_list: 
-                # TODO: Remove this hack once videos aren't attached to
-                # platform objects.
-                # HACK: Add the video to the platform object because our call 
-                # will put it on the NeonPlatform object.
-                video_id = item[0] 
-                job_id = item[1] 
-                if job_id is not None and video_id is not None:
-                        self.platform = yield tornado.gen.Task(
-                            neondata.BrightcovePlatform.modify,
-                            self.platform.neon_api_key,
-                            self.platform.integration_id,
-                        lambda x: x.add_video(video_id, job_id))
-
+    
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.submit_playlist_videos()
@@ -391,9 +378,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
   
         raise tornado.gen.Return(video)  
 
-    def skip_old_video(self, publish_date):
+    def skip_old_video(self, publish_date, video_id):
         rv = False
-        import pdb; pdb.set_trace()     
         if (self.skip_old_videos and 
             publish_date is not None and 
             self.platform.oldest_video_allowed is not None and
@@ -403,7 +389,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                       ' old' % (video_id, self.platform.neon_api_key))
             statemon.state.increment('old_videos_skipped')
             rv = True
-        return rv  
+        return rv
+
+    def does_video_exist(self, video_meta, video_ref): 
+        return video_ref in self.platform.videos   
 
     @tornado.gen.coroutine
     def _update_video_info(self, data, bc_video_id, job_id):

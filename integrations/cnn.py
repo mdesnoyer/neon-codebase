@@ -93,7 +93,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                  'thumb_ref' : thumb_ref }
 
     def set_video_iter(self, videos):
-        self.video_iter = iter(videos) 
+        self.video_iter = iter(videos)
+ 
+    def does_video_exist(self, video_meta, video_ref): 
+        return video_meta is not None    
     
     @tornado.gen.coroutine 
     def get_next_video_item(self):
