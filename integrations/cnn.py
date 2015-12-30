@@ -40,14 +40,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         self.platform = integration
         self.platform.neon_api_key = account_id
 
-        self.video_iter = None         
  
     @tornado.gen.coroutine 
     def submit_new_videos(self):
         search_results = yield self.api.search(dateutil.parser.parse(self.last_process_date))
         videos = search_results['docs'] 
         _log.info('Processing %d videos for cnn' % (len(videos)))
-        yield self.submit_many_videos(videos)
+        self.set_video_iter(videos) 
+        yield self.submit_ovp_videos(self.get_next_video_item)
  
         #_log.info('Added %d jobs for cnn integration' % added_jobs) 
         raise tornado.gen.Return(self.platform)
@@ -94,7 +94,8 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
     def set_video_iter(self, videos):
         self.video_iter = iter(videos) 
-  
+    
+    @tornado.gen.coroutine 
     def get_next_video_item(self):
         video = None 
         try:  
@@ -102,7 +103,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         except StopIteration: 
             video = StopIteration('hacky')
   
-        return video  
+        raise tornado.gen.Return(video)  
                 
     @staticmethod
     def _get_best_image_info(media_json):

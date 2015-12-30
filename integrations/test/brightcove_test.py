@@ -1227,7 +1227,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.platform = neondata.BrightcovePlatform.modify(
             'acct1', 'i1', _set_last_processed, create_missing=True)
         self.integration.platform.video_submit_retries = 0
-        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
         submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
         submit_video_mock.side_effect = Exception('blah') 
 
@@ -1258,7 +1258,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.platform = neondata.BrightcovePlatform.modify(
             'acct1', 'i1', _set_last_processed, create_missing=True)
         self.integration.platform.video_submit_retries = 1
-        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
         submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
         submit_video_mock.side_effect = Exception('blah') 
 
@@ -1289,7 +1289,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.platform = neondata.BrightcovePlatform.modify(
             'acct1', 'i1', _set_last_processed, create_missing=True)
         self.integration.platform.video_submit_retries = 3
-        submit_video_mocker = patch('integrations.brightcove.BrightcoveIntegration.submit_one_video_object')
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
         submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
         submit_video_mock.side_effect = Exception('blah') 
 
@@ -1481,7 +1481,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             ]
 
         with options._set_bounded(
-                'integrations.brightcove.max_vids_for_new_account', 1):
+                'integrations.ovp.max_vids_for_new_account', 1):
             yield self.integration.submit_new_videos()
 
         # Make sure that the last processed date was updated

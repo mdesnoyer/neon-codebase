@@ -175,6 +175,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                 doc['id'] = _string_generator()
                 doc['videoId'] = _string_generator()
                 doc['title'] = _string_generator()
+                doc['duration'] = publish_time.strftime('%H:%M:%S')
                 doc['firstPublishDate'] = publish_time.strftime('%Y-%m-%dT%H:%M:%S') 
                 doc['lastPublishDate'] = publish_time.strftime('%Y-%m-%dT%H:%M:%S')
                 doc['topics'] = _generate_topics()

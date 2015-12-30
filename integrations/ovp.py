@@ -16,6 +16,7 @@ import json
 import logging
 import tornado.gen
 import utils.http
+from utils.inputsanitizer import InputSanitizer
 from utils.options import define, options
 from utils import statemon
 import utils.sync
@@ -25,6 +26,9 @@ statemon.define('new_job_submitted', int)
 statemon.define('unexpected_submission_error', int)
 define('max_submit_retries', default=3, 
        help='Maximum times we will retry a video submit before passing on it.')
+
+define('max_vids_for_new_account', default=100, 
+       help='Maximum videos to process for a new account')
 
 define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
@@ -45,9 +49,13 @@ class OVPIntegration(object):
         self.platform = platform
         # hacky to make generic work for dual keyed platform objects 
         self.is_platform_dual_keyed = False
-    
+        # specify whether we want an async iterator  
+        self.wants_async_iter = False
+        # must be set to your video iterator for submit_ovp_videos 
+        self.video_iter = None         
+ 
     @tornado.gen.coroutine 
-    def submit_many_videos(self, videos): 
+    def submit_ovp_videos(self, iter_func, continue_on_error=False): 
         '''Submits many videos utilizing child class functions 
 
         Parameters: 
@@ -57,18 +65,25 @@ class OVPIntegration(object):
         dictionary of video_info => { video_id -> job_ids }
         '''
         added_jobs = 0
+        video_tuple_list = []  
         last_processed_date = None
-        self.set_video_iter(videos)
+
+        if self.video_iter is None: 
+            raise NotImplementedError('video_iter must be set in child class') 
   
         while True:   
             try:  
-                video = self.get_next_video_item() 
+                if (self.platform.last_process_date is None and 
+                    added_jobs >= options.max_vids_for_new_account):
+                    # New account, so only process the most recent videos
+                    break
+                video = yield iter_func()
                 if isinstance(video, StopIteration):
                     break
-                video_id = self.get_video_id(video) 
-                video_url = self.get_video_url(video) 
+                video_id = InputSanitizer.sanitize_string(self.get_video_id(video)) 
+                video_url = InputSanitizer.sanitize_string(self.get_video_url(video)) 
                 callback_url = self.get_video_callback_url(video) 
-                video_title = self.get_video_title(video)
+                video_title = InputSanitizer.sanitize_string(self.get_video_title(video))
                 thumbnail_info = self.get_video_thumbnail_info(video)
                 if thumbnail_info['thumb_ref']:  
                     thumb_id = thumbnail_info['thumb_ref'] 
@@ -76,34 +91,50 @@ class OVPIntegration(object):
                     default_thumbnail = thumbnail_info['thumb_url'] 
                 custom_data = self.get_video_custom_data(video) 
                 duration = self.get_video_duration(video) 
-                publish_date = last_processed_date = self.get_video_publish_date(video) 
-
-                existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                        neondata.InternalVideoID.generate(self.account_id, video_id))
-                if not existing_video:
-                    response = yield self.submit_video(video_id=video_id, 
-                                                       video_url=video_url, 
-                                                       callback_url=callback_url,
-                                                       external_thumbnail_id=thumb_id, 
-                                                       custom_data=custom_data, 
-                                                       duration=duration, 
-                                                       publish_date=publish_date, 
-                                                       video_title=unicode(video_title), 
-                                                       default_thumbnail=default_thumbnail)
-                    if response['job_id']:
-                        added_jobs += 1
+                publish_date = self.get_video_publish_date(video)
+                if (video_url is None or 
+                    duration < 0 or 
+                    video_url.endswith('.m3u8') or 
+                    video_url.startswith('rtmp://') or 
+                    video_url.endswith('.csmil')):
+                    _log.warn_n('Video ID %s for account %s is a live stream' 
+                                 % (video_id, self.account_id))
+                    continue
+                
+                if not self.skip_old_video(publish_date): 
+                    existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
+                                                            neondata.InternalVideoID.generate(self.account_id, video_id))
+                    if not existing_video:
+                        response = yield self.submit_video(video_id=video_id, 
+                                                           video_url=video_url, 
+                                                           callback_url=callback_url,
+                                                           external_thumbnail_id=thumb_id, 
+                                                           custom_data=custom_data, 
+                                                           duration=duration, 
+                                                           publish_date=publish_date, 
+                                                           video_title=unicode(video_title), 
+                                                           default_thumbnail=default_thumbnail)
+                        
+                        video_tuple_list.append((video_id, response['job_id'])) 
+                        if response['job_id']:
+                            added_jobs += 1
             except KeyError as e:
                 # let's continue here, we do not have enough to submit 
                 pass 
             except OVPCustomRefIDError: 
                 pass 
             except OVPRefIDError: 
-                pass 
+                pass
+            except OVPError:
+                raise  
             except Exception as e:
                 # we got an unknown error from somewhere, it could be video,
                 #  server, or api related -- we will retry it on the next goaround 
                 #  if we have not reached the max retries for this video, otherwise 
                 #  we pass and move on
+                if continue_on_error: 
+                    continue
+ 
                 def _increase_retries(x):
                     x.video_submit_retries += 1
 
@@ -123,19 +154,22 @@ class OVPIntegration(object):
                             self.platform.integration_id,
                             _increase_retries)
                     _log.info('Added %d jobs for integration before failure.' % added_jobs)
-                    return  
+                    return 
                 else:
                     _log.error('Unknown error, reached max retries on '
                                'video submit for account %s: item %s: %s' % 
-                               (self.account_id, item, e))
+                               (self.account_id, video, e))
                     statemon.state.define_and_increment(
                         'submit_video_bc_error.%s' % self.account_id)
-                    pass 
-        
+                    pass
+ 
+            last_processed_date = max(last_processed_date, 
+                                      self.get_video_last_modified_date(video))
+  
         yield self.update_last_processed_date(last_processed_date) 
         _log.info('Added %d jobs for integration' % added_jobs)
  
-        raise tornado.gen.Return(self.platform)
+        raise tornado.gen.Return(video_tuple_list)
     
     @tornado.gen.coroutine 
     def update_last_processed_date(self, 
@@ -317,6 +351,13 @@ class OVPIntegration(object):
         '''
         raise NotImplementedError()
 
+    def get_video_last_modified_date(self, video):
+        '''Find duration in the video object
+
+           Defaults to return the publish_date 
+        '''
+        return self.get_video_publish_date(video) 
+
     def get_video_thumbnail_info(self, video):
         '''Find the default_thumbnail in the video object
 
@@ -330,3 +371,31 @@ class OVPIntegration(object):
            thumb_info['thumb_url'] = 'http://meisaurl.com' 
         '''
         raise NotImplementedError()
+
+    def set_video_iter(self, videos=None):
+        ''' set the iterator you want to use for videos 
+
+           If using submit_many_videos: 
+             Child classes must implement this 
+        ''' 
+        raise NotImplementedError()
+    
+    def get_next_video_item(self):
+        ''' get the next video off the iterator  
+
+           If using submit_many_videos: 
+             Child classes must implement this 
+
+           return a StopIteration instance when there 
+           are no more videos, this is a hack due to async 
+           code not playing nice
+        ''' 
+        raise NotImplementedError()
+
+    def skip_old_video(self, publish_date=None):
+        '''should we skip the old videos 
+           
+           defaults to False, override if you want 
+             to skip old videos 
+        ''' 
+        return False 
