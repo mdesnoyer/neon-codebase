@@ -30,7 +30,7 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         # Mock cnn integration
         self.int_mocker = patch(
-            'integrations.cnn_ingester.integrations.cnn.'
+            'integrations.ingester.integrations.cnn.'
             'CNNIntegration')
         self.int_mock = self.int_mocker.start()
         self.process_mock = self._future_wrap_mock(
@@ -47,17 +47,17 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         self.integration_id = self.integration.integration_id 
 
         self.old_poll_cycle = options.get(
-            'integrations.cnn_ingester.poll_period')
-        options._set('integrations.cnn_ingester.poll_period', 0.1)
-        
+            'integrations.ingester.poll_period')
+        options._set('integrations.ingester.poll_period', 0.1)
+        options._set('integrations.ingester.service_name', 'cnn')
 
         super(SmokeTesting, self).setUp()
 
-        self.manager = integrations.cnn_ingester.Manager()
+        self.manager = integrations.ingester.Manager()
 
     def tearDown(self):
         self.manager.stop()
-        options._set('integrations.cnn_ingester.poll_period',
+        options._set('integrations.ingester.poll_period',
                      self.old_poll_cycle)
         self.int_mocker.stop()
         self.redis.stop()
@@ -133,14 +133,14 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR, 
                                   ('Unexpected exception when processing '
                                    'publisher stream')):
-            yield integrations.cnn_ingester.process_one_account(
+            yield integrations.ingester.process_one_account(
                 'acct1', self.integration.integration_id)
 
     @tornado.testing.gen_test
     def test_slow_update(self):
         with self.assertLogExists(logging.WARNING, 
                                   ('Finished processing.*Time was')):
-            yield integrations.cnn_ingester.process_one_account(
+            yield integrations.ingester.process_one_account(
                 self.user.neon_api_key, self.integration.integration_id, slow_limit=0.0)
 
         self.assertEquals(self.process_mock.call_count, 1)
@@ -150,17 +150,17 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(cargs[1].integration_id, self.integration.integration_id)
 
         self.assertEquals(
-            statemon.state.get('integrations.cnn_ingester.slow_update'),
+            statemon.state.get('integrations.ingester.slow_update'),
             1)
 
     @tornado.testing.gen_test
     def test_platform_missing(self):
         with self.assertLogExists(logging.ERROR, 'Could not find platform'):
-            yield integrations.cnn_ingester.process_one_account(
+            yield integrations.ingester.process_one_account(
                 self.user.neon_api_key, 'i10')
 
         self.assertEquals(
-            statemon.state.get('integrations.cnn_ingester.platform_missing'),
+            statemon.state.get('integrations.ingester.platform_missing'),
             1)
 
         self.assertEquals(self.process_mock.call_count, 0)
@@ -175,7 +175,7 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogNotExists(logging.ERROR, 
                                      ('Unexpected exception when processing '
                                       'publisher stream')):
-            yield integrations.cnn_ingester.process_one_account(
+            yield integrations.ingester.process_one_account(
                 self.user.neon_api_key, self.integration.integration_id)
 
         self.assertEquals(self.process_mock.call_count, 1)
@@ -183,7 +183,7 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogNotExists(logging.ERROR, 
                                      ('Unexpected exception when processing '
                                       'publisher stream')):
-            yield integrations.cnn_ingester.process_one_account(
+            yield integrations.ingester.process_one_account(
                 self.user.neon_api_key, self.integration.integration_id)
 
         self.assertEquals(self.process_mock.call_count, 2)

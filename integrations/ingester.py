@@ -16,6 +16,8 @@ import datetime
 import functools
 import logging
 import integrations.brightcove
+import integrations.cnn
+import integrations.fox
 import integrations.exceptions
 import signal
 import multiprocessing
@@ -43,7 +45,7 @@ statemon.define('slow_update', int)
 
 _log = logging.getLogger(__name__)
 
-def get_platform_object(): 
+def get_platform_class(): 
     '''Takes the service_name option and returns 
          the correct neondata.platform/integration object 
     '''
@@ -53,12 +55,12 @@ def get_platform_object():
               'brightcove' : neondata.BrightcovePlatform 
             } 
     try: 
-        return types[options.service_name] 
+        return types[options.service_name.lower()] 
     except KeyError as e: 
         _log.error('Service not available for Ingestion : %s' % e)
         raise     
 
-def get_integration_object(): 
+def get_integration_class(): 
     '''Takes the service_name option and returns 
          the correct integrations.integration object 
     ''' 
@@ -68,7 +70,7 @@ def get_integration_object():
               'brightcove' : integrations.brightcove.BrightcoveIntegration 
             } 
     try: 
-        return types[options.service_name] 
+        return types[options.service_name.lower()] 
     except KeyError as e: 
         _log.error('Service not available for Ingestion : %s' % e)
         raise     
@@ -79,24 +81,32 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
     _log.debug('Processing %s platform for account %s, integration %s'
                % (options.service_name, api_key, integration_id))
     start_time = datetime.datetime.now()
+    pi_class = get_platform_class() 
+    # TODO hack once these platform objects go away
+    # import pdb; pdb.set_trace()
+    if options.service_name.lower() == 'brightcove': 
+        platform = yield tornado.gen.Task(pi_class.get, api_key, integration_id)
+    else: 
+        platform = yield tornado.gen.Task(pi_class.get, integration_id)
 
-    pi_obj = get_platform_object() 
-    integration_obj = get_integration_object()
-
-    platform = yield tornado.gen.Task(pi_obj.get, api_key, integration_id)
     if platform is None:
         _log.error('Could not find platform %s for account %s' %
                    (integration_id, api_key))
         statemon.state.increment('platform_missing')
         return
 
+    integration_class = get_integration_class()
     account_id = platform.account_id
-    if account_id is None or account_id == platform.neon_api_key:
-        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
-                                      platform.neon_api_key)
-        account_id = acct.account_id
+    try: 
+        if account_id is None or account_id == platform.neon_api_key:
+            acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                          platform.neon_api_key)
+            account_id = acct.account_id
+    except AttributeError: 
+        # this is an cmsd_integration object that does not have a neon_api_key
+        pass 
 
-    integration = integration_object(account_id, platform)
+    integration = integration_class(account_id, platform)
     try:
         yield integration.process_publisher_stream()
     except integrations.exceptions.IntegrationError as e:
@@ -115,7 +125,7 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
         statemon.state.increment('slow_update')
         log_func = _log.warn
     log_func('Finished processing account %s, integration %s. Time was %f' %
-             (platform.neon_api_key, platform.integration_id, runtime))
+             (integration.platform.neon_api_key, platform.integration_id, runtime))
 
 
 class Manager(object):
@@ -135,11 +145,15 @@ class Manager(object):
     def check_integration_list(self):
         '''Polls the database for the active integrations.'''
         orig_keys = set(self._timers.keys())
-
-        platforms = yield tornado.gen.Task(
-            neondata.BrightcovePlatform.get_all)
-        cur_keys = set([(x.neon_api_key, x.integration_id) for x in platforms
-                        if x is not None and x.enabled])
+        pi_class = get_platform_class() 
+        platforms = yield tornado.gen.Task(pi_class.get_all)
+        
+        if options.service_name.lower() == 'brightcove': 
+            cur_keys = set([(x.neon_api_key, x.integration_id) for x in platforms
+                             if x is not None and x.enabled])
+        else: 
+            cur_keys = set([(x.account_id, x.integration_id) for x in platforms
+                             if x is not None and x.enabled])
         
         # Schedule callbacks for new integration objects
         new_keys = cur_keys - orig_keys

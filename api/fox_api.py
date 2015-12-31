@@ -18,27 +18,21 @@ import tornado.escape
 import utils.http
 
 class FoxApi(object):
-
-    BASE_URL = 'https://services.cnn.com' 
-    def __init__(self, api_key):
-        self.api_key = api_key
+    BASE_URL = 'http://feed.theplatform.com/f/fng-fbc' 
+    def __init__(self, feed_pid_ref):
+        self.feed_pid_ref = feed_pid_ref
 
     @tornado.gen.coroutine
     def search(self, 
-               start_date=datetime.datetime(1970,1,1), 
-               start_row=0, 
-               rows=50, 
-               search_type='video',
-               sort_by='firstPublishDate,asc', 
+               from_date=datetime.datetime(1970,1,1), 
+               sort_by='updated', 
                retries=5):
         '''search the fox feed 
            
         ''' 
-        end_date = start_date + datetime.timedelta(hours=24) 
-        end_date_str = end_date.strftime('%Y-%m-%dT%H:%M:%SZ') 
-        start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%SZ') 
-        url = '%s/newsgraph/search/type:%s/firstPublishDate:%s~%s/rows:%d/start:%d/sort:%s?api_key=%s' \
-              % (FoxApi.BASE_URL, search_type, start_date_str, end_date_str, rows, start_row, sort_by, self.api_key) 
+        from_date_str = from_date.strftime('%Y-%m-%dT%H:%M:%SZ~') 
+        url = '%s/%s?sort=%s&byUpdated=%s' \
+              % (FoxApi.BASE_URL, self.feed_pid_ref, sort_by, from_date_str) 
         request = tornado.httpclient.HTTPRequest(url, 
                                                  method='GET',
                                                  request_timeout = 60.0)
@@ -50,4 +44,4 @@ class FoxApi(object):
         if response:
             raise tornado.gen.Return(json.loads(response.body))
         else: 
-            raise Exception('unable to fetch cnn feed') 
+            raise Exception('unable to fetch fox feed') 

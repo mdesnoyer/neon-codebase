@@ -3212,7 +3212,7 @@ class FoxIntegration(AbstractIntegration):
         super(FoxIntegration, self).__init__(enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
-        # user.neon_api_key this integration belongs to 
+        # user.account_id this integration belongs to 
         self.account_id = account_id
         # the feed_pid_ref required by the fox api - external
         self.feed_pid_ref = feed_pid_ref

@@ -32,14 +32,13 @@ _log = logging.getLogger(__name__)
 class CNNIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, integration):
         super(CNNIntegration, self).__init__(account_id, integration)
-        # this is the user.neon_api_key, but properly named here
+
         self.account_id = account_id 
         self.api = api.cnn_api.CNNApi(integration.api_key_ref)
         self.last_process_date = integration.last_process_date
         # to correspond with the inherited class 
         self.platform = integration
         self.platform.neon_api_key = account_id
-
  
     @tornado.gen.coroutine 
     def submit_new_videos(self):
@@ -49,7 +48,6 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         self.set_video_iter(videos) 
         yield self.submit_ovp_videos(self.get_next_video_item, grab_new_thumb=False)
  
-        #_log.info('Added %d jobs for cnn integration' % added_jobs) 
         raise tornado.gen.Return(self.platform)
 
     def get_video_id(self, video):
