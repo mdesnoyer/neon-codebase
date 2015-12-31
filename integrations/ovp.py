@@ -101,6 +101,7 @@ class OVPIntegration(object):
                 pass
             except OVPError:
                 if continue_on_error: 
+                    video_dict[self.get_video_id(video)] = e  
                     continue 
                 raise  
             except Exception as e:
