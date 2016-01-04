@@ -125,7 +125,7 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
         statemon.state.increment('slow_update')
         log_func = _log.warn
     log_func('Finished processing account %s, integration %s. Time was %f' %
-             (integration.platform.neon_api_key, platform.integration_id, runtime))
+             (api_key, platform.integration_id, runtime))
 
 
 class Manager(object):
