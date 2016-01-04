@@ -30,10 +30,9 @@ _log = logging.getLogger(__name__)
 
 class FoxIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, cmsdb_integration):
-        super(FoxIntegration, self).__init__(account_lookup_id, cmsdb_integration)
+        super(FoxIntegration, self).__init__(account_id, cmsdb_integration)
         
-        
-        self.account_lookup_id = account_lookup_id 
+        self.account_lookup_id = account_id 
         self.api = api.fox_api.FoxApi(cmsdb_integration.feed_pid_ref)
         self.last_process_date = cmsdb_integration.last_process_date
         # to correspond with the inherited class 
