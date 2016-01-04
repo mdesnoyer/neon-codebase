@@ -153,7 +153,7 @@ class Manager(object):
                              if x is not None and x.enabled])
         else: 
             cur_keys = set([(x.account_id, x.integration_id) for x in platforms
-                             if x is not None and x.enabled])
+                             if x is not None and x.enabled and isinstance(x, pi_class)])
         
         # Schedule callbacks for new integration objects
         new_keys = cur_keys - orig_keys
