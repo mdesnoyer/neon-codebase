@@ -240,7 +240,8 @@ class OVPIntegration(object):
                 rv = existing_video.job_id 
             if rv is None:
                 # TODO remove this when platform videos are no more! 
-                rv = self.platform.videos[video_id]  
+                if self.needs_platform_videos: 
+                    rv = self.platform.videos[video_id]  
             if rv is not None: 
                 yield self._update_video_info(video, video_id, rv)
             if grab_new_thumb: 
