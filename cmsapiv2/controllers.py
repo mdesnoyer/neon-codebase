@@ -90,8 +90,22 @@ class NewAccountHandler(APIV2Handler):
 
         output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
         user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
+
+        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 user.tracker_account_id, 
+                                 user.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.PRODUCTION)
+
+        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 user.staging_tracker_account_id, 
+                                 user.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.STAGING)
+
+        yield tornado.gen.Task(tracker_p_aid_mapper.save) 
+        yield tornado.gen.Task(tracker_s_aid_mapper.save) 
+
         user = ReturnFormatter.format_user_return(user)
-            
+        
         _log.debug(('New Account has been added : name = %s id = %s') 
                    % (user['name'], user['account_id']))
         statemon.state.increment('post_account_oks')
