@@ -82,7 +82,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_publish_date(self, video):
         '''override from ovp'''
-        return video['pubDate'] 
+        return video['pubDate'] / 1000. 
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''
