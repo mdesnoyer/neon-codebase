@@ -96,7 +96,10 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         self.video_iter = iter(videos)
  
     def does_video_exist(self, video_meta, video_ref): 
-        return video_meta is not None    
+        return video_meta is not None   
+ 
+    def get_video_last_modified_date(self, video):
+        return int(video['updated']) / 1000.0 
     
     @tornado.gen.coroutine 
     def get_next_video_item(self):
