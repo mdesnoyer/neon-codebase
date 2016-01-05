@@ -39,6 +39,7 @@ _log = logging.getLogger(__name__)
 class OVPError(IntegrationError): pass
 class OVPRefIDError(OVPError): pass
 class OVPCustomRefIDError(OVPError): pass
+class OVPNoValidURL(OVPError): pass
 class CMSAPIError(IntegrationError): pass
 
 class OVPIntegration(object):
@@ -99,7 +100,10 @@ class OVPIntegration(object):
                 pass 
             except OVPRefIDError: 
                 pass
-            except OVPError:
+            except OVPNoValidURL: 
+                _log.error('Unable to find a valid url for video_id : %s' % self.get_video_id(video))
+                pass
+            except OVPError as e:
                 if continue_on_error: 
                     video_dict[self.get_video_id(video)] = e  
                     continue 

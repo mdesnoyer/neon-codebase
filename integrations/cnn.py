@@ -142,7 +142,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         if current_url: 
             return current_url 
         else: 
-            raise Exception('unable to find a suitable url for processing') 
+            raise integrations.ovp.OVPNoValidURL('unable to find a suitable url for processing')
  
     @staticmethod 
     def _build_custom_data_from_topics(topics):
