@@ -91,13 +91,15 @@ class NewAccountHandler(APIV2Handler):
         output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
         user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
 
-        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(user.tracker_account_id, 
-                                                               user.neon_api_key, 
-                                                               neondata.TrackerAccountIDMapper.PRODUCTION)
+        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 user.tracker_account_id, 
+                                 user.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.PRODUCTION)
 
-        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(user.staging_tracker_account_id, 
-                                                               user.neon_api_key, 
-                                                               neondata.TrackerAccountIDMapper.STAGING)
+        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 user.staging_tracker_account_id, 
+                                 user.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.STAGING)
 
         yield tornado.gen.Task(tracker_p_aid_mapper.save) 
         yield tornado.gen.Task(tracker_s_aid_mapper.save) 
