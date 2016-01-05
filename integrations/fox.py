@@ -57,8 +57,15 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         return video['id'].replace('/', '~')
  
     def get_video_url(self, video):
-        '''override from ovp''' 
-        return 'http://TODOweneedFOXtodothis.com' 
+        '''override from ovp'''
+        #TODO not sure if this should be hardcoded or not, 
+        # it's a one-off thing where we should only have one 
+        # fox integration, but maybe this should live on the db 
+        # object  
+        bucket_location = 'http://neon-fox.s3.amazonaws.com' 
+        file_path = video['media$content'][0]['plfile$filePath']
+        video_url = '%s/%s' % (bucket_location, file_path)  
+        return video_url  
 
     def get_video_callback_url(self, video):
         '''override from ovp''' 
@@ -78,8 +85,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_duration(self, video):
         '''override from ovp'''
-        # TODO we should request this from Fox 
-        return 30
+        return video['media$content'][0]['plfile$duration'] 
 
     def get_video_publish_date(self, video):
         '''override from ovp'''
