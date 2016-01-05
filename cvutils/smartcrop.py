@@ -184,7 +184,20 @@ class SmartCrop(object):
         gaussian_array = np.repeat(gaussian_x, height, axis=0)
         target_filter[:, 0:width/2] = gaussian_array[:, 0:width/2]
         target_filter[:, width/2:] = gaussian_array[:, -(width-width/2):]
+
+        v_target_filter = np.ones((width, height))
+        v_line_size = height * 2 / 3
+        y = np.linspace(norm.ppf(0.1), norm.ppf(0.9), v_line_size)
+        gaussian_y = np.array([norm.pdf(y)]) # make the sample 2d array
+        v_gaussian_array = np.repeat(gaussian_y, width, axis=0)
+        v_target_filter[:, 0:height/2] = v_gaussian_array[:, 0:height/2]
+        v_target_filter[:, height/2:] = v_gaussian_array[:, -(height-height/2):]
+        v_target_filter = v_target_filter.transpose()
+
+        target_filter *= v_target_filter
+
         # Normalize the filter
+        # Uncomment to visualize the filter.
         # cv2.imshow('filter', target_filter/target_filter.max())
         # cv2.waitKey(0)
         target_filter = target_filter / sum(sum(target_filter))
@@ -580,11 +593,14 @@ class SmartCrop(object):
             filter_result = cv2.filter2D(saliency_map, cv2.CV_32F, fil)
             # search horizontally, since the result is the same dimension as
             # the saliency_map, we take the truncated end. It is 1D vector.
+            print filter_result.shape
             filter_line = filter_result[new_y + new_height - 1,
-                                        width - new_width:]
+                                        new_width - 1:]
 
             if self.with_face_detection:
                 # Zero out locations that faces are cut
+                print len(filter_line)
+                print len(face_zero_vector)
                 filter_line *= face_zero_vector
 
             # Find the max.
@@ -598,11 +614,12 @@ class SmartCrop(object):
         return (new_x, new_y, new_width, new_height)
 
 
-    def crop_and_resize_alt(self, h, w):
+    def crop(self, h, w):
         '''Using a sliding window to decide what's the optimal crop region.
         The sliding window avoids text at the bottom of the image, and avoids
         cropping faces, maximizes the saliency.
         '''
+        tic()
         height = self.image.shape[0]
         width = self.image.shape[1]
 
@@ -616,29 +633,36 @@ class SmartCrop(object):
 
         # Get the image with text cropped
         is_text_cut = False
+        # "Main" is referring to the default face saliency cropping. If it
+        # doesn't crop text, we keep it as is. If it contains text boxes, then
+        # we crop the text area and rerun the saliency_face_crop.
+        has_main_crop_text = False
         if self.with_text_detection:
-            bottom = height * 0.7
-            upper_text_y_array = []
-            for box in boxes:
-                if box[1] < bottom:
-                    continue
-                upper_text_y_array.append(box[1])
-            # leave 3 pixels for cushion.
-            if  upper_text_y_array:
-                is_text_cut = True
-                upper_text_y = min(upper_text_y_array) - 3
-                text_cropped_im = self.image[0:upper_text_y, :]
+            boxes = self.get_text_boxes()
+            if len(boxes) > 0:
+                bottom = height * 0.7
+                upper_text_y_array = []
+                for box in boxes:
+                    if box[1] < bottom:
+                        continue
+                    upper_text_y_array.append(box[1])
+                    # check to see the cropped image area overlaps with text.
+                    if (box[0] > new_x and box[0] < new_x + new_width - 1) or \
+                       (box[0] + box[2] - 1 > new_x and \
+                        box[0] + box[2] - 1< new_x + new_width - 1):
+                       has_main_crop_text = True
 
-        if is_text_cut:
+                # leave 3 pixels for cushion.
+                if  upper_text_y_array:
+                    is_text_cut = True
+                    upper_text_y = min(upper_text_y_array) - 3
+                    text_cropped_im = self.image[0:upper_text_y, :]
+
+        if is_text_cut and has_main_crop_text:
             saliency_map_with_text_cut = saliency_map[0:upper_text_y, :]
-            (new_x_text, new_y_text, new_width_text, new_height_text) = \
-                self.saliency_face_crop(saliency_map, h, w)
-
-
-
-
-        self.saliency_face_crop(self.im, self.h, w)
-
+            (new_x, new_y, new_width, new_height) = \
+                self.saliency_face_crop(saliency_map_with_text_cut, h, w)
+        toc()
         return (new_x, new_y, new_width, new_height)
 
 

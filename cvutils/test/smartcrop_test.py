@@ -11,8 +11,8 @@ sys.path.insert(0,  os.path.abspath(
 import unittest
 from cvutils import smartcrop
 from cvutils import imageutils
-from model import features
-from model.colorname import JSD
+# from model import features
+# from model.colorname import JSD
 
 class TestSmartCrop(unittest.TestCase):
     def setUp(self):
@@ -121,15 +121,31 @@ class TestSmartCrop(unittest.TestCase):
             with_text_detection=False, with_face_detection=False)
         smart_crop.with_face_detection = True
         smart_crop.with_saliency_detection = True
+        smart_crop.with_text_detection = True
+        # text_boxes = np.array([[500, 320, 90, 35],
+        #                        [300, 320, 90, 35]])
+        text_boxes = np.array([[500, 320, 90, 35]])
+        faces = np.array([[0, 120, 30, 60],
+                          [240, 120, 120, 120],
+                          [60, 120, 60, 60]])
+        # faces = np.array([])
+        smart_crop._faces = faces
         smart_crop._saliency_map = saliency_im
-        smart_crop._text_boxes = []
+        smart_crop._text_boxes = text_boxes
         (new_x, new_y, new_width, new_height) = \
-            smart_crop.saliency_face_crop(saliency_im, 300, 300)
-        cropped_im = saliency_im[new_y:new_y+new_height,
+            smart_crop.crop(300, 300)
+        draw_im = saliency_im.copy()
+        cv2.rectangle(draw_im, (240, 120), (360, 240), (255, 0,0))
+        cv2.rectangle(draw_im, (60, 120), (120, 180), (255, 0,0))
+        cv2.rectangle(draw_im, (500, 320), (590, 355), (255, 0,0))
+        cv2.rectangle(draw_im, (300, 320), (390, 355), (255, 0,0))
+        cropped_im = draw_im[new_y:new_y+new_height,
                                     new_x:new_x+new_width]
+
         cv2.imshow('cropped saliency', cropped_im)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+        self.assertEqual(1, 2)
         self.assertLess(new_x, 120)
         self.assertEqual(new_y, 0)
         self.assertEqual(new_height, 360)
