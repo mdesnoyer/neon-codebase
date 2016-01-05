@@ -54,7 +54,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_id(self, video):
         '''override from ovp''' 
-        return video['id'].replace('/', '~')
+        return video['id'].replace('http://', '').replace('/', '~')
  
     def get_video_url(self, video):
         '''override from ovp'''
