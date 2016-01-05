@@ -186,6 +186,25 @@ class TestNewAccountHandler(TestControllersBase):
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['name'], 'meisnew')
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_tracker_accounts(self):
+        params = json.dumps({'name': 'meisnew'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+	self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['name'], 'meisnew')
+        prod_t_id = rjson['tracker_account_id'] 
+        staging_t_id = rjson['staging_tracker_account_id'] 
+        tai_p = neondata.TrackerAccountIDMapper.get_neon_account_id(prod_t_id) 
+        self.assertEquals(tai_p[0], rjson['account_id'])
+        tai_s = neondata.TrackerAccountIDMapper.get_neon_account_id(staging_t_id)
+        self.assertEquals(tai_s[0], rjson['account_id'])
  
     @tornado.testing.gen_test 
     def test_account_is_verified(self):
