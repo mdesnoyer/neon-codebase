@@ -43,8 +43,12 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                       self.account_lookup_id)
         self.platform.neon_api_key = acct.neon_api_key
-        self.account_id = acct.account_id 
-        search_results = yield self.api.search(dateutil.parser.parse(self.last_process_date))
+        self.account_id = acct.account_id
+        from_date = datetime.datetime(1970, 1, 1)
+        if self.platform.last_process_date is not None: 
+            from_date = datetime.datetime.utcfromtimestamp(self.last_process_date)
+
+        search_results = yield self.api.search(from_date)
         videos = search_results['entries'] 
         self.set_video_iter(videos) 
         _log.info('Processing %d videos for fox integration' % len(videos)) 
