@@ -614,13 +614,9 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
 
     def test_turn_off_serving(self):
          
-        #def _disable_serving(x):
-        #    x.serving_enabled = False
-        #neondata.BrightcovePlatform.modify('key1', 'i1', _disable_serving)
         self.acct.serving_enabled = False 
         self.acct.save()  
         self.wait_for_video_updates()
-        #import pdb; pdb.set_trace()
         self.assertNotIn('key1', self.watcher._account_subscribers)
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
