@@ -101,7 +101,6 @@ statemon.define('serving_urls_missing', int) # missing serving urls for videos
 statemon.define('need_full_urls', int) # Num of thumbs where full urls had to be sent in the directive file
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
-statemon.define('no_platform', int) # mising platform information 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
 statemon.define('unexpected_video_handle_error', int) # Error when handling video
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
@@ -233,10 +232,10 @@ class VideoDBWatcher(threading.Thread):
         self._vids_waiting = threading.Event()
         self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
-        self._platform_options_lock = threading.RLock()
-        # Options for the platform
-        # (api_key, integration_id) -> (abtest, serving_enabled)
-        self._platform_options = {} 
+        self._current_accounts_lock = threading.RLock()
+        # stores current account, to get a number of things 
+        # (api_key) -> (account)
+        self._current_accounts = {} 
 
     def __del__(self):
         self.stop()
@@ -291,17 +290,12 @@ class VideoDBWatcher(threading.Thread):
         '''
         _log.info('Loading current experiment info and updating in mastermind')
 
-        for platform in neondata.AbstractPlatform.iterate_all():
-            if not platform.serving_enabled:
+        for account in list(neondata.NeonUserAccount.iterate_all()):
+            if not account.serving_enabled:
                 continue
 
-            # Add the platform to the options list
-            with self._platform_options_lock:
-                self._platform_options[(platform.neon_api_key,
-                                        str(platform.integration_id))] = \
-                  (platform.abtest, platform.serving_enabled)
-            
-            for video_id in platform.get_internal_video_ids():
+            self._current_accounts[account.neon_api_key] = account
+            for video_id in account.get_internal_video_ids():
                 video_metadata = neondata.VideoMetadata.get(video_id)
                 account_id = video_metadata.get_account_id()
                 if not video_metadata.serving_enabled:
@@ -348,21 +342,15 @@ class VideoDBWatcher(threading.Thread):
                     url_obj.get_thumbnail_id(),
                     url_obj)
 
-        # Update the platform, which updates the video data
-        for platform in neondata.AbstractPlatform.iterate_all():
-            # Update the experimental strategy for the account
+        for account in list(neondata.NeonUserAccount.iterate_all()):
+            self._handle_account_change(account.get_id(), account, 'set', 
+                                        update_videos=False) 
             self.mastermind.update_experiment_strategy(
-                platform.neon_api_key,
-                neondata.ExperimentStrategy.get(platform.neon_api_key))
-            
-            self._handle_platform_change(platform.get_id(), platform, 'set',
-                                         update_videos=False,
-                force_subscribe=(not is_initialized))
-
-            # Force the videos to update
-            for internal_video_id in platform.get_internal_video_ids():
-                self._schedule_video_update(internal_video_id)
-            self.process_queued_video_updates()
+                account.neon_api_key,
+                neondata.ExperimentStrategy.get(account.neon_api_key))
+            for video_id in account.get_internal_video_ids():
+                self._schedule_video_update(video_id) 
+            self.process_queued_video_updates() 
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -373,10 +361,6 @@ class VideoDBWatcher(threading.Thread):
             self._table_subscribers.append(
                 neondata.NeonUserAccount.subscribe_to_changes(
                     self._handle_account_change))
-
-            self._table_subscribers.append(
-                neondata.AbstractPlatform.subscribe_to_changes(
-                    self._handle_platform_change))
 
             self._table_subscribers.append(
                 neondata.ExperimentStrategy.subscribe_to_changes(
@@ -453,39 +437,20 @@ class VideoDBWatcher(threading.Thread):
             self._vids_waiting.set()
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
-
-    def _handle_platform_change(self, key, platform, operation,
-                                update_videos=True, force_subscribe=False):
-        '''Handler for when a platform object changes in the database'''
-        # TODO: Handle deletion
-        if operation != 'set' or platform is None:
-            return
-
-        # If there are new settings, then trigger a bunch of updates 
-        new_options = (platform.abtest, platform.serving_enabled)
-        plat_tup = tuple(key[1:])
-        with self._platform_options_lock:
-            old_options = self._platform_options.get(plat_tup, None)
-            if new_options != old_options:
-                self._platform_options[plat_tup] = new_options
-            elif not force_subscribe:
-                return
-
-        if platform.serving_enabled:
-            self._subscribe_to_video_changes(platform.neon_api_key)
-        else:
-            self._unsubscribe_from_video_changes(platform.neon_api_key)
-
-        if update_videos:
-            for internal_video_id in platform.get_internal_video_ids():
-                self._schedule_video_update(internal_video_id)
-
-    def _handle_account_change(self, account_id, account, operation):
+    
+    def _handle_account_change(self, account_id, account, operation, 
+                               update_videos=True):
         '''Handler for when a NeonUserAccount object changes in the database.'''
 
         if operation == 'set' and account is not None:
+            with self._current_accounts_lock:
+                self._current_accounts[account_id] = account
+ 
             # Subscribe to this account if we aren't subscribed yet
-            self._subscribe_to_video_changes(account_id)
+            if account.serving_enabled: 
+                self._subscribe_to_video_changes(account_id)
+            else: 
+                self._unsubscribe_from_video_changes(account_id)
 
             # Update default size and default thumbs
             self.directive_pusher.default_sizes[account_id] = \
@@ -498,6 +463,10 @@ class VideoDBWatcher(threading.Thread):
                     del self.directive_pusher.default_thumbs[account_id]
                 except KeyError: pass
 
+            if update_videos:
+                for internal_video_id in account.get_internal_video_ids():
+                    self._schedule_video_update(internal_video_id)
+
     def _handle_video_update(self, video_id, video_metadata):
         '''Processes a new video state for a single video.'''
         if video_metadata is None:
@@ -507,18 +476,11 @@ class VideoDBWatcher(threading.Thread):
 
         
         thumb_ids = sorted(set(video_metadata.thumbnail_ids))
-
-        try:
-            abtest, serving_enabled = self._platform_options[
-                (video_metadata.get_account_id(),
-                 str(video_metadata.integration_id))]
-        except KeyError:
-            statemon.state.increment('no_platform')
-            _log.error_n('Could not find platform information for video %s' %
-                         video_id)
-            return
-
-        if serving_enabled and video_metadata.serving_enabled:
+        
+        abtest = video_metadata.testing_enabled 
+        serving_enabled = video_metadata.serving_enabled and \
+                          self._current_accounts[video_metadata.get_account_id()].serving_enabled
+        if serving_enabled:
             thumbnails = []
             thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
             for thumb_id, meta in zip(thumb_ids, thumbs):
