@@ -143,11 +143,13 @@ class SmartCrop(object):
     def __init__(self, image,
                  with_saliency=True,
                  with_face_detection=True,
-                 with_text_detection=True):
+                 with_text_detection=True,
+                 no_text_crop_same_aspect_ratio=False):
         self.image = image
         self.with_saliency = with_saliency
         self.with_face_detection = with_face_detection
         self.with_text_detection = with_text_detection
+        self.no_text_crop_same_aspect_ratio = no_text_crop_same_aspect_ratio
         if with_face_detection:
             self.haar_profile = options.haar_profile
             self.profile_face_cascade = cv2.CascadeClassifier()
@@ -593,14 +595,11 @@ class SmartCrop(object):
             filter_result = cv2.filter2D(saliency_map, cv2.CV_32F, fil)
             # search horizontally, since the result is the same dimension as
             # the saliency_map, we take the truncated end. It is 1D vector.
-            print filter_result.shape
             filter_line = filter_result[new_y + new_height - 1,
                                         new_width - 1:]
 
             if self.with_face_detection:
                 # Zero out locations that faces are cut
-                print len(filter_line)
-                print len(face_zero_vector)
                 filter_line *= face_zero_vector
 
             # Find the max.
@@ -619,7 +618,7 @@ class SmartCrop(object):
         The sliding window avoids text at the bottom of the image, and avoids
         cropping faces, maximizes the saliency.
         '''
-        tic()
+        # tic()
         height = self.image.shape[0]
         width = self.image.shape[1]
 
@@ -662,7 +661,8 @@ class SmartCrop(object):
             saliency_map_with_text_cut = saliency_map[0:upper_text_y, :]
             (new_x, new_y, new_width, new_height) = \
                 self.saliency_face_crop(saliency_map_with_text_cut, h, w)
-        toc()
+        # Using tic, toc to measure the performance.
+        # toc()
         return (new_x, new_y, new_width, new_height)
 
 
@@ -670,47 +670,27 @@ class SmartCrop(object):
         ''' Crop and resize to the new size, based on face, saliency and text.
         Saliency crop is biased to the center of the image.
         '''
+
+        # Check if the aspect ratio is the same as the original.
         (height, width, elem) = self.image.shape
+        neutral_width = float(width) * h / height
+        is_same_ratio = False
+        if abs(neutral_width - w) <= 5.0:
+            is_same_ratio = True
+
+        text_boxes = []
+        if self.no_text_crop_same_aspect_ratio and is_same_ratio:
+            return  cv2.resize(cropped_im, (w, h))
+        
         if self.with_text_detection:
             text_boxes = self.get_text_boxes()
-            if len(text_boxes) == 0:
-                neutral_width = float(width) * h / height
-                if abs(neutral_width - w) <= 5.0:
-                    return cv2.resize(self.image, (w, h))
 
-        # Get the default crop locations.
-        if float(h) / height > float(w) / width:
-            new_width = int(height / float(h) * float(w))
-            new_height = height
-        else:
-            new_width = width
-            new_height = int(width / float(w) * float(h))
-        center_horizontal = width / 2
-        center_vertical = height / 2
-        new_x = center_horizontal - new_width / 2
-        new_y = center_vertical - height / 2
+        if len(text_boxes) == 0 and is_same_ratio:
+            return cv2.resize(self.image, (w, h))
 
-
-        if self.with_saliency:
-            # saliency_adjust is a conservative way to crop, it trims the
-            # unused boundaries.
-            # (new_x, new_y, new_width, new_height) = self.saliency_adjust(h, w)
-            # saliency_crop using convolution to decide how to center the crop.
-            (new_x, new_y, new_width, new_height) = self.saliency_crop(h, w)
-
-        if self.with_face_detection:
-            # tic()
-            faces = self.detect_faces()
-            # print "after face"
-            # toc()
-            new_x = self.face_adjust(faces, new_x, new_width)
-
-
-        if self.with_text_detection:
-            cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
-        else:
-            cropped_im = self.image[new_y:new_y+new_height,
-                                    new_x:new_x+new_width]
+        (new_x, new_y, new_width, new_height) = self.crop(w, h)
+        cropped_im = self.image[new_y:new_y+new_height,
+                                new_x:new_x+new_width]
 
         resized_im = cv2.resize(cropped_im, (w, h))
         return resized_im

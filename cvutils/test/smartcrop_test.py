@@ -122,8 +122,6 @@ class TestSmartCrop(unittest.TestCase):
         smart_crop.with_face_detection = True
         smart_crop.with_saliency_detection = True
         smart_crop.with_text_detection = True
-        # text_boxes = np.array([[500, 320, 90, 35],
-        #                        [300, 320, 90, 35]])
         text_boxes = np.array([[500, 320, 90, 35]])
         faces = np.array([[0, 120, 30, 60],
                           [240, 120, 120, 120],
@@ -132,22 +130,42 @@ class TestSmartCrop(unittest.TestCase):
         smart_crop._faces = faces
         smart_crop._saliency_map = saliency_im
         smart_crop._text_boxes = text_boxes
+        smart_crop.image = cv2.cvtColor(saliency_im, cv2.COLOR_GRAY2BGR)
         (new_x, new_y, new_width, new_height) = \
             smart_crop.crop(300, 300)
-        draw_im = saliency_im.copy()
-        cv2.rectangle(draw_im, (240, 120), (360, 240), (255, 0,0))
-        cv2.rectangle(draw_im, (60, 120), (120, 180), (255, 0,0))
-        cv2.rectangle(draw_im, (500, 320), (590, 355), (255, 0,0))
-        cv2.rectangle(draw_im, (300, 320), (390, 355), (255, 0,0))
-        cropped_im = draw_im[new_y:new_y+new_height,
-                                    new_x:new_x+new_width]
 
-        cv2.imshow('cropped saliency', cropped_im)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        self.assertEqual(1, 2)
-        self.assertLess(new_x, 120)
-        self.assertEqual(new_y, 0)
         self.assertEqual(new_height, 360)
-        self.assertEqual(new_width, 360)
-
+        # Uncomment to visualize the result.
+        # draw_im = saliency_im.copy()
+        # for face in faces:
+        #     cv2.rectangle(draw_im, (face[0], face[1]),
+        #                            (face[0] + face[2] - 1, face[1] + face[3] - 1),
+        #                            (255, 0,0))
+        # for box in text_boxes:
+        #     cv2.rectangle(draw_im, (box[0], box[1]),
+        #                            (box[0] + box[2] - 1, box[1] + box[3] - 1),
+        #                            (255, 0,0))
+        # cropped_im = draw_im[new_y:new_y+new_height,
+        #                      new_x:new_x+new_width]
+        # cv2.imshow('cropped saliency', cropped_im)
+        # cv2.waitKey(0)
+        text_boxes = np.array([[500, 320, 90, 35],
+                               [300, 320, 90, 35]])
+        smart_crop._text_boxes = text_boxes
+        (new_x, new_y, new_width, new_height) = \
+            smart_crop.crop(300, 300)
+        self.assertLess(new_height, 360)
+        # Uncomment to visualize the result.
+        # for face in faces:
+        #     cv2.rectangle(draw_im, (face[0], face[1]),
+        #                            (face[0] + face[2] - 1, face[1] + face[3] - 1),
+        #                            (255, 0,0))
+        # for box in text_boxes:
+        #     cv2.rectangle(draw_im, (box[0], box[1]),
+        #                            (box[0] + box[2] - 1, box[1] + box[3] - 1),
+        #                            (255, 0,0))
+        # cropped_im = draw_im[new_y:new_y+new_height,
+        #                      new_x:new_x+new_width]
+        # cv2.imshow('cropped saliency', cropped_im)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
