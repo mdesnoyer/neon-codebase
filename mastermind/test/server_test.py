@@ -161,7 +161,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Define the serving strategy
         datamock.ExperimentStrategy.get.side_effect = \
-          [neondata.ExperimentStrategy('apikey1'),
+          [neondata.ExperimentStrategy('apikey1', exp_frac=0.0),
            neondata.ExperimentStrategy('apikey2'),
            neondata.ExperimentStrategy('apikey3'),
            neondata.ExperimentStrategy('apikey4')]
@@ -174,8 +174,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           for x in self.mastermind.get_directives())
         self.assertEquals(len(directives), 4)
         self.assertEquals(directives[('apikey1', 'apikey1'+'_0')],
-                          {'apikey1'+'_0_t01': 0.0, 'apikey1'+'_0_t02': 0.99,
-                           'apikey1'+'_0_t03': 0.01})
+                          {'apikey1'+'_0_t01': 0.0, 'apikey1'+'_0_t02': 1.0,
+                           'apikey1'+'_0_t03': 0.0})
         self.assertEquals(directives[('apikey2', 'apikey2'+'_1')],
                           {'apikey2'+'_1_t11': 1.0})
         self.assertEquals(directives[('apikey2', 'apikey2'+'_2')],

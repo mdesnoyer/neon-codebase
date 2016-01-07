@@ -101,7 +101,6 @@ statemon.define('serving_urls_missing', int) # missing serving urls for videos
 statemon.define('need_full_urls', int) # Num of thumbs where full urls had to be sent in the directive file
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
-statemon.define('no_platform', int) # mising platform information 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
 statemon.define('unexpected_video_handle_error', int) # Error when handling video
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
@@ -233,11 +232,6 @@ class VideoDBWatcher(threading.Thread):
         self._vids_waiting = threading.Event()
         self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
-        self._platform_options_lock = threading.RLock()
-        # Options for the platform
-        # (api_key, integration_id) -> (abtest, serving_enabled)
-        self._platform_options = {}
- 
         self._current_accounts_lock = threading.RLock()
         # stores current account, to get a number of things 
         # (api_key) -> (account)
@@ -369,10 +363,6 @@ class VideoDBWatcher(threading.Thread):
                     self._handle_account_change))
 
             self._table_subscribers.append(
-                neondata.AbstractPlatform.subscribe_to_changes(
-                    self._handle_platform_change))
-
-            self._table_subscribers.append(
                 neondata.ExperimentStrategy.subscribe_to_changes(
                     lambda key, obj, op: 
                     self.mastermind.update_experiment_strategy(key, obj)))
@@ -447,33 +437,7 @@ class VideoDBWatcher(threading.Thread):
             self._vids_waiting.set()
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
-
-    def _handle_platform_change(self, key, platform, operation,
-                                update_videos=True, force_subscribe=False):
-        '''Handler for when a platform object changes in the database'''
-        # TODO: Handle deletion
-        if operation != 'set' or platform is None:
-            return
-
-        # If there are new settings, then trigger a bunch of updates 
-        new_options = (platform.abtest, platform.serving_enabled)
-        plat_tup = tuple(key[1:])
-        with self._platform_options_lock:
-            old_options = self._platform_options.get(plat_tup, None)
-            if new_options != old_options:
-                self._platform_options[plat_tup] = new_options
-            elif not force_subscribe:
-                return
-
-        if platform.serving_enabled:
-            self._subscribe_to_video_changes(platform.neon_api_key)
-        else:
-            self._unsubscribe_from_video_changes(platform.neon_api_key)
-
-        if update_videos:
-            for internal_video_id in platform.get_internal_video_ids():
-                self._schedule_video_update(internal_video_id)
-
+    
     def _handle_account_change(self, account_id, account, operation, 
                                update_videos=True):
         '''Handler for when a NeonUserAccount object changes in the database.'''
