@@ -986,8 +986,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         if vids is None:
             user = yield neondata.NeonUserAccount.get(self.api_key, async=True)
             internal_video_ids = yield user.get_internal_video_ids(async=True)
-            #import pdb; pdb.set_trace()
-            vids_one = [neondata.InternalVideoID.to_external(i) for i in internal_video_ids]  
+            vids = [neondata.InternalVideoID.to_external(i) for i in internal_video_ids]  
             vids_two = platform_account.get_videos()
             import pdb; pdb.set_trace()
         

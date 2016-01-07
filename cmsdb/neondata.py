@@ -2824,6 +2824,7 @@ class NeonUserAccount(NamespacedStoredObject):
             db_connection = DBConnection.get(self)
             vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
                                           set_name='objset:%s' % self.neon_api_key)
+            import pdb; pdb.set_trace()
             raise tornado.gen.Return(list(vids))
 
     @utils.sync.optional_sync
