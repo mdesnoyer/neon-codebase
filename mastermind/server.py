@@ -205,12 +205,12 @@ class VideoUpdater(threading.Thread):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
 
-class VideoDBWatcher(threading.Thread):
+class VideoDBWatcher(object):
     '''This thread polls the video database for changes.'''
     def __init__(self, mastermind, directive_pusher,
                  video_id_cache=VideoIdCache(),
                  activity_watcher=utils.ps.ActivityWatcher()):
-        super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
+        # super(VideoDBWatcher, self).__init__(name='VideoDBWatcher')
         self.mastermind = mastermind
         self.daemon = True
         self.activity_watcher = activity_watcher
@@ -218,28 +218,28 @@ class VideoDBWatcher(threading.Thread):
         self.video_id_cache = video_id_cache
 
         # Is the initial data loaded
-        self.is_loaded = threading.Event()
+        # self.is_loaded = threading.Event()
 
-        self._stopped = threading.Event()
+        # self._stopped = threading.Event()
 
         # Objects to subscribe to changes in the database
         self._table_subscribers = []
         self._account_subscribers = {}
-        self._subscribe_lock = threading.RLock()
+        # self._subscribe_lock = threading.RLock()
 
-        self._vid_lock = threading.RLock()
+        # self._vid_lock = threading.RLock()
         # Set of videos to update
         self._vids_to_update = set()
-        self._vids_waiting = threading.Event()
-        self._vid_processing_done = threading.Event()
+        # self._vids_waiting = threading.Event()
+        # self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
-        self._platform_options_lock = threading.RLock()
+        # self._platform_options_lock = threading.RLock()
         # Options for the platform
         # (api_key, integration_id) -> (abtest, serving_enabled)
         self._platform_options = {} 
 
     def __del__(self):
-        self.stop()
+        # self.stop()
         del self._video_updater
         for sub in self._table_subscribers:
             if sub is not None:
@@ -255,11 +255,10 @@ class VideoDBWatcher(threading.Thread):
             try:
                 with self.activity_watcher.activate():
                     if not is_initialized:
-                        self._initialize_serving_directives()
-                    self._process_db_data(is_initialized)
-                    
-                    is_initialized = True
-                    statemon.state.initialized_directives = 1
+                        self.initialize_serving_directives()
+                        is_initialized = True
+                        statemon.state.initialized_directives = 1
+                    self._process_db_data()
 
                     if not self._video_updater.is_alive():
                         self._video_updater.start()
@@ -281,7 +280,8 @@ class VideoDBWatcher(threading.Thread):
         self._stopped.set()
         self._video_updater.stop()
 
-    def _initialize_serving_directives(self):
+    @tornado.gen.coroutine
+    def initialize_serving_directives(self):
         '''Save current experiment state and serving fracs to mastermind
          
         When Mastermind server starts, the experiment_states and current
@@ -291,36 +291,50 @@ class VideoDBWatcher(threading.Thread):
         '''
         _log.info('Loading current experiment info and updating in mastermind')
 
-        for platform in neondata.AbstractPlatform.iterate_all():
+        t_begin = datetime.datetime.now()
+        # TODO: remove this line.
+        _log.info("begin time: %s" % str(t_begin))
+	    all_platform = yield tornado.gen.Task(neondata.AbstractPlatform.iterate_all)
+        print "Length of all_platform:", len(all_platform)
+        def chunks(source, n):
+            ''' yield successive n-sized chunks from the source list.'''
+            for i in xrange(0, len(source), n):
+                yield source[i: i+n]
+        for platform in all_platform:
             if not platform.serving_enabled:
                 continue
+            platform_video_ids = platform.get_internal_video_ids()
+            for video_id_chunck in chunks(platform_video_ids, 100):
+                video_metadata_chunck = \
+                    yield tornado.gen.Task(neondata.VideoMetadata.get_many,
+                                           video_id_chunck)
 
-            # Add the platform to the options list
-            with self._platform_options_lock:
-                self._platform_options[(platform.neon_api_key,
-                                        str(platform.integration_id))] = \
-                  (platform.abtest, platform.serving_enabled)
-            
-            for video_id in platform.get_internal_video_ids():
-                video_metadata = neondata.VideoMetadata.get(video_id)
-                account_id = video_metadata.get_account_id()
-                if not video_metadata.serving_enabled:
-                    continue
-                video_status = neondata.VideoStatus.get(video_id,
-                                                        log_missing=False)
-                if video_status is None:
-                    continue
+                for video_metadata in video_metadata_chunck:
+                    account_id = video_metadata.get_account_id()
+                    if not video_metadata.serving_enabled:
+                        continue
+                    video_status = \
+                        yield tornado.gen.Task(neondata.VideoStatus.get,
+                                               video_id,
+                                               log_missing=False)
+                    if video_status is None:
+                        continue
 
-                # Get all thumbnails
-                thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    set(video_metadata.thumbnail_ids), log_missing=False)
-                thumbnail_status_list = [x for x in thumbnail_status_list if
-                                         x is not None]
+                    # Get all thumbnails
+                    thumbnail_status_list = \
+                        yield tornado.gen.Task(neondata.ThumbnailStatus.get_many,
+                                               set(video_metadata.thumbnail_ids),
+                                               log_missing=False)
+                    thumbnail_status_list = [x for x in thumbnail_status_list if
+                                             x is not None]
 
-                self.mastermind.update_experiment_state_directive(
-                    video_id,
-                    video_status,
-                    thumbnail_status_list)
+                    self.mastermind.update_experiment_state_directive(
+                        video_id,
+                        video_status,
+                        thumbnail_status_list)
+        # TODO: remove this line.
+        t_end = datetime.now()
+        _log.info("initialize_serving_directives run time is %s" % str(t_end - t_begin))
 
     def _process_db_data(self, is_initialized):
         _log.info('Polling the video database for a full batch update')
@@ -1554,31 +1568,42 @@ class DirectivePublisher(threading.Thread):
             statemon.state.decrement('pending_callbacks')
         
 def main(activity_watcher = utils.ps.ActivityWatcher()):    
+    # with activity_watcher.activate():
+    #     mastermind = Mastermind()
+    #     video_id_cache = VideoIdCache()
+    #     publisher = DirectivePublisher(mastermind, 
+    #                                    activity_watcher=activity_watcher)
+
+    #     videoDbThread = VideoDBWatcher(mastermind, publisher, video_id_cache,
+    #                                    activity_watcher)
+    #     videoDbThread.start()
+    #     videoDbThread.wait_until_loaded()
+    #     videoDbThread.subscribe_to_db_changes()
+    #     statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
+    #                                    activity_watcher)
+    #     statsDbThread.start()
+    #     statsDbThread.wait_until_loaded()
+
+    #     publisher.start()
+
+    ioloop = tornado.ioloop.IOLoop()
     with activity_watcher.activate():
         mastermind = Mastermind()
         video_id_cache = VideoIdCache()
         publisher = DirectivePublisher(mastermind, 
                                        activity_watcher=activity_watcher)
-
-        videoDbThread = VideoDBWatcher(mastermind, publisher, video_id_cache,
-                                       activity_watcher)
-        videoDbThread.start()
-        videoDbThread.wait_until_loaded()
-        videoDbThread.subscribe_to_db_changes()
-        statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
-                                       activity_watcher)
-        statsDbThread.start()
-        statsDbThread.wait_until_loaded()
-
-        publisher.start()
-
-    ioloop = tornado.ioloop.IOLoop()
+        video_db_watcher = VideoDBWatcher(mastermind, publisher, video_id_cache,
+                                          activity_watcher)
+        ioloop.add_callback(video_db_watcher.initialize_serving_directives)
     ioloop.make_current()
+    def print_every_5_seconds():
+        print "[[every 5 seconds]]"
+    a = tornado.ioloop.PeriodicCallback(print_every_5_seconds, 5000, io_loop=ioloop)
 
     atexit.register(ioloop.stop)
-    atexit.register(publisher.stop)
-    atexit.register(videoDbThread.stop)
-    atexit.register(statsDbThread.stop)
+    # atexit.register(publisher.stop)
+    # atexit.register(videoDbThread.stop)
+    # atexit.register(statsDbThread.stop)
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
     signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
 
@@ -1586,12 +1611,14 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
         statemon.state.last_publish_time = (
             datetime.datetime.utcnow() -
             publisher.last_publish_time).total_seconds()
-    tornado.ioloop.PeriodicCallback(update_publish_time, 10000, io_loop=ioloop)
+    # tornado.ioloop.PeriodicCallback(update_publish_time, 10000, io_loop=ioloop)
+    print "Right before ioloop start."
+    # a.start()
     ioloop.start()
-
-    publisher.join(300)
-    videoDbThread.join(30)
-    statsDbThread.join(30)
+    print "print interval start status:", a.is_running()
+    # publisher.join(300)
+    # videoDbThread.join(30)
+    # statsDbThread.join(30)
     
 if __name__ == "__main__":
     utils.neon.InitNeon()
