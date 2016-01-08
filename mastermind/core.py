@@ -403,8 +403,6 @@ class Mastermind(object):
                     self.serving_directive[video_id] = \
                         ((account_id, video_id), directive_list)
 
-
-
     def update_video_info(self, video_metadata, thumbnails,
                           testing_enabled=True):
         '''Updates information about the video.
