@@ -344,7 +344,8 @@ class VideoDBWatcher(threading.Thread):
 
         for account in list(neondata.NeonUserAccount.iterate_all()):
             self._handle_account_change(account.get_id(), account, 'set', 
-                                        update_videos=False) 
+                                        update_videos=False, 
+                                        force_subscribe=(not is_initialized)) 
             self.mastermind.update_experiment_strategy(
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
@@ -439,19 +440,10 @@ class VideoDBWatcher(threading.Thread):
             statemon.state.increment('video_push_updates_received')
     
     def _handle_account_change(self, account_id, account, operation, 
-                               update_videos=True):
+                               update_videos=True, 
+                               force_subscribe=False):
         '''Handler for when a NeonUserAccount object changes in the database.'''
-
         if operation == 'set' and account is not None:
-            with self._current_accounts_lock:
-                self._current_accounts[account_id] = account
- 
-            # Subscribe to this account if we aren't subscribed yet
-            if account.serving_enabled: 
-                self._subscribe_to_video_changes(account_id)
-            else: 
-                self._unsubscribe_from_video_changes(account_id)
-
             # Update default size and default thumbs
             self.directive_pusher.default_sizes[account_id] = \
               account.default_size
@@ -462,6 +454,25 @@ class VideoDBWatcher(threading.Thread):
                 try:
                     del self.directive_pusher.default_thumbs[account_id]
                 except KeyError: pass
+
+            with self._current_accounts_lock:
+                # if the serving_enabled state has not changed, don't 
+                # do anything 
+                old_account = self._current_accounts.get(account_id, None)
+                try:  
+                    if old_account.serving_enabled is account.serving_enabled: 
+                        if not force_subscribe:
+                            return  
+                except AttributeError: 
+                    pass
+ 
+                self._current_accounts[account_id] = account
+ 
+            # Subscribe to this account if we aren't subscribed yet
+            if account.serving_enabled: 
+                self._subscribe_to_video_changes(account_id)
+            else: 
+                self._unsubscribe_from_video_changes(account_id)
 
             if update_videos:
                 for internal_video_id in account.get_internal_video_ids():
