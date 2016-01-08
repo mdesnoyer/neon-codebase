@@ -11,18 +11,18 @@ import scipy.stats as spstats
 import itertools
 
 class Param(object):
-    BASE_PERCENT = 0.04
+    BASE_PERCENT = 0.04 # Baseline CTR
     LIFT = 1.25
-    EXP_RATE = 0.02
-    EXP_STOP = 0.1
-    MIN_CONVERSION = 50
-    BANDIT_FRAC_END = 0
-    RANDOM_WALK_UPPER = 0.15
-    RANDOM_WALK_LOWER = 0.01
-    RANDOM_WALK_STEP = 0.005
-    ALPHA = 0.5
-    FRAC_ADJUST_RATE = 0.0
-    COMBINED_BIN_SIZE = 5
+    EXP_RATE = 0.02 # If the CTR is exponentially dropping, this is the decay rate.
+    EXP_STOP = 0.1 # Minimum decay ratio allowed
+    MIN_CONVERSION = 50 # Minimum conversion number per video before the experiment can stop.
+    BANDIT_FRAC_END = 0 # Misnomer. Minimum sample number to collect before running the bandit method. Default fraction is 1/N (N number of images) before bandit starts.
+    RANDOM_WALK_UPPER = 0.15 # Upper bound for random walk CTR
+    RANDOM_WALK_LOWER = 0.01 # Lower bound for random walk CTR
+    RANDOM_WALK_STEP = 0.005 # The mean for normal distribution of random walk steps.
+    ALPHA = 0.5 # This is alpha the optimizely formula 
+    FRAC_ADJUST_RATE = 0.0 # This is the exponential parameter to make bandit algorithm to be the same as sequential method when 0, bandit itself, when 1.
+    COMBINED_BIN_SIZE = 5 # this is to bin history data into bins for CTR calculation when trying to estimate moving CTR.
 
 class Sequencial(object):
     def __init__(self, tau = 0.0001, alpha = Param.ALPHA):
@@ -693,13 +693,22 @@ def simulator():
     random_walk_array = random_walk(10000)
     stat_simulator = StatsOptimizingSimulator(bin_size = 200, experiment_number = 100, is_display = False)
     # Start the testing.
+    # new = optimizely approach
+    # traditional = t-test
+    # optimal = exact answer based on CTR
+    # avg = mean number of samples for experiements when ended.
+    # inconclusive_count = number of experiments that didn't finish. It normally doesn't happen for t-test, bandit, when there are positive lifts.
+    # Err_count = number of wrong conclusions.
+    # missed_conversion_average = the difference in conversions between optimal and the executed strategy.
+    # err_end_avg = This the mean number of samples when the conclusions are wrong.
+    # optimal_conversion_avg = the mean number of conversion when the experiments run under optimal conditions.
     print "Sequencial Testing"
     print """(traditional_avg, new_avg, traditional_inconclusive_count,
               new_inconclusive_count, traditional_err_count, new_err_count,
               missed_traditional_conversion_avg, missed_new_conversion_avg,
               traditional_err_end_avg, new_err_end_avg,
               optimal_traditional_conversion_avg, optimal_new_conversion_avg)"""
-    # print stat_simulator.run_sequencial_experiment(simulator_function_simple)
+    print stat_simulator.run_sequencial_experiment(simulator_function_simple)
     # print stat_simulator.run_sequencial_experiment(simulator_function_type1_err)
     # print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr)
     # print stat_simulator.run_sequencial_experiment(simulator_function_exp_ctr_type1_err)
