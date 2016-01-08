@@ -11,8 +11,8 @@ sys.path.insert(0,  os.path.abspath(
 import unittest
 from cvutils import smartcrop
 from cvutils import imageutils
-# from model import features
-# from model.colorname import JSD
+from model import features
+from model.colorname import JSD
 
 class TestSmartCrop(unittest.TestCase):
     def setUp(self):
@@ -34,7 +34,9 @@ class TestSmartCrop(unittest.TestCase):
         # text_im = cv2.imread(os.path.join(os.path.dirname(__file__),
         #                                   'test_crop_images/lower_text.jpg'))
         smart_crop = smartcrop.SmartCrop(text_im)
-        cropped_im = smart_crop.text_crop(0, 0, text_im.shape[1], text_im.shape[0])
+        (new_x, new_y, new_width, new_height) = smart_crop.crop(360, 480)
+        cropped_im = text_im[new_y:new_y+new_height,
+                             new_x:new_x+new_width]
         # Assert to make sure there are less residual pixels. It is allowed to
         # have some.
         self.assertLess(cropped_im.shape[0], text_im.shape[0])
@@ -67,48 +69,6 @@ class TestSmartCrop(unittest.TestCase):
         gist_cropped = gist.generate(cropped_im)
         gist_expected = gist.generate(expected_resize)
         self.assertLess(JSD(gist_cropped, gist_expected), 0.01)
-
-    def test_sliding_window_saliency(self):
-        ''' Test the saliency cropping algorithm.
-        '''
-        # create the image asymetrical
-        test_im = np.zeros((360, 600, 3), dtype=np.uint8)
-        saliency_line = np.append(np.append(range(1, 256), np.arange(255, 1, -0.8)),
-                                  np.zeros(27)).astype(np.uint8)
-        saliency_im = np.repeat(np.array([saliency_line]), 360, axis=0)
-        smart_crop = smartcrop.SmartCrop(test_im,
-            with_text_detection=False, with_face_detection=False)
-        smart_crop._saliency_map = saliency_im
-        smart_crop._text_boxes = []
-        (new_x, new_y, new_width, new_height) = \
-            smart_crop.saliency_crop(300, 300)
-        cropped_im = saliency_im[new_y:new_y+new_height,
-                                    new_x:new_x+new_width]
-        cv2.imshow('cropped saliency', cropped_im)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        self.assertLess(new_x, 120)
-        self.assertEqual(new_y, 0)
-        self.assertEqual(new_height, 360)
-        self.assertEqual(new_width, 360)
-
-    def test_center_saliency_bias(self):
-        test_im = np.zeros((360, 600, 3), dtype=np.uint8)
-        im_saliency = smartcrop.ImageSignatureSaliency(test_im)
-        im_saliency._create_center_bias(360, 600)        
-
-    def test_face_zeros(self):
-        test_im = np.zeros((50, 100, 3), dtype=np.uint8)
-        smart_crop = smartcrop.SmartCrop(test_im)
-        faces = np.array([[40, 20, 20, 20],
-                          [10, 20, 10, 10]])
-        loc_array = smart_crop._get_face_zeros(faces, 100, 50)
-        target = np.ones(51)
-        for x in xrange(51):
-            right_x = x + 50 - 1
-            if smart_crop._face_cut_length(x, right_x, faces) > 0:
-                target[x] = 0
-        np.testing.assert_array_equal(target, loc_array)
 
     def test_saliency_face_crop(self):
         ''' Test the combination function of saliency and face cropping.
