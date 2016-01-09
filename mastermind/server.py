@@ -1054,6 +1054,11 @@ class DirectivePublisher(threading.Thread):
         # Set of last video ids in the directive file
         self.last_published_videos = set([])
 
+        # video ids that are currently waiting on isp, to prevent 
+        # firing off hundres ofthreads that loop for 
+        # isp_timeout_time (default 30 mins) 
+        self.waiting_on_isp_videos = set([]) 
+        
         # Counter for the number of pending modify calls to the database
         self.pending_modifies = multiprocessing.Value('i', 0)
         statemon.state.pending_modifies = 0
@@ -1469,17 +1474,27 @@ class DirectivePublisher(threading.Thread):
 
             # Now we wait until the video is serving on the isp
             start_time = time.time()
-            while not video.image_available_in_isp():
-                if (time.time() - start_time) > options.isp_wait_timeout:
-                    statemon.state.increment('timeout_waiting_for_isp')
-                    _log.error('Timed out waiting for ISP for video %s' %
-                               video.key)
-                    with self.lock:
-                        self.last_published_videos.discard(video_id)
-                    return
-                time.sleep(5.0 * random.random())
+            if video_id in self.waiting_on_isp_videos:
+                # we are already waiting on this video_id, do not 
+                # start another long loop for it 
+                return 
+            else: 
+                with self.lock: 
+                    self.waiting_on_isp_videos.add(video_id)  
+                while not video.image_available_in_isp():
+                    if (time.time() - start_time) > options.isp_wait_timeout:
+                        statemon.state.increment('timeout_waiting_for_isp')
+                        _log.error('Timed out waiting for ISP for video %s' %
+                                   video.key)
+                        with self.lock:
+                            self.last_published_videos.discard(video_id)
+                            self.waiting_on_isp_videos.discard(video_id) 
+                        return
+                    time.sleep(5.0 * random.random())
+            with self.lock: 
+                self.waiting_on_isp_videos.discard(video_id) 
+              
             statemon.state.isp_ready_delay = time.time() - start_time
-
             # Wait a bit so that it gets to all the ISPs
             time.sleep(options.serving_update_delay)
 
