@@ -232,10 +232,9 @@ class VideoDBWatcher(threading.Thread):
         self._vids_waiting = threading.Event()
         self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
-        self._current_accounts_lock = threading.RLock()
-        # stores current account, to get a number of things 
-        # (api_key) -> (account)
-        self._current_accounts = {} 
+        self._accounts_options_lock = threading.RLock()
+        # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
+        self._accounts_options = {} 
 
     def __del__(self):
         self.stop()
@@ -289,12 +288,13 @@ class VideoDBWatcher(threading.Thread):
         changing its serving directives.
         '''
         _log.info('Loading current experiment info and updating in mastermind')
-
-        for account in list(neondata.NeonUserAccount.iterate_all()):
+        for account in neondata.NeonUserAccount.iterate_all():
             if not account.serving_enabled:
                 continue
 
-            self._current_accounts[account.neon_api_key] = account
+            self._accounts_options[account.neon_api_key] = (account.abtest, 
+                 account.serving_enabled)
+ 
             for video_id in account.get_internal_video_ids():
                 video_metadata = neondata.VideoMetadata.get(video_id)
                 account_id = video_metadata.get_account_id()
@@ -342,15 +342,17 @@ class VideoDBWatcher(threading.Thread):
                     url_obj.get_thumbnail_id(),
                     url_obj)
 
-        for account in list(neondata.NeonUserAccount.iterate_all()):
-            self._handle_account_change(account.get_id(), account, 'set', 
+        for account in neondata.NeonUserAccount.iterate_all():
+            self._handle_account_change(account.neon_api_key, account, 'set', 
                                         update_videos=False, 
                                         force_subscribe=(not is_initialized)) 
             self.mastermind.update_experiment_strategy(
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
+
             for video_id in account.get_internal_video_ids():
-                self._schedule_video_update(video_id) 
+                self._schedule_video_update(video_id)
+ 
             self.process_queued_video_updates() 
 
         statemon.state.increment('videodb_batch_update')
@@ -454,19 +456,16 @@ class VideoDBWatcher(threading.Thread):
                 try:
                     del self.directive_pusher.default_thumbs[account_id]
                 except KeyError: pass
-
-            with self._current_accounts_lock:
-                # if the serving_enabled state has not changed, don't 
+            
+            new_options = (account.abtest, account.serving_enabled)
+            with self._accounts_options_lock:
+                # if the serving_enabled/abtest state has not changed, don't 
                 # do anything 
-                old_account = self._current_accounts.get(account_id, None)
-                try:  
-                    if old_account.serving_enabled is account.serving_enabled: 
-                        if not force_subscribe:
-                            return  
-                except AttributeError: 
-                    pass
- 
-                self._current_accounts[account_id] = account
+                old_options = self._accounts_options.get(account_id, None)
+                if new_options != old_options: 
+                    self._accounts_options[account_id] = new_options
+                elif not force_subscribe: 
+                    return 
  
             # Subscribe to this account if we aren't subscribed yet
             if account.serving_enabled: 
@@ -484,13 +483,15 @@ class VideoDBWatcher(threading.Thread):
             statemon.state.increment('no_videometadata')
             _log.error('Could not find information about video %s' % video_id)
             return
-
         
         thumb_ids = sorted(set(video_metadata.thumbnail_ids))
         
-        abtest = video_metadata.testing_enabled 
-        serving_enabled = video_metadata.serving_enabled and \
-                          self._current_accounts[video_metadata.get_account_id()].serving_enabled
+        acct_abtest, acct_serving_enabled = self._accounts_options[
+                video_metadata.get_account_id()] 
+ 
+        abtest = video_metadata.testing_enabled and acct_abtest 
+        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled
+
         if serving_enabled:
             thumbnails = []
             thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
