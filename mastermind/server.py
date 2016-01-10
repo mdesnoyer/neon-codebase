@@ -116,6 +116,8 @@ statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
 statemon.define('thumbnails_serving', int)
 
+statemon.define('videos_waiting_on_isp', int)
+
 _log = logging.getLogger(__name__)
 
 def pack_obj(x):
@@ -1480,7 +1482,8 @@ class DirectivePublisher(threading.Thread):
                 return 
             else: 
                 with self.lock: 
-                    self.waiting_on_isp_videos.add(video_id)  
+                    self.waiting_on_isp_videos.add(video_id) 
+                    statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
                 while not video.image_available_in_isp():
                     if (time.time() - start_time) > options.isp_wait_timeout:
                         statemon.state.increment('timeout_waiting_for_isp')
@@ -1493,6 +1496,7 @@ class DirectivePublisher(threading.Thread):
                     time.sleep(5.0 * random.random())
             with self.lock: 
                 self.waiting_on_isp_videos.discard(video_id) 
+                statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
               
             statemon.state.isp_ready_delay = time.time() - start_time
             # Wait a bit so that it gets to all the ISPs
