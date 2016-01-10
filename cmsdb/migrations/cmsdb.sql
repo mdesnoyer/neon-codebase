@@ -272,13 +272,6 @@ COPY neonuseraccount (_data, _type) FROM stdin;
 
 
 --
--- Data for Name: ooyalaintegration; Type: TABLE DATA; Schema: public; Owner: pgadmin
---
-
-COPY ooyalaintegration (_data, _type) FROM stdin;
-\.
-
---
 -- Data for Name: request; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 

@@ -191,7 +191,6 @@ class Postgresql(object):
             with closing(conn.cursor()) as cursor:
                 cursor.execute("DELETE FROM abstractintegration")
                 cursor.execute("DELETE FROM abstractplatform")
-                cursor.execute("DELETE FROM brightcoveplatform")
                 cursor.execute("DELETE FROM cdnhostingmetadatalist")
                 cursor.execute("DELETE FROM experimentstrategy")
                 cursor.execute("DELETE FROM neonapikey")
@@ -199,8 +198,6 @@ class Postgresql(object):
                 cursor.execute("DELETE FROM neonuseraccount")
                 cursor.execute("DELETE FROM neonplatform")
                 cursor.execute("DELETE FROM users")
-                cursor.execute("DELETE FROM ooyalaintegration")
-                cursor.execute("DELETE FROM ooyalaplatform")
                 cursor.execute("DELETE FROM request")
                 cursor.execute("DELETE FROM thumbnailmetadata")
                 cursor.execute("DELETE FROM thumbnailservingurls")

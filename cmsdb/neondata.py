@@ -4364,38 +4364,54 @@ class NeonApiRequest(NamespacedStoredObject):
         raise NotImplementedError()
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify(cls, job_id, api_key, func, create_missing=False, 
                callback=None):
-        return super(NeonApiRequest, cls).modify(
-            cls._generate_subkey(job_id, api_key),
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).modify(
+                cls._generate_subkey(job_id, api_key),
+                func,
+                create_missing=create_missing,
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (job_id, api_key)
         '''
-        return super(NeonApiRequest, cls).modify_many(
-            [cls._generate_subkey(*k) for k in keys],
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).modify_many(
+                    [cls._generate_subkey(*k) for k in keys],
+                    func,
+                    create_missing=create_missing,
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete(cls, job_id, api_key, callback=None):
-        return super(NeonApiRequest, cls).delete(
-            cls._generate_subkey(job_id, api_key),
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).delete(
+                cls._generate_subkey(job_id, api_key),
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
-        return super(NeonApiRequest, cls).delete_many(
-            [cls._generate_subkey(job_id, api_key) for 
-             job_id, api_key in keys],
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).delete_many(
+                [cls._generate_subkey(job_id, api_key) for 
+                job_id, api_key in keys],
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
     
     @utils.sync.optional_sync
     @tornado.gen.coroutine

@@ -2901,7 +2901,76 @@ class BasePGNormalObject(object):
         else: 
             rv = yield obj.get(obj.key, 
                                async=True) 
-        raise tornado.gen.Return(rv)  
+        raise tornado.gen.Return(rv) 
+ 
+    @tornado.gen.coroutine 
+    def _get_delete_function(cls, obj):
+        new_keys = cls._make_keys(obj)  
+        if len(new_keys) == 2:
+            rv = yield obj.delete(new_keys[0], 
+                                  new_keys[1], 
+                                  async=True) 
+        elif len(cls.keys) == 1: 
+            rv = yield obj.delete(new_keys[0], 
+                                  async=True)
+        else: 
+            rv = yield obj.delete(obj.key, 
+                                  async=True) 
+        raise tornado.gen.Return(rv) 
+
+    @tornado.gen.coroutine 
+    def _run_delete_many_function(cls, objs): 
+        key_set = [] 
+        for obj in objs:
+            keys = cls._make_keys(obj)
+            if len(keys) == 2:  
+                key_set.append(cls._make_keys(obj))
+            else: 
+               key_set.append(keys[0])
+        rv = yield obj.delete_many(key_set, async=True)
+        raise tornado.gen.Return(rv) 
+ 
+    @tornado.gen.coroutine 
+    def _run_get_many_function(cls, objs): 
+        key_set = [] 
+        for obj in objs:
+            keys = cls._make_keys(obj)
+            if len(keys) == 2:  
+                key_set.append(cls._make_keys(obj))
+            else: 
+               key_set.append(keys[0])
+        rv = yield obj.get_many(key_set, async=True)
+        raise tornado.gen.Return(rv)
+ 
+    @tornado.gen.coroutine 
+    def _run_modify_many_function(cls, objs, mocker): 
+        key_set = [] 
+        for obj in objs:
+            keys = cls._make_keys(obj)
+            if len(keys) == 2:  
+                key_set.append(cls._make_keys(obj))
+            else: 
+               key_set.append(keys[0])
+        rv = yield obj.modify_many(key_set, mocker, async=True)
+        raise tornado.gen.Return(rv) 
+ 
+    @tornado.gen.coroutine 
+    def _run_modify_function(cls, obj, mocker):
+        new_keys = cls._make_keys(obj)  
+        if len(new_keys) == 2:
+            rv = yield obj.modify(new_keys[0], 
+                                  new_keys[1],
+                                  mocker,  
+                                  async=True) 
+        elif len(cls.keys) == 1: 
+            rv = yield obj.modify(new_keys[0], 
+                                  mocker, 
+                                  async=True)
+        else: 
+            rv = yield obj.modify(obj.key,
+                                  mocker,  
+                                  async=True) 
+        raise tornado.gen.Return(rv) 
 
     @tornado.testing.gen_test
     def test_save_object(self):
@@ -2916,8 +2985,8 @@ class BasePGNormalObject(object):
     @tornado.testing.gen_test 
     def test_save_duplicate_objects(self):     
         unique_id = uuid.uuid1().hex 
-        so1 = self._get_object_type()(unique_id) 
-        so2 = self._get_object_type()(unique_id) 
+        so1 = self._get_object_type()(unique_id, 'test1') 
+        so2 = self._get_object_type()(unique_id, 'test1') 
         yield so1.save(async=True) 
         yield so2.save(async=True)  
         get_obj_one = yield self._get_get_function(so1) 
@@ -2928,8 +2997,8 @@ class BasePGNormalObject(object):
     def test_save_all_objects(self):    
         key1 = uuid.uuid1().hex
         key2 = uuid.uuid1().hex 
-        so1 = self._get_object_type()(key1)
-        so2 = self._get_object_type()(key2)
+        so1 = self._get_object_type()(key1, 'test1')
+        so2 = self._get_object_type()(key2, 'test2')
         self._get_object_type().save_all([so1, so2])
         get_obj_one = yield self._get_get_function(so1) 
         get_obj_two = yield self._get_get_function(so2) 
@@ -2938,54 +3007,68 @@ class BasePGNormalObject(object):
      
     @tornado.testing.gen_test 
     def test_get_many_objects(self):     
-        so1 = self._get_object_type()(uuid.uuid1().hex)
-        so2 = self._get_object_type()(uuid.uuid1().hex)
-        self._get_object_type().save_all([so1, so2])
-        results = yield self._get_object_type().get_many([so1.key,so2.key], async=True)
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield self._get_object_type().save_all([so1, so2], async=True)
+        results = yield self._run_get_many_function([so1,so2])
         self.assertEquals(len(results), 2)
-
-    @tornado.testing.gen_test 
-    def test_modify_many_objects(self):     
-        self.assertEquals(1,1)
- 
-    @tornado.testing.gen_test 
-    def test_modify_object(self):     
-        self.assertEquals(1,1)
 
     @tornado.testing.gen_test 
     def test_delete_object(self):  
         so1 = self._get_object_type()(uuid.uuid1().hex) 
-        yield self._get_object_type().delete(so1.key, async=True) 
-        get1 = yield self._get_object_type().get(so1.key, async=True)
+        yield self._get_delete_function(so1) 
+        get1 = yield self._get_get_function(so1)
         self.assertEquals(None, get1)
 
     @tornado.testing.gen_test 
     def test_delete_many_objects(self): 
-        so1 = self._get_object_type()(uuid.uuid1().hex)
-        so2 = self._get_object_type()(uuid.uuid1().hex)
-        yield self._get_object_type().delete_many([so1.key,so2.key], async=True) 
-        get1 = yield self._get_object_type().get(so1.key, async=True)
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        yield self._run_delete_many_function([so1, so2]) 
+        get1 = yield self._get_get_function(so1)
         self.assertEquals(None, get1)
-        get2 = yield self._get_object_type().get(so2.key, async=True)
+        get2 = yield self._get_get_function(so2)
         self.assertEquals(None, get2)
 
     @tornado.testing.gen_test
     def test_delete_many_objects_key_dne(self): 
-        so1 = self._get_object_type()(uuid.uuid1().hex)
-        so2 = self._get_object_type()(uuid.uuid1().hex)
-        yield self._get_object_type().delete_many([so1.key,so2.key,'dne'], async=True) 
-        get1 = yield self._get_object_type().get(so1.key, async=True)
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        so3 = self._get_object_type()('doesnotexist')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        yield self._run_delete_many_function([so1,so2,so3]) 
+        get1 = yield self._get_get_function(so1)
         self.assertEquals(None, get1)
-        get2 = yield self._get_object_type().get(so2.key, async=True)
+        get2 = yield self._get_get_function(so2)
         self.assertEquals(None, get2)
 
     @tornado.testing.gen_test
     def test_modify_object(self):
         modify_me = MagicMock()  
-        so = self._get_object_type()(uuid.uuid1().hex)
+        so = self._get_object_type()(uuid.uuid1().hex, 'test1')
         yield so.save(async=True)
-        self._get_object_type().modify_many([so.key], modify_me) 
-        modify_me.assert_called_with({so}, ANY, ANY)
+        yield self._run_modify_function(so, modify_me) 
+        self.assertEquals(modify_me.call_args[0][0].key, so.key)
+        self.assertEquals(modify_me.call_count, 1)
+
+    @tornado.testing.gen_test 
+    def test_modify_many_objects(self):     
+        modify_me = MagicMock()  
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        yield self._run_modify_many_function([so1,so2], modify_me) 
+        self.assertEquals(1,1)
+        keys = []
+        for iter_item in modify_me.call_args[0][0].iteritems(): 
+            keys.append(iter_item[1].key) 
+        self.assertTrue(so2.key in keys) 
+        self.assertTrue(so1.key in keys) 
+        self.assertEquals(modify_me.call_count, 1)
 
 class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
