@@ -2310,25 +2310,40 @@ class DefaultedStoredObject(NamespacedStoredObject):
         super(DefaultedStoredObject, self).__init__(key)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, key, log_missing=True, callback=None):
-        return super(DefaultedStoredObject, cls).get(
-            key,
-            create_default=True,
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(DefaultedStoredObject, cls).get(
+                    key,
+                    create_default=True,
+                    log_missing=log_missing,
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get_many(cls, keys, log_missing=True, callback=None):
-        return super(DefaultedStoredObject, cls).get_many(
-            keys,
-            create_default=True,
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(DefaultedStoredObject, cls).get_many(
+                    keys,
+                    create_default=True,
+                    log_missing=log_missing,
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=None, callback=None):
-        return super(DefaultedStoredObject, cls).modify_many(
-            keys, func, create_missing=True, callback=callback)
+        rv = yield super(DefaultedStoredObject, cls).modify_many(
+                    keys, 
+                    func, 
+                    create_missing=True, 
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -2824,7 +2839,6 @@ class NeonUserAccount(NamespacedStoredObject):
             db_connection = DBConnection.get(self)
             vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
                                           set_name='objset:%s' % self.neon_api_key)
-            import pdb; pdb.set_trace()
             raise tornado.gen.Return(list(vids))
 
     @utils.sync.optional_sync

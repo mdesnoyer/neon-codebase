@@ -114,7 +114,7 @@ def process_account(api_key, pool):
 
     # Submit each video
     results = pool.imap_unordered(process_one_video,
-                                  plat.get_internal_video_ids(),
+                                  account.get_internal_video_ids(),
                                   30)
 
     n_success = 0

@@ -735,14 +735,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         ordered_videos = sorted(self._get_videos(), reverse=True)
         test_video_ids = ordered_videos[:2]
         video_ids = ",".join(test_video_ids)
-
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos/?video_ids=15238901589,%s'
                 %(self.a_id, self.b_id, video_ids))
         jresp = self.get_request(url, self.api_key)
         resp = json.loads(jresp.body)
-        self.assertEqual(resp["total_count"], 3)
-        self.assertEqual(len(resp["items"]), 3)
+        self.assertEqual(resp["total_count"], 2)
+        self.assertEqual(len(resp["items"]), 2)
 
         #result_vids = [x['video_id'] for x in items]
         #self.assertItemsEqual(result_vids, test_video_ids)
@@ -1161,9 +1160,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             self.api_key, '0',
             _add_videos)
         random.seed(1123)
-
-        self._process_brightcove_neon_api_requests(api_requests[:-1])
-
+        self._process_brightcove_neon_api_requests(api_requests)
+        
         page_no = 0
         page_size = 2
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1173,7 +1171,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
-        
+
         # recommended
         page_size = 5
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1185,6 +1183,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         result_vids = [ x['video_id'] for x in items]
 
         # processing
+        page_size = 5
+        api_requests[0].state = neondata.RequestState.SUBMIT
+        api_requests[0].save()
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
@@ -1231,8 +1232,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         status = [item['status'] for item in items]
         self.assertEqual(status.count("serving"), 1)
-
-        
 
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):
