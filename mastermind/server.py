@@ -116,6 +116,8 @@ statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
 statemon.define('thumbnails_serving', int)
 
+statemon.define('videos_waiting_on_isp', int)
+
 _log = logging.getLogger(__name__)
 
 def pack_obj(x):
@@ -232,10 +234,9 @@ class VideoDBWatcher(threading.Thread):
         self._vids_waiting = threading.Event()
         self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
-        self._current_accounts_lock = threading.RLock()
-        # stores current account, to get a number of things 
-        # (api_key) -> (account)
-        self._current_accounts = {} 
+        self._accounts_options_lock = threading.RLock()
+        # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
+        self._accounts_options = {} 
 
     def __del__(self):
         self.stop()
@@ -289,12 +290,13 @@ class VideoDBWatcher(threading.Thread):
         changing its serving directives.
         '''
         _log.info('Loading current experiment info and updating in mastermind')
-
-        for account in list(neondata.NeonUserAccount.iterate_all()):
+        for account in neondata.NeonUserAccount.iterate_all():
             if not account.serving_enabled:
                 continue
 
-            self._current_accounts[account.neon_api_key] = account
+            self._accounts_options[account.neon_api_key] = (account.abtest, 
+                 account.serving_enabled)
+ 
             for video_id in account.get_internal_video_ids():
                 video_metadata = neondata.VideoMetadata.get(video_id)
                 account_id = video_metadata.get_account_id()
@@ -342,14 +344,17 @@ class VideoDBWatcher(threading.Thread):
                     url_obj.get_thumbnail_id(),
                     url_obj)
 
-        for account in list(neondata.NeonUserAccount.iterate_all()):
-            self._handle_account_change(account.get_id(), account, 'set', 
-                                        update_videos=False) 
+        for account in neondata.NeonUserAccount.iterate_all():
+            self._handle_account_change(account.neon_api_key, account, 'set', 
+                                        update_videos=False, 
+                                        force_subscribe=(not is_initialized)) 
             self.mastermind.update_experiment_strategy(
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
+
             for video_id in account.get_internal_video_ids():
-                self._schedule_video_update(video_id) 
+                self._schedule_video_update(video_id)
+ 
             self.process_queued_video_updates() 
 
         statemon.state.increment('videodb_batch_update')
@@ -439,19 +444,10 @@ class VideoDBWatcher(threading.Thread):
             statemon.state.increment('video_push_updates_received')
     
     def _handle_account_change(self, account_id, account, operation, 
-                               update_videos=True):
+                               update_videos=True, 
+                               force_subscribe=False):
         '''Handler for when a NeonUserAccount object changes in the database.'''
-
         if operation == 'set' and account is not None:
-            with self._current_accounts_lock:
-                self._current_accounts[account_id] = account
- 
-            # Subscribe to this account if we aren't subscribed yet
-            if account.serving_enabled: 
-                self._subscribe_to_video_changes(account_id)
-            else: 
-                self._unsubscribe_from_video_changes(account_id)
-
             # Update default size and default thumbs
             self.directive_pusher.default_sizes[account_id] = \
               account.default_size
@@ -462,6 +458,22 @@ class VideoDBWatcher(threading.Thread):
                 try:
                     del self.directive_pusher.default_thumbs[account_id]
                 except KeyError: pass
+            
+            new_options = (account.abtest, account.serving_enabled)
+            with self._accounts_options_lock:
+                # if the serving_enabled/abtest state has not changed, don't 
+                # do anything 
+                old_options = self._accounts_options.get(account_id, None)
+                if new_options != old_options: 
+                    self._accounts_options[account_id] = new_options
+                elif not force_subscribe: 
+                    return 
+ 
+            # Subscribe to this account if we aren't subscribed yet
+            if account.serving_enabled: 
+                self._subscribe_to_video_changes(account_id)
+            else: 
+                self._unsubscribe_from_video_changes(account_id)
 
             if update_videos:
                 for internal_video_id in account.get_internal_video_ids():
@@ -473,13 +485,15 @@ class VideoDBWatcher(threading.Thread):
             statemon.state.increment('no_videometadata')
             _log.error('Could not find information about video %s' % video_id)
             return
-
         
         thumb_ids = sorted(set(video_metadata.thumbnail_ids))
         
-        abtest = video_metadata.testing_enabled 
-        serving_enabled = video_metadata.serving_enabled and \
-                          self._current_accounts[video_metadata.get_account_id()].serving_enabled
+        acct_abtest, acct_serving_enabled = self._accounts_options[
+                video_metadata.get_account_id()] 
+ 
+        abtest = video_metadata.testing_enabled and acct_abtest 
+        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled
+
         if serving_enabled:
             thumbnails = []
             thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
@@ -1042,6 +1056,11 @@ class DirectivePublisher(threading.Thread):
         # Set of last video ids in the directive file
         self.last_published_videos = set([])
 
+        # video ids that are currently waiting on isp, to prevent 
+        # firing off hundres ofthreads that loop for 
+        # isp_timeout_time (default 30 mins) 
+        self.waiting_on_isp_videos = set([]) 
+        
         # Counter for the number of pending modify calls to the database
         self.pending_modifies = multiprocessing.Value('i', 0)
         statemon.state.pending_modifies = 0
@@ -1457,17 +1476,29 @@ class DirectivePublisher(threading.Thread):
 
             # Now we wait until the video is serving on the isp
             start_time = time.time()
-            while not video.image_available_in_isp():
-                if (time.time() - start_time) > options.isp_wait_timeout:
-                    statemon.state.increment('timeout_waiting_for_isp')
-                    _log.error('Timed out waiting for ISP for video %s' %
-                               video.key)
-                    with self.lock:
-                        self.last_published_videos.discard(video_id)
-                    return
-                time.sleep(5.0 * random.random())
+            if video_id in self.waiting_on_isp_videos:
+                # we are already waiting on this video_id, do not 
+                # start another long loop for it 
+                return 
+            else: 
+                with self.lock: 
+                    self.waiting_on_isp_videos.add(video_id) 
+                    statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
+                while not video.image_available_in_isp():
+                    if (time.time() - start_time) > options.isp_wait_timeout:
+                        statemon.state.increment('timeout_waiting_for_isp')
+                        _log.error('Timed out waiting for ISP for video %s' %
+                                   video.key)
+                        with self.lock:
+                            self.last_published_videos.discard(video_id)
+                            self.waiting_on_isp_videos.discard(video_id) 
+                        return
+                    time.sleep(5.0 * random.random())
+            with self.lock: 
+                self.waiting_on_isp_videos.discard(video_id) 
+                statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
+              
             statemon.state.isp_ready_delay = time.time() - start_time
-
             # Wait a bit so that it gets to all the ISPs
             time.sleep(options.serving_update_delay)
 

@@ -308,10 +308,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         api_key = 'apikey'
         acct = neondata.NeonUserAccount('acct1', api_key)
         datamock.NeonUserAccount.iterate_all.return_value = [acct] 
-        bcPlatform = neondata.BrightcovePlatform(api_key, 'i1', 
-                                                 abtest=True)
-        bcPlatform.add_video('0', 'job11')
-        bcPlatform.add_video('10', 'job12')
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
         
@@ -509,7 +505,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(self.mastermind.experiment_state['a2_vid1'],
                           neondata.ExperimentState.COMPLETE)
 
-
 class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
     def setUp(self):
         # Start a database
@@ -530,6 +525,7 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
 
         # Setup a simple account in the database
         self.acct = neondata.NeonUserAccount('acct1', 'key1')
+        self.acct.save()
 
         # Setup api request
         self.job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
@@ -540,13 +536,6 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
                                           tids=['key1_vid1_t1', 'key1_vid1_t2'],
                                           i_id='i1')
         self.vid.save()
-        def _set_plat(x):
-            x.abtest = True
-            x.add_video('vid1', self.vid.job_id)
-        self.platform = neondata.BrightcovePlatform.modify(
-            'key1', 'i1', _set_plat, create_missing=True)
-        self.acct.add_platform(self.platform)
-        self.acct.save()
         self.thumbs =  [
             neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
                                        ttype='random'),
@@ -613,7 +602,6 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             False)
 
     def test_turn_off_serving(self):
-         
         self.acct.serving_enabled = False 
         self.acct.save()  
         self.wait_for_video_updates()
@@ -700,7 +688,6 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
         self.assertWaitForEquals(
             lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
             False)
-        
 
 class SQLWrapper(object):
     def __init__(self, test_case):
@@ -2149,6 +2136,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
                                       {(160, 90) : 't_default.jpg'}).save()
         acct = neondata.NeonUserAccount('acct1', 'key1')
         acct.default_thumbnail_id = default_acct_thumb.key
+        acct.save()
 
         # Setup api request and update the state to processed
         job = neondata.NeonApiRequest('job1', 'key1', 'vid1',
@@ -2161,15 +2149,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
                                      tids=['key1_vid1_t1', 'key1_vid1_t2'],
                                      i_id='i1')
         vid.save()
-        def _change_plat(x):
-            x.abtest = True
-            x.add_video('vid1', vid.job_id)
-        platform = neondata.BrightcovePlatform.modify(
-            'key1', 'i1',
-            _change_plat,
-            create_missing=True)
-        acct.add_platform(platform)
-        acct.save()
         thumbs =  [neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
                                               ttype='centerframe'),
                    neondata.ThumbnailMetadata('key1_vid1_t2', 'key1_vid1',
