@@ -160,6 +160,9 @@ class ThreshFilt(LocalFilter):
     def _filter_impl(self, feat_vec):
         return feat_vec > self.thresh
 
+    def short_description(self):
+        return 'thresholdfilter'
+
 class SceneChangeFilter(LocalFilter):
     '''
     Removes frames that are near scene changes. 
@@ -239,6 +242,9 @@ class SceneChangeFilter(LocalFilter):
             crit = np.logical_and(crit, feat_vec < self.max_thresh)
         return crit
 
+    def short_description(self):
+        return 'scenechange'
+
 class FaceFilter(LocalFilter):
     '''
     Removes frames that have less faces than other frames.
@@ -249,6 +255,9 @@ class FaceFilter(LocalFilter):
 
     def _filter_impl(self, feat_vec):
         return feat_vec == np.max(feat_vec)
+
+    def short_description(self):
+        return 'faces'
 
 class EyeFilter(LocalFilter):
     '''
@@ -262,6 +271,9 @@ class EyeFilter(LocalFilter):
 
     def _filter_impl(self, feat_vec):
         return feat_vec >= 0
+
+    def short_description(self):
+        return 'eyes'
 
 class CascadeFilter(Filter):
     '''A sequence of filters where if one cuts out the image, it fails.'''

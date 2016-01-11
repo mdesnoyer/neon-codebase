@@ -30,6 +30,8 @@ define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
 _log = logging.getLogger(__name__)
 
 class OVPError(IntegrationError): pass
+class OVPRefIDError(OVPError): pass
+class OVPCustomRefIDError(OVPError): pass
 class CMSAPIError(IntegrationError): pass
 
 class OVPIntegration(object):
