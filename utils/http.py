@@ -88,6 +88,9 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
             response = tornado.httpclient.HTTPResponse(request,
                                                        502,
                                                        error=error)
+        finally:
+            http_client.close()
+ 
         if not response.error:
             try:
                 data = tornado.escape.json_decode(response.body)
