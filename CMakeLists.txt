@@ -26,7 +26,10 @@ externalproject_add(Nginx
     UPDATE_COMMAND ""  # Stop it from updating because we want a static repo
     CONFIGURE_COMMAND
     ${PROJECT_SOURCE_DIR}/imageservingplatform/nginx-1.6.2/configure
-    --add-module=../neon_isp/ --with-http_realip_module
+    --add-module=../neon_isp/ 
+    --add-module=../ngx_devel_kit-0.2.19/ 
+    --add-module=../set-misc-nginx-module-0.29/
+    --with-http_realip_module
     --prefix=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     BUILD_COMMAND make
     BUILD_IN_SOURCE 1
