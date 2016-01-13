@@ -1292,6 +1292,30 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
         response, code = self.make_api_request(url, headers)
         self.assertEqual(code, 400)
 
+    def test_get_video_url_encoded(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin%7Evid%7Ewith%7Etildes')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
+
+    def test_get_video_should_be_encoded(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin~vid&$@with&$tildes')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 204)
+
+    def test_get_video_encoded_other_characters(self):
+        url = "http://localhost:%s/v1/video?publisher_id=%s&video_id=%s" % \
+                (self.port, 'pub5', 'kevin%7Evid%24%40with%24others')
+        ip = "203.2.113.7"
+        headers = {"X-Forwarded-For" : ip}
+        response, code = self.make_api_request(url, headers)
+        self.assertEqual(code, 200)
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     test_utils.neontest.main()
