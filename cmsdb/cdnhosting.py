@@ -152,8 +152,17 @@ class CDNHosting(object):
 
         Returns: list [(cdn_url, width, height)]
         '''
+        # we need to avoid source cropping (and smart cropping) thumbnails
+        # that come directly from the client.
+        thumb_meta = yield tornado.gen.Task(
+            cmsdb.neondata.ThumbnailMetadata.get, tid))
+        if ((thumb_meta.type is cmsdb.neondata.ThumbnailType.DEFAULT) or
+            (thumb_meta.type is cmsdb.neondata.ThumbnailType.CUSTOMUPLOAD)):
+            from_client = True
+        else:
+            from_client = False
         new_serving_thumbs = [] # (url, width, height)
-        if self.source_crop is not None:
+        if (self.source_crop is not None) and (not from_client):
             if not self.resize:
                 _log.error(('Crop source specified but no desired final size '
                             'is defined'))
@@ -167,13 +176,20 @@ class CDNHosting(object):
         try:
             if self.resize:
                 cv_im = pycvutils.from_pil(image)
-                sc = smartcrop.SmartCrop(cv_im,
-                    with_saliency=self.crop_with_saliency,
-                    with_face_detection=self.crop_with_face_detection,
-                    with_text_detection=self.crop_with_text_detection)
+                if not from_client:
+                    sc = smartcrop.SmartCrop(cv_im,
+                        with_saliency=self.crop_with_saliency,
+                        with_face_detection=self.crop_with_face_detection,
+                        with_text_detection=self.crop_with_text_detection)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    cv_im_r = sc.crop_and_resize(sz[1], sz[0])
+                    if not from_client:
+                        cv_im_r = sc.crop_and_resize(sz[1], sz[0])
+                    else:
+                        # avoid smart cropping, since it's too aggressive
+                        # about finding text.
+                        cv_im_r = pycvutils.resize_and_crop(
+                            cv_im, sz[1], sz[0])
                     im = pycvutils.to_pil(cv_im_r)
                     cdn_val = yield self._upload_and_check_image(
                         im, tid, url, overwrite)
