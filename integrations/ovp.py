@@ -11,6 +11,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
+import datetime
 from integrations.exceptions import IntegrationError
 import json
 import logging
@@ -135,7 +136,8 @@ class OVPIntegration(object):
                             self.platform.modify,
                             self.platform.integration_id,
                             _increase_retries)
-                    _log.info('Added %d jobs for integration before failure.' % added_jobs)
+                    _log.info('Added %d jobs for account : %s integration : %s before failure.' % \
+                                added_jobs, self.platform.neon_api_key, self.platform.integration_id)
                     return 
                 else:
                     _log.error('Unknown error, reached max retries on '
@@ -149,7 +151,8 @@ class OVPIntegration(object):
                                       self.get_video_last_modified_date(video))
   
         yield self.update_last_processed_date(last_processed_date) 
-        _log.info('Added %d jobs for integration' % added_jobs)
+        _log.info('Added %d jobs for account : %s integration : %s' % \
+                   added_jobs, self.platform.neon_api_key, self.platform.integration_id)
  
         raise tornado.gen.Return(video_dict)
     
