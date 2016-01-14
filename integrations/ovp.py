@@ -137,7 +137,7 @@ class OVPIntegration(object):
                             self.platform.integration_id,
                             _increase_retries)
                     _log.info('Added %d jobs for account : %s integration : %s before failure.' % \
-                                added_jobs, self.platform.neon_api_key, self.platform.integration_id)
+                                (added_jobs, self.neon_api_key, self.platform.integration_id))
                     return 
                 else:
                     _log.error('Unknown error, reached max retries on '
@@ -152,7 +152,7 @@ class OVPIntegration(object):
   
         yield self.update_last_processed_date(last_processed_date) 
         _log.info('Added %d jobs for account : %s integration : %s' % \
-                   added_jobs, self.platform.neon_api_key, self.platform.integration_id)
+                   (added_jobs, self.neon_api_key, self.platform.integration_id))
  
         raise tornado.gen.Return(video_dict)
     
@@ -210,7 +210,7 @@ class OVPIntegration(object):
                 # already a string, leave it alone
                 pass 
         existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                neondata.InternalVideoID.generate(self.platform.neon_api_key, video_id))
+                                                neondata.InternalVideoID.generate(self.neon_api_key, video_id))
        
         # TODO this won't be necessary once videos are removed from platforms
         if not self.does_video_exist(existing_video, video_id):
@@ -311,7 +311,7 @@ class OVPIntegration(object):
             'duration': duration,
             'publish_date': publish_date
             }
-        headers = {"X-Neon-API-Key" : self.platform.neon_api_key,
+        headers = {"X-Neon-API-Key" : self.neon_api_key,
                    "Content-Type" : "application/json"}
         url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
                'create_thumbnail_api_request') % (
@@ -332,7 +332,7 @@ class OVPIntegration(object):
 
         if response.code == 409:
             _log.warn('Video %s for account %s already exists' % 
-                      (video_id, self.platform.neon_api_key))
+                      (video_id, self.neon_api_key))
             raise tornado.gen.Return(json.loads(response.body))
         elif response.error is not None:
             statemon.state.increment('job_submission_error')
@@ -341,7 +341,7 @@ class OVPIntegration(object):
             raise CMSAPIError('Error submitting video: %s' % response.error)
 
         _log.info('New video was submitted for account %s video id %s'
-                  % (self.platform.neon_api_key, video_id))
+                  % (self.neon_api_key, video_id))
         statemon.state.increment('new_job_submitted')
         raise tornado.gen.Return(json.loads(response.body))
     
@@ -356,7 +356,7 @@ class OVPIntegration(object):
 
         # Get the data that could be updated
         video_id = neondata.InternalVideoID.generate(
-            self.platform.neon_api_key, video_id)
+            self.neon_api_key, video_id)
         publish_date = self.get_video_publish_date(data)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
@@ -377,7 +377,7 @@ class OVPIntegration(object):
             x.video_title = video_title
         yield tornado.gen.Task(
             neondata.NeonApiRequest.modify,
-            job_id, self.platform.neon_api_key, _update_request)
+            job_id, self.neon_api_key, _update_request)
 
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, video_id):

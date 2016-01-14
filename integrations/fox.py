@@ -42,7 +42,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
     def submit_new_videos(self):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                       self.account_lookup_id)
-        self.platform.neon_api_key = acct.neon_api_key
+        self.neon_api_key = acct.neon_api_key
         self.account_id = acct.account_id
         from_date = datetime.datetime(1970, 1, 1)
         if self.platform.last_process_date is not None: 

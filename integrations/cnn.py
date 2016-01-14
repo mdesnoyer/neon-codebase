@@ -38,10 +38,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         self.last_process_date = integration.last_process_date
         # to correspond with the inherited class 
         self.platform = integration
-        self.platform.neon_api_key = account_id
+        self.neon_api_key = account_id
  
     @tornado.gen.coroutine 
     def submit_new_videos(self):
+        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                      self.account_id)
+        self.neon_api_key = acct.neon_api_key
+        self.account_id = acct.account_id
         search_results = yield self.api.search(dateutil.parser.parse(self.last_process_date))
         videos = search_results['docs'] 
         _log.info('Processing %d videos for cnn' % (len(videos)))
