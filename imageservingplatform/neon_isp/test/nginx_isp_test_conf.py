@@ -20,7 +20,7 @@ http {     default_type  application/octet-stream; \
         location ~ ^/v1/server/(.+\.*)$ { \
             v1_server; 		}\
         location ~ ^/v1/video/?$ { \
-            v1_video; 		}\
+            set_unescape_uri $args; proxy_pass http://localhost:80/v1/video?$args; v1_video;}\
         location ~ ^/v1/getthumbnailid/(.+\.*)$ { \
             v1_getthumbnailid; 		}\
         location = /stats { \
