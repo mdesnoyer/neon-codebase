@@ -136,7 +136,7 @@ class OVPIntegration(object):
                             self.platform.modify,
                             self.platform.integration_id,
                             _increase_retries)
-                    _log.info('Added %d jobs for account : %s integration : %s before failure.' % \
+                    _log.info('Added or found %d jobs for account : %s integration : %s before failure.' % \
                                 (added_jobs, self.neon_api_key, self.platform.integration_id))
                     return 
                 else:
@@ -151,7 +151,7 @@ class OVPIntegration(object):
                                       self.get_video_last_modified_date(video))
   
         yield self.update_last_processed_date(last_processed_date) 
-        _log.info('Added %d jobs for account : %s integration : %s' % \
+        _log.info('Added or found %d jobs for account : %s integration : %s' % \
                    (added_jobs, self.neon_api_key, self.platform.integration_id))
  
         raise tornado.gen.Return(video_dict)
