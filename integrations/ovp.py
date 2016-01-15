@@ -359,7 +359,11 @@ class OVPIntegration(object):
             self.neon_api_key, video_id)
         publish_date = self.get_video_publish_date(data)
         if publish_date is not None:
-            publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
+            try: 
+                publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
+            except TypeError as e:
+                # already a string just leave it be 
+                pass 
         video_title = self.get_video_title(data) 
 
         # Update the video object
