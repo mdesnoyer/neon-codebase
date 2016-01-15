@@ -2772,7 +2772,8 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, 
+                       video_submit_retries=0):
         
         integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
@@ -2780,6 +2781,9 @@ class AbstractIntegration(NamespacedStoredObject):
         
         # should this integration be used 
         self.enabled = enabled
+        
+        # how many times have we tried to submit the current video
+        self.video_submit_retries = video_submit_retries
 
     @classmethod
     def _baseclass_name(cls):
@@ -3193,6 +3197,25 @@ class CNNIntegration(AbstractIntegration):
         self.account_id = account_id
         # the api_key required to make requests to cnn api - external
         self.api_key_ref = api_key_ref
+
+class FoxIntegration(AbstractIntegration):
+    ''' Fox Integration class '''
+
+    def __init__(self, 
+                 account_id='',
+                 feed_pid_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
+
+        ''' On every successful processing, the last video processed date is saved '''
+
+        super(FoxIntegration, self).__init__(enabled)
+        # The publish date of the last video we looked at - ISO 8601
+        self.last_process_date = last_process_date 
+        # user.account_id this integration belongs to 
+        self.account_id = account_id
+        # the feed_pid_ref required by the fox api - external
+        self.feed_pid_ref = feed_pid_ref
 
 # DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
