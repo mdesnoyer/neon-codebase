@@ -58,7 +58,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_id(self, video):
         '''override from ovp''' 
-        return video['id'].replace('http://', '').replace('/', '~')
+        return video['id'].replace('http://data.media.theplatform.com/media/data/Media/', '')
  
     def get_video_url(self, video):
         '''override from ovp'''
@@ -74,10 +74,21 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_custom_data(self, video):
         '''override from ovp''' 
-        custom_data = {} 
-        custom_data['keywords'] = video['media$keywords'] 
-        custom_data['showcode'] = video['fox$showcode'] 
-        custom_data['content_type'] = video['fox$contentType']         
+        custom_data = {}
+
+        try:  
+            custom_data['keywords'] = video['media$keywords'] 
+        except KeyError: 
+            pass 
+        try: 
+            custom_data['showcode'] = video['fox$showcode'] 
+        except KeyError: 
+            pass 
+        try: 
+            custom_data['content_type'] = video['fox$contentType']         
+        except KeyError: 
+            pass 
+
         return custom_data
 
     def get_video_duration(self, video):
