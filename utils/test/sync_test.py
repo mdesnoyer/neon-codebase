@@ -17,13 +17,13 @@ import time
 import tornado.concurrent
 import tornado.gen
 import tornado.ioloop
+import tornado.testing
 import test_utils.neontest
 import utils.http
 import utils.sync
 import unittest
 
 class TestOptionalSyncDecorator(test_utils.neontest.AsyncTestCase):
-    ''' Services Test '''
 
     def setUp(self):
         super(TestOptionalSyncDecorator, self).setUp()
@@ -160,6 +160,61 @@ class TestOptionalSyncDecorator(test_utils.neontest.AsyncTestCase):
             start_gate.set()
             end_gate.set()
             raise
+
+class TestPeriodicCoroutineTimer(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestPeriodicCoroutineTimer, self).setUp()
+        self.timer = None
+
+    def tearDown(self):
+        if self.timer:
+            self.timer.stop()
+        super(TestPeriodicCoroutineTimer, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_wait_for_running_func(self):
+
+        state = [None]
+
+        @tornado.gen.coroutine
+        def _wait_a_bit():
+            state[0] = 'start'
+            yield tornado.gen.sleep(0.1)
+            state[0] = 'done'
+
+            raise tornado.gen.Return('Finished')
+        
+        self.timer = utils.sync.PeriodicCoroutineTimer(_wait_a_bit, 0.0)
+        self.timer.start()
+        
+        # Make sure we get the timer started
+        yield tornado.gen.moment
+        self.assertEquals(state[0], 'start')
+
+        # Now wait for it to be done
+        funcval = yield self.timer.wait_for_running_func()
+        self.assertEquals(funcval, 'Finished')
+        
+    @tornado.testing.gen_test
+    def test_dont_call_too_often(self):
+
+        calls = []
+
+        @tornado.gen.coroutine
+        def _func():
+            calls.append(True)
+            yield tornado.gen.sleep(0.1)
+
+        self.timer = utils.sync.PeriodicCoroutineTimer(_func, 0.04)
+        self.timer.start()
+
+        yield tornado.gen.sleep(0.09)
+        self.timer.stop()
+
+        yield self.timer.wait_for_running_func()
+
+        self.assertEquals(len(calls), 1)
+        
 
 if __name__ == '__main__':
     unittest.main()
