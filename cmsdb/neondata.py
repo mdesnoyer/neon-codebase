@@ -3415,10 +3415,11 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, enabled=True, 
+    def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
         
-        integration_id = uuid.uuid1().hex
+        if integration_id is None: 
+            integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -3795,7 +3796,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(enabled)
+        super(BrightcoveIntegration, self).__init__(i_id, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -3859,7 +3860,7 @@ class CNNIntegration(AbstractIntegration):
 
         ''' On every successful processing, the last video processed date is saved '''
 
-        super(CNNIntegration, self).__init__(enabled)
+        super(CNNIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
         # user.neon_api_key this integration belongs to 
@@ -3878,7 +3879,7 @@ class FoxIntegration(AbstractIntegration):
 
         ''' On every successful processing, the last video processed date is saved '''
 
-        super(FoxIntegration, self).__init__(enabled)
+        super(FoxIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
         # user.account_id this integration belongs to 
@@ -4121,7 +4122,7 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-        super(OoyalaIntegration, self).__init__()
+        super(OoyalaIntegration, self).__init__(i_id)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key

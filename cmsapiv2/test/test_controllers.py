@@ -15,6 +15,7 @@ import tornado.gen
 import tornado.ioloop
 import tornado.testing
 import tornado.httpclient
+import test_utils.postgresql
 import test_utils.redis
 import time
 import unittest
@@ -237,8 +238,33 @@ class TestNewAccountHandler(TestControllersBase):
         exception_mocker = patch('cmsapiv2.controllers.NewAccountHandler.post')
         params = json.dumps({'name': '123123abc'})
 	url = '/api/v2/accounts'
-        self.post_exceptions(url, params, exception_mocker) 
+        self.post_exceptions(url, params, exception_mocker)
 
+#TODO KF replace once hot swap is done 
+class TestNewAccountHandlerPG(TestNewAccountHandler): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestNewAccountHandler, self).setUp()
+
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
 class TestAccountHandler(TestControllersBase):
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
@@ -408,6 +434,33 @@ class TestAccountHandler(TestControllersBase):
 	url = '/api/v2/124234234?param=123'
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
+
+# TODO KF here until hot swap is done
+class TestAccountHandlerPG(TestAccountHandler): 
+    def setUp(self):
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
+        self.user.save() 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestAccountHandler, self).setUp()
+
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
  
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
@@ -440,7 +493,6 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
                                           rjson['integration_id'])
-
         self.assertEquals(rjson['integration_id'], platform.integration_id) 
  
     @tornado.testing.gen_test 
@@ -527,6 +579,36 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
+
+# TODO KF here until hot swap is done
+class TestOoyalaIntegrationHandlerPG(TestOoyalaIntegrationHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testiid' 
+        defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestOoyalaIntegrationHandler, self).setUp()
+
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
  
 class TestBrightcoveIntegrationHandler(TestControllersBase): 
     def setUp(self):
@@ -790,7 +872,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['integration_id'])
         self.assertEquals(platform.uses_batch_provisioning, False)
- 
+    
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
 	url = '/api/v2/%s/integrations/brightcove' % '1234234'
@@ -808,8 +890,37 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 	url = '/api/v2/%s/integrations/brightcove' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
-class TestVideoHandler(TestControllersBase): 
+# TODO KF here until hot swap is done
+class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testbciid' 
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestBrightcoveIntegrationHandler, self).setUp()
 
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+class TestVideoHandler(TestControllersBase): 
     def setUp(self):
         self.redis = test_utils.redis.RedisServer()
         self.redis.start()
@@ -1313,7 +1424,56 @@ class TestVideoHandler(TestControllersBase):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/videos' % '1234234'
-        self.post_exceptions(url, params, exception_mocker)  
+        self.post_exceptions(url, params, exception_mocker) 
+
+# TODO KF here until hot swap is done
+class TestVideoHandlerPG(TestVideoHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testvideohiid'
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
+        user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image]
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start()) 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestVideoHandler, self).setUp()
+
+    def tearDown(self): 
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
+        self.http_mocker.stop()
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
 
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
@@ -1468,7 +1628,53 @@ class TestThumbnailHandler(TestControllersBase):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/thumbnails' % '1234234'
-        self.post_exceptions(url, params, exception_mocker)  
+        self.post_exceptions(url, params, exception_mocker) 
+ 
+# TODO KF here until hot swap is done
+class TestThumbnailHandlerPG(TestThumbnailHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save() 
+        self.account_id_api_key = user.neon_api_key
+        neondata.ThumbnailMetadata('testingtid', width=500).save()
+        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+                             'tn_test_vid1')).save()
+        neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
+                             'tn_test_vid2')).save()
+
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image] 
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestThumbnailHandler, self).setUp()
+
+    def tearDown(self): 
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
 
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
@@ -1584,6 +1790,35 @@ class TestVideoStatsHandler(TestControllersBase):
         response = self.wait() 
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
+
+class TestVideoStatsHandlerPG(TestVideoStatsHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testbciid' 
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestVideoStatsHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
  
 class TestThumbnailStatsHandler(TestControllersBase): 
     def setUp(self):
@@ -1708,6 +1943,38 @@ class TestThumbnailStatsHandler(TestControllersBase):
         response = self.wait() 
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
+
+class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.test_i_id = 'testbciid' 
+        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        neondata.ThumbnailMetadata('testingtid', width=800).save()
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        super(TestThumbnailStatsHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
 
 class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
@@ -2067,6 +2334,26 @@ class TestAPIKeyRequired(TestControllersBase):
                                method='POST') 
         response = self.wait()
 	self.assertEquals(response.code, 401)
+
+class TestAPIKeyRequiredPG(TestAPIKeyRequired): 
+    def setUp(self):
+        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
+        self.neon_user.save() 
+        super(TestAPIKeyRequired, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
        
 class TestAuthenticationHandler(TestAuthenticationBase): 
     def setUp(self): 
@@ -2174,6 +2461,27 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         token2 = rjson['access_token'] 
         self.assertNotEquals(token1, token2)
 
+class TestAuthenticationHandlerPG(TestAuthenticationHandler): 
+    def setUp(self):
+        super(TestAuthenticationHandler, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        TestAuthenticationHandler.username = 'kevin' 
+        TestAuthenticationHandler.password = '12345678'
+        user = neondata.User(username=TestAuthenticationHandler.username, 
+                             password=TestAuthenticationHandler.password)
+        user.save()
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
+
 class TestRefreshTokenHandler(TestAuthenticationBase): 
     def setUp(self): 
         self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
@@ -2266,6 +2574,31 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         # verify refresh tokens stay the same 
         self.assertEquals(user.refresh_token, rjson1['refresh_token'])
 
+class TestRefreshTokenHandlerPG(TestRefreshTokenHandler): 
+    def setUp(self):
+        self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
+        super(TestRefreshTokenHandler, self).setUp()
+
+    def tearDown(self): 
+        options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        TestRefreshTokenHandler.username = 'kevin' 
+        TestRefreshTokenHandler.password = '12345678'
+        user = neondata.User(username=TestRefreshTokenHandler.username, 
+                             password=TestRefreshTokenHandler.password)
+        user.save()
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
+
 class TestLogoutHandler(TestAuthenticationBase): 
     def setUp(self): 
         super(TestLogoutHandler, self).setUp()
@@ -2317,6 +2650,27 @@ class TestLogoutHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header)
         rjson = json.loads(response.body)
+
+class TestLogoutHandlerPG(TestLogoutHandler): 
+    def setUp(self):
+        super(TestLogoutHandler, self).setUp()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        TestLogoutHandler.username = 'kevin' 
+        TestLogoutHandler.password = '12345678'
+        user = neondata.User(username=TestLogoutHandler.username, 
+                             password=TestLogoutHandler.password)
+        user.save()
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
 
 class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
     def setUp(self):
