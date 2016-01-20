@@ -130,7 +130,8 @@ class CDNHosting(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def upload(self, image, tid, url=None, overwrite=True,
-               servingurl_overwrite=False):
+               servingurl_overwrite=False, do_source_crop=False,
+               do_smart_crop=False):
         '''
         Host images on the CDN
 
@@ -146,27 +147,24 @@ class CDNHosting(object):
               CDNHosting objects might use this instead of the image.
         overwrite - Should existing files be overwritten?
         servingurl_overwrite - Should the serving urls be overwritten?
+        do_source_crop - Will source crop, so long as self.source_crop is 
+                         defined. See notes on source cropping below.
+        do_smart_crop - Will smart crop images.
 
-        Also performs source cropping, to exclude regions of the image that we
-        know a priori are 'bad' (i.e., newscrawl with CNN).
+        Source Crop:
+            source cropping excludes regions of the images that are known to
+            be bad, i.e., the newscrawl with CNN images.
 
         Returns: list [(cdn_url, width, height)]
         '''
         # we need to avoid source cropping (and smart cropping) thumbnails
         # that come directly from the client.
-        thumb_meta = yield tornado.gen.Task(
-            cmsdb.neondata.ThumbnailMetadata.get, tid))
-        if ((thumb_meta.type is cmsdb.neondata.ThumbnailType.DEFAULT) or
-            (thumb_meta.type is cmsdb.neondata.ThumbnailType.CUSTOMUPLOAD)):
-            from_client = True
-        else:
-            from_client = False
         new_serving_thumbs = [] # (url, width, height)
-        if (self.source_crop is not None) and (not from_client):
+        if self.source_crop is not None and do_source_crop:
             if not self.resize:
-                _log.error(('Crop source specified but no desired final size '
-                            'is defined'))
-                raise ValueError(('Crop source can only operate along with '
+                _log.error(('Crop source specified but no desired final ',
+                            'size is defined'))
+                raise ValueError(('Crop source can only operate along with ',
                                   'resize'))
             _prep = pycvutils.ImagePrep(crop_frac=self.source_crop,
                                         return_same=True)
@@ -176,14 +174,14 @@ class CDNHosting(object):
         try:
             if self.resize:
                 cv_im = pycvutils.from_pil(image)
-                if not from_client:
+                if do_smart_crop:
                     sc = smartcrop.SmartCrop(cv_im,
                         with_saliency=self.crop_with_saliency,
                         with_face_detection=self.crop_with_face_detection,
                         with_text_detection=self.crop_with_text_detection)
                 for sz in self.rendition_sizes:
                     cv_im = pycvutils.from_pil(image)
-                    if not from_client:
+                    if do_smart_crop:
                         cv_im_r = sc.crop_and_resize(sz[1], sz[0])
                     else:
                         # avoid smart cropping, since it's too aggressive
