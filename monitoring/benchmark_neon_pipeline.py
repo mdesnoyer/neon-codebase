@@ -45,6 +45,7 @@ define("cmsapi_pass", default=None, help='Password for the cmsapi')
 
 # counters
 statemon.define('total_time_to_isp', float)
+statemon.define('time_to_processing', float)
 statemon.define('time_to_callback', float)
 statemon.define('time_to_serving', float)
 statemon.define('time_to_finished', float)
@@ -75,6 +76,7 @@ class JobManager(object):
         self.video_id = None
         self.job_id = None
         self.start_time = None
+        self.result = None
 
         self._stopped = False # Has a request been received to stop
 
@@ -87,6 +89,10 @@ class JobManager(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def cleanup(self):
+        if self.result is not None:
+            # Save the result of this job to the database
+            yield tornado.gen.Task(self.result.save)
+        
         if self.job_id is not None:
             np = yield tornado.gen.Task(neondata.NeonPlatform.get,
                                         options.api_key, '0')
@@ -108,6 +114,8 @@ class JobManager(object):
             statemon.state.unexpected_exception_thrown = 0
         except JobError as e:
             # Logging already done
+            self.result.error_type = e.__class__.__name__
+            self.result.error_msg = e.msg
             pass
         except Exception as e:
             _log.exception('Exception when monitoring')
@@ -118,6 +126,8 @@ class JobManager(object):
     @tornado.gen.coroutine
     def _run_test_job(self, video_id=None):
         self.start_time =  time.time()
+        self.result = neondata.BenchmarkVideoJobResult(
+            self.start_time.isoformat())
 
         # Create a video request for test account
         yield self.create_neon_api_request(options.account,
@@ -132,9 +142,9 @@ class JobManager(object):
             return
 
 
-        total_time = time.time() - self.start_time
-        statemon.state.total_time_to_isp = total_time
-        _log.info("total pipeline time %s" % total_time)
+        self.result.total_time = time.time() - self.start_time
+        statemon.state.total_time_to_isp = self.result.total_time
+        _log.info("total pipeline time %s" % self.result.total_time)
 
         # Clear the error states
         statemon.state.job_submission_error = 0
@@ -174,11 +184,11 @@ class JobManager(object):
             if res.error:
                 _log.error('Error submitting job: %s' % res.error)
                 statemon.state.job_submission_error = 1
-                raise SubmissionError
+                raise SubmissionError(res.error)
         except tornado.httpclient.HTTPError as e:
             _log.error('Error submitting job: %s' % e)
             statemon.state.job_submission_error = 1
-            raise SubmissionError
+            raise SubmissionError(e.msg)
         api_resp = json.loads(res.buffer)
         self.job_id = api_resp['job_id']
         
@@ -192,14 +202,24 @@ class JobManager(object):
         # Poll the API for job request completion
         job_serving = False
         job_finished = False
+        job_processing = False
         while not job_serving and not self._stopped:
             request = yield tornado.gen.Task(neondata.NeonApiRequest.get,
                                              self.job_id, options.api_key)
             if request:
-                if (not job_finished and 
-                    request.state == neondata.RequestState.FINISHED):
-                    statemon.state.time_to_finished = \
+                if (not job_processing and
+                    request.state == neondata.RequestState.PROCESSING):
+                    self.result.time_to_processing = \
                       time.time() - self.start_time
+                    statemon.state.time_to_processing = \
+                      self.result.time_to_processing
+                    job_processing = True
+                elif (not job_finished and 
+                    request.state == neondata.RequestState.FINISHED):
+                    self.result.time_to_finished = \
+                      time.time() - self.start_time
+                    statemon.state.time_to_finished = \
+                      self.result.time_to_finished 
                     job_finished = True
                 elif request.state == neondata.RequestState.SERVING:
                     job_serving = True
@@ -211,7 +231,7 @@ class JobManager(object):
                     statemon.state.job_failed = 1
                     _log.error('Job failed with state %s with response: %s' %
                                (request.state, request.response))
-                    raise JobFailed
+                    raise JobFailed(json.loads(request.response).error)
             else:
                 _log.warn("request data not found in db")
                 statemon.state.request_not_in_db = 1
@@ -220,15 +240,20 @@ class JobManager(object):
             if time.time() > (self.start_time + options.serving_timeout):
                 statemon.state.job_not_serving = 1
                 _log.error('Job took too long to reach serving state')
-                raise RunningTooLongError
+                raise RunningTooLongError('Too long to reach serving')
             yield tornado.gen.sleep(1.0)
 
+        if not job_processing:
+            self.result.time_to_processing = time.time() - self.start_time
+            statemon.state.time_to_processing = self.result.time_to_processing
         if not job_finished:
-            statemon.state.time_to_finished = time.time() - self.start_time
+            self.result.time_to_finished = time.time() - self.start_time
+            statemon.state.time_to_finished = self.result.time_to_finished
         # time to video serving
-        video_serving = time.time() - self.start_time
-        statemon.state.time_to_serving = video_serving
-        _log.info("video is in serving state, took %s" % video_serving)
+        self.result.time_to_serving = time.time() - self.start_time
+        statemon.state.time_to_serving = self.result.time_to_serving
+        _log.info("video is in serving state, took %s" % 
+                  self.result.time_to_serving)
 
     @tornado.gen.coroutine
     def wait_for_callback(self):
@@ -247,14 +272,15 @@ class JobManager(object):
             elif time.time() > (self.start_time + options.serving_timeout):
                 statemon.state.no_callback = 1
                 _log.error('Timeout waiting for the callback')
-                raise RunningTooLongError
+                raise RunningTooLongError('Too long to receive callback')
 
             if not callback_seen:
                 yield tornado.gen.sleep(0.1)
 
-        callback_time = time.time() - self.start_time
-        statemon.state.time_to_callback = callback_time
-        _log.info('Callback received after %s seconds' % callback_time)
+        self.result.time_to_callback = time.time() - self.start_time
+        statemon.state.time_to_callback = self.result.time_to_callback
+        _log.info('Callback received after %s seconds' % 
+                  self.result.time_to_callback)
 
     @tornado.gen.coroutine
     def wait_for_isp_image(self):
@@ -271,7 +297,7 @@ class JobManager(object):
                 if time.time() > (isp_start + options.isp_timeout):
                     _log.error('Too long for image to appear in ISP')
                     statemon.state.not_available_in_isp = 1
-                    raise RunningTooLongError
+                    raise RunningTooLongError('Too long waiting for ISP')
                 yield tornado.gen.sleep(1.0)
 
         isp_serving = time.time() - isp_start 

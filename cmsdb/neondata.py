@@ -4719,6 +4719,53 @@ class VideoStatus(DefaultedStoredObject):
         '''
         return VideoStatus.__name__
 
+class BenchmarkVideoJobResult(NamespacedStoredObject):
+    '''Stores the metrics for running a benchmark video job.
+
+    Used for benchmarking the system. Keyed by job start time.
+    '''
+    def __init__(self, start_time,
+                 error_type=None,
+                 error_msg=None,
+                 total_time=None,
+                 time_to_processing=None,
+                 time_to_finished=None,
+                 time_to_callback=None,
+                 time_to_serving=None,
+                 mastermind_to_isp=None
+                 ):
+        super(BenchmarkVideoJobResult, self).__init__(start_time)
+
+        # The start time of the job in iso format
+        self.start_time = start_time
+
+        # String specifying the type of error that occurred
+        self.error_type = error_type
+
+        # More detailed string describing the error
+        self.error_msg = error_msg
+
+        # Time from job submission to images being available in the isp
+        self.total_time = total_time
+
+        # Time from submission to when it starts to be processed.
+        self.time_to_processing = time_to_processing
+
+        # Time from submission to when it is finished processing.
+        self.time_to_finished = time_to_finished
+
+        # Time from submission to when it is flagged as serving in the db.
+        self.time_to_serving = time_to_serving
+
+        # Time from submission to when the callback is received
+        self.time_to_callback = time_to_callback
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return BenchmarkVideoJobResult.__name__
+
     
 
 class AbstractJsonResponse(object):
