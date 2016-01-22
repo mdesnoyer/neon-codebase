@@ -14,7 +14,9 @@ if sys.path[0] != __base_path__:
 
 from cmsdb import neondata
 import logging
+import utils.neon
 from utils.options import define, options
+
 
 _log = logging.getLogger(__name__)
 
