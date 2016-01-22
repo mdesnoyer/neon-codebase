@@ -2639,12 +2639,17 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False, rendition_sizes=None, policy=None):
+                 make_tid_folders=False, rendition_sizes=None, policy=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         '''
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
-            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes)
+            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
+            source_crop, crop_with_saliency, crop_with_face_detection,
+            crop_with_text_detection)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -2675,7 +2680,10 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  update_serving_urls=True,
                  do_salt=True,
                  make_tid_folders=False,
-                 rendition_sizes=None):
+                 rendition_sizes=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -2686,7 +2694,11 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
             rendition_sizes=rendition_sizes,
-            policy='public-read')
+            policy='public-read',
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -2697,7 +2709,10 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=None):
+                 folder_prefix=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -2706,18 +2721,28 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=False,
             do_salt=False,
             make_tid_folders=True,
-            policy='public-read')
+            policy='public-read',
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
     Cloudinary images
     '''
 
-    def __init__(self, key=None):
+    def __init__(self, key=None,source_crop=None, crop_with_saliency=True,
+            crop_with_face_detection=True,
+            crop_with_text_detection=True):
         super(CloudinaryCDNHostingMetadata, self).__init__(
             key,
             resize=False,
-            update_serving_urls=False)
+            update_serving_urls=False,
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -2726,13 +2751,19 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
                  folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
-                 cpcode=None):
+                 cpcode=None,source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
-            rendition_sizes=rendition_sizes)
+            rendition_sizes=rendition_sizes,
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
         # Host for uploading to akamai. Can have http:// or not
         self.host = host
@@ -4198,7 +4229,11 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
-        
+        self.do_source_crop = False # see cdnhosting.CDNHosting.upload
+        self.do_smart_crop = False # see cdnhosting.CDNHosting.upload
+        if self.type is ThumbnailType.NEON:
+            self.do_source_crop = True
+            self.do_smart_crop = True
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
@@ -4276,7 +4311,9 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True, 
+                                        do_source_crop=self.do_source_crop,
+                                        do_smart_crop=self.do_smart_crop)
         
         # TODO (Sunil):  Add redirect for the image
 
@@ -4300,9 +4337,11 @@ class ThumbnailMetadata(StoredObject):
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
-            
+        
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, s3_url, async=True) for x in hosters]
+        yield [x.upload(image, self.key, s3_url, async=True, 
+                        do_source_crop=self.do_source_crop,
+                        do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
