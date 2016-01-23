@@ -4731,8 +4731,7 @@ class BenchmarkVideoJobResult(NamespacedStoredObject):
                  time_to_processing=None,
                  time_to_finished=None,
                  time_to_callback=None,
-                 time_to_serving=None,
-                 mastermind_to_isp=None
+                 time_to_serving=None
                  ):
         super(BenchmarkVideoJobResult, self).__init__(start_time)
 

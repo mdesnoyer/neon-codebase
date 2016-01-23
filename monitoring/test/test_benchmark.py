@@ -112,6 +112,11 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         raise tornado.gen.Return(response)
 
+    @tornado.gen.coroutine
+    def _get_job_result(self):
+        results = yield neondata.BenchmarkVideoJobResult.get_all(async=True)
+        raise tornado.gen.Return(results[0])
+
     @tornado.testing.gen_test
     def test_video_serving(self):
         self.request.state = neondata.RequestState.SERVING
@@ -144,6 +149,15 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.time_to_callback'),
             0)
 
+        result = yield self._get_job_result()
+        self.assertIsNone(result.error_type)
+        self.assertIsNone(result.error_msg)
+        self.assertGreater(result.total_time, 0)
+        self.assertGreater(result.time_to_processing, 0)
+        self.assertGreater(result.time_to_finished, 0)
+        self.assertGreater(result.time_to_serving, 0)
+        self.assertGreater(result.time_to_callback, 0)
+
     @tornado.testing.gen_test
     def test_bad_callback_received(self):
         with self.assertRaisesRegexp(tornado.httpclient.HTTPError, 'HTTP 400'):
@@ -152,7 +166,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
                 'processing_state': neondata.RequestState.SERVING})
             
     @tornado.testing.gen_test
-    def test_job_not_serving(self):
+    def test_job_still_submitting(self):
         with self.assertLogExists(logging.ERROR,
                                   'Job took too long to reach serving state'):
             yield self.benchmarker.job_manager.run_test_job('vid1')
@@ -162,8 +176,42 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_not_serving'), 1)
+
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'RunningTooLongError')
+        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
+        self.assertIsNone(result.total_time)
+        self.assertIsNone(result.time_to_processing)
+        self.assertIsNone(result.time_to_finished)
+        self.assertIsNone(result.time_to_serving)
+        self.assertIsNone(result.time_to_callback)
+
+    @tornado.testing.gen_test
+    def test_job_processing(self):
+        self.request.state = neondata.RequestState.PROCESSING
+        self.request.save()
+
+        with self.assertLogExists(logging.ERROR,
+                                  'Job took too long to reach serving state'):
+            yield self.benchmarker.job_manager.run_test_job('vid1')
+
+        self._check_request_cleanup()
+
+        # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.no_callback'), 1)
+            'monitoring.benchmark_neon_pipeline.job_not_serving'), 1)
+        self.assertGreater(statemon.state.get(
+            'monitoring.benchmark_neon_pipeline.time_to_processing'),
+            0)
+
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'RunningTooLongError')
+        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
+        self.assertIsNone(result.total_time)
+        self.assertGreater(result.time_to_processing, 0)
+        self.assertIsNone(result.time_to_finished)
+        self.assertIsNone(result.time_to_serving)
+        self.assertIsNone(result.time_to_callback)
 
     @tornado.testing.gen_test
     def test_job_finished_but_not_serving(self):
@@ -185,9 +233,19 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.no_callback'), 1)
 
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'RunningTooLongError')
+        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
+        self.assertIsNone(result.total_time)
+        self.assertGreater(result.time_to_processing, 0)
+        self.assertGreater(result.time_to_finished, 0)
+        self.assertIsNone(result.time_to_serving)
+        self.assertIsNone(result.time_to_callback)
+
     @tornado.testing.gen_test
     def test_job_failed(self):
         self.request.state = neondata.RequestState.FAILED
+        self.request.response = {'error' : 'some_error'}
         self.request.save()
 
         # The callback should be received and handled correctly
@@ -199,18 +257,22 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         with self.assertLogExists(logging.ERROR,
                                   'Job failed with state'):
-            with self.assertLogExists(logging.WARNING,
-                                      'Incorrect callback received:'):
-                yield self.benchmarker.job_manager.run_test_job('vid1')
+            yield self.benchmarker.job_manager.run_test_job('vid1')
 
         self._check_request_cleanup()
 
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_failed'), 1)
-        self.assertGreater(statemon.state.get(
-            'monitoring.benchmark_neon_pipeline.incorrect_callback'),
-            0)
+
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'JobFailed')
+        self.assertRegexpMatches(result.error_msg, '.*some_error.*')
+        self.assertIsNone(result.total_time)
+        self.assertIsNone(result.time_to_processing)
+        self.assertIsNone(result.time_to_finished)
+        self.assertIsNone(result.time_to_serving)
+        self.assertIsNone(result.time_to_callback)
 
     @tornado.testing.gen_test
     def test_error_submitting_job(self):
@@ -234,6 +296,14 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         # Make sure that statemon is set correctly
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.job_submission_error'), 1)
+
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'SubmissionError')
+        self.assertIsNone(result.total_time)
+        self.assertIsNone(result.time_to_processing)
+        self.assertIsNone(result.time_to_finished)
+        self.assertIsNone(result.time_to_serving)
+        self.assertIsNone(result.time_to_callback)
 
 
     @tornado.testing.gen_test
@@ -266,6 +336,15 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.time_to_callback'),
             0)
 
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'RunningTooLongError')
+        self.assertRegexpMatches(result.error_msg, '.*waiting for ISP.*')
+        self.assertIsNone(result.total_time)
+        self.assertGreater(result.time_to_processing, 0)
+        self.assertGreater(result.time_to_finished, 0)
+        self.assertGreater(result.time_to_serving, 0)
+        self.assertGreater(result.time_to_callback, 0)
+
     @tornado.testing.gen_test
     def test_timeout_waiting_for_callback(self):
         self.request.state = neondata.RequestState.SERVING
@@ -279,6 +358,14 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.no_callback'), 1)
+
+        result = yield self._get_job_result()
+        self.assertEquals(result.error_type, 'RunningTooLongError')
+        self.assertIsNone(result.total_time)
+        self.assertGreater(result.time_to_processing, 0)
+        self.assertGreater(result.time_to_finished, 0)
+        self.assertGreater(result.time_to_serving, 0)
+        self.assertIsNone(result.time_to_callback, 0)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
