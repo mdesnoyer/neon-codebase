@@ -333,64 +333,63 @@ class TestImagePrep(unittest.TestCase):
         image = self.image_pil
         self._test_convert_to_gray(image)
 
-    # # TEST CROPPING IS DISABLED UNTIL THE NATURE OF THE FAILURE CAN BE
-    # # DETERMINED ON AWS
-    # def test_cropping(self):
-    #     '''Attempts to validate the cropping.'''
-    #     image = self.image_cv
-    #     oh, ow = _get_dims(image)
-    #     def _get_frac(orig, new1, new2):
-    #         return (float(abs((new2-dimtol)-(new1+dimtol)))/orig,
-    #                 float(abs((new2+dimtol)-(new1-dimtol)))/orig)
-    #     # test crop type one
-    #     crop_frac = np.random.rand()*.5+.5 #(crop no more than 50%)
-    #     ip = ImagePrep(crop_frac=crop_frac)
-    #     new_image = ip(image)
-    #     fnd = _subarray_in_array(image, new_image)
-    #     self.assertTrue(fnd)
-    #     x1, y1, x2, y2 = fnd
-    #     min_frac, max_frac = _get_frac(oh, x1, x2)
-    #     self.assertGreaterEqual(crop_frac, min_frac)
-    #     self.assertGreaterEqual(max_frac, crop_frac)
-    #     min_frac, max_frac = _get_frac(ow, y1, y2)
-    #     self.assertGreaterEqual(crop_frac, min_frac)
-    #     self.assertGreaterEqual(max_frac, crop_frac)
+    @unittest.skip("fails for unknown reasosn on video_server machines - NPD 1/22/16")
+    def test_cropping(self):
+        '''Attempts to validate the cropping.'''
+        image = self.image_cv
+        oh, ow = _get_dims(image)
+        def _get_frac(orig, new1, new2):
+            return (float(abs((new2-dimtol)-(new1+dimtol)))/orig,
+                    float(abs((new2+dimtol)-(new1-dimtol)))/orig)
+        # test crop type one
+        crop_frac = np.random.rand()*.5+.5 #(crop no more than 50%)
+        ip = ImagePrep(crop_frac=crop_frac)
+        new_image = ip(image)
+        fnd = _subarray_in_array(image, new_image)
+        self.assertTrue(fnd)
+        x1, y1, x2, y2 = fnd
+        min_frac, max_frac = _get_frac(oh, x1, x2)
+        self.assertGreaterEqual(crop_frac, min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac)
+        min_frac, max_frac = _get_frac(ow, y1, y2)
+        self.assertGreaterEqual(crop_frac, min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac)
 
-    #     # test crop type 2
-    #     crop_frac = [np.random.rand()*.5+.5, np.random.rand()*.5+.5]
-    #     ip = ImagePrep(crop_frac=crop_frac)
-    #     new_image = ip(image)
-    #     fnd = _subarray_in_array(image, new_image)
-    #     self.assertTrue(fnd)
-    #     x1, y1, x2, y2 = fnd
-    #     min_frac, max_frac = _get_frac(oh, x1, x2)
-    #     self.assertGreaterEqual(crop_frac[0], min_frac)
-    #     self.assertGreaterEqual(max_frac, crop_frac[0])
-    #     min_frac, max_frac = _get_frac(ow, y1, y2)
-    #     self.assertGreaterEqual(crop_frac[1], min_frac)
-    #     self.assertGreaterEqual(max_frac, crop_frac[1])
-    #     # test crop type 3
-    #     crop_frac = [np.random.rand()*.5, np.random.rand()*.5,
-    #                  np.random.rand()*.5, np.random.rand()*.5]
-    #     ip = ImagePrep(crop_frac=crop_frac)
-    #     new_image = ip(image)
-    #     fnd = _subarray_in_array(image, new_image)
-    #     self.assertTrue(fnd)
-    #     x1, y1, x2, y2 = fnd
-    #     min_frac, max_frac = _get_frac(oh, x1, oh)
-    #     self.assertTrue((1.-crop_frac[0] >= min_frac) and
-    #                     (1.-crop_frac[0] <= max_frac))
-    #     self.assertGreaterEqual(1-crop_frac[0], min_frac)
-    #     self.assertGreaterEqual(max_frac, 1-crop_frac[0])
-    #     min_frac, max_frac = _get_frac(ow, 0, y2)
-    #     self.assertGreaterEqual(1-crop_frac[1], min_frac)
-    #     self.assertGreaterEqual(max_frac, 1-crop_frac[1])
-    #     min_frac, max_frac = _get_frac(oh, 0, x2)
-    #     self.assertGreaterEqual(1-crop_frac[2], min_frac)
-    #     self.assertGreaterEqual(max_frac, 1-crop_frac[2])
-    #     min_frac, max_frac = _get_frac(ow, y1, ow)
-    #     self.assertGreaterEqual(1-crop_frac[3], min_frac)
-    #     self.assertGreaterEqual(max_frac, 1-crop_frac[3])
+        # test crop type 2
+        crop_frac = [np.random.rand()*.5+.5, np.random.rand()*.5+.5]
+        ip = ImagePrep(crop_frac=crop_frac)
+        new_image = ip(image)
+        fnd = _subarray_in_array(image, new_image)
+        self.assertTrue(fnd)
+        x1, y1, x2, y2 = fnd
+        min_frac, max_frac = _get_frac(oh, x1, x2)
+        self.assertGreaterEqual(crop_frac[0], min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac[0])
+        min_frac, max_frac = _get_frac(ow, y1, y2)
+        self.assertGreaterEqual(crop_frac[1], min_frac)
+        self.assertGreaterEqual(max_frac, crop_frac[1])
+        # test crop type 3
+        crop_frac = [np.random.rand()*.5, np.random.rand()*.5,
+                     np.random.rand()*.5, np.random.rand()*.5]
+        ip = ImagePrep(crop_frac=crop_frac)
+        new_image = ip(image)
+        fnd = _subarray_in_array(image, new_image)
+        self.assertTrue(fnd)
+        x1, y1, x2, y2 = fnd
+        min_frac, max_frac = _get_frac(oh, x1, oh)
+        self.assertTrue((1.-crop_frac[0] >= min_frac) and
+                        (1.-crop_frac[0] <= max_frac))
+        self.assertGreaterEqual(1-crop_frac[0], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[0])
+        min_frac, max_frac = _get_frac(ow, 0, y2)
+        self.assertGreaterEqual(1-crop_frac[1], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[1])
+        min_frac, max_frac = _get_frac(oh, 0, x2)
+        self.assertGreaterEqual(1-crop_frac[2], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[2])
+        min_frac, max_frac = _get_frac(ow, y1, ow)
+        self.assertGreaterEqual(1-crop_frac[3], min_frac)
+        self.assertGreaterEqual(max_frac, 1-crop_frac[3])
 
     def test_returnTypes(self):
         pil_img = self.image_pil
