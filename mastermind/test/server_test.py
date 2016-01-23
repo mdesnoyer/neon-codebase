@@ -37,6 +37,7 @@ import socket
 import test_utils.mock_boto_s3
 import test_utils.neontest
 import test_utils.redis
+import test_utils.postgresql 
 import thrift.Thrift
 import time
 import tornado.web
@@ -505,6 +506,22 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(self.mastermind.experiment_state['a2_vid1'],
                           neondata.ExperimentState.COMPLETE)
 
+class TestChangeSubscriber(test_utils.neontest.TestCase):
+    def setUp(self): 
+       self.mastermind = mastermind.core.Mastermind()
+       self.directive_publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+       self.watcher = mastermind.server.VideoDBWatcher(
+            self.mastermind,
+            self.directive_publisher)
+       self.subber = mastermind.server.ChangeSubscriber(self.watcher)
+
+    def tearDown(self):
+        self.watcher.__del__()
+
+    def test_stuff(self): 
+        pass 
+        
 class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
     def setUp(self):
         # Start a database
@@ -553,7 +570,7 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
 
         # Run a process cycle and then turn on the subscriptions
         self.watcher._process_db_data(False)
-        self.watcher.subscribe_to_db_changes()
+        self.watcher._change_subscriber.subscribe_to_db_changes()
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
@@ -687,6 +704,109 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
         neondata.ThumbnailServingURLs.delete('key1_vid1_t1')
         self.assertWaitForEquals(
             lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
+            False)
+
+
+class TestVideoDBPushUpdatesPG(TestVideoDBPushUpdates):
+    def setUp(self):
+        # Start a database
+        #self.redis = test_utils.redis.RedisServer()
+        #self.redis.start()
+        
+        # Mock out the callback sending
+        self.callback_patcher = patch('cmsdb.neondata.utils.http')
+        self.callback_patcher.start()
+        
+        self.mastermind = mastermind.core.Mastermind()
+        self.directive_publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+        self.watcher = mastermind.server.VideoDBWatcher(
+            self.mastermind,
+            self.directive_publisher)
+        logging.getLogger('mastermind.server').reset_sample_counters()
+
+        # Setup a simple account in the database
+        self.acct = neondata.NeonUserAccount('acct1', 'key1')
+        self.acct.save()
+
+        # Setup api request
+        self.job = neondata.NeonApiRequest('job1', 'key1', 'vid1')
+        self.job.save()
+
+        # Create a video with a couple of thumbs in the database
+        self.vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
+                                          tids=['key1_vid1_t1', 'key1_vid1_t2'],
+                                          i_id='i1')
+        self.vid.save()
+        self.thumbs =  [
+            neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
+                                       ttype='random'),
+            neondata.ThumbnailMetadata('key1_vid1_t2', 'key1_vid1',
+                                       ttype='neon')]
+        neondata.ThumbnailMetadata.save_all(self.thumbs)
+        neondata.ThumbnailServingURLs.save_all([
+            neondata.ThumbnailServingURLs('key1_vid1_t1',
+                                          {(160, 90) : 't1.jpg'}),
+            neondata.ThumbnailServingURLs('key1_vid1_t2',
+                                          {(160, 90) : 't2.jpg'})])
+        neondata.TrackerAccountIDMapper(
+            'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
+        neondata.ExperimentStrategy('key1').save()
+
+        # Run a process cycle and then turn on the subscriptions
+        self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start() 
+        self.watcher._change_subscriber.subscribe_to_db_changes()
+
+    def tearDown(self):
+        self.mastermind.wait_for_pending_modifies()
+        self.watcher.__del__()
+        #self.redis.stop()
+        self.postgresql.clear_all_tables()
+        self.callback_patcher.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+    
+    def test_add_default_thumb_to_account(self):
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
+                                                        'key1_NOVIDEO',
+                                                        ttype='default',
+                                                        rank=0)
+        default_acct_thumb.save()
+        t_urls = neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                               {(160, 90) : 't_default.jpg'})
+        t_urls.save()
+        self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
+        self.acct.default_size = (640, 480)
+        self.acct.save()
+
+        self.assertWaitForEquals(
+            lambda: self.directive_publisher.default_thumbs['key1'],
+            'key1_NOVIDEO_t0')
+        self.assertEquals(self.directive_publisher.default_sizes['key1'],
+                          [640,480])
+        
+        self.assertWaitForEquals(
+            lambda: self.directive_publisher.get_serving_urls(
+                'key1_NOVIDEO_t0').get_serving_url(160, 90),
+            't_default.jpg')
+
+        # Now remove the default thumb and make sure it disapears
+        self.acct.default_thumbnail_id = None
+        self.acct.save()
+
+        self.assertWaitForEquals(
+            lambda: 'key1' in self.directive_publisher.default_thumbs,
             False)
 
 class SQLWrapper(object):
@@ -2190,7 +2310,7 @@ class SmokeTesting(test_utils.neontest.TestCase):
             # Now start all the threads
             self.video_watcher.start()
             self.video_watcher.wait_until_loaded(5.0)
-            self.video_watcher.subscribe_to_db_changes()
+            self.video_watcher._change_subscriber.subscribe_to_db_changes()
             self.stats_watcher.start()
             self.stats_watcher.wait_until_loaded(5.0)
             self.directive_publisher.start()
