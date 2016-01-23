@@ -337,6 +337,8 @@ CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (
 CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailmetadata_key ON thumbnailmetadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX thumbnailservingurls_key ON thumbnailservingurls USING btree (((_data ->> 'key'::text)));
 
 --
 -- Name: public; Type: ACL; Schema: -; Owner: pgadmin

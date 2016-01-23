@@ -298,9 +298,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 try: 
                     conn = yield self._get_momoko_connection(pool, True)
                 except psycopg2.OperationalError as e: 
-                    #if self.host is not str(options.db_address):
                     if current_db_info != self.db_info: 
-                        #self._set_current_host()  
                         self.db_info = current_db_info  
                         pool.close() 
                         pool = _get_momoko_pool()  
@@ -337,7 +335,6 @@ class PostgresDB(tornado.web.RequestHandler):
             except Exception as e: 
                 _log.exception('Unknown Error : trying to close connection %s. ' % e) 
                 
-             
         @tornado.gen.coroutine 
         def _get_momoko_connection(self, db, is_pool=False):
             conn = None 
@@ -788,7 +785,7 @@ class PostgresPubSub(object):
                 future = concurrent.futures.Future()
                 future.set_result(notifications)
                 channel = self.channels[channel_name]
-                callback_functions = channel['callback_functions'] 
+                callback_functions = channel['callback_functions']
                 for func in callback_functions: 
                     tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
@@ -1964,18 +1961,17 @@ class StoredObject(object):
                func(key, object, operation) 
         ''' 
         results = future.result()
-        import pdb; pdb.set_trace() 
         for r in results: 
             r = json.loads(r)
             data = r['_data'] 
             op = r['tg_op']
             key = data['key'] 
-            obj = cls.get(key) 
+            obj = yield cls.get(key, async=True) 
             try:
                 statemon.state.increment('postgres_successful_pubsub_callbacks')
-                yield tornado.gen.maybe_future(func(key, obj, op))
+                yield tornado.gen.maybe_future(func(obj.get_id() if obj else key, obj, op))
             except Exception as e:
-                _log.error('Unexpected exception on db change when calling'
+                _log.error('Unexpected exception on PG db change when calling'
                            ' %s with arguments %s: %s' % 
                            (func, (key, obj, op), e))
 
