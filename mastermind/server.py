@@ -272,6 +272,22 @@ class ChangeSubscriber(threading.Thread):
                         lambda: neondata.ThumbnailServingURLs.subscribe_to_changes(
                            _update_serving_url, 
                            async=True)))
+
+                if self._thumbnails_subscribed_pg is False:
+                    self.io_loop.add_callback(  
+                        lambda: neondata.ThumbnailMetadata.subscribe_to_changes(
+                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                                '_'.join(key.split('_')[0:2]), is_push_update=True),
+                            async=True))
+                    self._thumbnails_subscribed_pg = True
+ 
+                if self._videos_subscribed_pg is False: 
+                    self.io_loop.add_callback(
+                        lambda: neondata.VideoMetadata.subscribe_to_changes(
+                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                                key, is_push_update=True),
+                            async=True))
+                    self._videos_subscribed_pg = True 
             else: 
                 self.video_db_watcher._table_subscribers.append(
                     neondata.NeonUserAccount.subscribe_to_changes(
@@ -305,20 +321,8 @@ class ChangeSubscriber(threading.Thread):
             # and thumbnailmetadata tables, TODO clean this up a bit, once redis 
             # is no longer required   
             if options.get('cmsdb.neondata.wants_postgres'):
-                if self._thumbnails_subscribed_pg is False:
-                    self.io_loop.add_callback(  
-                        lambda: neondata.ThumbnailMetadata.subscribe_to_changes(
-                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
-                                '_'.join(key.split('_')[0:2]), is_push_update=True),
-                            async=True))
-                    self._thumbnails_subscribed_pg = True 
-                if self._videos_subscribed_pg is False: 
-                    self.io_loop.add_callback(
-                        lambda: neondata.VideoMetadata.subscribe_to_changes(
-                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
-                                key, is_push_update=True),
-                            async=True))
-                    self._videos_subscribed_pg = True 
+                # these are subscribed in the main subscribe_to_changes now
+                pass 
             else: 
                 if account_id not in self.video_db_watcher._account_subscribers:
                     _log.debug('Subscribing to changes in account %s' % account_id)
@@ -390,6 +394,7 @@ class ChangeSubscriber(threading.Thread):
                     self.video_db_watcher._schedule_video_update(internal_video_id)
 
     def stop(self):
+        self._is_subscribed = False  
         self._stopped.set()
         self.io_loop.stop()
 

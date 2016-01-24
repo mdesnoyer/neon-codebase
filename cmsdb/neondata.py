@@ -274,9 +274,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 try:  
                     conn = yield self._get_momoko_connection(db) 
                 except psycopg2.OperationalError as e:
-                    #if self.host is not str(options.db_address):
-                    if current_db_info != self.db_info: 
-                        #self._set_current_host()
+                    if current_db_info != self.db_info:
                         self.db_info = current_db_info  
                         db = _get_momoko_db()
                         conn = yield self._get_momoko_connection(db) 
@@ -771,7 +769,7 @@ class PostgresPubSub(object):
  
                sends a future with a list of json strings  
             '''
-            try:   
+            try:  
                 channel = self.channels[channel_name]
                 notifications = [] 
                 connection = channel['connection'].connection 
@@ -867,8 +865,15 @@ class PostgresPubSub(object):
             try: 
                 channel = self.channels[channel_name] 
                 connection = channel['connection']
-                yield connection.execute('UNLISTEN %s' % channel_name)
-                connection.close()
+                try: 
+                    yield connection.execute('UNLISTEN %s' % channel_name)
+                    connection.close()
+                except psycopg2.InterfaceError as e:
+                    # this means we already lost connection, and can not close a 
+                    # closed connection  
+                    _log.exception('psycopg error when unlistening to %s on postgres %s' \
+                                   % (channel, e))
+                    pass  
                 self.channels.pop(channel_name, None)
                 statemon.state.decrement('postgres_listeners')
             except psycopg2.Error as e: 

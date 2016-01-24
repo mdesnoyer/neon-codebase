@@ -126,6 +126,18 @@ CREATE TABLE neonuseraccount (
 ALTER TABLE neonuseraccount OWNER TO pgadmin;
 
 --
+-- Name: processingstrategy; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE processingstrategy (
+    _data jsonb,
+    _type character varying(128) NOT NULL
+);
+
+
+ALTER TABLE processingstrategy OWNER TO pgadmin;
+
+--
 -- Name: request; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 -- here for backwards compatibility, NeonApiRequest._baseclass_name() == request
 --
@@ -270,6 +282,12 @@ COPY neonapirequest (_data, _type) FROM stdin;
 COPY neonuseraccount (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: processingstrategy; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY processingstrategy (_data, _type) FROM stdin;
+\.
 
 --
 -- Data for Name: request; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -334,10 +352,13 @@ COPY videostatus (_data, _type) FROM stdin;
 
 CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX neonapirequest_key ON neonapirequest USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX processingstrategy_key ON processingstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX request_key ON request USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailmetadata_key ON thumbnailmetadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
-CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX thumbnailservingurls_key ON thumbnailservingurls USING btree (((_data ->> 'key'::text)));
 
 --
@@ -405,6 +426,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER neonuseraccount_notify_trig
 AFTER INSERT OR UPDATE OR DELETE
 ON neonuseraccount
+FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
+
+CREATE TRIGGER processingstrategy_notify_trig
+AFTER INSERT OR UPDATE OR DELETE
+ON processingstrategy
 FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 
 CREATE TRIGGER request_notify_trig

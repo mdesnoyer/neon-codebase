@@ -209,6 +209,7 @@ class Postgresql(object):
         options._set('cmsdb.neondata.db_port', self.old_port)
         options._set('cmsdb.neondata.db_name', self.old_name)
         neondata.PostgresDB.instance = None  
+        neondata.PostgresPubSub.instance = None  
         self.terminate(_signal)
         self.cleanup()
 
@@ -236,7 +237,7 @@ class Postgresql(object):
     def cleanup(self):
         if self.pid is not None:
             return
-
+      
         if self._use_tmpdir and os.path.exists(self.base_dir):
             rmtree(self.base_dir, ignore_errors=True)
             self._use_tmpdir = False

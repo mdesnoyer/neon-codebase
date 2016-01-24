@@ -690,7 +690,6 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
 
 
 class TestVideoDBPushUpdatesPG(TestVideoDBPushUpdates):
-#class TestVideoDBPushUpdatesPG(test_utils.neontest.TestCase):
     def setUp(self):
         options._set('cmsdb.neondata.wants_postgres', 1)
         self.callback_patcher = patch('cmsdb.neondata.utils.http')
@@ -2038,6 +2037,119 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.TestCase):
         self.assertIsNotNone(neondata.VideoMetadata.get(
             'acct1_vid1').serving_url)
 
+# TODO delete/replace other class once hotswap is done
+class TestPublisherStatusUpdatesInDBPG(TestPublisherStatusUpdatesInDB):
+    '''Tests for updates to the database when directives are published.'''
+    def setUp(self):
+        super(TestPublisherStatusUpdatesInDB, self).setUp()
+
+        statemon.state._reset_values()
+
+        # Mock out http connections
+        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
+                                                require_async_kw=True)
+        self.callback_mock = MagicMock()
+        self.isp_mock = MagicMock()
+        def _handle_http(x, **kw):
+            if '/v1/video?' in x.url:
+                return self.isp_mock(x, **kw)
+            else:
+                return self.callback_mock(x, **kw)
+        self.http_mock.side_effect = _handle_http
+
+        self.callback_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
+
+        self.isp_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
+
+        # Mock out the connection to S3
+        self.s3_patcher = patch('mastermind.server.S3Connection')
+        self.s3conn = test_utils.mock_boto_s3.MockConnection()
+        self.s3_patcher.start().return_value = self.s3conn
+        self.s3conn.create_bucket('neon-image-serving-directives-test')
+
+        # Insert a fake filesystem
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.real_tempfile = mastermind.server.tempfile
+        mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
+            self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
+
+        # setup neonuser account with apikey = 'acct1'
+        self.acc = neondata.NeonUserAccount('myacctid', 'acct1')
+        self.acc.save()
+
+        # Initialize the data in the database that we actually need
+        neondata.VideoMetadata(
+            'acct1_vid1',
+            tids=['acct1_vid1_tid11', 'acct1_vid1_tid12'],
+            request_id='job1',
+            i_id='int1').save()
+
+        request = neondata.BrightcoveApiRequest(
+            'job1', 'acct1', 'vid1',
+            http_callback='http://callback.com')
+        request.state = neondata.RequestState.FINISHED
+        request.response = { 'video_id' : 'vid1' }
+        request.save()
+
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
+        # Create the publisher
+        self.mastermind = mastermind.core.Mastermind()
+        self.publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+
+        # Set the state of the publisher and the mastermind core
+        self.mastermind.serving_directive = {
+            'acct1_vid1': (('acct1', 'acct1_vid1'), 
+                           [('tid11', 0.1),
+                            ('tid12', 0.9)])}
+        self.mastermind.video_info = self.mastermind.serving_directive
+        self.publisher.update_tracker_id_map({
+            'tai1' : 'acct1'})
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid11',
+            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
+                                          base_url = 'http://first_tids.com',
+                                          sizes=[(640, 480), (160,90)]))
+        self.publisher.add_serving_urls(
+            'acct1_vid1_tid12',
+            neondata.ThumbnailServingURLs(
+                'acct1_vid1_tid12',
+                size_map = { (800, 600): 't12_800.jpg',
+                             (160, 90): 't12_160.jpg'}))
+
+        logging.getLogger('mastermind.server').reset_sample_counters()
+
+    def tearDown(self):
+        self.http_patcher.stop()
+        mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
+        self.s3_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
+        self._wait_for_db_updates()
+        self.postgresql.clear_all_tables()
+        super(TestPublisherStatusUpdatesInDB, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
 class SmokeTesting(test_utils.neontest.TestCase):
     def setUp(self):
         super(SmokeTesting, self).setUp()
@@ -2171,8 +2283,8 @@ class SmokeTesting(test_utils.neontest.TestCase):
         if os.path.exists(f):
             os.remove(f)
         del self.mastermind
-        self.video_watcher._change_subscriber.stop()
         self.video_watcher.join(2)
+        self.video_watcher._change_subscriber.stop() 
         self.video_watcher.__del__()
         self.directive_publisher.join(2)
         self.stats_watcher.join(2)
@@ -2259,6 +2371,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
             self.video_watcher.start()
             self.video_watcher.wait_until_loaded(5.0)
             self.video_watcher._change_subscriber.subscribe_to_db_changes()
+            while self.video_watcher._change_subscriber._is_subscribed is False: 
+                time.sleep(0.1)
+            time.sleep(0.25) 
             self.stats_watcher.start()
             self.stats_watcher.wait_until_loaded(5.0)
             self.directive_publisher.start()
@@ -2330,6 +2445,152 @@ class SmokeTesting(test_utils.neontest.TestCase):
                 neondata.NeonApiRequest.get('job3', 'key1').state,
                 neondata.RequestState.CUSTOMER_ERROR)
 
+class SmokeTestingPG(SmokeTesting):
+    def setUp(self):
+        super(SmokeTesting, self).setUp()
+        # Mock out the connection to S3
+        self.s3_patcher = patch('mastermind.server.S3Connection')
+        self.s3conn = test_utils.mock_boto_s3.MockConnection()
+        self.s3_patcher.start().return_value = self.s3conn
+        self.s3conn.create_bucket('neon-image-serving-directives-test')
+
+        # Mock out the http connections
+        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
+                                                require_async_kw=True)
+        self.callback_mock = MagicMock()
+        self.isp_mock = MagicMock()
+        def _handle_http(x, **kw):
+            if '/v1/video?' in x.url:
+                return self.isp_mock(x, **kw)
+            else:
+                return self.callback_mock(x, **kw)
+        self.http_mock.side_effect = _handle_http
+
+        self.callback_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
+
+        self.isp_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
+
+        # Insert a fake filesystem
+        self.filesystem = fake_filesystem.FakeFilesystem()
+        self.real_tempfile = mastermind.server.tempfile
+        mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
+            self.filesystem)
+        self.real_os = mastermind.server.os
+        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
+
+        # Use an in-memory sqlite for the impala server
+        def connect2db(*args, **kwargs):
+            return sqlite3.connect('file::memory:?cache=shared')
+        self.ramdb = connect2db()
+
+        cursor = self.ramdb.cursor()
+        # Create the necessary tables (these are subsets of the real tables)
+        cursor.execute('''CREATE TABLE IF NOT EXISTS videoplays (
+                       serverTime DOUBLE,
+                       mnth INT,
+                       yr INT)''')
+        cursor.execute('CREATE TABLE IF NOT EXISTS table_build_times ('
+                       'done_time timestamp)')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS EventSequences (
+                       thumbnail_id varchar(128),
+                       imloadclienttime DOUBLE,
+                       imvisclienttime DOUBLE,
+                       imclickclienttime DOUBLE,
+                       adplayclienttime DOUBLE,
+                       videoplayclienttime DOUBLE,
+                       serverTime DOUBLE, 
+                       mnth INT,
+                       yr INT,
+                       tai varchar(64))''')
+        self.ramdb.commit()
+
+        #patch impala connect
+        self.sqlite_connect_patcher = \
+          patch('mastermind.server.impala.dbapi.connect')
+        self.sqllite_mock = self.sqlite_connect_patcher.start()
+        self.sqllite_mock.side_effect = connect2db
+
+        #patch hbase connection
+        self.hbase_patcher = patch('mastermind.server.happybase.Connection')
+        self.hbase_conn = self.hbase_patcher.start()
+        self.timethumb_table = MockHBaseCountTable()
+        self.thumbtime_table = MockHBaseCountTable()
+        def _pick_table(name):
+            if name == 'TIMESTAMP_THUMBNAIL_EVENT_COUNTS':
+                return self.timethumb_table
+            elif name == 'THUMBNAIL_TIMESTAMP_EVENT_COUNTS':
+                return self.thumbtime_table
+            raise thrift.Thrift.TException('Unknown table')
+        self.hbase_conn().table.side_effect = _pick_table
+
+        # Patch the cluster lookup
+        self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
+        self.cluster_patcher.start()
+
+        self.activity_watcher = utils.ps.ActivityWatcher()
+
+        self.old_serving_update_delay = options.get(
+            'mastermind.server.serving_update_delay')
+        options._set('mastermind.server.serving_update_delay', 0)
+
+        self.mastermind = mastermind.core.Mastermind()
+        self.directive_publisher = mastermind.server.DirectivePublisher(
+            self.mastermind, activity_watcher=self.activity_watcher)
+        self.video_watcher = mastermind.server.VideoDBWatcher(
+            self.mastermind,
+            self.directive_publisher,
+            activity_watcher=self.activity_watcher)
+        self.stats_watcher = mastermind.server.StatsDBWatcher(
+            self.mastermind, activity_watcher=self.activity_watcher)
+
+    def tearDown(self):
+        neondata.DBConnection.clear_singleton_instance()
+        mastermind.server.tempfile = self.real_tempfile
+        mastermind.server.os = self.real_os
+        self.hbase_patcher.stop()
+        self.cluster_patcher.stop()
+        self.http_patcher.stop()
+        self.s3_patcher.stop()
+        self.sqlite_connect_patcher.stop()
+        options._set('mastermind.server.serving_update_delay',
+                     self.old_serving_update_delay)
+        self.directive_publisher.stop()
+        self.video_watcher.stop()
+        self.stats_watcher.stop()
+        try:
+            cursor = self.ramdb.cursor()
+            cursor.execute('drop table videoplays')
+            cursor.execute('drop table table_build_times')
+            cursor.execute('drop table eventsequences')
+            self.ramdb.commit()
+        except Exception as e:
+            pass
+        self.ramdb.close()
+        f = 'file::memory:?cache=shared'
+        if os.path.exists(f):
+            os.remove(f)
+        del self.mastermind
+        self.video_watcher.join(2)
+        self.video_watcher._change_subscriber.stop() 
+        self.video_watcher.__del__()
+        self.directive_publisher.join(2)
+        self.stats_watcher.join(2)
+        self.postgresql.clear_all_tables() 
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
