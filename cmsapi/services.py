@@ -1316,11 +1316,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                                               _initialize_bc_plat,
                                                               create_missing=True, 
                                                               async=True)
-                na = yield tornado.gen.Task(
-                    neondata.NeonUserAccount.modify,
-                    self.api_key,
-                    lambda x: x.add_platform(bc))
-                
+                na.add_platform(bc) 
+                na = yield neondata.NeonUserAccount.save(na, async=True) 
                 #Saved platform
                 if na:
                     # Verify that the token works by making a call to

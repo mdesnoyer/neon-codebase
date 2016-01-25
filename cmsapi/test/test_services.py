@@ -25,6 +25,7 @@ from PIL import Image
 from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
+import test_utils.postgresql
 import test_utils.redis
 import time
 import tornado.gen
@@ -1553,7 +1554,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             return response
         
         mock_img_download.side_effect = _handle_img_download 
-        
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
@@ -1803,6 +1803,47 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         url = self.get_url("/healthcheck/video_server")
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
+
+class TestServicesPG(TestServices):
+    ''' Services Test '''
+        
+    def setUp(self):
+        super(TestServices, self).setUp()
+        #Http Connection pool Mock
+        self.cp_async_patcher = \
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
+        self.cp_mock_async_client = self._future_wrap_mock(
+            self.cp_async_patcher.start()().fetch)
+
+        self.api_key = "" # filled later
+        self.a_id = "unittester-0"
+        self.rtoken = "rtoken"
+        self.wtoken = "wtoken"
+        self.b_id = "i12345" #i_id bcove
+        self.pub_id = "p124"
+        self.thumbnail_url_to_image = {} # mock url => raw image buffer data
+        self.job_ids = [] #ordered list
+        self.video_ids = []
+        self.images = {} 
+
+        random.seed(19449)
+        
+    def tearDown(self):
+        self.cp_async_patcher.stop()
+        self.postgresql.clear_all_tables() 
+        super(TestServices, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        super(TestServices, cls).setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

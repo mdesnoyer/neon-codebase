@@ -1742,9 +1742,9 @@ class StoredObject(object):
                 raise tornado.gen.Return({})
             # get the items, sql in a loop -- i would prefer 
             # an IN here, but trying to maintain create_missing
+                
             mappings = {}
             orig_objects = {}
-            key_sets = collections.defaultdict(list)
              
             for key in keys:
                 query = "SELECT _data, _type \
@@ -1756,16 +1756,13 @@ class StoredObject(object):
                 if item is None:
                     if create_missing:
                         cur_obj = create_class(key)
-                        if cur_obj is not None:
-                            key_sets[cur_obj._set_keyname()].append(key)
                     else:
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
-                    #cur_obj = create_class._create(key, item['_data'])
                     cur_obj = create_class._create(key, item)
-                    #orig_objects[key] = create_class._create(key, item['_data'])
                     orig_objects[key] = create_class._create(key, item)
+
                 mappings[key] = cur_obj
             try:
                 func(mappings)
