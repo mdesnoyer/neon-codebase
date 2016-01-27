@@ -329,7 +329,11 @@ class PostgresDB(tornado.web.RequestHandler):
                 if pool is None:
                     conn.close()
                 else:
-                    pool.putconn(conn) 
+                    try: 
+                        pool.putconn(conn) 
+                    except AssertionError: 
+                        # generally a release of a already released conn, move on
+                        pass 
             except Exception as e: 
                 _log.exception('Unknown Error : trying to close connection %s. ' % e) 
                 
@@ -1551,7 +1555,7 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, create_default=False, log_missing=True):
+    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
@@ -1566,7 +1570,7 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
-        return cls._get_many_with_raw_keys(keys, create_default, log_missing)
+        return cls._get_many_with_raw_keys(keys, create_default, log_missing, func_level_wpg)
 
     @classmethod
     @utils.sync.optional_sync
@@ -1589,7 +1593,7 @@ class StoredObject(object):
             conn = yield db.get_connection()
             query = "SELECT _data, _type \
                      FROM %s \
-                     WHERE _data->>'key' ~ '%s'" % (cls.__name__.lower(), pattern)
+                     WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
             cursor = yield conn.execute(query)
             for result in cursor:
@@ -1608,14 +1612,14 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
-                                log_missing=True):
+                                log_missing=True, func_level_wpg=True):
         '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
             raise tornado.gen.Return([])
 
-        if options.wants_postgres:
+        if options.wants_postgres and func_level_wpg:
             rv = []
             obj_map = OrderedDict() 
             db = PostgresDB()
@@ -1961,7 +1965,8 @@ class StoredObject(object):
            it will take this list and call all the expecting cbs with a format 
            of : 
                func(key, object, operation) 
-        ''' 
+        '''
+        import pdb; pdb.set_trace()   
         results = future.result()
         for r in results: 
             r = json.loads(r)
@@ -2011,7 +2016,11 @@ class StoredObject(object):
         keys, ops = filtered
     
         if get_object:
-            objs = cls.get_many(keys)
+            # this is a dirty hack, to prevent a race condition 
+            # when we subscribe to changes in redis, but want to 
+            # push to postgres -- i don't want to lock get_many for this 
+            # case, adding the extra parameter instead to force redis here
+            objs = cls.get_many(keys, func_level_wpg=False)
         else:
             objs = [None for x in range(len(keys))]
     
@@ -2193,7 +2202,7 @@ class NamespacedStoredObject(StoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, create_default=False, log_missing=True):
+    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple
@@ -2202,6 +2211,7 @@ class NamespacedStoredObject(StoredObject):
                          [cls.format_key(x) for x in keys],
                          create_default=create_default,
                          log_missing=log_missing, 
+                         func_level_wpg=func_level_wpg, 
                          async=True)
         raise tornado.gen.Return(rv) 
 
@@ -2340,12 +2350,13 @@ class DefaultedStoredObject(NamespacedStoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, log_missing=True, callback=None):
+    def get_many(cls, keys, log_missing=True, callback=None, func_level_wpg=True):
         rv = yield super(DefaultedStoredObject, cls).get_many(
                     keys,
                     create_default=True,
                     log_missing=log_missing,
                     callback=callback, 
+                    func_level_wpg=func_level_wpg,
                     async=True)
         raise tornado.gen.Return(rv) 
 
@@ -4388,7 +4399,7 @@ class NeonApiRequest(NamespacedStoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, log_missing=True):
+    def get_many(cls, keys, log_missing=True, func_level_wpg=True):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
@@ -4396,6 +4407,7 @@ class NeonApiRequest(NamespacedStoredObject):
         rv = yield super(NeonApiRequest, cls).get_many(
                           [cls._generate_subkey(*k) for k in keys],
                           log_missing=log_missing,
+                          func_level_wpg=func_level_wpg, 
                           async=True)
         raise tornado.gen.Return(rv) 
 
