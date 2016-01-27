@@ -1775,15 +1775,16 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                    original_object = orig_objects.get(key, None)
                    if obj is not None and original_object is None: 
-                       obj.updated = str(datetime.datetime.utcnow())
                        query_tuple = db.get_insert_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
-                       obj.updated = str(datetime.datetime.utcnow())
                        query_tuple = db.get_update_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
-    
+            try: 
                 cursor = yield conn.transaction(sql_statements)
+            except Exception as e: 
+                _log.error('unknown error when running sql_statments %s in transaction %s' % (sql_statements, e))
+            finally: 
                 db.return_connection(conn)
                 raise tornado.gen.Return(mappings) 
         else:  

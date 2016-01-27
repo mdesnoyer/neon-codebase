@@ -11,6 +11,7 @@ if sys.path[0] != __base_path__:
 
 from cmsdb import neondata
 import logging
+import datetime
 import tornado.ioloop
 import tornado.web
 import tornado.escape
@@ -26,32 +27,34 @@ _log = logging.getLogger(__name__)
 local_queue = Queue() 
 sem = Semaphore(1)
  
-@tornado.gen.coroutine 
-def subscribe_to_changes():
-     
+@tornado.gen.coroutine
+def producer(queue):
     @tornado.gen.coroutine 
     def change_handler_platform(key, obj, op):
         _log.info('Adding platform object')
-        #yield sem.acquire() 
-        yield local_queue.put({'type' : 'platform', 'key' : key, 'obj' : obj, 'op' : op})
-        #sem.release()  
-        yield tornado.gen.sleep(0.01)
+        try:  
+            yield queue.put({'type' : 'platform', 'key' : key, 'obj' : obj, 'op' : op})
+        except Exception as e: 
+            _log.error('exception occured puting to local queue') 
+            yield tornado.gen.sleep(0.01)
          
     @tornado.gen.coroutine 
     def change_handler_apirequest(key, obj, op): 
         _log.info('Adding request object')
-        #yield sem.acquire() 
-        yield local_queue.put({'type' : 'apirequest', 'key' : key, 'obj' : obj, 'op' : op})  
-        #sem.release()  
-        yield tornado.gen.sleep(0.01)
+        try:  
+            yield queue.put({'type' : 'apirequest', 'key' : key, 'obj' : obj, 'op' : op})  
+        except Exception as e: 
+            _log.error('exception occured puting to local queue') 
+            yield tornado.gen.sleep(0.01)
 
     @tornado.gen.coroutine 
     def change_handler_normal(key, obj, op):
         _log.info('Adding normal object')
-        #yield sem.acquire() 
-        yield local_queue.put({'type' : 'normal', 'key' : key, 'obj' : obj, 'op' : op})
-        #sem.release()
-        yield tornado.gen.sleep(0.01)
+        try: 
+            yield queue.put({'type' : 'normal', 'key' : key, 'obj' : obj, 'op' : op})
+        except Exception as e: 
+            _log.error('exception occured puting to local queue') 
+            yield tornado.gen.sleep(0.01)
      
     options._set('cmsdb.neondata.wants_postgres', 0)
     yield neondata.AbstractIntegration.subscribe_to_changes(change_handler_normal, async=True)
@@ -66,26 +69,8 @@ def subscribe_to_changes():
     yield neondata.VideoMetadata.subscribe_to_changes(change_handler_normal, async=True) 
     yield neondata.VideoStatus.subscribe_to_changes(change_handler_normal, async=True) 
     yield neondata.AbstractPlatform.subscribe_to_changes(change_handler_platform, async=True)
+    yield neondata.TrackerAccountIDMapper.subscribe_to_changes(change_handler_normal, async=True) 
+    yield neondata.User.subscribe_to_changes(change_handler_normal, async=True) 
+    yield neondata.NeonUserAccount.subscribe_to_changes(change_handler_normal, async=True) 
+    yield neondata.ProcessingStrategy.subscribe_to_changes(change_handler_normal, async=True) 
     options._set('cmsdb.neondata.wants_postgres', 1)
-
-@tornado.gen.coroutine
-def producer(queue):
-    tornado.ioloop.IOLoop.current().add_callback(lambda: subscribe_to_changes()) 
-    while True:  
-        current_counter = 0 
-        #yield sem.acquire()
-        try:
-            #_log.info('blam checking local_queue size = %s' % local_queue.qsize())
-            obj = local_queue.get_nowait() 
-            yield queue.put(obj)   
-        except tornado.queues.QueueEmpty as e: 
-            yield tornado.gen.sleep(0.01)
-          
-        #while not local_queue.empty():
-        #    obj = yield local_queue.get() 
-        #    yield queue.put(obj)
-        #    current_counter += 1
-        #sem.release()  
-        #current_counter = 0
-        #yield tornado.gen.sleep(0.01)
-        #print 'test' 

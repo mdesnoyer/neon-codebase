@@ -28,8 +28,11 @@ import utils.neon
 @tornado.gen.coroutine
 def main(): 
     queue = Queue() 
-    tornado.ioloop.IOLoop.current().spawn_callback(lambda: change_listener_consumer.consumer(queue)) 
-    yield change_listener_producer.producer(queue) 
+    #tornado.ioloop.IOLoop.current().spawn_callback(lambda: change_listener_consumer.consumer(queue)) 
+    #tornado.ioloop.IOLoop.current().add_callback(lambda: change_listener_consumer.consumer(queue))
+     
+    #yield change_listener_producer.producer(queue) 
+    yield change_listener_consumer.consumer(queue) 
     yield queue.join()  
 if __name__ == '__main__':
     utils.neon.InitNeon()

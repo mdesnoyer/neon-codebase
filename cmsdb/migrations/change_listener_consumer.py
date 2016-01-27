@@ -16,15 +16,25 @@ import tornado.web
 import tornado.escape
 import tornado.gen
 import tornado.httpclient
-import utils 
+from tornado.locks import Semaphore, Lock
+import utils
+import change_listener_producer 
 from utils.options import define, options
 
 _log = logging.getLogger(__name__)
 
+sem_normal = Semaphore(1)
+sem_apirequest = Semaphore(1)
+sem_platform = Semaphore(1)
+
+lock_normal = Lock() 
+lock_apirequest = Lock() 
+lock_platform = Lock() 
+ 
 @tornado.gen.coroutine
 def consumer(queue):
     @tornado.gen.coroutine
-    def change_handler_normal(key, obj, op):
+    def modify_normal(key, obj, op):
         # if we already have the data in the database 
         # modify this thing, otherwise just save it
         # we will always overwrite on save, because modifies 
@@ -34,6 +44,7 @@ def consumer(queue):
             x.__dict__ = obj.__dict__
             x.key = current_key
         if op == 'set':
+            #yield sem_normal.acquire() 
             try:
                 if obj: 
                     options._set('cmsdb.neondata.wants_postgres', 1)  
@@ -42,14 +53,20 @@ def consumer(queue):
                     _log.info('saving changing object %s' % obj.__class__.__name__)  
             except Exception as e: 
                 _log.error('exception while saving changing key %s : %s' % (key, e))
+                yield tornado.gen.sleep(0.01)
+                pass  
+            #finally: 
+            #    sem_normal.release() 
+        raise tornado.gen.Return(True) 
     
     @tornado.gen.coroutine 
-    def change_handler_apirequest(key, obj, op): 
+    def modify_apirequest(key, obj, op): 
         def modify_me(x): 
             current_key = x.key 
             x.__dict__ = obj.__dict__
-            x.key = current_key 
+            x.key = current_key
         if op == 'set':
+            #yield sem_apirequest.acquire()  
             try:
                 options._set('cmsdb.neondata.wants_postgres', 1)  
                 yield obj.modify(obj.api_key, 
@@ -61,10 +78,14 @@ def consumer(queue):
                 _log.info('saving changing object neonapirequest')  
             except Exception as e: 
                 _log.error('exception while saving changing request %s : %s' % (obj, e))
-                pass
+                yield tornado.gen.sleep(0.01)
+                pass  
+            #finally: 
+            #    sem_apirequest.release() 
+        raise tornado.gen.Return(True) 
         
     @tornado.gen.coroutine
-    def change_handler_platform(key, obj, op):
+    def modify_platform(key, obj, op):
         # since platforms are keyed differently we will 
         # just use another handler  
         obj.key.replace('brightcoveplatform', 'abstractplatform') 
@@ -75,8 +96,9 @@ def consumer(queue):
             current_key = x.key 
             x.__dict__ = obj.__dict__
             x.key = current_key
-            x.videos = {}  
+            x.__dict__['videos'] = {}  
         if op == 'set':
+            #yield sem_platform.acquire() 
             try:
                 options._set('cmsdb.neondata.wants_postgres', 1)  
                 yield obj.modify(obj.neon_api_key, 
@@ -88,18 +110,32 @@ def consumer(queue):
                 _log.info('saving changing object platform')  
             except Exception as e: 
                 _log.error('exception while saving changing platform %s : %s' % (obj, e))
-                pass
+                yield tornado.gen.sleep(0.01)
+                pass  
+            #finally: 
+            #    sem_platform.release()
+ 
+        raise tornado.gen.Return(True) 
 
-    while True: 
+    # start the producer       
+    yield change_listener_producer.producer(queue)
+
+    # loop on our queue 
+    while True:
+        # this runs infinitely with no timeout, and pulls items 
+        # from the producers queue  
         item = yield queue.get()
         try: 
             _log.info('this is the item %s' % (item))
-            if item['type'] is 'normal': 
-                yield change_handler_normal(item['key'], item['obj'], item['op']) 
+            if item['type'] is 'normal':
+                with (yield lock_normal.acquire()):  
+                    yield modify_normal(item['key'], item['obj'], item['op']) 
             if item['type'] is 'apirequest': 
-                yield change_handler_apirequest(item['key'], item['obj'], item['op']) 
+                with (yield lock_apirequest.acquire()):  
+                    yield modify_apirequest(item['key'], item['obj'], item['op']) 
             if item['type'] is 'platform': 
-                yield change_handler_platform(item['key'], item['obj'], item['op']) 
-            yield tornado.gen.sleep(0.01)  
+                with (yield lock_platform.acquire()):  
+                    yield modify_platform(item['key'], item['obj'], item['op']) 
+            yield tornado.gen.sleep(0.01) 
         finally: 
-            queue.task_done()   
+            queue.task_done() 
