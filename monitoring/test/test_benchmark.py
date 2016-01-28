@@ -47,12 +47,20 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
           lambda x: tornado.httpclient.HTTPResponse(
               x, code=200, effective_url="http://www.where.com/neontntid.jpg")
 
+        # Mock out the result submission
+        self.result_mock = MagicMock()
+        self.result_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(x, code=200)
+
         # Mock out the http requests
         self.send_request_patcher = patch('utils.http.send_request')
         self.send_request_mock = self._future_wrap_mock(
             self.send_request_patcher.start(), require_async_kw=True)
         def _handle_http_request(req, **kw):
-            return self.isp_call_mock(req)
+            if '10.0.13.60' in req.url:
+                return self.result_mock(req)
+            else:
+                return self.isp_call_mock(req)
         self.send_request_mock.side_effect = _handle_http_request
         
 
@@ -114,8 +122,8 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
     @tornado.gen.coroutine
     def _get_job_result(self):
-        results = yield neondata.BenchmarkVideoJobResult.get_all(async=True)
-        raise tornado.gen.Return(results[0])
+        cargs, kwargs = self.result_mock.call_args
+        raise tornado.gen.Return(json.loads(cargs[0].body))
 
     @tornado.testing.gen_test
     def test_video_serving(self):
@@ -150,13 +158,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             0)
 
         result = yield self._get_job_result()
-        self.assertIsNone(result.error_type)
-        self.assertIsNone(result.error_msg)
-        self.assertGreater(result.total_time, 0)
-        self.assertGreater(result.time_to_processing, 0)
-        self.assertGreater(result.time_to_finished, 0)
-        self.assertGreater(result.time_to_serving, 0)
-        self.assertGreater(result.time_to_callback, 0)
+        self.assertIsNone(result['error_type'])
+        self.assertIsNone(result['error_msg'])
+        self.assertGreater(result['total_time'], 0)
+        self.assertGreater(result['time_to_processing'], 0)
+        self.assertGreater(result['time_to_finished'], 0)
+        self.assertGreater(result['time_to_serving'], 0)
+        self.assertGreater(result['time_to_callback'], 0)
 
     @tornado.testing.gen_test
     def test_bad_callback_received(self):
@@ -178,13 +186,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.job_not_serving'), 1)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'RunningTooLongError')
-        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
-        self.assertIsNone(result.total_time)
-        self.assertIsNone(result.time_to_processing)
-        self.assertIsNone(result.time_to_finished)
-        self.assertIsNone(result.time_to_serving)
-        self.assertIsNone(result.time_to_callback)
+        self.assertEquals(result['error_type'], 'RunningTooLongError')
+        self.assertRegexpMatches(result['error_msg'], 'Too long to .*')
+        self.assertIsNone(result['total_time'])
+        self.assertIsNone(result['time_to_processing'])
+        self.assertIsNone(result['time_to_finished'])
+        self.assertIsNone(result['time_to_serving'])
+        self.assertIsNone(result['time_to_callback'])
 
     @tornado.testing.gen_test
     def test_job_processing(self):
@@ -205,13 +213,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             0)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'RunningTooLongError')
-        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
-        self.assertIsNone(result.total_time)
-        self.assertGreater(result.time_to_processing, 0)
-        self.assertIsNone(result.time_to_finished)
-        self.assertIsNone(result.time_to_serving)
-        self.assertIsNone(result.time_to_callback)
+        self.assertEquals(result['error_type'], 'RunningTooLongError')
+        self.assertRegexpMatches(result['error_msg'], 'Too long to .*')
+        self.assertIsNone(result['total_time'])
+        self.assertGreater(result['time_to_processing'], 0)
+        self.assertIsNone(result['time_to_finished'])
+        self.assertIsNone(result['time_to_serving'])
+        self.assertIsNone(result['time_to_callback'])
 
     @tornado.testing.gen_test
     def test_job_finished_but_not_serving(self):
@@ -234,13 +242,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.no_callback'), 1)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'RunningTooLongError')
-        self.assertRegexpMatches(result.error_msg, 'Too long to .*')
-        self.assertIsNone(result.total_time)
-        self.assertGreater(result.time_to_processing, 0)
-        self.assertGreater(result.time_to_finished, 0)
-        self.assertIsNone(result.time_to_serving)
-        self.assertIsNone(result.time_to_callback)
+        self.assertEquals(result['error_type'], 'RunningTooLongError')
+        self.assertRegexpMatches(result['error_msg'], 'Too long to .*')
+        self.assertIsNone(result['total_time'])
+        self.assertGreater(result['time_to_processing'], 0)
+        self.assertGreater(result['time_to_finished'], 0)
+        self.assertIsNone(result['time_to_serving'])
+        self.assertIsNone(result['time_to_callback'])
 
     @tornado.testing.gen_test
     def test_job_failed(self):
@@ -266,13 +274,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.job_failed'), 1)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'JobFailed')
-        self.assertRegexpMatches(result.error_msg, '.*some_error.*')
-        self.assertIsNone(result.total_time)
-        self.assertIsNone(result.time_to_processing)
-        self.assertIsNone(result.time_to_finished)
-        self.assertIsNone(result.time_to_serving)
-        self.assertIsNone(result.time_to_callback)
+        self.assertEquals(result['error_type'], 'JobFailed')
+        self.assertRegexpMatches(result['error_msg'], '.*some_error.*')
+        self.assertIsNone(result['total_time'])
+        self.assertIsNone(result['time_to_processing'])
+        self.assertIsNone(result['time_to_finished'])
+        self.assertIsNone(result['time_to_serving'])
+        self.assertIsNone(result['time_to_callback'])
 
     @tornado.testing.gen_test
     def test_error_submitting_job(self):
@@ -298,12 +306,12 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.job_submission_error'), 1)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'SubmissionError')
-        self.assertIsNone(result.total_time)
-        self.assertIsNone(result.time_to_processing)
-        self.assertIsNone(result.time_to_finished)
-        self.assertIsNone(result.time_to_serving)
-        self.assertIsNone(result.time_to_callback)
+        self.assertEquals(result['error_type'], 'SubmissionError')
+        self.assertIsNone(result['total_time'])
+        self.assertIsNone(result['time_to_processing'])
+        self.assertIsNone(result['time_to_finished'])
+        self.assertIsNone(result['time_to_serving'])
+        self.assertIsNone(result['time_to_callback'])
 
 
     @tornado.testing.gen_test
@@ -337,13 +345,13 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             0)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'RunningTooLongError')
-        self.assertRegexpMatches(result.error_msg, '.*waiting for ISP.*')
-        self.assertIsNone(result.total_time)
-        self.assertGreater(result.time_to_processing, 0)
-        self.assertGreater(result.time_to_finished, 0)
-        self.assertGreater(result.time_to_serving, 0)
-        self.assertGreater(result.time_to_callback, 0)
+        self.assertEquals(result['error_type'], 'RunningTooLongError')
+        self.assertRegexpMatches(result['error_msg'], '.*waiting for ISP.*')
+        self.assertIsNone(result['total_time'])
+        self.assertGreater(result['time_to_processing'], 0)
+        self.assertGreater(result['time_to_finished'], 0)
+        self.assertGreater(result['time_to_serving'], 0)
+        self.assertGreater(result['time_to_callback'], 0)
 
     @tornado.testing.gen_test
     def test_timeout_waiting_for_callback(self):
@@ -360,12 +368,12 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             'monitoring.benchmark_neon_pipeline.no_callback'), 1)
 
         result = yield self._get_job_result()
-        self.assertEquals(result.error_type, 'RunningTooLongError')
-        self.assertIsNone(result.total_time)
-        self.assertGreater(result.time_to_processing, 0)
-        self.assertGreater(result.time_to_finished, 0)
-        self.assertGreater(result.time_to_serving, 0)
-        self.assertIsNone(result.time_to_callback, 0)
+        self.assertEquals(result['error_type'], 'RunningTooLongError')
+        self.assertIsNone(result['total_time'])
+        self.assertGreater(result['time_to_processing'], 0)
+        self.assertGreater(result['time_to_finished'], 0)
+        self.assertGreater(result['time_to_serving'], 0)
+        self.assertIsNone(result['time_to_callback'], 0)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
