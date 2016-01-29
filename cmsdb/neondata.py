@@ -1416,7 +1416,6 @@ class StoredObject(object):
                 if value == float('nan'):
                     obj[key] = PythonNaNStrings.NAN
             return obj
-        import pdb; pdb.set_trace()
         obj = _json_fixer(self.to_dict()['_data']) 
         return json.dumps(obj)
 
