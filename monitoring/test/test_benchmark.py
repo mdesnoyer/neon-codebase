@@ -57,7 +57,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.send_request_mock = self._future_wrap_mock(
             self.send_request_patcher.start(), require_async_kw=True)
         def _handle_http_request(req, **kw):
-            if '10.0.13.60' in req.url:
+            if req.url == options.get('monitoring.benchmark_neon_pipeline.result_endpoint'):
                 return self.result_mock(req)
             else:
                 return self.isp_call_mock(req)
@@ -374,6 +374,25 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.assertGreater(result['time_to_finished'], 0)
         self.assertGreater(result['time_to_serving'], 0)
         self.assertIsNone(result['time_to_callback'], 0)
+
+    @tornado.testing.gen_test
+    def test_fail_send_result_info(self):
+        self.result_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, code=404, error=tornado.httpclient.HTTPError(404))
+
+        self.request.state = neondata.RequestState.SERVING
+        self.request.save()
+        cb_response = yield self._send_callback({
+            'video_id': 'vid1',
+            'processing_state': neondata.RequestState.SERVING})
+        self.assertEquals(cb_response.code, 200)
+
+        with self.assertLogExists(logging.ERROR, 'Error submitting job info'):
+            yield self.benchmarker.job_manager.run_test_job('vid1')
+
+        self.assertEquals(statemon.state.get(
+            'monitoring.benchmark_neon_pipeline.result_submission_error'), 1)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

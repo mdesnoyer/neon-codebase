@@ -132,9 +132,7 @@ class BenchmarkVideoJobResult:
         if response.error:
             _log.error('Error submitting job information: %s' %
                        response.error)
-            statemon.state.increment('result_sumission_error')
-            
-
+            statemon.state.increment('result_submission_error')
 
 class JobManager(object):
     def __init__(self, cb_collector):
