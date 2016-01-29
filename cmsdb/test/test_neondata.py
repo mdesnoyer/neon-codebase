@@ -1187,6 +1187,9 @@ class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
     def setUp(self): 
         super(TestPGNeondataDataSpecific, self).setUp()
 
+    def tearDown(self): 
+        super(TestPGNeondataDataSpecific, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
@@ -2178,6 +2181,7 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestThumbnailHelperClass, cls).tearDownClass()
 
     def test_thumbnail_mapper(self):
         ''' Thumbnail mappings '''
@@ -2719,6 +2723,10 @@ class TestPGThumbnailHelperClass(TestThumbnailHelperClass):
     def setUp(self): 
         super(TestPGThumbnailHelperClass, self).setUp()
 
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(TestPGThumbnailHelperClass, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
@@ -2731,10 +2739,6 @@ class TestPGThumbnailHelperClass(TestThumbnailHelperClass):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
-    
     def test_thumbnail_mapper(self):
         # we are not carrying over the thumbnail url mapper 
         self.assertEquals(1,1) 
@@ -2743,6 +2747,10 @@ class TestPGAddingImageData(TestAddingImageData):
     def setUp(self): 
         super(TestPGAddingImageData, self).setUp()
 
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(TestPGAddingImageData, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
@@ -2754,14 +2762,14 @@ class TestPGAddingImageData(TestAddingImageData):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
-
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
+        super(TestPGAddingImageData, cls).tearDownClass()
 
 class TestPostgresDB(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPostgresDB, self).setUp()
+
+    def tearDown(self): 
+        super(TestPostgresDB, self).tearDown()
     
     @classmethod
     def setUpClass(cls):
@@ -2798,6 +2806,7 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         super(TestPostgresPubSub, self).setUp()
     def tearDown(self): 
         neondata.PostgresPubSub.instance = None
+        super(TestPostgresPubSub, self).tearDown()
     
     @classmethod
     def setUpClass(cls): 
@@ -2862,6 +2871,10 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
 class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGPlatformAndIntegration, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(TestPGPlatformAndIntegration, self).tearDown()
     
     @classmethod
     def setUpClass(cls): 
@@ -3102,6 +3115,10 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
 
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
@@ -3114,10 +3131,6 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
-
     @classmethod 
     def _get_object_type(cls): 
         return VideoMetadata
@@ -3125,6 +3138,10 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -3137,10 +3154,6 @@ class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-    
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
     
     @classmethod 
     def _get_object_type(cls): 
@@ -3159,6 +3172,10 @@ class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
 
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
@@ -3171,10 +3188,6 @@ class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
-
     @classmethod
     def _get_object_type(cls): 
         return User
@@ -3183,6 +3196,10 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
 
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
@@ -3195,10 +3212,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
-    @classmethod
-    def tearDown(cls): 
-        cls.postgresql.clear_all_tables()
-
     @classmethod
     def _get_object_type(cls): 
         return NeonUserAccount

@@ -276,6 +276,7 @@ class TestNewAccountHandlerPG(TestNewAccountHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestNewAccountHandler, cls).tearDownClass() 
     
 class TestAccountHandler(TestControllersBase):
     def setUp(self):
@@ -304,6 +305,7 @@ class TestAccountHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -485,6 +487,7 @@ class TestAccountHandlerPG(TestAccountHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestAccountHandlerPG, cls).tearDownClass() 
  
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
@@ -515,6 +518,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestOoyalaIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -644,6 +648,7 @@ class TestOoyalaIntegrationHandlerPG(TestOoyalaIntegrationHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestOoyalaIntegrationHandlerPG, cls).tearDownClass() 
  
 class TestBrightcoveIntegrationHandler(TestControllersBase): 
     def setUp(self):
@@ -674,6 +679,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestBrightcoveIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -965,6 +971,7 @@ class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestBrightcoveIntegrationHandlerPG, cls).tearDownClass() 
 
 class TestVideoHandler(TestControllersBase): 
     def setUp(self):
@@ -1014,6 +1021,7 @@ class TestVideoHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestVideoHandler, cls).tearDownClass() 
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -1531,6 +1539,7 @@ class TestVideoHandlerPG(TestVideoHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestVideoHandlerPG, cls).tearDownClass() 
 
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
@@ -1577,6 +1586,7 @@ class TestThumbnailHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestThumbnailHandler, cls).tearDownClass() 
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -1743,6 +1753,7 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+        super(TestThumbnailHandlerPG, cls).tearDownClass() 
 
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
@@ -1766,6 +1777,7 @@ class TestHealthCheckHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestHealthCheckHandler, cls).tearDownClass() 
  
     def test_healthcheck_success(self): 
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
@@ -1814,6 +1826,7 @@ class TestVideoStatsHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestVideoStatsHandler, cls).tearDownClass() 
     
     @tornado.testing.gen_test
     def test_one_video_id(self): 
