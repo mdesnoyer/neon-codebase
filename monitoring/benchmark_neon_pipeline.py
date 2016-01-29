@@ -43,6 +43,10 @@ define("callback_port", default=8080,
        help='Port to listen with the callback receiver on')
 define("cmsapi_user", default=None, help='User to submit jobs with')
 define("cmsapi_pass", default=None, help='Password for the cmsapi')
+define("result_endpoint",
+       default="http://10.0.13.60:9200/result_index/videojob/",
+       help=("External endpoint to send the result objects to. It could "
+             "be an elasticsearch cluster"))
 
 # counters
 statemon.define('total_time_to_isp', float)
@@ -61,6 +65,7 @@ statemon.define('unexpected_exception_thrown', int)
 statemon.define('jobs_created', int)
 statemon.define('incorrect_callback', int)
 statemon.define('no_callback', int)
+statemon.define('result_submission_error', int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -76,6 +81,58 @@ class SubmissionError(JobError): pass
 class RunningTooLongError(JobError): pass
 class JobFailed(JobError): pass
 
+class BenchmarkVideoJobResult:
+    '''Stores the metrics for running a benchmark video job.
+
+    Used for benchmarking the system. Keyed by job start time.
+    '''
+    def __init__(self, start_time,
+                 error_type=None,
+                 error_msg=None,
+                 total_time=None,
+                 time_to_processing=None,
+                 time_to_finished=None,
+                 time_to_callback=None,
+                 time_to_serving=None
+                 ):
+        # The start time of the job in iso format
+        self.start_time = start_time
+
+        # String specifying the type of error that occurred
+        self.error_type = error_type
+
+        # More detailed string describing the error
+        self.error_msg = error_msg
+
+        # Time from job submission to images being available in the isp
+        self.total_time = total_time
+
+        # Time from submission to when it starts to be processed.
+        self.time_to_processing = time_to_processing
+
+        # Time from submission to when it is finished processing.
+        self.time_to_finished = time_to_finished
+
+        # Time from submission to when it is flagged as serving in the db.
+        self.time_to_serving = time_to_serving
+
+        # Time from submission to when the callback is received
+        self.time_to_callback = time_to_callback
+
+    @tornado.gen.coroutine
+    def send(self):
+        request = tornado.httpclient.HTTPRequest(
+            options.result_endpoint,
+            method='POST',
+            headers={'Content-Type': 'application/json'},
+            body=json.dumps(self.__dict__))
+
+        response = yield utils.http.send_request(request, async=True)
+
+        if response.error:
+            _log.error('Error submitting job information: %s' %
+                       response.error)
+            statemon.state.increment('result_submission_error')
 
 class JobManager(object):
     def __init__(self, cb_collector):
@@ -98,8 +155,11 @@ class JobManager(object):
     @tornado.gen.coroutine
     def cleanup(self):
         if self.result is not None:
-            # Save the result of this job to the database
-            yield tornado.gen.Task(self.result.save)
+            if not self._stopped:
+                # Don't send the result if an external entity stopped
+                # the process because it wasn't the system that got
+                # stuck part way.
+                yield self.result.send()
             self.result = None
         
         if self.job_id is not None:
@@ -135,7 +195,7 @@ class JobManager(object):
     @tornado.gen.coroutine
     def _run_test_job(self, video_id=None):
         self.start_time =  time.time()
-        self.result = neondata.BenchmarkVideoJobResult(
+        self.result = BenchmarkVideoJobResult(
            datetime.datetime.now().isoformat())
 
         # Create a video request for test account
