@@ -53,6 +53,8 @@ class Postgresql(object):
         self.settings.update(kwargs)
         self.pid = None
         self._owner_pid = os.getpid()
+        #self.old_port = None
+        #self.old_name = None 
         self._use_tmpdir = False
 
         if self.base_dir:
@@ -254,7 +256,7 @@ class Postgresql(object):
             params = self.dsn(database='template1')
             with closing(psycopg2.connect(**params)):
                 pass
-        except pg8000.Error:
+        except psycopg2.OperationalError:
             return False
         else:
             return True

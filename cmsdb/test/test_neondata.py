@@ -61,14 +61,24 @@ _log = logging.getLogger(__name__)
 class TestNeondataRedisListSpecific(test_utils.neontest.AsyncTestCase): 
     def setUp(self):
         super(TestNeondataRedisListSpecific, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.maxDiff = 5000
         logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
-        self.redis.stop()
+        conn = neondata.DBConnection.get(VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(ThumbnailMetadata)
+        conn.clear_db()
         super(TestNeondataRedisListSpecific, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_creating_list_of_videos_async(self):
@@ -88,7 +98,6 @@ class TestNeondataRedisListSpecific(test_utils.neontest.AsyncTestCase):
       self.assertItemsEqual(conn.blocking_conn.smembers(
         VideoMetadata('a2_v1')._set_keyname()),
         ['a2_v1', 'a2_v2', 'a2_v3', 'a2_v4'])
-
       # Now delete some
       yield tornado.gen.Task(VideoMetadata.delete_many,
                              ['a1_v2', 'a2_v2'])
@@ -260,14 +269,24 @@ class TestNeondataRedisListSpecific(test_utils.neontest.AsyncTestCase):
 class TestNeondataDataSpecific(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestNeondataDataSpecific, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.maxDiff = 5000
         logging.getLogger('cmsdb.neondata').reset_sample_counters()
 
     def tearDown(self):
-        self.redis.stop()
+        conn = neondata.DBConnection.get(VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(ThumbnailMetadata)
+        conn.clear_db()
         super(TestNeondataDataSpecific, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     def test_neon_api_key(self):
         ''' test api key generation '''
@@ -1565,6 +1584,7 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
 
     def test_subscribe_api_request_changes(self):
+        #import pdb; pdb.set_trace()
         bc_trap = TestNeondata.ChangeTrap()
         generic_trap = TestNeondata.ChangeTrap()
 
@@ -2141,14 +2161,23 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
     '''
     def setUp(self):
         super(TestThumbnailHelperClass, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
         self.image = PILImageUtils.create_random_image(360, 480)
 
     def tearDown(self):
-        self.redis.stop()
+        conn = neondata.DBConnection.get(VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(ThumbnailMetadata)
+        conn.clear_db()
         super(TestThumbnailHelperClass, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     def test_thumbnail_mapper(self):
         ''' Thumbnail mappings '''
@@ -2333,9 +2362,6 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
     Test cases that add image data to thumbnails (and do uploads) 
     '''
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
         self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
@@ -2367,7 +2393,10 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         self.s3_patcher.stop()
         self.cloudinary_patcher.stop()
         self.cdn_check_patcher.stop()
-        self.redis.stop()
+        conn = neondata.DBConnection.get(VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(ThumbnailMetadata)
+        conn.clear_db()
         super(TestAddingImageData, self).tearDown()
 
     @tornado.testing.gen_test
@@ -2799,7 +2828,7 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
         yield tornado.gen.sleep(0.01) 
-        cb.assert_called_with(so.key, ANY, ANY)
+        cb.assert_called_with(so.get_id(), ANY, ANY)
  
     @tornado.testing.gen_test()
     def test_unsubscribe_from_changes(self):
@@ -2813,7 +2842,7 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         rv = yield so2.save(async=True)
 
         yield tornado.gen.sleep(0.01) 
-        cb.assert_called_once_with(so.key, ANY, ANY)
+        cb.assert_called_once_with(so.get_id(), ANY, ANY)
  
     @tornado.testing.gen_test()
     def test_multiple_functions_listening(self):
@@ -2826,9 +2855,9 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         rv = yield so.save(async=True)
 
-        yield tornado.gen.sleep(0.01) 
-        cb.assert_called_once_with(so.key, ANY, ANY)
-        cb2.assert_called_once_with(so.key, ANY, ANY)
+        yield tornado.gen.sleep(0.01)
+        cb.assert_called_once_with(so.get_id(), ANY, ANY)
+        cb2.assert_called_once_with(so.get_id(), ANY, ANY)
 
 class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
@@ -2861,7 +2890,7 @@ class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
  
     @tornado.testing.gen_test 
     def test_modify_brightcove_integration(self):
-        def _initialize_bc_plat(x):
+        def _initialize_bc_int(x):
             x.account_id = '123'
             x.publisher_id = '123'
             x.read_token = 'abc'
@@ -2869,8 +2898,7 @@ class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
             x.last_process_date = time.time()
         bc = yield tornado.gen.Task(
               neondata.BrightcoveIntegration.modify,
-              '45', '82',
-              _initialize_bc_plat)
+              '45', _initialize_bc_int, create_missing=True)
 
 class BasePGNormalObject(object):
     @classmethod 

@@ -1114,6 +1114,7 @@ class PubSubConnection(threading.Thread):
             self._channels[pattern] = func
 
         error = None
+        #import pdb; pdb.set_trace()
         for i in range(options.maxRedisRetries):
             try:
                 pool = concurrent.futures.ThreadPoolExecutor(1)
@@ -1126,6 +1127,7 @@ class PubSubConnection(threading.Thread):
                 if not self.is_alive():
                     self.start()
 
+         #       import pdb; pdb.set_trace()
                 yield sub_future
                 return
             except DBConnectionError as e:
@@ -1135,6 +1137,7 @@ class PubSubConnection(threading.Thread):
                 delay = (1 << i) * options.baseRedisRetryWait # in seconds
                 yield tornado.gen.sleep(delay)
 
+        #import pdb; pdb.set_trace()
         with self._publock:
             try:
                 del self._channels[pattern]
@@ -1967,7 +1970,6 @@ class StoredObject(object):
            of : 
                func(key, object, operation) 
         '''
-        import pdb; pdb.set_trace()   
         results = future.result()
         for r in results: 
             r = json.loads(r)
@@ -2050,6 +2052,7 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
+        #import pdb; pdb.set_trace()
         if options.wants_postgres:
             pubsub = PostgresPubSub();
             pattern = cls._baseclass_name().lower()

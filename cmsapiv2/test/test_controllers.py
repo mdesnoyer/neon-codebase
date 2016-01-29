@@ -151,8 +151,6 @@ class TestControllersBase(TestBase):
 
 class TestNewAccountHandler(TestControllersBase):
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
@@ -161,8 +159,21 @@ class TestNewAccountHandler(TestControllersBase):
         super(TestNewAccountHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestNewAccountHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
@@ -253,6 +264,7 @@ class TestNewAccountHandlerPG(TestNewAccountHandler):
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestNewAccountHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -267,8 +279,6 @@ class TestNewAccountHandlerPG(TestNewAccountHandler):
     
 class TestAccountHandler(TestControllersBase):
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.user.save() 
         self.verify_account_mocker = patch(
@@ -279,8 +289,21 @@ class TestAccountHandler(TestControllersBase):
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestAccountHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -450,6 +473,7 @@ class TestAccountHandlerPG(TestAccountHandler):
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestAccountHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -464,8 +488,6 @@ class TestAccountHandlerPG(TestAccountHandler):
  
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
@@ -479,8 +501,20 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -598,6 +632,7 @@ class TestOoyalaIntegrationHandlerPG(TestOoyalaIntegrationHandler):
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestOoyalaIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -612,8 +647,6 @@ class TestOoyalaIntegrationHandlerPG(TestOoyalaIntegrationHandler):
  
 class TestBrightcoveIntegrationHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
@@ -627,8 +660,20 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -908,6 +953,7 @@ class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler):
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestBrightcoveIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -922,8 +968,6 @@ class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler):
 
 class TestVideoHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
@@ -953,11 +997,23 @@ class TestVideoHandler(TestControllersBase):
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -1463,6 +1519,7 @@ class TestVideoHandlerPG(TestVideoHandler):
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestVideoHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1477,8 +1534,6 @@ class TestVideoHandlerPG(TestVideoHandler):
 
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
@@ -1506,10 +1561,22 @@ class TestThumbnailHandler(TestControllersBase):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -1664,6 +1731,7 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
+        super(TestThumbnailHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1678,16 +1746,26 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
 
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.http_mocker = patch('utils.http.send_request')
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
         super(TestHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.http_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
  
     def test_healthcheck_success(self): 
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
@@ -1709,8 +1787,6 @@ class TestHealthCheckHandler(TestControllersBase):
 
 class TestVideoStatsHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
@@ -1724,8 +1800,20 @@ class TestVideoStatsHandler(TestControllersBase):
         super(TestVideoStatsHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
     
     @tornado.testing.gen_test
     def test_one_video_id(self): 
@@ -1808,6 +1896,7 @@ class TestVideoStatsHandlerPG(TestVideoStatsHandler):
     def tearDown(self):
         self.verify_account_mocker.stop()  
         self.postgresql.clear_all_tables()
+        super(TestVideoStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1822,8 +1911,6 @@ class TestVideoStatsHandlerPG(TestVideoStatsHandler):
  
 class TestThumbnailStatsHandler(TestControllersBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
@@ -1840,8 +1927,20 @@ class TestThumbnailStatsHandler(TestControllersBase):
         super(TestThumbnailStatsHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         self.verify_account_mocker.stop()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_account_id_video_id(self): 
@@ -1964,6 +2063,7 @@ class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler):
     def tearDown(self):
         self.verify_account_mocker.stop()  
         self.postgresql.clear_all_tables()
+        super(TestThumbnailStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1978,14 +2078,24 @@ class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler):
 
 class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
     
     def make_calls_and_assert_401(self, 
                                   url, 
@@ -2343,6 +2453,7 @@ class TestAPIKeyRequiredPG(TestAPIKeyRequired):
 
     def tearDown(self):
         self.postgresql.clear_all_tables()
+        super(TestAPIKeyRequired, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2489,6 +2600,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
          
     def tearDown(self): 
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
+        super(TestRefreshTokenHandler, self).tearDown()
  
     @classmethod 
     def setUpClass(cls): 
@@ -2581,6 +2693,7 @@ class TestRefreshTokenHandlerPG(TestRefreshTokenHandler):
 
     def tearDown(self): 
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
+        super(TestRefreshTokenHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2674,12 +2787,23 @@ class TestLogoutHandlerPG(TestLogoutHandler):
 
 class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         super(TestAuthenticationHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
+        super(TestAuthenticationHealthCheckHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
  
     def test_healthcheck_success(self): 
 	url = '/healthcheck/'

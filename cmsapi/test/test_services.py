@@ -169,15 +169,24 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.video_ids = []
         self.images = {} 
 
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         super(TestServices, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
     
     def get_app(self):
         ''' return services app '''
