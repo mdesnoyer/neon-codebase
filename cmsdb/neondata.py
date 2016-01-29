@@ -1331,6 +1331,11 @@ class AccessLevels(object):
     ADMIN = 16 
     GLOBAL_ADMIN = 32
 
+class PythonNaNStrings(object): 
+    INF = 'Infinite' 
+    NEGINF = '-Infinite' 
+    NAN = 'NaN' 
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -1395,13 +1400,25 @@ class StoredObject(object):
         return json.dumps(self, default=lambda o: o.to_dict())
     
     def get_json_data(self):
+         
         '''
             for postgres we only want the _data field, since we 
             have a column that is named _data we do not want _data->_data
 
             override this if you need something custom to get _data
         '''
-        return json.dumps(self.to_dict()['_data']) 
+        def _json_fixer(obj): 
+            for key, value in obj.items(): 
+                if value == float('-inf'):
+                    obj[key] = PythonNaNStrings.NEGINF
+                if value == float('inf'):
+                    obj[key] = PythonNaNStrings.INF
+                if value == float('nan'):
+                    obj[key] = PythonNaNStrings.NAN
+            return obj
+        import pdb; pdb.set_trace()
+        obj = _json_fixer(self.to_dict()['_data']) 
+        return json.dumps(obj)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1477,6 +1494,12 @@ class StoredObject(object):
             #populate the object dictionary
             try:
                 for k, value in data_dict.iteritems():
+                    if value == PythonNaNStrings.NEGINF:
+                        value = float('-inf') 
+                    if value == PythonNaNStrings.INF:
+                        value = float('inf')
+                    if value == PythonNaNStrings.NAN:
+                        value = float('nan') 
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None

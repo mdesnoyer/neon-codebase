@@ -2289,6 +2289,20 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(val)
         self.assertEqual(val.urls, ['http://image.jpg'])
 
+    def test_create_infinite_model_score(self):
+        vid1 = InternalVideoID.generate('api1', 'vid1')
+        tid1 = ThumbnailID.generate(self.image, vid1)
+        tdata1 = ThumbnailMetadata(tid1, vid1, ['one.jpg', 'two.jpg'],
+                                   None, 
+                                   self.image.size[1],
+                                   self.image.size[0],
+                                   'brightcove', model_score=float('-inf'))
+
+        tdata1.save() 
+        val = ThumbnailMetadata.get(tid1)
+        self.assertIsNotNone(val)
+        self.assertEqual(val.urls, ['one.jpg', 'two.jpg'])
+
     @tornado.testing.gen_test
     def test_create_or_modify_async(self):
         vid1 = InternalVideoID.generate('api1', 'vid1')

@@ -1818,6 +1818,7 @@ class TestServicesPG(TestServices):
         
     def setUp(self):
         super(TestServices, self).setUp()
+        options._set('cmsdb.neondata.wants_postgres', 1)
         #Http Connection pool Mock
         self.cp_async_patcher = \
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
@@ -1840,6 +1841,7 @@ class TestServicesPG(TestServices):
     def tearDown(self):
         self.cp_async_patcher.stop()
         self.postgresql.clear_all_tables() 
+        options._set('cmsdb.neondata.wants_postgres', 0)
         super(TestServices, self).tearDown()
 
     @classmethod
@@ -1853,6 +1855,7 @@ class TestServicesPG(TestServices):
     def tearDownClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
+        super(TestServices, cls).tearDownClass()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
