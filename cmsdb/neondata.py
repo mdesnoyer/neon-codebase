@@ -4756,9 +4756,7 @@ class VideoStatus(DefaultedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return VideoStatus.__name__
-
-    
+        return VideoStatus.__name__ 
 
 class AbstractJsonResponse(object):
     

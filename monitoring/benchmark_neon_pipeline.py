@@ -12,6 +12,7 @@ if sys.path[0] != __base_path__:
 import atexit
 import cmsapiv2.client
 from cmsdb import neondata
+import datetime
 import functools
 import json
 import re
@@ -42,9 +43,14 @@ define("callback_port", default=8080,
        help='Port to listen with the callback receiver on')
 define("cmsapi_user", default=None, help='User to submit jobs with')
 define("cmsapi_pass", default=None, help='Password for the cmsapi')
+define("result_endpoint",
+       default="http://10.0.13.60:9200/result_index/videojob/",
+       help=("External endpoint to send the result objects to. It could "
+             "be an elasticsearch cluster"))
 
 # counters
 statemon.define('total_time_to_isp', float)
+statemon.define('time_to_processing', float)
 statemon.define('time_to_callback', float)
 statemon.define('time_to_serving', float)
 statemon.define('time_to_finished', float)
@@ -59,15 +65,74 @@ statemon.define('unexpected_exception_thrown', int)
 statemon.define('jobs_created', int)
 statemon.define('incorrect_callback', int)
 statemon.define('no_callback', int)
+statemon.define('result_submission_error', int)
 
 import logging
 _log = logging.getLogger(__name__)
 
-class JobError(Exception): pass
+class JobError(Exception): 
+    def __init__(self, msg=None):
+        self.msg = msg
+        
+    def __repr__(self):
+        return '%s(%s)' % (self.__class__.__name__, self.msg)
+    
 class SubmissionError(JobError): pass
 class RunningTooLongError(JobError): pass
 class JobFailed(JobError): pass
 
+class BenchmarkVideoJobResult:
+    '''Stores the metrics for running a benchmark video job.
+
+    Used for benchmarking the system. Keyed by job start time.
+    '''
+    def __init__(self, start_time,
+                 error_type=None,
+                 error_msg=None,
+                 total_time=None,
+                 time_to_processing=None,
+                 time_to_finished=None,
+                 time_to_callback=None,
+                 time_to_serving=None
+                 ):
+        # The start time of the job in iso format
+        self.start_time = start_time
+
+        # String specifying the type of error that occurred
+        self.error_type = error_type
+
+        # More detailed string describing the error
+        self.error_msg = error_msg
+
+        # Time from job submission to images being available in the isp
+        self.total_time = total_time
+
+        # Time from submission to when it starts to be processed.
+        self.time_to_processing = time_to_processing
+
+        # Time from submission to when it is finished processing.
+        self.time_to_finished = time_to_finished
+
+        # Time from submission to when it is flagged as serving in the db.
+        self.time_to_serving = time_to_serving
+
+        # Time from submission to when the callback is received
+        self.time_to_callback = time_to_callback
+
+    @tornado.gen.coroutine
+    def send(self):
+        request = tornado.httpclient.HTTPRequest(
+            options.result_endpoint,
+            method='POST',
+            headers={'Content-Type': 'application/json'},
+            body=json.dumps(self.__dict__))
+
+        response = yield utils.http.send_request(request, async=True)
+
+        if response.error:
+            _log.error('Error submitting job information: %s' %
+                       response.error)
+            statemon.state.increment('result_submission_error')
 
 class JobManager(object):
     def __init__(self, cb_collector):
@@ -75,6 +140,8 @@ class JobManager(object):
         self.video_id = None
         self.job_id = None
         self.start_time = None
+        self.result = None
+        self.cur_state = None
 
         self._stopped = False # Has a request been received to stop
 
@@ -87,6 +154,14 @@ class JobManager(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def cleanup(self):
+        if self.result is not None:
+            if not self._stopped:
+                # Don't send the result if an external entity stopped
+                # the process because it wasn't the system that got
+                # stuck part way.
+                yield self.result.send()
+            self.result = None
+        
         if self.job_id is not None:
             np = yield tornado.gen.Task(neondata.NeonPlatform.get,
                                         options.api_key, '0')
@@ -108,6 +183,8 @@ class JobManager(object):
             statemon.state.unexpected_exception_thrown = 0
         except JobError as e:
             # Logging already done
+            self.result.error_type = e.__class__.__name__
+            self.result.error_msg = e.msg
             pass
         except Exception as e:
             _log.exception('Exception when monitoring')
@@ -118,13 +195,32 @@ class JobManager(object):
     @tornado.gen.coroutine
     def _run_test_job(self, video_id=None):
         self.start_time =  time.time()
+        self.result = BenchmarkVideoJobResult(
+           datetime.datetime.now().isoformat())
 
         # Create a video request for test account
         yield self.create_neon_api_request(options.account,
                                            options.api_key,
                                            video_id=video_id)
 
-        yield [self.wait_for_callback(), self.wait_for_job_serving()]
+        # Wait for processing
+        yield self.wait_for_job_state([
+            neondata.RequestState.PROCESSING,
+            neondata.RequestState.FINISHED,
+            neondata.RequestState.SERVING])
+        self.result.time_to_processing = time.time() - self.start_time
+        statemon.state.time_to_processing = self.result.time_to_processing
+
+        # Wait for finished
+        yield self.wait_for_job_state([
+            neondata.RequestState.FINISHED,
+            neondata.RequestState.SERVING])
+        self.result.time_to_finished = time.time() - self.start_time
+        statemon.state.time_to_finished = self.result.time_to_finished
+
+        # Wait for serving and the callback
+        yield tornado.gen.multi_future([self.wait_for_callback(),
+                                        self.wait_for_job_serving()])
         
         yield self.wait_for_isp_image()
 
@@ -132,9 +228,9 @@ class JobManager(object):
             return
 
 
-        total_time = time.time() - self.start_time
-        statemon.state.total_time_to_isp = total_time
-        _log.info("total pipeline time %s" % total_time)
+        self.result.total_time = time.time() - self.start_time
+        statemon.state.total_time_to_isp = self.result.total_time
+        _log.info("total pipeline time %s" % self.result.total_time)
 
         # Clear the error states
         statemon.state.job_submission_error = 0
@@ -174,11 +270,11 @@ class JobManager(object):
             if res.error:
                 _log.error('Error submitting job: %s' % res.error)
                 statemon.state.job_submission_error = 1
-                raise SubmissionError
+                raise SubmissionError(str(res.error))
         except tornado.httpclient.HTTPError as e:
             _log.error('Error submitting job: %s' % e)
             statemon.state.job_submission_error = 1
-            raise SubmissionError
+            raise SubmissionError(str(e))
         api_resp = json.loads(res.buffer)
         self.job_id = api_resp['job_id']
         
@@ -187,23 +283,20 @@ class JobManager(object):
             self.video_id, self.job_id, options.api_key))
 
     @tornado.gen.coroutine
-    def wait_for_job_serving(self):
+    def wait_for_job_state(self, valid_states=[]):
+        '''Poll the api to wait for the request to be one of the valid_states.
+        '''
 
-        # Poll the API for job request completion
-        job_serving = False
-        job_finished = False
-        while not job_serving and not self._stopped:
+        if self.cur_state and self.cur_state in valid_states:
+            return
+        
+        while not self._stopped:
             request = yield tornado.gen.Task(neondata.NeonApiRequest.get,
                                              self.job_id, options.api_key)
             if request:
-                if (not job_finished and 
-                    request.state == neondata.RequestState.FINISHED):
-                    statemon.state.time_to_finished = \
-                      time.time() - self.start_time
-                    job_finished = True
-                elif request.state == neondata.RequestState.SERVING:
-                    job_serving = True
-                    break
+                self.cur_state = request.state
+                if request.state in valid_states:
+                    return
                 elif request.state in [
                     neondata.RequestState.FAILED,
                     neondata.RequestState.INT_ERROR,
@@ -211,7 +304,7 @@ class JobManager(object):
                     statemon.state.job_failed = 1
                     _log.error('Job failed with state %s with response: %s' %
                                (request.state, request.response))
-                    raise JobFailed
+                    raise JobFailed(request.response['error'])
             else:
                 _log.warn("request data not found in db")
                 statemon.state.request_not_in_db = 1
@@ -220,15 +313,18 @@ class JobManager(object):
             if time.time() > (self.start_time + options.serving_timeout):
                 statemon.state.job_not_serving = 1
                 _log.error('Job took too long to reach serving state')
-                raise RunningTooLongError
+                raise RunningTooLongError('Too long to reach serving')
             yield tornado.gen.sleep(1.0)
 
-        if not job_finished:
-            statemon.state.time_to_finished = time.time() - self.start_time
-        # time to video serving
-        video_serving = time.time() - self.start_time
-        statemon.state.time_to_serving = video_serving
-        _log.info("video is in serving state, took %s" % video_serving)
+    @tornado.gen.coroutine
+    def wait_for_job_serving(self):
+        yield self.wait_for_job_state([
+            neondata.RequestState.SERVING])
+        self.result.time_to_serving = time.time() - self.start_time
+        statemon.state.time_to_serving = self.result.time_to_serving
+
+        _log.info("video is in serving state, took %s" % 
+                  self.result.time_to_serving)
 
     @tornado.gen.coroutine
     def wait_for_callback(self):
@@ -247,14 +343,15 @@ class JobManager(object):
             elif time.time() > (self.start_time + options.serving_timeout):
                 statemon.state.no_callback = 1
                 _log.error('Timeout waiting for the callback')
-                raise RunningTooLongError
+                raise RunningTooLongError('Too long to receive callback')
 
             if not callback_seen:
                 yield tornado.gen.sleep(0.1)
 
-        callback_time = time.time() - self.start_time
-        statemon.state.time_to_callback = callback_time
-        _log.info('Callback received after %s seconds' % callback_time)
+        self.result.time_to_callback = time.time() - self.start_time
+        statemon.state.time_to_callback = self.result.time_to_callback
+        _log.info('Callback received after %s seconds' % 
+                  self.result.time_to_callback)
 
     @tornado.gen.coroutine
     def wait_for_isp_image(self):
@@ -271,7 +368,7 @@ class JobManager(object):
                 if time.time() > (isp_start + options.isp_timeout):
                     _log.error('Too long for image to appear in ISP')
                     statemon.state.not_available_in_isp = 1
-                    raise RunningTooLongError
+                    raise RunningTooLongError('Too long waiting for ISP')
                 yield tornado.gen.sleep(1.0)
 
         isp_serving = time.time() - isp_start 
