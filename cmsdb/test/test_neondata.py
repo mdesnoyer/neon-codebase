@@ -2417,6 +2417,16 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         conn.clear_db()
         super(TestAddingImageData, self).tearDown()
 
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
+        super(TestAddingImageData, cls).tearDownClass()
+
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
 

@@ -144,10 +144,6 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     ''' Services Test '''
         
-    @classmethod
-    def setUpClass(cls):
-        super(TestServices, cls).setUpClass()
-
     def setUp(self):
         super(TestServices, self).setUp()
         #NOTE: Make sure that you don't repatch objects
@@ -183,10 +179,12 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     def setUpClass(cls):
         cls.redis = test_utils.redis.RedisServer()
         cls.redis.start()
+        super(TestServices, cls).setUpClass()
 
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
+        super(TestServices, cls).tearDownClass()
     
     def get_app(self):
         ''' return services app '''
