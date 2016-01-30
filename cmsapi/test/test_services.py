@@ -1855,6 +1855,9 @@ class TestServicesPG(TestServices):
         cls.postgresql.stop()
         super(TestServices, cls).tearDownClass()
 
+    def test_create_video_request_utf8(self):
+        pass 
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()
