@@ -1187,7 +1187,8 @@ class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
     def setUp(self): 
         super(TestPGNeondataDataSpecific, self).setUp()
 
-    def tearDown(self): 
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
         super(TestPGNeondataDataSpecific, self).tearDown()
 
     @classmethod
@@ -1200,10 +1201,6 @@ class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
-
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestPGNeondataDataSpecific, self).tearDown()
 
     def test_default_bcplatform_settings(self):
         ''' override from base due to saving 
@@ -2745,11 +2742,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
 class TestPGThumbnailHelperClass(TestThumbnailHelperClass):
     def setUp(self): 
-        super(TestPGThumbnailHelperClass, self).setUp()
+        self.image = PILImageUtils.create_random_image(360, 480)
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
 
     def tearDown(self): 
         self.postgresql.clear_all_tables()
-        super(TestPGThumbnailHelperClass, self).tearDown()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2768,12 +2766,40 @@ class TestPGThumbnailHelperClass(TestThumbnailHelperClass):
         self.assertEquals(1,1) 
 
 class TestPGAddingImageData(TestAddingImageData): 
-    def setUp(self): 
-        super(TestPGAddingImageData, self).setUp()
+    def setUp(self):
+        # Mock out s3
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('hosting-bucket')
+        self.bucket = self.s3conn.get_bucket('hosting-bucket')
 
-    def tearDown(self): 
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().hoster_type = "cloudinary"
+        self.cloudinary_mock().upload.side_effect = [future]
+
+        # Mock out the cdn url check
+        self.cdn_check_patcher = patch('cmsdb.cdnhosting.utils.http')
+        self.mock_cdn_url = self._future_wrap_mock(
+            self.cdn_check_patcher.start().send_request)
+        self.mock_cdn_url.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+
+        random.seed(1654984)
+
+        self.image = PILImageUtils.create_random_image(360, 480)
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self):
+        self.s3_patcher.stop()
+        self.cloudinary_patcher.stop()
+        self.cdn_check_patcher.stop()
         self.postgresql.clear_all_tables()
-        super(TestPGAddingImageData, self).tearDown()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
