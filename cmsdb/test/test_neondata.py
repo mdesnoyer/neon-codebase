@@ -1185,11 +1185,13 @@ class TestNeondataDataSpecific(test_utils.neontest.AsyncTestCase):
 
 class TestPGNeondataDataSpecific(TestNeondataDataSpecific):
     def setUp(self): 
-        super(TestPGNeondataDataSpecific, self).setUp()
+        self.maxDiff = 5000
+        logging.getLogger('cmsdb.neondata').reset_sample_counters()
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
 
     def tearDown(self):
         self.postgresql.clear_all_tables()
-        super(TestPGNeondataDataSpecific, self).tearDown()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
