@@ -183,8 +183,9 @@ def move_cdn_hosting_metadata_lists():
 def move_neon_videos_and_thumbnails():
     ''' 
         move VideoMetadata, ThumbnailMetadata, ThumbnailStatus 
-             VideoStatus
-    '''  
+             VideoStatus, ThumbnailServingURLs, NeonApiRequest
+    ''' 
+    accounts_done = []  
     accts = neondata.NeonUserAccount.get_all()
     _log.info('Processing Videos for %d Accounts ...' % len(accts))
     account_counter = 0 
@@ -196,7 +197,7 @@ def move_neon_videos_and_thumbnails():
         for v in acct.iterate_all_videos():
             options._set('cmsdb.neondata.wants_postgres', 0)
             video_counter += 1
-            if video_counter % 5 is 0:
+            if video_counter % 20 is 0:
                 _log.info('Done Processing %d videos for Account : %s ...' % (video_counter, acct.neon_api_key))
             try:
                 tnails = neondata.ThumbnailMetadata.get_many(v.thumbnail_ids)
@@ -248,18 +249,20 @@ def move_neon_videos_and_thumbnails():
             except Exception as e: 
                 _log.exception('Error pulling information for video %s while saving to postgres %s' % (v,e)) 
                 pass
+        accounts_done.append(acct.get_api_key())
+        _log.info('Accounts Done : %s' % accounts_done)
     options._set('cmsdb.neondata.wants_postgres', 0)
 
 def main():
-    move_processing_strategies() 
-    move_tracker_account_id_mappers() 
-    move_users() 
-    move_neon_user_accounts()
+    #move_processing_strategies() 
+    #move_tracker_account_id_mappers() 
+    #move_users() 
+    #move_neon_user_accounts()
     move_neon_videos_and_thumbnails()
-    move_abstract_integrations()
-    move_abstract_platforms()
-    move_cdn_hosting_metadata_lists()
-    move_experiment_strategies()
+    #move_abstract_integrations()
+    #move_abstract_platforms()
+    #move_cdn_hosting_metadata_lists()
+    #move_experiment_strategies()
 
 if __name__ == "__main__":
     utils.neon.InitNeon()

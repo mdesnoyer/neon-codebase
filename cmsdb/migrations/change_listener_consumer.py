@@ -126,7 +126,6 @@ def consumer(queue):
         # from the producers queue  
         item = yield queue.get()
         try: 
-            _log.info('this is the item %s' % (item))
             if item['type'] is 'normal':
                 with (yield lock_normal.acquire()):  
                     yield modify_normal(item['key'], item['obj'], item['op']) 
@@ -137,5 +136,8 @@ def consumer(queue):
                 with (yield lock_platform.acquire()):  
                     yield modify_platform(item['key'], item['obj'], item['op']) 
             yield tornado.gen.sleep(0.01) 
-        finally: 
-            queue.task_done() 
+        finally:
+            try:  
+                queue.task_done() 
+            except ValueError: 
+                pass 
