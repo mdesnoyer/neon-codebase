@@ -39,7 +39,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             self.create_job_patcher.start().Client().send_request)
         self.create_job_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
-              x, 200, buffer='{"job_id": "myjobid"}')
+              x, 200, buffer=StringIO('{"job_id": "myjobid"}'))
 
         # Mock out the isp request
         self.isp_call_mock = MagicMock()

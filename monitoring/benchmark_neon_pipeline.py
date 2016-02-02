@@ -275,7 +275,7 @@ class JobManager(object):
             _log.error('Error submitting job: %s' % e)
             statemon.state.job_submission_error = 1
             raise SubmissionError(str(e))
-        api_resp = json.loads(res.buffer)
+        api_resp = json.loads(res.body)
         self.job_id = api_resp['job_id']
         
         statemon.state.increment('jobs_created')
