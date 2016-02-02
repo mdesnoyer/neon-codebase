@@ -280,7 +280,7 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
                                        row_stop=end_key,
                                        columns=['evts']):
                 garb1, garb, hr = key.rpartition('_')
-                hr = datetime.strptime(hr, 'Y-%m-%dT%H')
+                hr = datetime.strptime(hr, '%Y-%m-%dT%H')
                 cur_counts = dict([(k.partition(':')[2],
                                     struct.unpack('>q', v)[0])
                                     for k, v in row.iteritems()])
