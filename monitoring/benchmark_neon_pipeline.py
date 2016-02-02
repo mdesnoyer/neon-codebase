@@ -449,7 +449,7 @@ def main():
                   io_loop.add_callback_from_signal(io_loop.spawn_callback,
                                                    benchmarker.shutdown))
 
-    Benchmarker.start()
+    benchmarker.start()
     io_loop.start()
 
 if __name__ == "__main__":
