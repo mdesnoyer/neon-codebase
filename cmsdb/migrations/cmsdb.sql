@@ -435,13 +435,13 @@ BEGIN
     IF TG_OP = 'DELETE' THEN
     payload := row_to_json(tmp)::text FROM (
             SELECT
-                OLD.*,
+                OLD._data->>'key' AS _key,
                 TG_OP
         ) tmp;
     ELSE
         payload := row_to_json(tmp)::text FROM (
             SELECT 
-                NEW.*,
+                NEW._data->>'key' AS _key,
                 TG_OP
         ) tmp;
     END IF;

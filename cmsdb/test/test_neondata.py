@@ -2920,6 +2920,42 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
         cb.assert_called_once_with(so.get_id(), ANY, ANY)
         cb2.assert_called_once_with(so.get_id(), ANY, ANY)
 
+    @tornado.testing.gen_test()
+    def test_payload_too_long_save(self):
+        self.returned_key = None 
+        def cb(key, data, op):
+            self.returned_key = key 
+        yield neondata.ThumbnailStatus.subscribe_to_changes(cb, async=True)
+        tn = neondata.ThumbnailStatus('123')
+        for i in range(1,500): 
+            tn.serving_history.append([time.time(), '0.21'])  
+        yield tn.save(async=True)
+        yield self.assertWaitForEquals(lambda: '123' in self.returned_key, 
+            True, 
+            async=True)
+ 
+    @tornado.testing.gen_test()
+    def test_payload_too_long_delete(self):
+        self.returned_key = None
+        self.returned_op = None  
+        def cb(key, data, op):
+            self.returned_key = key 
+            self.returned_op = op 
+        yield neondata.ThumbnailStatus.subscribe_to_changes(cb, async=True)
+        tn = neondata.ThumbnailStatus('123')
+        for i in range(1,500): 
+            tn.serving_history.append([time.time(), '0.21'])  
+        yield tn.save(async=True)
+        yield self.assertWaitForEquals(lambda: '123' in self.returned_key and  
+            'INSERT' in self.returned_op, 
+            True, 
+            async=True) 
+        yield tn.delete(tn.key, async=True) 
+        yield self.assertWaitForEquals(lambda: '123' in self.returned_key and 
+            'DELETE' in self.returned_op, 
+            True, 
+            async=True) 
+
 class TestPGPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPGPlatformAndIntegration, self).setUp()

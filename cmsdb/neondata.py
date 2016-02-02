@@ -1991,13 +1991,15 @@ class StoredObject(object):
            it will take this list and call all the expecting cbs with a format 
            of : 
                func(key, object, operation) 
+
+           these come in off a postgres trigger, see migrations/cmsdb.sql for 
+             the definition of the this trigger. 
         '''
         results = future.result()
         for r in results: 
             r = json.loads(r)
-            data = r['_data'] 
+            key = r['_key'] 
             op = r['tg_op']
-            key = data['key'] 
             obj = yield cls.get(key, async=True) 
             try:
                 statemon.state.increment('postgres_successful_pubsub_callbacks')
