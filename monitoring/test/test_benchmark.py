@@ -68,26 +68,20 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.redis.start()
 
         self.api_key = 'apikey'
-        self.old_api_key = options.get(
-            'monitoring.benchmark_neon_pipeline.api_key')
-        options._set('monitoring.benchmark_neon_pipeline.api_key',
+        options._set('monitoring.benchmark_neon_pipeline.account',
                      self.api_key)
         options._set('monitoring.benchmark_neon_pipeline.serving_timeout', 0)
         options._set('monitoring.benchmark_neon_pipeline.isp_timeout', 0)
 
         acct = neondata.NeonUserAccount('a1', self.api_key)
-        plat = neondata.NeonPlatform.modify(
-            self.api_key, '0',
-            lambda x: x.add_video('vid1', 'myjobid'),
-            create_missing=True)
-        acct.add_platform(plat)
         acct.save()
 
         self.request = neondata.NeonApiRequest('myjobid', self.api_key, 'vid1')
         self.request.save()
 
         video = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate(self.api_key, 'vid1'))
+            neondata.InternalVideoID.generate(self.api_key, 'vid1'),
+            request_id=self.request.job_id)
         video.save()
         video.get_serving_url()
 
@@ -100,16 +94,12 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.send_request_patcher.stop()
         self.create_job_patcher.stop()
         statemon.state._reset_values()
-        options._set('monitoring.benchmark_neon_pipeline.api_key',
-                     self.old_api_key)
         self.redis.stop()
         super(BenchmarkTest, self).tearDown()
 
     def _check_request_cleanup(self):
         '''Checks that the request object is cleaned up in the database.'''
         self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
 
         
     @tornado.gen.coroutine

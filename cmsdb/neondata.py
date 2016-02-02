@@ -1423,6 +1423,22 @@ class StoredObject(object):
                 _del_and_remfromset,
                 *keys,
                 value_from_callable=True)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        '''Deletes all data associated with a given object.
+
+        For example, on the video object, this will delete the
+        VideoMetadata object, the VideoStatus object, the
+        NeonApiRequest object and all data related to each
+        thumbnail. This function is not defined for every object type.
+
+        Inputs:
+        key - The internal key to delete
+        '''
+        raise NotImplementedError()
         
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
@@ -3086,22 +3102,7 @@ class AbstractPlatform(NamespacedStoredObject):
                                self.neon_api_key, '0',
                                _del_video)
 
-        # delete the request object
-        yield tornado.gen.Task(NeonApiRequest.delete,
-                               self.videos[platform_vid],
-                               self.neon_api_key)
-
-        if vm is not None:
-            # delete the video object
-            yield tornado.gen.Task(VideoMetadata.delete, i_vid)
-
-            # delete the thumbnails
-            yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                                   vm.thumbnail_ids)
-
-            # delete the serving urls
-            yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
-                                   vm.thumbnail_ids)
+        yield VideoMetadata.delete_related_data(i_vid, async=True)
         
 class NeonPlatform(AbstractPlatform):
     '''
@@ -4381,6 +4382,14 @@ class ThumbnailMetadata(StoredObject):
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        yield tornado.gen.Task(ThumbnailStatus.delete, key)
+        yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
+        yield tornado.gen.Task(ThumbnailMetadata.delete, key)
+
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
 
@@ -4720,6 +4729,27 @@ class VideoMetadata(StoredObject):
                        'isp: %s' % (self.key, e))
 
         raise tornado.gen.Return(False)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        vmeta = yield tornado.gen.Task(VideoMetadata.get, key)
+
+        if vmeta is None:
+            # Nothing to delete
+            return
+        
+        yield tornado.gen.Task(VideoStatus.delete, key)
+
+        yield tornado.gen.Task(NeonApiRequest.delete,
+                               vmeta.job_id,
+                               vmeta.get_account_id())
+
+        for tid in vmeta.thumbnail_ids:
+            yield ThumbnailMetadata.delete_related_data(tid, async=True)
+
+        yield tornado.gen.Task(VideoMetadata.delete, key)
     
 
 class VideoStatus(DefaultedStoredObject):
