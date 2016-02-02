@@ -67,6 +67,10 @@ define("video_ids", default=None, type=str,
        help="File containing video ids to analyze, one per line")
 define("use_realtime_data", default=0, type=int,
        help="If 1, use the realtime data instead of the cleaned Impala data")
+define("hbase_host", default="hbase3",
+       help="Hostname of the HBase machine")
+define("stack_name", default=None, type=str,
+       help="Stack name to limit search for hosts to")
 define("show_bad_experiment_vids", default=0, type=int,
        help=("If 1, include videos where there either is not a Neon thumb or"
              " there is not a baseline"))
