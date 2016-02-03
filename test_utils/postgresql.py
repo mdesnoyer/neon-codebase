@@ -206,6 +206,7 @@ class Postgresql(object):
                 cursor.execute("DELETE FROM thumbnailstatus")
                 cursor.execute("DELETE FROM videometadata")
                 cursor.execute("DELETE FROM videostatus")
+        neondata.PostgresPubSub.instance = None  
 
     def stop(self, _signal=signal.SIGINT):
         options._set('cmsdb.neondata.db_port', self.old_port)

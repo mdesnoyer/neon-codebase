@@ -688,22 +688,11 @@ class TestVideoDBPushUpdates(test_utils.neontest.TestCase):
             lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
             False)
 
-
-class TestVideoDBPushUpdatesPG(TestVideoDBPushUpdates):
+class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase): 
     def setUp(self):
-        options._set('cmsdb.neondata.wants_postgres', 1)
+        # Run a process cycle and then turn on the subscriptions
         self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
-        
-        self.mastermind = mastermind.core.Mastermind()
-        self.directive_publisher = mastermind.server.DirectivePublisher(
-            self.mastermind)
-        self.watcher = mastermind.server.VideoDBWatcher(
-            self.mastermind,
-            self.directive_publisher)
-        logging.getLogger('mastermind.server').reset_sample_counters()
-
-        # Setup a simple account in the database
         self.acct = neondata.NeonUserAccount('acct1', 'key1')
         self.acct.save()
 
@@ -730,34 +719,164 @@ class TestVideoDBPushUpdatesPG(TestVideoDBPushUpdates):
         neondata.TrackerAccountIDMapper(
             'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
         neondata.ExperimentStrategy('key1').save()
-
-        # Run a process cycle and then turn on the subscriptions
+        self.mastermind = mastermind.core.Mastermind()
+        self.directive_publisher = mastermind.server.DirectivePublisher(
+            self.mastermind)
+        self.watcher = mastermind.server.VideoDBWatcher(
+            self.mastermind,
+            self.directive_publisher)
         self.watcher._process_db_data(False)
         if not self.watcher._change_subscriber.is_alive():
-            self.watcher._change_subscriber.start() 
-        self.watcher._change_subscriber.subscribe_to_db_changes()
-        # verify we are subscribed before moving on
-        while self.watcher._change_subscriber._is_subscribed is False: 
-            time.sleep(0.1)
-        time.sleep(0.25) 
-
+            self.watcher._change_subscriber.start()
+        super(TestVideoDBPushUpdatesPG, self).setUp()
+     
     def tearDown(self):
-        self.mastermind.wait_for_pending_modifies()
-        self.watcher._change_subscriber.stop()
         self.watcher.__del__()
         self.postgresql.clear_all_tables()
         self.callback_patcher.stop()
+        super(TestVideoDBPushUpdatesPG, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        super(TestVideoDBPushUpdatesPG, cls).setUpClass()
 
     @classmethod
     def tearDownClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
+        super(TestVideoDBPushUpdatesPG, cls).tearDownClass()
+
+    def parse_directives(self):
+        return dict((x[0], dict(x[1]))
+                    for x in self.mastermind.get_directives())
+    
+    @tornado.testing.gen_test 
+    def test_add_default_thumb_to_account(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
+                                                        'key1_NOVIDEO',
+                                                        ttype='default',
+                                                        rank=0)
+        yield default_acct_thumb.save(async=True)
+        t_urls = neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                               {(160, 90) : 't_default.jpg'})
+        yield t_urls.save(async=True)
+        self.acct.default_thumbnail_id = 'key1_NOVIDEO_t0'
+        self.acct.default_size = (640, 480)
+        yield self.acct.save(async=True)
+        yield self.assertWaitForEquals(
+            lambda: self.directive_publisher.default_thumbs['key1'],
+            'key1_NOVIDEO_t0', async=True)
+
+        self.assertEquals(self.directive_publisher.default_sizes['key1'],
+                          [640,480])
+
+        yield self.assertWaitForEquals(
+            lambda: self.directive_publisher.get_serving_urls(
+                'key1_NOVIDEO_t0').get_serving_url(160, 90),
+            't_default.jpg', async=True)
+        self.acct.default_thumbnail_id = None
+        yield self.acct.save(async=True)
+
+        yield self.assertWaitForEquals(
+            lambda: 'key1' in self.directive_publisher.default_thumbs,
+            False, async=True)
+
+    @tornado.testing.gen_test 
+    def test_turn_off_serving(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+
+        self.acct.serving_enabled = False 
+        yield self.acct.save(async=True)  
+        yield self.assertWaitForEquals(lambda: 'key1' in self.watcher._account_subscribers, False, async=True)
+        yield self.assertWaitForEquals(lambda: len([x for x in self.mastermind.get_directives()]),
+                          0, async=True)
+
+    @tornado.testing.gen_test 
+    def test_add_new_video(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+        thumb = neondata.ThumbnailMetadata('key1_vid2_t1', 'key1_vid2',
+                                           ttype='random')
+        yield thumb.save(async=True)
+        vid = neondata.VideoMetadata('key1_vid2', request_id='job2',
+                                     tids=['key1_vid2_t1'],
+                                     i_id='i1')
+        yield vid.save(async=True)
+
+        yield neondata.BrightcovePlatform.modify(
+            'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), async=True)
+        yield self.assertWaitForEquals(lambda: 
+            len([x for x in self.mastermind.get_directives()]), 
+              2, 
+            async=True)
+        yield self.assertWaitForEquals(lambda: 
+            self.parse_directives()[('key1', 'key1_vid2')],
+                {'key1_vid2_t1': 1.0}, 
+            async=True)
+
+    @tornado.testing.gen_test 
+    def test_change_experiment_strategy(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+
+        exp = yield neondata.ExperimentStrategy('key1', exp_frac=0.1).save(async=True)
+        def _parse_directives():
+            return dict((x[0], dict(x[1]))
+                        for x in self.mastermind.get_directives())
+        yield self.assertWaitForEquals(
+            self.parse_directives,
+            {('key1', 'key1_vid1') : { 'key1_vid1_t1': 0.9,
+                                       'key1_vid1_t2': 0.1}}, async=True)
+
+    @tornado.testing.gen_test 
+    def test_add_tracker_id(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+        yield neondata.TrackerAccountIDMapper(
+                'tai2', 'key1', neondata.TrackerAccountIDMapper.STAGING).save(async=True)
+
+        yield self.assertWaitForEquals(
+                lambda : self.directive_publisher.tracker_id_map['tai2'], 
+                'key1', 
+                async=True)
+
+    @tornado.testing.gen_test 
+    def test_change_serving_urls(self):
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+
+        yield neondata.ThumbnailServingURLs('key1_vid1_t1',
+                                            {(160, 90) : 't1.jpg',
+                                            (640, 480) : '640.jpg'}).save(async=True)
+        yield self.assertWaitForEquals(
+                 lambda: self.directive_publisher.get_serving_urls(
+                     'key1_vid1_t1').get_serving_url(640,480),
+                     '640.jpg', async=True)
+
+        # Test deleting the serving url
+        yield neondata.ThumbnailServingURLs.delete('key1_vid1_t1', async=True)
+        yield self.assertWaitForEquals(
+                  lambda: 'key1_vid1_t1' in self.directive_publisher.serving_urls,
+                  False,
+                  async=True)
 
 class SQLWrapper(object):
     def __init__(self, test_case):
@@ -2284,7 +2403,6 @@ class SmokeTesting(test_utils.neontest.TestCase):
             os.remove(f)
         del self.mastermind
         self.video_watcher.join(2)
-        self.video_watcher._change_subscriber.stop() 
         self.video_watcher.__del__()
         self.directive_publisher.join(2)
         self.stats_watcher.join(2)
@@ -2445,9 +2563,9 @@ class SmokeTesting(test_utils.neontest.TestCase):
                 neondata.NeonApiRequest.get('job3', 'key1').state,
                 neondata.RequestState.CUSTOMER_ERROR)
 
-class SmokeTestingPG(SmokeTesting):
+class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        super(SmokeTesting, self).setUp()
+        super(SmokeTestingPG, self).setUp()
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
@@ -2575,22 +2693,178 @@ class SmokeTestingPG(SmokeTesting):
             os.remove(f)
         del self.mastermind
         self.video_watcher.join(2)
-        self.video_watcher._change_subscriber.stop() 
         self.video_watcher.__del__()
         self.directive_publisher.join(2)
         self.stats_watcher.join(2)
-        self.postgresql.clear_all_tables() 
+        super(SmokeTestingPG, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        super(SmokeTestingPG, cls).setUpClass()
 
     @classmethod
     def tearDownClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
+        super(SmokeTestingPG, cls).tearDownClass()
+
+    def _add_hbase_entry(self, timestamp, thumb_id, il=None, iv=None, ic=None,
+                         vp=None):
+        tstamp = date.datetime.utcfromtimestamp(timestamp).strftime(
+            '%Y-%m-%dT%H')
+        self.timethumb_table.insert_event_row(
+            '%s_%s' % (tstamp, thumb_id),
+            il, iv, ic, vp)
+        self.thumbtime_table.insert_event_row(
+            '%s_%s' % (thumb_id, tstamp),
+            il, iv, ic, vp)
+
+    @tornado.testing.gen_test 
+    def test_integration(self):
+        # This is purely a smoke test to see if anything breaks when
+        # it's all hooked together.
+
+        # Create the account with a default thumbnail
+        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
+                                                        'key1_NOVIDEO',
+                                                        ttype='default',
+                                                        rank=0)
+        default_acct_thumb.save()
+        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
+                                      {(160, 90) : 't_default.jpg'}).save()
+        acct = neondata.NeonUserAccount('acct1', 'key1')
+        acct.default_thumbnail_id = default_acct_thumb.key
+        acct.save()
+
+        # Setup api request and update the state to processed
+        job = neondata.NeonApiRequest('job1', 'key1', 'vid1',
+                                      http_callback='http://some_callback.com')
+        job.state = neondata.RequestState.FINISHED
+        job.save()
+        
+        # Create a video with a couple of thumbs in the database
+        vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
+                                     tids=['key1_vid1_t1', 'key1_vid1_t2'],
+                                     i_id='i1')
+        vid.save()
+        thumbs =  [neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
+                                              ttype='centerframe'),
+                   neondata.ThumbnailMetadata('key1_vid1_t2', 'key1_vid1',
+                                              ttype='neon')]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        neondata.ThumbnailServingURLs.save_all([
+            neondata.ThumbnailServingURLs('key1_vid1_t1',
+                                          {(160, 90) : 't1.jpg'}),
+            neondata.ThumbnailServingURLs('key1_vid1_t2',
+                                          {(160, 90) : 't2.jpg'})])
+        neondata.TrackerAccountIDMapper(
+            'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
+        neondata.ExperimentStrategy('key1').save()
+        
+        # Add a couple of entries to the stats db
+        cursor = self.ramdb.cursor()
+        cursor.execute('''REPLACE INTO VideoPlays
+        (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
+        cursor.execute('INSERT INTO table_build_times (done_time) values '
+                       "('2014-12-03 10:14:15')")
+        cursor.executemany('''REPLACE INTO EventSequences
+        (thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, 
+        yr, tai)
+        VALUES (?,?,?,?,?,?,?)''', [
+            ('key1_vid1_t1', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
+            ('key1_vid1_t1', 1405372146, 1405372146, 1405372146, 6, 2033,
+             'tai1'),
+            ('key1_vid1_t2', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
+            ('key1_vid1_t2', None, 1405372146, 1405372146, 6, 2033, 'tai1')])
+        self.ramdb.commit()
+
+        # Add entries to the hbase incremental database
+        self._add_hbase_entry(1405375626, 'key1_vid1_t1', iv=1, ic=0)
+        self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
+        self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
+
+        # set the db update delay to 0
+        with options._set_bounded('mastermind.server.publishing_period', 1.0):
+            # Now start all the threads
+            self.video_watcher.start()
+            self.video_watcher.wait_until_loaded(5.0)
+            tornado.ioloop.IOLoop.current().add_callback(lambda: 
+                self.video_watcher._change_subscriber.subscribe_to_db_changes())
+            while not self.video_watcher._change_subscriber._is_subscribed: 
+                yield tornado.gen.sleep(0.1)
+            self.stats_watcher.start()
+            self.stats_watcher.wait_until_loaded(5.0)
+            self.directive_publisher.start()
+
+            time.sleep(1) # Make sure that the directive publisher gets busy
+            self.activity_watcher.wait_for_idle()
+
+            self.directive_publisher.wait_for_pending_modifies()
+            # See if there is anything in S3 (which there should be)
+            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+            data = bucket.get_key('mastermind').get_contents_as_string()
+            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+            lines = gz.read().split('\n')
+            self.assertEqual(len(lines), 5)
+
+            # check the DB to ensure it has changed
+            req = neondata.VideoMetadata.get_video_request('key1_vid1')
+            self.assertEqual(req.state, neondata.RequestState.SERVING)
+            self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
+
+            # Make sure a callback was sent
+            self.assertEqual(self.callback_mock.call_count, 1)
+
+            # Trigger new videos with different states via a push
+            # (finished, customer_error)
+            for i in [2, 3]:
+                job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
+                if i == 2:
+                    job.state = neondata.RequestState.FINISHED 
+                if i == 3:
+                    job.state = neondata.RequestState.CUSTOMER_ERROR
+                job.save()
+        
+                # Create a video with a couple of thumbs in the database
+                vid = neondata.VideoMetadata('key1_vid%d'%i,
+                                        request_id='job%d'%i,
+                                        tids=['key1_vid%d_t%d' % (i, j)
+                                              for j in range(2)],
+                                        i_id='i1')
+                vid.save()
+                neondata.BrightcovePlatform.modify(
+                    'key1', 'i1', 
+                    lambda x: x.add_video('vid%d' % i,
+                                          vid.job_id))
+                thumbs =  [neondata.ThumbnailMetadata(
+                    'key1_vid%d_t%d'% (i,j),
+                    'key1_vid%d' % i,
+                    ttype='neon',
+                    rank=j) for j in range(2)]
+                neondata.ThumbnailMetadata.save_all(thumbs)
+                neondata.ThumbnailServingURLs.save_all([
+                    neondata.ThumbnailServingURLs(
+                        'key1_vid%d_t%d' % (i,j),
+                        {(160, 90) : 't21.jpg'})
+                        for j in range(2)])
+
+            yield self.assertWaitForEquals(
+                lambda: 'key1_vid2' in \
+                self.directive_publisher.last_published_videos,
+                True, async=True)
+
+            # Check state for the customer_error video and ensure its in the 
+            # list of last published videos
+            yield self.assertWaitForEquals(
+                lambda: 'key1_vid3' in \
+                self.directive_publisher.last_published_videos,
+                True, async=True)
+            self.assertEquals(
+                neondata.NeonApiRequest.get('job3', 'key1').state,
+                neondata.RequestState.CUSTOMER_ERROR)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

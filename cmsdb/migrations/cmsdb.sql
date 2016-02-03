@@ -167,6 +167,8 @@ CREATE TABLE request (
     updated_time timestamp DEFAULT current_timestamp 
 );
 
+ALTER TABLE request OWNER TO pgadmin;
+
 --
 -- Name: thumbnailmetadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --

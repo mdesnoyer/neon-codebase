@@ -103,7 +103,9 @@ define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
-define("pool_size", default=5, type=int, help="size we want our connection pools to be")
+# this basically means how many open pubsubs we can have at once, most other pools will be relatively 
+# small, and not get to this size. see momoko pool for more info. 
+define("pool_size", default=25, type=int, help="size we want our connection pools to be")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -788,7 +790,7 @@ class PostgresPubSub(object):
                 future.set_result(notifications)
                 channel = self.channels[channel_name]
                 callback_functions = channel['callback_functions']
-                for func in callback_functions: 
+                for func in callback_functions:
                     tornado.ioloop.IOLoop.current().add_future(future, func) 
             except Exception as e: 
                 statemon.state.increment('postgres_unknown_errors')
@@ -1114,7 +1116,6 @@ class PubSubConnection(threading.Thread):
             self._channels[pattern] = func
 
         error = None
-        #import pdb; pdb.set_trace()
         for i in range(options.maxRedisRetries):
             try:
                 pool = concurrent.futures.ThreadPoolExecutor(1)
@@ -1127,7 +1128,6 @@ class PubSubConnection(threading.Thread):
                 if not self.is_alive():
                     self.start()
 
-         #       import pdb; pdb.set_trace()
                 yield sub_future
                 return
             except DBConnectionError as e:
@@ -1137,7 +1137,6 @@ class PubSubConnection(threading.Thread):
                 delay = (1 << i) * options.baseRedisRetryWait # in seconds
                 yield tornado.gen.sleep(delay)
 
-        #import pdb; pdb.set_trace()
         with self._publock:
             try:
                 del self._channels[pattern]
@@ -2000,7 +1999,7 @@ class StoredObject(object):
             r = json.loads(r)
             key = r['_key'] 
             op = r['tg_op']
-            obj = yield cls.get(key, async=True) 
+            obj = yield cls.get(key, async=True)
             try:
                 statemon.state.increment('postgres_successful_pubsub_callbacks')
                 yield tornado.gen.maybe_future(func(obj.get_id() if obj else key, obj, op))
@@ -2076,7 +2075,6 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
-        #import pdb; pdb.set_trace()
         if options.wants_postgres:
             pubsub = PostgresPubSub();
             pattern = cls._baseclass_name().lower()

@@ -42,6 +42,8 @@ import thrift
 import thrift.Thrift
 import threading
 import tornado.ioloop
+import tornado.gen
+import tornado.web
 import utils.neon
 from utils.options import define, options
 import utils.http
@@ -211,8 +213,8 @@ class ChangeSubscriber(threading.Thread):
         super(ChangeSubscriber, self).__init__(name='ChangeSubscriber')
         self.video_db_watcher = video_db_watcher
         self.daemon = True
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
         self._stopped = threading.Event()
-        self.io_loop = tornado.ioloop.IOLoop().instance() 
         self._subscribe_lock = threading.RLock()
         self._accounts_options_lock = threading.RLock()
         self._videos_subscribed_pg = False 
@@ -221,12 +223,13 @@ class ChangeSubscriber(threading.Thread):
 
     def run(self):
         try:
-            self.io_loop.make_current() 
+            self.io_loop.make_current()
             self.io_loop.start()  
         except Exception as e: 
-            _log.error('Unexpected error when subscribing to changes %s' % e) 
+            _log.error('Unexpected error starting ioloop for database changes %s' % e) 
             statemon.state.increment('unexpected_video_handle_error')
 
+    @tornado.gen.coroutine
     def subscribe_to_db_changes(self):
         '''Subscribe to all the changes we care about in the database.'''
         with self._subscribe_lock:
@@ -246,48 +249,44 @@ class ChangeSubscriber(threading.Thread):
                         self.video_db_watcher.directive_pusher.add_serving_urls(key, obj)
 
             if options.get('cmsdb.neondata.wants_postgres'):
-                self.video_db_watcher._table_subscribers.append(
-                    self.io_loop.add_callback(
-                        lambda: neondata.NeonUserAccount.subscribe_to_changes( 
-                            self._handle_account_change, 
-                            async=True)))
+                sub = yield neondata.ThumbnailServingURLs.subscribe_to_changes(
+                           _update_serving_url,
+                           async=True) 
+                self.video_db_watcher._table_subscribers.append(sub)
 
-                self.video_db_watcher._table_subscribers.append(
-                    self.io_loop.add_callback(
-                        lambda: neondata.ExperimentStrategy.subscribe_to_changes(
-                              lambda key, obj, op: 
-                              self.video_db_watcher.mastermind.update_experiment_strategy(key, obj), 
-                              async=True)))
-                
-                self.video_db_watcher._table_subscribers.append(
-                    self.io_loop.add_callback(
-                        lambda: neondata.TrackerAccountIDMapper.subscribe_to_changes(
-                            lambda key, obj, op: 
-                            self.video_db_watcher.directive_pusher.add_to_tracker_id_map(
-                                str(obj.get_tai()), str(obj.value)), 
-                            async=True)))
+                sub = yield neondata.ExperimentStrategy.subscribe_to_changes(
+                              lambda key, obj, op:
+                              self.video_db_watcher.mastermind.update_experiment_strategy(key, obj),
+                              async=True)
+                self.video_db_watcher._table_subscribers.append(sub) 
+               
+                sub = yield neondata.TrackerAccountIDMapper.subscribe_to_changes(
+                              lambda key, obj, op:
+                              self.video_db_watcher.directive_pusher.add_to_tracker_id_map(
+                                  str(obj.get_tai()), str(obj.value)),
+                              async=True)
+                self.video_db_watcher._table_subscribers.append(sub)
 
-                self.video_db_watcher._table_subscribers.append( 
-                    self.io_loop.add_callback(
-                        lambda: neondata.ThumbnailServingURLs.subscribe_to_changes(
-                           _update_serving_url, 
-                           async=True)))
+                sub = yield neondata.NeonUserAccount.subscribe_to_changes(
+                          self._handle_account_change, 
+                          async=True)
+                self.video_db_watcher._table_subscribers.append(sub) 
+
+                if self._videos_subscribed_pg is False:
+                    sub = yield neondata.VideoMetadata.subscribe_to_changes(
+                             lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                                 key, is_push_update=True),
+                             async=True) 
+                    self.video_db_watcher._table_subscribers.append(sub) 
+                    self._videos_subscribed_pg = True
 
                 if self._thumbnails_subscribed_pg is False:
-                    self.io_loop.add_callback(  
-                        lambda: neondata.ThumbnailMetadata.subscribe_to_changes(
-                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
-                                '_'.join(key.split('_')[0:2]), is_push_update=True),
-                            async=True))
+                    sub = yield neondata.ThumbnailMetadata.subscribe_to_changes(
+                            lambda key, obj, op: 
+                            self.video_db_watcher._schedule_video_update('_'.join(key.split('_')[0:2]), is_push_update=True),
+                            async=True)
+                    self.video_db_watcher._table_subscribers.append(sub) 
                     self._thumbnails_subscribed_pg = True
- 
-                if self._videos_subscribed_pg is False: 
-                    self.io_loop.add_callback(
-                        lambda: neondata.VideoMetadata.subscribe_to_changes(
-                            lambda key, obj, op: self.video_db_watcher._schedule_video_update(
-                                key, is_push_update=True),
-                            async=True))
-                    self._videos_subscribed_pg = True 
             else: 
                 self.video_db_watcher._table_subscribers.append(
                     neondata.NeonUserAccount.subscribe_to_changes(
@@ -308,9 +307,10 @@ class ChangeSubscriber(threading.Thread):
                     neondata.ThumbnailServingURLs.subscribe_to_changes(
                     _update_serving_url))
 
-            self._is_subscribed = True 
             if not self.video_db_watcher._video_updater.is_alive():
                 self.video_db_watcher._video_updater.start()
+
+            self._is_subscribed = True 
 
     def _subscribe_to_video_changes(self, account_id):
         '''Subscribe to changes to video and thumbnail objects for a given 
@@ -322,7 +322,9 @@ class ChangeSubscriber(threading.Thread):
             # is no longer required   
             if options.get('cmsdb.neondata.wants_postgres'):
                 # these are subscribed in the main subscribe_to_changes now
-                pass 
+                # but let's add the account_id to the list, so we can check in 
+                # schedule_video_update if we should do this 
+                self.video_db_watcher._account_subscribers[account_id] = (True, True)  
             else: 
                 if account_id not in self.video_db_watcher._account_subscribers:
                     _log.debug('Subscribing to changes in account %s' % account_id)
@@ -354,7 +356,10 @@ class ChangeSubscriber(threading.Thread):
         
         for sub in pubsubs:
             if sub:
-                sub.close()
+                try: 
+                    sub.close()
+                except AttributeError: 
+                    pass 
 
     def _handle_account_change(self, account_id, account, operation, 
                                update_videos=True, 
@@ -386,7 +391,7 @@ class ChangeSubscriber(threading.Thread):
             # Subscribe to this account if we aren't subscribed yet
             if account.serving_enabled: 
                 self._subscribe_to_video_changes(account_id)
-            else: 
+            else:
                 self._unsubscribe_from_video_changes(account_id)
 
             if update_videos:
@@ -396,7 +401,8 @@ class ChangeSubscriber(threading.Thread):
     def stop(self):
         self._is_subscribed = False  
         self._stopped.set()
-        self.io_loop.stop()
+        if self.io_loop: 
+            self.io_loop.stop()
 
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
@@ -440,16 +446,18 @@ class VideoDBWatcher(threading.Thread):
         for subs in self._account_subscribers.itervalues():
             for sub in subs:
                 if sub is not None:
-                    sub.close()
+                    try: 
+                        sub.close()
+                    except AttributeError: 
+                        pass 
 
     def run(self):
         is_initialized = False
+        if not self._change_subscriber.is_alive(): 
+            self._change_subscriber.start()
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
-                    if not self._change_subscriber.is_alive(): 
-                        self._change_subscriber.start()
- 
                     if not is_initialized:
                         self._initialize_serving_directives()
                     self._process_db_data(is_initialized)
@@ -476,6 +484,7 @@ class VideoDBWatcher(threading.Thread):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
         self._video_updater.stop()
+        self._change_subscriber.stop() 
 
     def _initialize_serving_directives(self):
         '''Save current experiment state and serving fracs to mastermind
@@ -579,8 +588,10 @@ class VideoDBWatcher(threading.Thread):
         acct_abtest, acct_serving_enabled = self._accounts_options[
                 video_metadata.get_account_id()] 
  
+        account_id = video_id.split('_')[0]
+        in_sub_list = account_id in self._account_subscribers 
         abtest = video_metadata.testing_enabled and acct_abtest 
-        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled
+        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled and in_sub_list
 
         if serving_enabled:
             thumbnails = []
@@ -1655,7 +1666,9 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
     ioloop = tornado.ioloop.IOLoop()
     ioloop.make_current()
-
+    ioloop.add_callback(lambda:
+        self.videoDbThread._change_subscriber.subscribe_to_db_changes())
+    
     atexit.register(ioloop.stop)
     atexit.register(publisher.stop)
     atexit.register(videoDbThread.stop)
