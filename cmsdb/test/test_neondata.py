@@ -475,6 +475,30 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         
         #TODO: Add more failure test cases
 
+    def test_delete_video_data(self):
+        api_key = 'key'
+
+        NeonApiRequest('job1', api_key, 'vid1').save()
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        ThumbnailMetadata(tid, i_vid).save()
+        VideoMetadata(i_vid, [tid],'job1').save()
+        neondata.VideoStatus(i_vid, 'complete').save()
+        neondata.ThumbnailStatus(tid, 0.2).save()
+        ThumbnailServingURLs(tid, sizes=[(640,480)]).save()
+
+        VideoMetadata.delete_related_data(i_vid)
+
+        self.assertIsNone(VideoMetadata.get(i_vid))
+        self.assertEquals(neondata.VideoStatus.get(i_vid).experiment_state,
+                          'unknown')
+        self.assertIsNone(NeonApiRequest.get('job1', api_key))
+        self.assertIsNone(ThumbnailMetadata.get(tid))
+        self.assertIsNone(ThumbnailServingURLs.get(tid))
+        self.assertIsNone(neondata.ThumbnailStatus.get(tid).serving_frac)
+        
+        
+
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
         input1.add_serving_url(

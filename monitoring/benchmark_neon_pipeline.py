@@ -30,7 +30,6 @@ import utils.sync
 
 from utils.options import define, options
 define("account", default="159", help="account id", type=str)
-define("api_key", default="3yd7b8vmrj67b99f7a8o1n30", help="api key", type=str)
 define("sleep", default=1800, type=float,
        help="sleep time between inserting new jobs in seconds")
 define("serving_timeout", default=2000.0, type=float,
@@ -137,7 +136,7 @@ class BenchmarkVideoJobResult:
 class JobManager(object):
     def __init__(self, cb_collector):
         self.cb_collector = cb_collector
-        self.video_id = None
+        self.video_id = None # External video id
         self.job_id = None
         self.start_time = None
         self.result = None
@@ -163,14 +162,13 @@ class JobManager(object):
             self.result = None
         
         if self.job_id is not None:
-            np = yield tornado.gen.Task(neondata.NeonPlatform.get,
-                                        options.api_key, '0')
-            yield np.delete_all_video_related_data(self.video_id,
-                                                   really_delete_keys=True,
-                                                   async=True)
             self.job_id = None
             self.video_id = None
             self.start_time = None
+            yield neondata.VideoMetadata.delete_related_data(
+                neondata.InternalVideoID.generate(options.account,
+                                                  self.video_id),
+                async=True)
             self._stopped = False
 
     @tornado.gen.coroutine
@@ -200,7 +198,6 @@ class JobManager(object):
 
         # Create a video request for test account
         yield self.create_neon_api_request(options.account,
-                                           options.api_key,
                                            video_id=video_id)
 
         # Wait for processing
@@ -241,12 +238,11 @@ class JobManager(object):
         statemon.state.no_callback = 0
 
     @tornado.gen.coroutine
-    def create_neon_api_request(self, account_id, api_key, video_id=None):
+    def create_neon_api_request(self, account_id, video_id=None):
         '''
         create random video processing request to Neon
         '''
-        headers = {"X-Neon-API-Key" : api_key,
-                   "Content-Type" : "application/json"}
+        headers = {"Content-Type" : "application/json"}
         request_url = '/api/v2/%s/videos' % account_id
         v = int(time.time())
         self.video_id = video_id or ("test%d" % v)
@@ -275,12 +271,13 @@ class JobManager(object):
             _log.error('Error submitting job: %s' % e)
             statemon.state.job_submission_error = 1
             raise SubmissionError(str(e))
-        api_resp = json.loads(res.buffer)
+        api_resp = json.loads(res.body)
         self.job_id = api_resp['job_id']
+        self.cur_state = None
         
         statemon.state.increment('jobs_created')
-        _log.info('created video request vid %s job %s api %s' % (
-            self.video_id, self.job_id, options.api_key))
+        _log.info('created video request vid %s job %s account %s' % (
+            self.video_id, self.job_id, options.account))
 
     @tornado.gen.coroutine
     def wait_for_job_state(self, valid_states=[]):
@@ -292,7 +289,7 @@ class JobManager(object):
         
         while not self._stopped:
             request = yield tornado.gen.Task(neondata.NeonApiRequest.get,
-                                             self.job_id, options.api_key)
+                                             self.job_id, options.account)
             if request:
                 self.cur_state = request.state
                 if request.state in valid_states:
@@ -360,7 +357,8 @@ class JobManager(object):
         isp_ready = False
         vid_obj = yield tornado.gen.Task(
             neondata.VideoMetadata.get,
-            neondata.InternalVideoID.generate(options.api_key, self.video_id))
+            neondata.InternalVideoID.generate(options.account,
+                                              self.video_id))
         while not isp_ready and not self._stopped:
             isp_ready = yield vid_obj.image_available_in_isp(async=True)
 
