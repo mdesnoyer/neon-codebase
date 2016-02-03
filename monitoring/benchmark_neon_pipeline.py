@@ -162,13 +162,13 @@ class JobManager(object):
             self.result = None
         
         if self.job_id is not None:
+            self.job_id = None
+            self.video_id = None
+            self.start_time = None
             yield neondata.VideoMetadata.delete_related_data(
                 neondata.InternalVideoID.generate(options.account,
                                                   self.video_id),
                 async=True)
-            self.job_id = None
-            self.video_id = None
-            self.start_time = None
             self._stopped = False
 
     @tornado.gen.coroutine
@@ -273,6 +273,7 @@ class JobManager(object):
             raise SubmissionError(str(e))
         api_resp = json.loads(res.body)
         self.job_id = api_resp['job_id']
+        self.cur_state = None
         
         statemon.state.increment('jobs_created')
         _log.info('created video request vid %s job %s account %s' % (
