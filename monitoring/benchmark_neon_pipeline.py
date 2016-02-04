@@ -301,7 +301,7 @@ class JobManager(object):
                     statemon.state.job_failed = 1
                     _log.error('Job failed with state %s with response: %s' %
                                (request.state, request.response))
-                    raise JobFailed(request.response['error'])
+                    raise JobFailed(request.response.get('error', 'unknown'))
             else:
                 _log.warn("request data not found in db")
                 statemon.state.request_not_in_db = 1
