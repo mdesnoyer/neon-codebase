@@ -163,12 +163,12 @@ class JobManager(object):
         
         if self.job_id is not None:
             self.job_id = None
-            self.video_id = None
             self.start_time = None
             yield neondata.VideoMetadata.delete_related_data(
                 neondata.InternalVideoID.generate(options.account,
                                                   self.video_id),
                 async=True)
+            self.video_id = None
             self._stopped = False
 
     @tornado.gen.coroutine
