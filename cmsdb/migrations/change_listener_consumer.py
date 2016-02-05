@@ -44,7 +44,6 @@ def consumer(queue):
             x.__dict__ = obj.__dict__
             x.key = current_key
         if op == 'set':
-            #yield sem_normal.acquire() 
             try:
                 if obj: 
                     options._set('cmsdb.neondata.wants_postgres', 1)  
@@ -55,8 +54,6 @@ def consumer(queue):
                 _log.error('exception while saving changing key %s : %s' % (key, e))
                 yield tornado.gen.sleep(0.01)
                 pass  
-            #finally: 
-            #    sem_normal.release() 
         raise tornado.gen.Return(True) 
     
     @tornado.gen.coroutine 
@@ -66,11 +63,10 @@ def consumer(queue):
             x.__dict__ = obj.__dict__
             x.key = current_key
         if op == 'set':
-            #yield sem_apirequest.acquire()  
             try:
                 options._set('cmsdb.neondata.wants_postgres', 1)  
-                yield obj.modify(obj.api_key, 
-                                 obj.job_id, 
+                yield obj.modify(obj.job_id, 
+                                 obj.api_key, 
                                  modify_me, 
                                  create_missing=True,
                                  async=True)
@@ -80,8 +76,6 @@ def consumer(queue):
                 _log.error('exception while saving changing request %s : %s' % (obj, e))
                 yield tornado.gen.sleep(0.01)
                 pass  
-            #finally: 
-            #    sem_apirequest.release() 
         raise tornado.gen.Return(True) 
         
     @tornado.gen.coroutine
@@ -98,7 +92,6 @@ def consumer(queue):
             x.key = current_key
             x.__dict__['videos'] = {}  
         if op == 'set':
-            #yield sem_platform.acquire() 
             try:
                 options._set('cmsdb.neondata.wants_postgres', 1)  
                 yield obj.modify(obj.neon_api_key, 
@@ -112,8 +105,6 @@ def consumer(queue):
                 _log.error('exception while saving changing platform %s : %s' % (obj, e))
                 yield tornado.gen.sleep(0.01)
                 pass  
-            #finally: 
-            #    sem_platform.release()
  
         raise tornado.gen.Return(True) 
 

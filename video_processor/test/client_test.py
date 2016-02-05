@@ -431,7 +431,7 @@ class TestVideoClientPG(TestVideoClient):
         random.seed(984695198)
         
     def tearDown(self):
-        self.utils_patch.stop()
+        #self.utils_patch.stop()
         self.postgresql.clear_all_tables()
         super(TestVideoClient, self).tearDown()
 
@@ -1130,10 +1130,10 @@ class TestFinalizeResponsePG(TestFinalizeResponse):
 
         
     def tearDown(self):
-        self.s3_patcher.stop()
-        self.http_mocker.stop()
-        self.im_download_mocker.stop()
-        self.cloudinary_patcher.stop()
+        #self.s3_patcher.stop()
+        #self.http_mocker.stop()
+        #self.im_download_mocker.stop()
+        #self.cloudinary_patcher.stop()
         self.postgresql.clear_all_tables() 
         super(TestFinalizeResponse, self).tearDown()
 
@@ -1532,12 +1532,12 @@ class SmokeTest(test_utils.neontest.TestCase):
                           neondata.CallbackState.NOT_SENT)
 
 # TODO delete/replace other class after postgres hot swap 
-class SmokeTestPG(SmokeTest):
+class SmokeTestPG(test_utils.neontest.TestCase):
     ''' 
     Smoke test for the video processing client
     '''
     def setUp(self):
-        super(SmokeTest, self).setUp()
+        super(SmokeTestPG, self).setUp()
         statemon.state._reset_values()
 
         random.seed(984695198)
@@ -1641,7 +1641,7 @@ class SmokeTestPG(SmokeTest):
         self.cloudinary_patcher.stop()
         self.model_patcher.stop()
         self.postgresql.clear_all_tables() 
-        super(SmokeTest, self).tearDown()
+        super(SmokeTestPG, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1653,6 +1653,274 @@ class SmokeTestPG(SmokeTest):
     def tearDownClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
+
+    def _run_job(self, job):
+        '''Runs the job'''
+        self.job_queue.put(job)
+        
+        with options._set_bounded('video_processor.client.dequeue_period', 0.01):
+            self.video_client.start()
+
+            try:
+                # Wait for the job results to show up in the database. We
+                # can't check the mocks because it is a separate process
+                # and the mocks just get copied. That's why this is a
+                # smoke test.
+                start_time = time.time() 
+                while (neondata.NeonApiRequest.get(job['job_id'],
+                                                   job['api_key']).state in 
+                       [neondata.RequestState.SUBMIT,
+                        neondata.RequestState.PROCESSING,
+                        neondata.RequestState.REPROCESS]):
+                    # See if we timeout
+                    self.assertLess(time.time() - start_time, 10.0,
+                                    'Timed out while running the smoke test')
+
+                    time.sleep(0.1)
+
+            finally:
+                # Clean up the job process
+                self.video_client.stop()
+                self.video_client.join(10.0)
+                if self.video_client.is_alive():
+                    # SIGKILL it
+                    utils.ps.send_signal_and_wait(signal.SIGKILL,
+                                                  [self.video_client.pid])
+                    self.fail('The subprocess did not die cleanly')
+
+    def test_smoke_test(self):
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://L\xc3\xb6rick_video.mp4'
+            })
+                    
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertEquals(video_meta.model_version, 'my_model')
+
+        # Check the thumbnail data
+        thumbs = neondata.ThumbnailMetadata.get_many(
+            video_meta.thumbnail_ids)
+        self.assertNotIn(None, thumbs)
+        self.assertGreater(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.NEON]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.OOYALA]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.RANDOM]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+    def test_reprocessing_smoke(self):
+        self.api_request.state = neondata.RequestState.REPROCESS
+        self.api_request.save()
+
+        # Add the results from the previous run to the database
+        thumbs = [
+            neondata.ThumbnailMetadata(
+                '%s_thumb1' % self.video_id,
+                self.video_id,
+                model_score=3.0,
+                ttype=neondata.ThumbnailType.NEON,
+                model_version='old_model',
+                frameno=167,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb2' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.RANDOM,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb3' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.OOYALA,
+                rank=0)]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [x.key for x in thumbs],
+            duration=97.0,
+            model_version='old_model')
+        video_meta.serving_url = 'my_serving_url.jpg'
+        video_meta.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertNotIn('%s_thumb1' % self.video_id, video_meta.thumbnail_ids)
+        self.assertNotIn('%s_thumb2' % self.video_id, video_meta.thumbnail_ids)
+        self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)
+        
+    def test_video_processing_error(self):
+        self.video_download_mock.side_effect = [
+            urllib2.URLError('Oops')]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.SUCESS)
+
+        # Check the state variables
+        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
+                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.video_download_error'),
+            1)
+
+    @patch('video_processor.client.neondata.VideoMetadata.modify')
+    def test_db_update_error(self, modify_mock):
+        modify_mock.side_effect = [
+            redis.ConnectionError("Connection Error")]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.INT_ERROR)
+
+        # Check the state variables
+        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
+                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.save_vmdata_error'),
+            1)
+
+    def test_no_need_to_process(self):
+        self.api_request.state = neondata.RequestState.SERVING
+        self.api_request.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+        
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.SERVING)
+
+    def test_download_default_thumb_error(self):
+        # In this case, we should still allow the video serve, but
+        # register it as a customer error in the database.
+        self.im_download_mock.side_effect = [IOError('Cannot download')]
+        
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.SUCESS)
+        response = api_request.response
+        self.assertEquals(response['video_id'], 'vid1')
+        self.assertEquals(response['job_id'], 'job1')
+        self.assertRegexpMatches(response['error'],
+                                 'Failed to download default')
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertTrue(video_meta.serving_enabled)
+
+        
+        # Check the thumbnail data
+        thumbs = neondata.ThumbnailMetadata.get_many(
+            video_meta.thumbnail_ids)
+        self.assertNotIn(None, thumbs)
+        self.assertGreater(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.NEON]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.OOYALA]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.DEFAULT]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.RANDOM]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+    def test_unexpected_error(self):
+        self.video_download_mock.side_effect = [Exception('Some bad error')]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.INT_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -73,6 +73,7 @@ def move_experiment_strategies():
     '''  
     strategies = neondata.ExperimentStrategy.get_all()
     options._set('cmsdb.neondata.wants_postgres', 1)
+    counter = 0
     for s in strategies: 
         try: 
             s.save(overwrite_existing_object=False)
@@ -254,15 +255,15 @@ def move_neon_videos_and_thumbnails():
     options._set('cmsdb.neondata.wants_postgres', 0)
 
 def main():
-    #move_processing_strategies() 
-    #move_tracker_account_id_mappers() 
-    #move_users() 
-    #move_neon_user_accounts()
+    move_processing_strategies() 
+    move_tracker_account_id_mappers() 
+    move_users() 
+    move_neon_user_accounts()
+    move_abstract_integrations()
+    move_abstract_platforms()
+    move_cdn_hosting_metadata_lists()
+    move_experiment_strategies()
     move_neon_videos_and_thumbnails()
-    #move_abstract_integrations()
-    #move_abstract_platforms()
-    #move_cdn_hosting_metadata_lists()
-    #move_experiment_strategies()
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
