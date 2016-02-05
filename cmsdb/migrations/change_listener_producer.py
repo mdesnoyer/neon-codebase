@@ -31,7 +31,7 @@ sem = Semaphore(1)
 def producer(queue):
     @tornado.gen.coroutine 
     def change_handler_platform(key, obj, op):
-        _log.info('Adding platform object')
+        _log.info_n('Adding platform object', 10)
         try:  
             yield queue.put({'type' : 'platform', 'key' : key, 'obj' : obj, 'op' : op})
         except Exception as e: 
@@ -40,7 +40,7 @@ def producer(queue):
          
     @tornado.gen.coroutine 
     def change_handler_apirequest(key, obj, op): 
-        _log.info('Adding request object')
+        _log.info_n('Adding request object', 10)
         try:  
             yield queue.put({'type' : 'apirequest', 'key' : key, 'obj' : obj, 'op' : op})  
         except Exception as e: 
@@ -49,7 +49,7 @@ def producer(queue):
 
     @tornado.gen.coroutine 
     def change_handler_normal(key, obj, op):
-        _log.info('Adding normal object')
+        _log.info_n('Adding normal object', 10)
         try: 
             yield queue.put({'type' : 'normal', 'key' : key, 'obj' : obj, 'op' : op})
         except Exception as e: 

@@ -49,7 +49,7 @@ def consumer(queue):
                     options._set('cmsdb.neondata.wants_postgres', 1)  
                     yield obj.modify(key, modify_me, create_missing=True, async=True) 
                     options._set('cmsdb.neondata.wants_postgres', 0)  
-                    _log.info('saving changing object %s' % obj.__class__.__name__)  
+                    _log.info_n('saving changing object %s' % obj.__class__.__name__, 10)  
             except Exception as e: 
                 _log.error('exception while saving changing key %s : %s' % (key, e))
                 yield tornado.gen.sleep(0.01)
@@ -71,7 +71,7 @@ def consumer(queue):
                                  create_missing=True,
                                  async=True)
                 options._set('cmsdb.neondata.wants_postgres', 0)  
-                _log.info('saving changing object neonapirequest')  
+                _log.info_n('saving changing object neonapirequest', 10)  
             except Exception as e: 
                 _log.error('exception while saving changing request %s : %s' % (obj, e))
                 yield tornado.gen.sleep(0.01)
@@ -100,7 +100,8 @@ def consumer(queue):
                                  create_missing=True,
                                  async=True) 
                 options._set('cmsdb.neondata.wants_postgres', 0)  
-                _log.info('saving changing object platform')  
+                #_log.info('saving changing object platform')  
+                _log.info_n('saving changing object platform', 10)  
             except Exception as e: 
                 _log.error('exception while saving changing platform %s : %s' % (obj, e))
                 yield tornado.gen.sleep(0.01)
