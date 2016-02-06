@@ -1801,7 +1801,7 @@ class StoredObject(object):
                    if obj is not None and original_object is None: 
                        query_tuple = db.get_insert_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
-                   elif obj is not None and obj != original_object:
+                   elif obj is not None:
                        query_tuple = db.get_update_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
             try: 
@@ -2008,6 +2008,22 @@ class StoredObject(object):
                            ' %s with arguments %s: %s' % 
                            (func, (key, obj, op), e))
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        '''Deletes all data associated with a given object.
+
+        For example, on the video object, this will delete the
+        VideoMetadata object, the VideoStatus object, the
+        NeonApiRequest object and all data related to each
+        thumbnail. This function is not defined for every object type.
+
+        Inputs:
+        key - The internal key to delete
+        '''
+        raise NotImplementedError()
+        
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
@@ -3335,12 +3351,17 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
     def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
-                 make_tid_folders=False, rendition_sizes=None, policy=None):
+                 make_tid_folders=False, rendition_sizes=None, policy=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         '''
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
-            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes)
+            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
+            source_crop, crop_with_saliency, crop_with_face_detection,
+            crop_with_text_detection)
         self.access_key = access_key # S3 access key
         self.secret_key = secret_key # S3 secret access key
         self.bucket_name = bucket_name # S3 bucket to host in
@@ -3371,7 +3392,10 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
                  update_serving_urls=True,
                  do_salt=True,
                  make_tid_folders=False,
-                 rendition_sizes=None):
+                 rendition_sizes=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(NeonCDNHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -3382,7 +3406,11 @@ class NeonCDNHostingMetadata(S3CDNHostingMetadata):
             do_salt=do_salt,
             make_tid_folders=make_tid_folders,
             rendition_sizes=rendition_sizes,
-            policy='public-read')
+            policy='public-read',
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
@@ -3393,7 +3421,10 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     def __init__(self, key=None,
                  bucket_name='host-thumbnails',
-                 folder_prefix=None):
+                 folder_prefix=None,
+                 source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(PrimaryNeonHostingMetadata, self).__init__(
             key,
             bucket_name=bucket_name,
@@ -3402,18 +3433,28 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
             update_serving_urls=False,
             do_salt=False,
             make_tid_folders=True,
-            policy='public-read')
+            policy='public-read',
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class CloudinaryCDNHostingMetadata(CDNHostingMetadata):
     '''
     Cloudinary images
     '''
 
-    def __init__(self, key=None):
+    def __init__(self, key=None,source_crop=None, crop_with_saliency=True,
+            crop_with_face_detection=True,
+            crop_with_text_detection=True):
         super(CloudinaryCDNHostingMetadata, self).__init__(
             key,
             resize=False,
-            update_serving_urls=False)
+            update_serving_urls=False,
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
 class AkamaiCDNHostingMetadata(CDNHostingMetadata):
     '''
@@ -3422,13 +3463,19 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 
     def __init__(self, key=None, host=None, akamai_key=None, akamai_name=None,
                  folder_prefix=None, cdn_prefixes=None, rendition_sizes=None,
-                 cpcode=None):
+                 cpcode=None,source_crop=None, crop_with_saliency=True,
+                 crop_with_face_detection=True,
+                 crop_with_text_detection=True):
         super(AkamaiCDNHostingMetadata, self).__init__(
             key,
             cdn_prefixes=cdn_prefixes,
             resize=True,
             update_serving_urls=True,
-            rendition_sizes=rendition_sizes)
+            rendition_sizes=rendition_sizes,
+            source_crop=source_crop,
+            crop_with_saliency=crop_with_saliency,
+            crop_with_face_detection=crop_with_face_detection,
+            crop_with_text_detection=crop_with_text_detection)
 
         # Host for uploading to akamai. Can have http:// or not
         self.host = host
@@ -3767,27 +3814,10 @@ class AbstractPlatform(NamespacedStoredObject):
                                          platform_vid)
         vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        yield tornado.gen.Task(self.modify,
-                               self.neon_api_key, '0',
-                               _del_video)
+        yield self.modify(self.neon_api_key, '0', _del_video, async=True)
 
-        # delete the request object
-        yield tornado.gen.Task(NeonApiRequest.delete,
-                               self.videos[platform_vid],
-                               self.neon_api_key)
-
-        if vm is not None:
-            # delete the video object
-            yield tornado.gen.Task(VideoMetadata.delete, i_vid)
-
-            # delete the thumbnails
-            yield tornado.gen.Task(ThumbnailMetadata.delete_many,
-                                   vm.thumbnail_ids)
-
-            # delete the serving urls
-            yield tornado.gen.Task(ThumbnailServingURLs.delete_many,
-                                   vm.thumbnail_ids)
-
+        yield VideoMetadata.delete_related_data(i_vid, async=True)
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
@@ -4964,7 +4994,11 @@ class ThumbnailMetadata(StoredObject):
         #TODO: remove refid. It's not necessary
         self.refid = refid #If referenceID exists *in case of a brightcove thumbnail
         self.phash = phash # Perceptual hash of the image. None if unknown
-        
+        self.do_source_crop = False # see cdnhosting.CDNHosting.upload
+        self.do_smart_crop = False # see cdnhosting.CDNHosting.upload
+        if self.type is ThumbnailType.NEON:
+            self.do_source_crop = True
+            self.do_smart_crop = True
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
@@ -5048,7 +5082,9 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload(image, self.key, async=True)
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True, 
+                                        do_source_crop=self.do_source_crop,
+                                        do_smart_crop=self.do_smart_crop)
         
         # TODO (Sunil):  Add redirect for the image
 
@@ -5074,7 +5110,9 @@ class ThumbnailMetadata(StoredObject):
                 cdn_metadata = [NeonCDNHostingMetadata()]
         
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, s3_url, async=True) for x in hosters]
+        yield [x.upload(image, self.key, s3_url, async=True, 
+                        do_source_crop=self.do_source_crop,
+                        do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
@@ -5113,6 +5151,17 @@ class ThumbnailMetadata(StoredObject):
 
         #return only the modified thumbnail objs
         return new_thumb_obj, old_thumb_obj 
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        #yield tornado.gen.Task(ThumbnailStatus.delete, key)
+        #yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
+        #yield tornado.gen.Task(ThumbnailMetadata.delete, key)
+        yield ThumbnailStatus.delete(key, async=True) 
+        yield ThumbnailServingURLs.delete(key, async=True)
+        yield ThumbnailMetadata.delete(key, async=True) 
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
@@ -5460,7 +5509,26 @@ class VideoMetadata(StoredObject):
                        'isp: %s' % (self.key, e))
 
         raise tornado.gen.Return(False)
-    
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_related_data(cls, key):
+        vmeta = yield VideoMetadata.get(key, async=True) 
+        if vmeta is None:
+            # Nothing to delete
+            return
+        
+        yield VideoStatus.delete(key, async=True)
+
+        yield NeonApiRequest.delete(vmeta.job_id,
+                                    vmeta.get_account_id(), 
+                                    async=True)
+
+        for tid in vmeta.thumbnail_ids:
+            yield ThumbnailMetadata.delete_related_data(tid, async=True)
+
+        yield VideoMetadata.delete(key, async=True) 
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
@@ -5496,9 +5564,7 @@ class VideoStatus(DefaultedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return VideoStatus.__name__
-
-    
+        return VideoStatus.__name__ 
 
 class AbstractJsonResponse(object):
     

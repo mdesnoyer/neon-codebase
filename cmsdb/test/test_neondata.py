@@ -554,6 +554,71 @@ class TestNeondataDataSpecific(test_utils.neontest.AsyncTestCase):
         api_key = NeonApiKey.get_api_key('acct1')
         self.assertEqual(na.neon_api_key, api_key)
 
+    def test_delete_all_video_related_data(self):
+        # create all video related objects
+        
+        na = NeonUserAccount('ta1')
+        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
+                                       create_missing=True)
+        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
+                                 create_missing=True)
+        na.add_platform(bp)
+        na.add_platform(np)
+        na.save()
+
+        req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
+        i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
+        tid = i_vid + "_t1"
+        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
+                              None, None, None)
+        vid = VideoMetadata(i_vid, [thumb.key],
+                           'job1', 'v0.mp4', 0, 0, None, '0')
+        req.save()
+        ThumbnailMetadata.save_all([thumb])
+        VideoMetadata.save_all([vid])
+        def modify_me(x): 
+            x.add_video('dummyv', 'dummyjob') 
+            x.add_video('vid1', 'job1') 
+        #NeonPlatform.modify(na.neon_api_key, '0', modify_me) 
+        #                    lambda x: x.add_video('dummyv', 'dummyjob'))
+        np = NeonPlatform.modify(na.neon_api_key, '0', modify_me) 
+#                                 lambda x: x.add_video('vid1', 'job1'))
+        np = NeonPlatform.get(na.neon_api_key, '0') 
+        np.delete_all_video_related_data('vid1', really_delete_keys=True)
+        
+        # check the keys have been deleted
+        self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
+        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
+        self.assertIsNone(VideoMetadata.get(i_vid))
+
+        # verify account
+        np = NeonPlatform.get(na.neon_api_key, '0')
+        self.assertListEqual(np.get_videos(), [u'dummyv'])
+        
+        #TODO: Add more failure test cases
+
+    def test_delete_video_data(self):
+        api_key = 'key'
+
+        NeonApiRequest('job1', api_key, 'vid1').save()
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        ThumbnailMetadata(tid, i_vid).save()
+        VideoMetadata(i_vid, [tid],'job1').save()
+        neondata.VideoStatus(i_vid, 'complete').save()
+        neondata.ThumbnailStatus(tid, 0.2).save()
+        ThumbnailServingURLs(tid, sizes=[(640,480)]).save()
+
+        VideoMetadata.delete_related_data(i_vid)
+
+        self.assertIsNone(VideoMetadata.get(i_vid))
+        self.assertEquals(neondata.VideoStatus.get(i_vid).experiment_state,
+                          'unknown')
+        self.assertIsNone(NeonApiRequest.get('job1', api_key))
+        self.assertIsNone(ThumbnailMetadata.get(tid))
+        self.assertIsNone(ThumbnailServingURLs.get(tid))
+        self.assertIsNone(neondata.ThumbnailStatus.get(tid).serving_frac)
+        
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
         input1.add_serving_url(
@@ -1355,45 +1420,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         #Make sure that each of the thread retrieved a key
         #and did not have an exception
         self.assertTrue(None not in results)
-
-    def test_delete_all_video_related_data(self):
-        # create all video related objects
-        
-        na = NeonUserAccount('ta1')
-        bp = BrightcovePlatform.modify(na.neon_api_key, 'bp1', lambda x: x,
-                                       create_missing=True)
-        np = NeonPlatform.modify(na.neon_api_key, '0', lambda x: x,
-                                 create_missing=True)
-        na.add_platform(bp)
-        na.add_platform(np)
-        na.save()
-
-        req = NeonApiRequest('job1', na.neon_api_key, 'vid1', 't', 't', 'r', 'h')
-        i_vid = InternalVideoID.generate(na.neon_api_key, 'vid1')
-        tid = i_vid + "_t1"
-        thumb = ThumbnailMetadata(tid, i_vid, ['t1.jpg'], None, None, None,
-                              None, None, None)
-        vid = VideoMetadata(i_vid, [thumb.key],
-                           'job1', 'v0.mp4', 0, 0, None, '0')
-        req.save()
-        ThumbnailMetadata.save_all([thumb])
-        VideoMetadata.save_all([vid])
-        NeonPlatform.modify(na.neon_api_key, '0',
-                            lambda x: x.add_video('dummyv', 'dummyjob'))
-        np = NeonPlatform.modify(na.neon_api_key, '0',
-                                 lambda x: x.add_video('vid1', 'job1'))
-        np.delete_all_video_related_data('vid1', really_delete_keys=True)
-        
-        # check the keys have been deleted
-        self.assertIsNone(NeonApiRequest.get('job1', na.neon_api_key))
-        self.assertIsNone(ThumbnailMetadata.get(thumb.key))
-        self.assertIsNone(VideoMetadata.get(i_vid))
-
-        # verify account
-        np = NeonPlatform.get(na.neon_api_key, '0')
-        self.assertListEqual(np.get_videos(), [u'dummyv'])
-        
-        #TODO: Add more failure test cases
 
     def test_too_many_open_connections_sync(self):
         self.maxDiff = 10000
