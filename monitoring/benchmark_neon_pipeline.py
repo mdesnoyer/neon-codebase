@@ -32,10 +32,13 @@ from utils.options import define, options
 define("account", default="159", help="account id", type=str)
 define("sleep", default=1800, type=float,
        help="sleep time between inserting new jobs in seconds")
-define("serving_timeout", default=2000.0, type=float,
+define("serving_timeout", default=3600.0, type=float,
        help="Timeout to get to serving state in seconds")
 define("isp_timeout", default=500.0, type=float,
        help='Timeout to see the video being served by isp in seconds')
+define("max_fail_count", default=3, type=int,
+       help=("Maximum number of job failures in the database before job "
+             "is considered actually failed"))
 define("test_video", default="https://neon-test.s3.amazonaws.com/output.mp4",
        help='Video to test with')
 define("callback_port", default=8080,
@@ -294,10 +297,11 @@ class JobManager(object):
                 self.cur_state = request.state
                 if request.state in valid_states:
                     return
-                elif request.state in [
-                    neondata.RequestState.FAILED,
-                    neondata.RequestState.INT_ERROR,
-                    neondata.RequestState.CUSTOMER_ERROR]:
+                elif (request.state in [
+                        neondata.RequestState.FAILED,
+                        neondata.RequestState.INT_ERROR,
+                        neondata.RequestState.CUSTOMER_ERROR] and
+                        request.fail_count >= options.max_fail_count):
                     statemon.state.job_failed = 1
                     _log.error('Job failed with state %s with response: %s' %
                                (request.state, request.response))
