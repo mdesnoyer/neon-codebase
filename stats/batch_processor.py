@@ -168,7 +168,8 @@ class ImpalaTableBuilder(threading.Thread):
                 "SET mapreduce.reduce.java.opts=-Xmx14000m")
             hive.execute("SET mapreduce.map.memory.mb=16000")
             hive.execute("SET mapreduce.map.java.opts=-Xmx14000m")
-            hive.execute("""
+            hive.execute("SET hive.exec.max.dynamic.partitions.pernode=200")
+            cmd = ("""
             insert overwrite table %s
             partition(tai, yr, mnth)
             select %s, trackerAccountId,
@@ -177,6 +178,8 @@ class ImpalaTableBuilder(threading.Thread):
             (parq_table, ','.join(x.name for x in 
                                   self.avro_schema.fields),
              external_table))
+            _log.info("Running command: %s" % cmd)
+            hive.execute(cmd)
 
             _log.info("Refreshing table %s in Impala" % parq_table)
             impala_cursor = impala_conn.cursor()
