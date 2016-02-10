@@ -1050,8 +1050,7 @@ class VideoStatsHelper(object):
         fields - List of fields to return
         """
         if fields is None:
-            fields = ['video_id', 'experiment_state', 'winner_thumbnail',
-                      'created', 'updated']
+            fields = ['video_id', 'experiment_state', 'winner_thumbnail']
         
         obj = {}
         for field in fields:
