@@ -2668,7 +2668,10 @@ class User(NamespacedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return 'users' 
+        if options.wants_postgres:
+            return 'users' 
+        else: 
+            return User.__name__  
         
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
