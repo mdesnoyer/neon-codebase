@@ -488,7 +488,7 @@ class ThumbnailHandler(APIV2Handler):
         schema(args)
         video_id = args['video_id'] 
         internal_video_id = neondata.InternalVideoID.generate(
-            account_id_api_key,video_id)
+            account_id_api_key, video_id)
 
         video = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                        internal_video_id)
@@ -528,8 +528,8 @@ class ThumbnailHandler(APIV2Handler):
 
         if new_video: 
             statemon.state.increment('post_thumbnail_oks')
-            self.success('{ "message": "thumbnail accepted for processing" }',
-                         code=ResponseCode.HTTP_ACCEPTED)  
+            self.success(json.dumps(ThumbnailHelper.db2api(new_thumbnail)),
+                         code=ResponseCode.HTTP_ACCEPTED)
         else:
             raise SaveError('unable to save thumbnail to video') 
 
