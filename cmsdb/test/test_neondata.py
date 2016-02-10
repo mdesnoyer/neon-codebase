@@ -14,6 +14,7 @@ import datetime
 import dateutil.parser
 import logging
 import json
+import momoko 
 import multiprocessing
 from mock import patch, MagicMock, ANY
 import os
@@ -2899,9 +2900,13 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         i2.running = False 
         i3 = tornado.ioloop.IOLoop()
         i3.running = False
-        pg.io_loop_dict[i1] = True 
-        pg.io_loop_dict[i2] = True 
-        pg.io_loop_dict[i3] = True
+        item = {} 
+        item['pool'] = None
+        item2 = {} 
+        item2['pool'] = momoko.Pool('test')  
+        pg.io_loop_dict[i1] = True
+        pg.io_loop_dict[i2] = item 
+        pg.io_loop_dict[i3] = item2
         self.assertEquals(len(pg.io_loop_dict), 3)
         conn = yield pg.get_connection() 
         self.assertEquals(len(pg.io_loop_dict), 1)

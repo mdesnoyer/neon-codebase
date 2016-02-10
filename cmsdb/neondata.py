@@ -244,6 +244,11 @@ class PostgresDB(tornado.web.RequestHandler):
                 if len(self.io_loop_dict) > options.max_io_loop_dict_size:
                     for key in self.io_loop_dict.keys():
                         if key._running is False:
+                            try: 
+                                pool = self.io_loop_dict[key]['pool']
+                                pool.close() 
+                            except (TypeError, AttributeError): 
+                                pass 
                             del self.io_loop_dict[key]
             _clean_up_io_dict() 
             conn = None 

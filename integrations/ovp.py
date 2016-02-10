@@ -88,9 +88,11 @@ class OVPIntegration(object):
                 video = yield iter_func()
                 if isinstance(video, StopIteration):
                     break
-
-                job_id = yield self.submit_one_video_object(video, 
-                                                            grab_new_thumb=grab_new_thumb)
+                try: 
+                    job_id = yield self.submit_one_video_object(video,   
+                                                                grab_new_thumb=grab_new_thumb)
+                except TypeError: 
+                    break 
                 if job_id: 
                     video_dict[self.get_video_id(video)] = job_id 
                     added_jobs += 1 
@@ -166,7 +168,9 @@ class OVPIntegration(object):
         except CMSAPIError as e: 
             raise 
         except OVPError as e: 
-            raise 
+            raise
+        except TypeError as e: 
+            raise  
         except Exception as e:
             _log.exception('Unexpected error submitting video %s' % video)
             statemon.state.increment('unexpected_submission_error') 

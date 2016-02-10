@@ -1695,7 +1695,7 @@ class SmokeTestPG(test_utils.neontest.TestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://L\xc3\xb6rick_video.mp4'
+            'video_url' : 'http://Lbrick_video.mp4'
             })
                     
         # Check the api request in the database
