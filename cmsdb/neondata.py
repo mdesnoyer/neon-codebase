@@ -106,6 +106,7 @@ define("max_connection_retries", default=5, type=int, help="maximum times we sho
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
 define("pool_size", default=25, type=int, help="size we want our connection pools to be")
+define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -239,6 +240,12 @@ class PostgresDB(tornado.web.RequestHandler):
             however, since we have optional_sync (which creates a new ioloop) 
             we have to manage how the pools/connections are created.  
             '''
+            def _clean_up_io_dict():
+                if len(self.io_loop_dict) > options.max_io_loop_dict_size:
+                    for key in self.io_loop_dict.keys():
+                        if key._running is False:
+                            del self.io_loop_dict[key]
+            _clean_up_io_dict() 
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop

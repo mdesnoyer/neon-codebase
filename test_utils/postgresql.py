@@ -45,7 +45,8 @@ DEFAULT_SETTINGS = dict(auto_start=2,
                         postgres_args='-h 127.0.0.1 -F -c logging_collector=off',
                         pid=None,
                         port=None,
-                        dump_file=None)
+                        dump_file=None, 
+                        dbname='test')
 
 class Postgresql(object):
     def __init__(self, **kwargs):
@@ -98,7 +99,7 @@ class Postgresql(object):
         #params.setdefault('host', '127.0.0.1')
         params.setdefault('host', '127.0.0.1')
         params.setdefault('user', 'postgres')
-        params.setdefault('database', 'test')
+        params.setdefault('database', self.dbname)
         #import pdb; pdb.set_trace()
 
         return params
@@ -175,20 +176,20 @@ class Postgresql(object):
             with closing(psycopg2.connect(**self.dsn(database='postgres'))) as conn:
                 conn.autocommit = True
                 with closing(conn.cursor()) as cursor:
-                    cursor.execute("SELECT COUNT(*) FROM pg_database WHERE datname='test'")
+                    cursor.execute("SELECT COUNT(*) FROM pg_database WHERE datname='%s'" % self.dbname)
                     if cursor.fetchone()[0] <= 0:
-                        cursor.execute('CREATE DATABASE test')
+                        cursor.execute('CREATE DATABASE %s' % self.dbname)
                     if self.dump_file:
-                        cmd = '/usr/bin/psql --quiet -p %d -h 127.0.0.1 --username=postgres test < %s' % (self.port, os.path.join(os.getcwd(), self.dump_file))
+                        cmd = '/usr/bin/psql --quiet -p %d -h 127.0.0.1 --username=postgres %s < %s' % (self.port, self.dbname, os.path.join(os.getcwd(), self.dump_file))
                         call(cmd, shell=True)
 
         self.old_port = options.get('cmsdb.neondata.db_port')
         self.old_name = options.get('cmsdb.neondata.db_name')
         options._set('cmsdb.neondata.db_port', self.port)
-        options._set('cmsdb.neondata.db_name', 'test')
+        options._set('cmsdb.neondata.db_name', self.dbname)
     
     def clear_all_tables(self): 
-        with closing(psycopg2.connect(**self.dsn(database='postgres', dbname='test'))) as conn:
+        with closing(psycopg2.connect(**self.dsn(database='postgres', dbname=self.dbname))) as conn:
             conn.autocommit = True
             with closing(conn.cursor()) as cursor:
                 cursor.execute("DELETE FROM abstractintegration")

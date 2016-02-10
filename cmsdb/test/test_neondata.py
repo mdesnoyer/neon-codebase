@@ -2879,6 +2879,34 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
             yield pg1.get_connection()
         exception_mocker.stop()
 
+    @tornado.testing.gen_test 
+    def database_name_changing(self):
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        postgresql_two = test_utils.postgresql.Postgresql(dump_file=dump_file, 
+                  dbname='test2')
+        
+        pass
+ 
+    @tornado.testing.gen_test 
+    def test_max_io_loop_size(self):
+        pg = neondata.PostgresDB() 
+        old_io_loop_size = options.get('cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 2)
+        i1 = tornado.ioloop.IOLoop()
+        i1.running = False 
+        i2 = tornado.ioloop.IOLoop()
+        i2.running = False 
+        i3 = tornado.ioloop.IOLoop()
+        i3.running = False
+        pg.io_loop_dict[i1] = True 
+        pg.io_loop_dict[i2] = True 
+        pg.io_loop_dict[i3] = True
+        self.assertEquals(len(pg.io_loop_dict), 3)
+        conn = yield pg.get_connection() 
+        self.assertEquals(len(pg.io_loop_dict), 1)
+        options._set('cmsdb.neondata.max_io_loop_dict_size', old_io_loop_size)
+
 class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPostgresPubSub, self).setUp()
