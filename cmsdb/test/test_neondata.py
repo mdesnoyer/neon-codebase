@@ -1872,24 +1872,81 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
       yield request.send_callback(async=True)
 
-      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
                         neondata.CallbackState.SUCESS)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.ExternalRequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.COMPLETE,
+         'winner_thumbnail' : 'key1_vid1_t2'}
+      
+      self.assertDictContainsSubset(expected_response, found_request.response)
 
       # Check the callback
       self.assertTrue(fetch_mock.called)
       cargs, kwargs = fetch_mock.call_args
       found_request = cargs[0]
       response_dict = json.loads(found_request.body)
-      self.assertDictContainsSubset(
-        {'job_id' : 'j1',
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
+    def test_callback_with_error_state(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+      request = NeonApiRequest('j1', 'key1', 'vid1',
+                               http_callback='http://some.where')
+      request.state = neondata.RequestState.CUSTOMER_ERROR
+      request.response['framenos'] = []
+      request.response['serving_url'] = None
+      request.response['error'] = 'some customer error'
+      request.save()
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.SUCESS)
+      expected_response = {
+        'job_id' : 'j1',
          'video_id' : 'vid1',
-         'error': None,
-         'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
-         'processing_state' : neondata.RequestState.SERVING,
-         'experiment_state' : neondata.ExperimentState.COMPLETE,
-         'winner_thumbnail' : 'key1_vid1_t2'},
-        response_dict)
+         'error': 'some customer error',
+         'framenos' : [],
+         'serving_url' : None,
+         'processing_state' : neondata.ExternalRequestState.FAILED,
+         'experiment_state' : neondata.ExperimentState.UNKNOWN,
+         'winner_thumbnail' : None}
+      
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(fetch_mock.called)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      response_dict = json.loads(found_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+    def test_request_state_conversion(self):
+      for state_name, val in neondata.RequestState.__dict__.items():
+        if state_name.startswith('__'):
+          # It's not a state name
+          continue
+        # The only state that should map to unknown is the unknown state
+        if val == neondata.RequestState.UNKNOWN:
+          self.assertEquals(
+          neondata.ExternalRequestState.from_internal_state(val), 
+          neondata.ExternalRequestState.UNKNOWN)
+        else:
+          self.assertNotEquals(
+            neondata.ExternalRequestState.from_internal_state(val), 
+            neondata.ExternalRequestState.UNKNOWN,
+            'Internal state %s does not map to an external one' % state_name)
 
     @patch('cmsdb.neondata.utils.http')
     @tornado.testing.gen_test

@@ -165,18 +165,18 @@ class TestNewAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
-        url = '/api/v2/accounts?name=meisnew'
+        url = '/api/v2/accounts?customer_name=meisnew'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['name'], 'meisnew')
+        self.assertEquals(rjson['customer_name'], 'meisnew')
  
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
-        params = json.dumps({'name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -185,11 +185,11 @@ class TestNewAccountHandler(TestControllersBase):
                                                 headers=header) 
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['name'], 'meisnew')
+        self.assertEquals(rjson['customer_name'], 'meisnew')
 
     @tornado.testing.gen_test 
     def test_create_new_account_tracker_accounts(self):
-        params = json.dumps({'name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -198,7 +198,7 @@ class TestNewAccountHandler(TestControllersBase):
                                                 headers=header) 
 	self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['name'], 'meisnew')
+        self.assertEquals(rjson['customer_name'], 'meisnew')
         prod_t_id = rjson['tracker_account_id'] 
         staging_t_id = rjson['staging_tracker_account_id'] 
         tai_p = neondata.TrackerAccountIDMapper.get_neon_account_id(prod_t_id) 
@@ -208,16 +208,15 @@ class TestNewAccountHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_account_is_verified(self):
-        params = json.dumps({'name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        api_key = rjson['api_key']
         account_id = rjson['account_id'] 
         url = '/api/v2/%s?default_height=1200' % (account_id) 
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -258,67 +257,62 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url), 
                                                     method="GET")
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 404) 
-	    pass
+        self.assertEquals(e.exception.code, 404) 
 
     @tornado.testing.gen_test
     def test_post_acct_not_implemented(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             header = { 'Content-Type':'application/json' }
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='{"abc123":"1"}', 
                                                     method="POST", 
                                                     headers=header)
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 501) 
-	    pass 
+        self.assertEquals(e.exception.code, 501) 
     
     @tornado.testing.gen_test
     def test_delete_acct_not_implemented(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='DELETE')
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 501) 
-	    pass 
+        self.assertEquals(e.exception.code, 501) 
     
     @tornado.testing.gen_test 
     def test_get_acct_does_exist(self):
-	url = '/api/v2/accounts?name=123abc'
-	response = yield self.http_client.fetch(self.get_url(url), 
-			       body='',
-   			       method='POST', 
-   			       allow_nonstandard_methods=True)
-	self.assertEquals(response.code, 200)
+        url = '/api/v2/accounts?customer_name=123abc'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='',
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-	self.assertEquals(rjson['name'], '123abc') 
-	url = '/api/v2/%s' % (rjson['account_id']) 
-	response = yield self.http_client.fetch(self.get_url(url),
-                       			 method="GET")
+        self.assertEquals(rjson['customer_name'], '123abc') 
+        url = '/api/v2/%s' % (rjson['account_id']) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method="GET")
         rjson2 = json.loads(response.body) 
-        self.assertEquals(rjson['account_id'],rjson2['account_id']) 
+        self.assertEquals(rjson['account_id'], rjson2['account_id']) 
 
     @tornado.testing.gen_test 
     def test_basic_post_account(self):
-        url = '/api/v2/accounts?name=123abc'
+        url = '/api/v2/accounts?customer_name=123abc'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['name'], '123abc') 
+        self.assertEquals(rjson['customer_name'], '123abc') 
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
-        url = '/api/v2/%s?default_height=1200&default_width=1500' % (self.user.neon_api_key) 
+        url = '/api/v2/%s?default_height=1200&default_width=1500' % (
+            self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='PUT',
@@ -356,14 +350,12 @@ class TestAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_update_acct_no_content_type(self): 
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/124abc' 
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='{"abc123":"1"}', 
                                                     method="PUT") 
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 400) 
-	    pass 
+	    self.assertEquals(e.exception.code, 400) 
 
     @tornado.testing.gen_test 
     def test_update_acct_width_only(self): 
@@ -480,15 +472,14 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.assertEquals(platform.api_key, api_key)
     @tornado.testing.gen_test 
     def test_put_integration_dne(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             api_key = 'testapikey' 
             url = '/api/v2/%s/integrations/ooyala?integration_id=nope&ooyala_api_key=%s' % (self.account_id_api_key, api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='PUT', 
                                                     allow_nonstandard_methods=True)
-        except Exception as e:
-            self.assertEquals(e.code, 404)  
+        self.assertEquals(e.exception.code, 404)  
  
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -623,15 +614,14 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_put_integration_dne(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             read_token = 'readtoken' 
             url = '/api/v2/%s/integrations/brightcove?integration_id=nope&read_token=%s' % (self.account_id_api_key, read_token)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='PUT', 
                                                     allow_nonstandard_methods=True)
-        except Exception as e:
-            self.assertEquals(e.code, 404)  
+        self.assertEquals(e.exception.code, 404)  
  
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -817,8 +807,11 @@ class TestVideoHandler(TestControllersBase):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500,
+                                   urls=['s']).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500,
+                                   urls=['d']).save()
+        neondata.NeonApiRequest('job1', self.account_id_api_key).save()
         defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
@@ -839,6 +832,7 @@ class TestVideoHandler(TestControllersBase):
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
+        self.maxDiff = 5000
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
@@ -1145,31 +1139,103 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
             vm.save()
             url = '/api/v2/%s/videos' % (self.account_id_api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
-        except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 400) 
+	    self.assertEquals(e.exception.code, 400) 
 
     @tornado.testing.gen_test
     def test_get_single_video(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            request_id='job1',
+            i_id='int2',
+            testing_enabled=False,
+            duration=31.5,
+            custom_data={'my_data' : 'happygo'},
+            tids=['vid1_t1', 'vid1_t2'],
+            video_url='http://someurl.com')
         vm.save()
+        request = neondata.NeonApiRequest('job1', self.account_id_api_key,
+                                          title='Title',
+                                          publish_date='2015-06-10')
+        request.state = neondata.RequestState.FINISHED
+        request.save()
         url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
+        
+        rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
+        self.assertEquals({
+            'testing_enabled' : False,
+            'url' : 'http://someurl.com',
+            'state': neondata.ExternalRequestState.PROCESSED,
+            'video_id': 'vid1',
+            'publish_date' : '2015-06-10',
+            'title' : 'Title',
+            'error' : None
+            },
+            rjson['videos'][0])
+
+    @tornado.testing.gen_test
+    def test_get_all_fields(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            request_id='job1',
+            i_id='int2',
+            testing_enabled=False,
+            duration=31.5,
+            custom_data={'my_data' : 'happygo'},
+            tids=['vid1_t1', 'vid1_t2'])
+        vm.save()
+        thumbs = [neondata.ThumbnailMetadata('vid1_t1', 'vid1', ['here.com']),
+                  neondata.ThumbnailMetadata('vid1_t2', 'vid1', ['there.com'])]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        request = neondata.NeonApiRequest('job1', self.account_id_api_key,
+                                          title='Title',
+                                          publish_date='2015-06-10')
+        request.state = neondata.RequestState.FINISHED
+        request.save()
+        url = '/api/v2/%s/videos?video_id=vid1&fields=state,integration_id,testing_enabled,job_id,title,video_id,serving_url,publish_date,thumbnails,duration,custom_data' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertDictContainsSubset({
+            'state': neondata.ExternalRequestState.PROCESSED,
+            'integration_id': 'int2',
+            'testing_enabled': False,
+            'job_id': 'job1',
+            'title' : 'Title',
+            'video_id': 'vid1',
+            'serving_url' : None,
+            'publish_date' : '2015-06-10',
+            'duration' : 31.5,
+            'custom_data' : {'my_data' : 'happygo'},
+            'error' : None
+            },
+            rjson['videos'][0])
+        tids = [x['thumbnail_id'] for x in rjson['videos'][0]['thumbnails']]
+        self.assertItemsEqual(tids, ['vid1_t1', 'vid1_t2'])
 
     @tornado.testing.gen_test
     def test_get_two_videos(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'),
+            request_id='job1')
         vm.save()
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'))
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid2'),
+            request_id='job2')
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1,vid2' % (self.account_id_api_key)
+        neondata.NeonApiRequest('job2', self.account_id_api_key).save()
+        url = '/api/v2/%s/videos?video_id=vid1,vid2' % (
+            self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
@@ -1179,11 +1245,15 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_two_videos_one_dne(self):
-        vm1 = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm1 = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
+            request_id='job1')
         vm1.save()
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'))
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid2'))
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1,viddoesnotexist' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?video_id=vid1,viddoesnotexist' % (
+            self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
        
@@ -1191,7 +1261,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 2)
         videos = rjson['videos']
-        self.assertEquals(videos[0]['key'], vm1.key) 
+        self.assertEquals(videos[0]['video_id'], 'vid1') 
  
     def test_get_video_dne(self):
         url = '/api/v2/%s/videos?video_id=viddoesnotexist' % (self.account_id_api_key)
@@ -1213,23 +1283,34 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_single_video_with_fields(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
+            request_id='job1')
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=created' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created' % (
+            self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
-       
+
+        rjson = json.loads(response.body)
+        videos = rjson['videos']
         self.assertEquals(response.code, 200)
+
+        self.assertIsNotNone(videos[0]['created']) 
+        self.assertIsNone(videos[0]['error'])
+        self.assertItemsEqual(videos[0].keys(), ['created', 'error'])
     
     @tornado.testing.gen_test
     def test_get_single_video_with_invalid_fields(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
+            request_id='job1')
         vm.save()
         url = '/api/v2/%s/videos?video_id=vid1&fields=created,me_is_invalid' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-       
-        self.assertEquals(response.code, 200)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method='GET')
+        self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_update_video_testing_enabled(self):
@@ -1255,8 +1336,10 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
-                                    tids=['testing_vtid_one', 'testing_vtid_two'])
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+            tids=['testing_vtid_one', 'testing_vtid_two'],
+            request_id='job1')
         vm.save()
         url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
@@ -1270,16 +1353,20 @@ class TestVideoHandler(TestControllersBase):
         thumbnail_two = thumbnail_array[1] 
         self.assertEquals(len(thumbnail_array), 2)
         self.assertEquals(thumbnail_one['width'], 500)
-        self.assertEquals(thumbnail_one['key'], 'testing_vtid_one') 
+        self.assertEquals(thumbnail_one['thumbnail_id'], 'testing_vtid_one') 
         self.assertEquals(thumbnail_two['width'], 500)
-        self.assertEquals(thumbnail_two['key'], 'testing_vtid_two') 
+        self.assertEquals(thumbnail_two['thumbnail_id'], 'testing_vtid_two') 
     
     @tornado.testing.gen_test 
     def test_get_video_with_thumbnails_field_no_thumbnails(self): 
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
-                                    tids=[])
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(
+                self.account_id_api_key,'vid1'), 
+                tids=[],
+            request_id='job1')
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (
+            self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
@@ -1289,30 +1376,29 @@ class TestVideoHandler(TestControllersBase):
     
     @tornado.testing.gen_test
     def test_update_video_does_not_exist(self):
-        try: 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/videos?video_id=vid_does_not_exist&testing_enabled=0' % (self.account_id_api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='PUT', 
                                                     allow_nonstandard_methods=True)
-	except Exception as e:
-            self.assertEquals(e.code, 404)
+        self.assertEquals(e.exception.code, 404)
 
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
-	url = '/api/v2/%s/videos' % '1234234'
+        url = '/api/v2/%s/videos' % '1234234'
         self.get_exceptions(url, exception_mocker)  
 
     def test_put_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/videos' % '1234234'
+        url = '/api/v2/%s/videos' % '1234234'
         self.put_exceptions(url, params, exception_mocker) 
  
     def test_post_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/videos' % '1234234'
+        url = '/api/v2/%s/videos' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
 class TestThumbnailHandler(TestControllersBase): 
@@ -1322,7 +1408,7 @@ class TestThumbnailHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500).save()
+        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
         self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
         neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
@@ -1379,7 +1465,8 @@ class TestThumbnailHandler(TestControllersBase):
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code,202)
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'tn_test_vid2')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'tn_test_vid2')
         video = neondata.VideoMetadata.get(internal_video_id)
         thumbnail_ids = video.thumbnail_ids
         self.assertEquals(len(video.thumbnail_ids), 2)
@@ -1388,30 +1475,33 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_thumbnail_exists(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(rjson['width'],500)
-        self.assertEquals(rjson['key'],'testingtid')
+        self.assertEquals(rjson['thumbnail_id'], 'testingtid')
 
     @tornado.testing.gen_test
     def test_get_thumbnail_does_not_exist(self):
-        try: 
-            url = '/api/v2/%s/thumbnails?thumbnail_id=testingtiddoesnotexist' % (self.account_id_api_key) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = ('/api/v2/%s/thumbnails?thumbnail_id=testingtiddoesnotexist'
+                   % (self.account_id_api_key))
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
-	except Exception as e:
-            self.assertEquals(e.code, 404)
+        self.assertEquals(e.exception.code, 404)
 
     @tornado.testing.gen_test
     def test_thumbnail_update_enabled(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         old_tn = json.loads(response.body)
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=0' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=0' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -1419,7 +1509,8 @@ class TestThumbnailHandler(TestControllersBase):
         new_tn = json.loads(response.body)
         self.assertEquals(new_tn['enabled'],False)
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=1' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid&enabled=1' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -1429,12 +1520,14 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_thumbnail_update_no_params(self):
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         old_tn = json.loads(response.body)
 
-        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
+            self.account_id_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -1445,13 +1538,12 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_delete_thumbnail_not_implemented(self):
-        try: 
-            url = '/api/v2/%s/thumbnails?thumbnail_id=12234' % (self.account_id_api_key)  
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/thumbnails?thumbnail_id=12234' % (
+                self.account_id_api_key)  
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='DELETE')
-	except tornado.httpclient.HTTPError as e:
-	    self.assertEquals(e.code, 501) 
-	    pass
+	    self.assertEquals(e.excpetion.code, 501) 
  
     def test_get_thumbnail_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.ThumbnailHandler.get')
@@ -1484,7 +1576,8 @@ class TestHealthCheckHandler(TestControllersBase):
         self.http_mocker.stop()
  
     def test_healthcheck_success(self): 
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
 	url = '/healthcheck/'
         response = self.http_client.fetch(self.get_url(url),
                                callback=self.stop, 
@@ -1565,8 +1658,7 @@ class TestVideoStatsHandler(TestControllersBase):
         statistic_one = rjson['statistics'][0] 
         self.assertEquals(statistic_one['experiment_state'], neondata.ExperimentState.COMPLETE)  
         statistic_two = rjson['statistics'][1] 
-        self.assertEquals(statistic_two['experiment_state'], neondata.ExperimentState.RUNNING)  
-        self.assertEquals(statistic_two['experiment_value_remaining'], 50)  
+        self.assertEquals(statistic_two['experiment_state'], neondata.ExperimentState.RUNNING) 
 
     @tornado.testing.gen_test
     def test_one_video_id_dne(self): 
@@ -1999,16 +2091,16 @@ class TestAPIKeyRequired(TestControllersBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'name': 'meisnew', 'token': token})
+        params = json.dumps({'customer_name': 'meisnew', 'token': token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
 
-        params = json.dumps({'name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew'})
         header = { 
                    'Content-Type':'application/json', 
                    'Authorization': 'Bearer %s' % token 
@@ -2017,9 +2109,9 @@ class TestAPIKeyRequired(TestControllersBase):
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
 
-        url = '/api/v2/accounts?name=meisnew&token=%s' % token
+        url = '/api/v2/accounts?customer_name=meisnew&token=%s' % token
         response = yield self.http_client.fetch(self.get_url(url),
                                                 allow_nonstandard_methods=True,
                                                 body='', 
