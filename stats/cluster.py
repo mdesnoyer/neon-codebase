@@ -822,10 +822,11 @@ class Cluster():
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
+        subnet_id, instance_group = self._get_core_instance_group() 
         instance_groups = [
             InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
                           'Master Instance Group'),
-            self._get_core_instance_group()
+            instance_group
             ]
         
         conn = EmrConnection()
@@ -845,7 +846,7 @@ class Cluster():
                 instance_groups=instance_groups,
                 visible_to_all_users=True,
                 api_params = {'Instances.Ec2SubnetId' : 
-                              'subnet-74c10003'})
+                              subnet_id})
         except boto.exception.EmrResponseError as e:
             _log.error('Error creating the cluster: %s' % e)
             statemon.state.increment('cluster_creation_error')
@@ -892,15 +893,21 @@ class Cluster():
     def _get_core_instance_group(self):   
              
         # Calculate the expected costs for each of the instance type options
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
+            'us-east-1d' : 'subnet-53fa1901' 
+        } 
+ 
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
-                 x[1], cur_price, avg_price)
+                 x[1], cur_price, avg_price, availability_zone)
+                 for availability_zone in [ 'us-east-1c', 'us-east-1d' ]
                  for itype, x in Cluster.instance_info.items()
-                 for cur_price, avg_price in [self._get_spot_prices(itype)]]
+                 for cur_price, avg_price in [self._get_spot_prices(itype, 
+                   availability_zone)]]
         data = sorted(data, key=lambda x: (-x[2] / (np.mean(x[4:6]) * x[1]),
                                            -x[1]))
         chosen_type, count, cpu_units, on_demand_price, cur_spot_price, \
-          avg_spot_price = data[0]
+          avg_spot_price, availability_zone = data[0]
 
         _log.info('Choosing core instance type %s because its avg price was %f'
                   % (chosen_type, avg_spot_price))
@@ -913,15 +920,18 @@ class Cluster():
         else:
             market_type = 'SPOT'
 
-        return InstanceGroup(int(count),
+        subnet_id = avail_zone_to_subnet_id[availability_zone] 
+
+        return subnet_id, InstanceGroup(int(count),
                              'CORE',
                              chosen_type,
                              market_type,
                              'Core instance group',
                              '%.3f' % (1.03 * on_demand_price))
-                             
 
-    def _get_spot_prices(self, instance_type, 
+    def _get_spot_prices(self, 
+                         instance_type, 
+                         availability_zone,
                          tdiff=datetime.timedelta(days=1)):
         '''Returns the (current, avg for the tdiff) for a given
         instance type.'''
@@ -932,7 +942,7 @@ class Cluster():
                     end_time=datetime.datetime.utcnow().isoformat(),
                     instance_type=instance_type,
                     product_description='Linux/UNIX (Amazon VPC)',
-                    availability_zone='us-east-1c')]
+                    availability_zone=availability_zone)]
         timestamps, prices = zip(*(data[::-1]))
 
         timestamps = np.array(
