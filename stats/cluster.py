@@ -824,7 +824,7 @@ class Cluster():
             
         subnet_id, instance_group = self._get_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'r3.large', 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
