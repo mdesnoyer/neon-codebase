@@ -3202,6 +3202,18 @@ class BasePGNormalObject(object):
         self.assertEquals(len(results), 2)
 
     @tornado.testing.gen_test 
+    def test_get_many_with_key_like_objects(self):    
+        key1 = uuid.uuid1().hex 
+        #key2 = uuid.uuid1().hex
+        so1 = self._get_object_type()(key1, 'testabcdef')
+        so2 = self._get_object_type()(key1, 'testfedcba')
+        yield self._get_object_type().save_all([so1, so2], async=True)
+        results = yield so1.get_many_with_key_like(so1.key, async=True) 
+        self.assertEquals(len(results), 1)
+        results = yield so1.get_many_with_key_like(so2.key, async=True) 
+        self.assertEquals(len(results), 1)
+
+    @tornado.testing.gen_test 
     def test_delete_object(self):  
         so1 = self._get_object_type()(uuid.uuid1().hex) 
         yield self._get_delete_function(so1) 

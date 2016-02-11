@@ -441,8 +441,12 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
 
+    @patch('cmsdb.neondata.NeonUserAccount.iterate_all_videos')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
-    def test_initialize_serving_directives(self, get_ivids_mock, datamock):
+    def test_initialize_serving_directives(self, 
+         get_ivids_mock, 
+         iter_all_vids_mock, 
+         datamock):
 
         datamock.InternalVideoID = neondata.InternalVideoID
         acct1 = neondata.NeonUserAccount('a1', 'a1')
@@ -492,8 +496,14 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
         # Do the initialization
         get_ivids_mock.side_effect = [ ['a1_vid1'],   
-                                       ['a2_vid1','a2_vid2'] 
-                                     ] 
+            ['a2_vid1','a2_vid2'] 
+        ] 
+        #datamock.VideoMetadata.get_many_with_key_like.side_effect = [ 
+        iter_all_vids_mock.side_effect = [ 
+              [vid_meta['a1_vid1']],   
+              [vid_meta['a2_vid1'],
+               vid_meta['a2_vid2']] 
+            ] 
         self.watcher._initialize_serving_directives()
 
         # Make sure one video was updated
@@ -2269,300 +2279,6 @@ class TestPublisherStatusUpdatesInDBPG(TestPublisherStatusUpdatesInDB):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
-class SmokeTesting(test_utils.neontest.TestCase):
-    def setUp(self):
-        super(SmokeTesting, self).setUp()
-        # Open up a temoprary redis server
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
-        # Mock out the connection to S3
-        self.s3_patcher = patch('mastermind.server.S3Connection')
-        self.s3conn = test_utils.mock_boto_s3.MockConnection()
-        self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives-test')
-
-        # Mock out the http connections
-        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
-                                                require_async_kw=True)
-        self.callback_mock = MagicMock()
-        self.isp_mock = MagicMock()
-        def _handle_http(x, **kw):
-            if '/v1/video?' in x.url:
-                return self.isp_mock(x, **kw)
-            else:
-                return self.callback_mock(x, **kw)
-        self.http_mock.side_effect = _handle_http
-
-        self.callback_mock.side_effect = \
-          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
-
-        self.isp_mock.side_effect = \
-          lambda x, **kw: tornado.httpclient.HTTPResponse(
-              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
-
-        # Insert a fake filesystem
-        self.filesystem = fake_filesystem.FakeFilesystem()
-        self.real_tempfile = mastermind.server.tempfile
-        mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
-            self.filesystem)
-        self.real_os = mastermind.server.os
-        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
-
-        # Use an in-memory sqlite for the impala server
-        def connect2db(*args, **kwargs):
-            return sqlite3.connect('file::memory:?cache=shared')
-        self.ramdb = connect2db()
-
-        cursor = self.ramdb.cursor()
-        # Create the necessary tables (these are subsets of the real tables)
-        cursor.execute('''CREATE TABLE IF NOT EXISTS videoplays (
-                       serverTime DOUBLE,
-                       mnth INT,
-                       yr INT)''')
-        cursor.execute('CREATE TABLE IF NOT EXISTS table_build_times ('
-                       'done_time timestamp)')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS EventSequences (
-                       thumbnail_id varchar(128),
-                       imloadclienttime DOUBLE,
-                       imvisclienttime DOUBLE,
-                       imclickclienttime DOUBLE,
-                       adplayclienttime DOUBLE,
-                       videoplayclienttime DOUBLE,
-                       serverTime DOUBLE, 
-                       mnth INT,
-                       yr INT,
-                       tai varchar(64))''')
-        self.ramdb.commit()
-
-        #patch impala connect
-        self.sqlite_connect_patcher = \
-          patch('mastermind.server.impala.dbapi.connect')
-        self.sqllite_mock = self.sqlite_connect_patcher.start()
-        self.sqllite_mock.side_effect = connect2db
-
-        #patch hbase connection
-        self.hbase_patcher = patch('mastermind.server.happybase.Connection')
-        self.hbase_conn = self.hbase_patcher.start()
-        self.timethumb_table = MockHBaseCountTable()
-        self.thumbtime_table = MockHBaseCountTable()
-        def _pick_table(name):
-            if name == 'TIMESTAMP_THUMBNAIL_EVENT_COUNTS':
-                return self.timethumb_table
-            elif name == 'THUMBNAIL_TIMESTAMP_EVENT_COUNTS':
-                return self.thumbtime_table
-            raise thrift.Thrift.TException('Unknown table')
-        self.hbase_conn().table.side_effect = _pick_table
-
-        # Patch the cluster lookup
-        self.cluster_patcher = patch('mastermind.server.stats.cluster.Cluster')
-        self.cluster_patcher.start()
-
-        self.activity_watcher = utils.ps.ActivityWatcher()
-
-        self.old_serving_update_delay = options.get(
-            'mastermind.server.serving_update_delay')
-        options._set('mastermind.server.serving_update_delay', 0)
-
-        self.mastermind = mastermind.core.Mastermind()
-        self.directive_publisher = mastermind.server.DirectivePublisher(
-            self.mastermind, activity_watcher=self.activity_watcher)
-        self.video_watcher = mastermind.server.VideoDBWatcher(
-            self.mastermind,
-            self.directive_publisher,
-            activity_watcher=self.activity_watcher)
-        self.stats_watcher = mastermind.server.StatsDBWatcher(
-            self.mastermind, activity_watcher=self.activity_watcher)
-
-    def tearDown(self):
-        neondata.DBConnection.clear_singleton_instance()
-        mastermind.server.tempfile = self.real_tempfile
-        mastermind.server.os = self.real_os
-        self.hbase_patcher.stop()
-        self.cluster_patcher.stop()
-        self.http_patcher.stop()
-        self.s3_patcher.stop()
-        self.sqlite_connect_patcher.stop()
-        options._set('mastermind.server.serving_update_delay',
-                     self.old_serving_update_delay)
-        self.directive_publisher.stop()
-        self.video_watcher.stop()
-        self.stats_watcher.stop()
-        try:
-            cursor = self.ramdb.cursor()
-            cursor.execute('drop table videoplays')
-            cursor.execute('drop table table_build_times')
-            cursor.execute('drop table eventsequences')
-            self.ramdb.commit()
-        except Exception as e:
-            pass
-        self.ramdb.close()
-        f = 'file::memory:?cache=shared'
-        if os.path.exists(f):
-            os.remove(f)
-        del self.mastermind
-        self.video_watcher.join(2)
-        self.video_watcher.__del__()
-        self.directive_publisher.join(2)
-        self.stats_watcher.join(2)
-        self.redis.stop()
-        super(SmokeTesting, self).tearDown()
-
-    def _add_hbase_entry(self, timestamp, thumb_id, il=None, iv=None, ic=None,
-                         vp=None):
-        tstamp = date.datetime.utcfromtimestamp(timestamp).strftime(
-            '%Y-%m-%dT%H')
-        self.timethumb_table.insert_event_row(
-            '%s_%s' % (tstamp, thumb_id),
-            il, iv, ic, vp)
-        self.thumbtime_table.insert_event_row(
-            '%s_%s' % (thumb_id, tstamp),
-            il, iv, ic, vp)
-
-    def test_integration(self):
-        # This is purely a smoke test to see if anything breaks when
-        # it's all hooked together.
-
-        # Create the account with a default thumbnail
-        default_acct_thumb = neondata.ThumbnailMetadata('key1_NOVIDEO_t0',
-                                                        'key1_NOVIDEO',
-                                                        ttype='default',
-                                                        rank=0)
-        default_acct_thumb.save()
-        neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
-                                      {(160, 90) : 't_default.jpg'}).save()
-        acct = neondata.NeonUserAccount('acct1', 'key1')
-        acct.default_thumbnail_id = default_acct_thumb.key
-        acct.save()
-
-        # Setup api request and update the state to processed
-        job = neondata.NeonApiRequest('job1', 'key1', 'vid1',
-                                      http_callback='http://some_callback.com')
-        job.state = neondata.RequestState.FINISHED
-        job.save()
-        
-        # Create a video with a couple of thumbs in the database
-        vid = neondata.VideoMetadata('key1_vid1', request_id='job1',
-                                     tids=['key1_vid1_t1', 'key1_vid1_t2'],
-                                     i_id='i1')
-        vid.save()
-        thumbs =  [neondata.ThumbnailMetadata('key1_vid1_t1', 'key1_vid1',
-                                              ttype='centerframe'),
-                   neondata.ThumbnailMetadata('key1_vid1_t2', 'key1_vid1',
-                                              ttype='neon')]
-        neondata.ThumbnailMetadata.save_all(thumbs)
-        neondata.ThumbnailServingURLs.save_all([
-            neondata.ThumbnailServingURLs('key1_vid1_t1',
-                                          {(160, 90) : 't1.jpg'}),
-            neondata.ThumbnailServingURLs('key1_vid1_t2',
-                                          {(160, 90) : 't2.jpg'})])
-        neondata.TrackerAccountIDMapper(
-            'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
-        neondata.ExperimentStrategy('key1').save()
-        
-        # Add a couple of entries to the stats db
-        cursor = self.ramdb.cursor()
-        cursor.execute('''REPLACE INTO VideoPlays
-        (serverTime, mnth, yr) values (1405372146.32, 6, 2033)''')
-        cursor.execute('INSERT INTO table_build_times (done_time) values '
-                       "('2014-12-03 10:14:15')")
-        cursor.executemany('''REPLACE INTO EventSequences
-        (thumbnail_id, imvisclienttime, imclickclienttime, servertime, mnth, 
-        yr, tai)
-        VALUES (?,?,?,?,?,?,?)''', [
-            ('key1_vid1_t1', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
-            ('key1_vid1_t1', 1405372146, 1405372146, 1405372146, 6, 2033,
-             'tai1'),
-            ('key1_vid1_t2', 1405372146, 1405372146, None, 6, 2033, 'tai1'),
-            ('key1_vid1_t2', None, 1405372146, 1405372146, 6, 2033, 'tai1')])
-        self.ramdb.commit()
-
-        # Add entries to the hbase incremental database
-        self._add_hbase_entry(1405375626, 'key1_vid1_t1', iv=1, ic=0)
-        self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
-        self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
-
-        # set the db update delay to 0
-        with options._set_bounded('mastermind.server.publishing_period', 1.0):
-            # Now start all the threads
-            self.video_watcher.start()
-            self.video_watcher.wait_until_loaded(5.0)
-            self.video_watcher._change_subscriber.subscribe_to_db_changes()
-            while self.video_watcher._change_subscriber._is_subscribed is False: 
-                time.sleep(0.1)
-            time.sleep(0.25) 
-            self.stats_watcher.start()
-            self.stats_watcher.wait_until_loaded(5.0)
-            self.directive_publisher.start()
-
-            time.sleep(1) # Make sure that the directive publisher gets busy
-            self.activity_watcher.wait_for_idle()
-
-            self.directive_publisher.wait_for_pending_modifies()
-            # See if there is anything in S3 (which there should be)
-            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-            data = bucket.get_key('mastermind').get_contents_as_string()
-            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
-            lines = gz.read().split('\n')
-            self.assertEqual(len(lines), 5)
-
-            # check the DB to ensure it has changed
-            req = neondata.VideoMetadata.get_video_request('key1_vid1')
-            self.assertEqual(req.state, neondata.RequestState.SERVING)
-            self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
-
-            # Make sure a callback was sent
-            self.assertEqual(self.callback_mock.call_count, 1)
-
-            # Trigger new videos with different states via a push
-            # (finished, customer_error)
-            for i in [2, 3]:
-                job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
-                if i == 2:
-                    job.state = neondata.RequestState.FINISHED 
-                if i == 3:
-                    job.state = neondata.RequestState.CUSTOMER_ERROR
-                job.save()
-        
-                # Create a video with a couple of thumbs in the database
-                vid = neondata.VideoMetadata('key1_vid%d'%i,
-                                        request_id='job%d'%i,
-                                        tids=['key1_vid%d_t%d' % (i, j)
-                                              for j in range(2)],
-                                        i_id='i1')
-                vid.save()
-                neondata.BrightcovePlatform.modify(
-                    'key1', 'i1', 
-                    lambda x: x.add_video('vid%d' % i,
-                                          vid.job_id))
-                thumbs =  [neondata.ThumbnailMetadata(
-                    'key1_vid%d_t%d'% (i,j),
-                    'key1_vid%d' % i,
-                    ttype='neon',
-                    rank=j) for j in range(2)]
-                neondata.ThumbnailMetadata.save_all(thumbs)
-                neondata.ThumbnailServingURLs.save_all([
-                    neondata.ThumbnailServingURLs(
-                        'key1_vid%d_t%d' % (i,j),
-                        {(160, 90) : 't21.jpg'})
-                        for j in range(2)])
-
-            self.assertWaitForEquals(
-                lambda: 'key1_vid2' in \
-                self.directive_publisher.last_published_videos,
-                True)
-
-            # Check state for the customer_error video and ensure its in the 
-            # list of last published videos
-            self.assertWaitForEquals(
-                lambda: 'key1_vid3' in \
-                self.directive_publisher.last_published_videos,
-                True)
-            self.assertEquals(
-                neondata.NeonApiRequest.get('job3', 'key1').state,
-                neondata.RequestState.CUSTOMER_ERROR)
-
 class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(SmokeTestingPG, self).setUp()
@@ -2790,7 +2506,7 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         with options._set_bounded('mastermind.server.publishing_period', 1.0):
             # Now start all the threads
             self.video_watcher.start()
-            self.video_watcher.wait_until_loaded(5.0)
+            self.video_watcher.wait_until_loaded(10.0)
             tornado.ioloop.IOLoop.current().add_callback(lambda: 
                 self.video_watcher._change_subscriber.subscribe_to_db_changes())
             while not self.video_watcher._change_subscriber._is_subscribed: 

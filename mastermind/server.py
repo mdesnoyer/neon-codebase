@@ -501,10 +501,10 @@ class VideoDBWatcher(threading.Thread):
 
             self._accounts_options[account.neon_api_key] = (account.abtest, 
                  account.serving_enabled)
- 
-            for video_id in account.get_internal_video_ids():
-                video_metadata = neondata.VideoMetadata.get(video_id)
-                account_id = video_metadata.get_account_id()
+            
+            for video_metadata in account.iterate_all_videos(
+               max_request_size=5000): 
+                video_id = video_metadata.key
                 if not video_metadata.serving_enabled:
                     continue
                 video_status = neondata.VideoStatus.get(video_id,

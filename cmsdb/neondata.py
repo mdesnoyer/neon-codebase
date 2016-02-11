@@ -247,7 +247,7 @@ class PostgresDB(tornado.web.RequestHandler):
                             try: 
                                 pool = self.io_loop_dict[key]['pool']
                                 pool.close() 
-                            except (TypeError, AttributeError): 
+                            except (KeyError, TypeError, AttributeError): 
                                 pass 
                             del self.io_loop_dict[key]
             _clean_up_io_dict() 
@@ -1643,6 +1643,35 @@ class StoredObject(object):
             raise tornado.gen.Return([x for x in 
                                      cls._get_many_with_raw_keys(keys)
                                      if x is not None])
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many_with_key_like(cls, key_portion):
+        ''' Returns many rows that have a key that matches 
+              in a query LIKE 'key_portion%' 
+
+            In Postgres this is much faster(4x) than the pattern 
+            matching ~ and makes this the much better choice if 
+            you are trying to match on accountid_blah 
+        ''' 
+        if options.wants_postgres:
+            results = [] 
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            baseclass_name = cls._baseclass_name().lower()
+            query = "SELECT _data, _type FROM " + baseclass_name + \
+                    " WHERE _data->>'key' LIKE %s"
+
+            params = ['%'+key_portion+'%']
+            cursor = yield conn.execute(query, params)
+            for result in cursor:
+                obj = cls._create(result['_data']['key'], result)
+                results.append(obj) 
+            db.return_connection(conn)
+            raise tornado.gen.Return(results)
+        else:
+            raise NotImplementedError('not implemented for redis')  
 
     @classmethod
     @utils.sync.optional_sync
