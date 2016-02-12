@@ -274,7 +274,8 @@ class ChangeSubscriber(threading.Thread):
 
                 if self._videos_subscribed_pg is False:
                     sub = yield neondata.VideoMetadata.subscribe_to_changes(
-                             lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                             lambda key, obj, op: 
+                             self.video_db_watcher._schedule_video_update(
                                  key, is_push_update=True),
                              async=True) 
                     self.video_db_watcher._table_subscribers.append(sub) 
@@ -283,7 +284,9 @@ class ChangeSubscriber(threading.Thread):
                 if self._thumbnails_subscribed_pg is False:
                     sub = yield neondata.ThumbnailMetadata.subscribe_to_changes(
                             lambda key, obj, op: 
-                            self.video_db_watcher._schedule_video_update('_'.join(key.split('_')[0:2]), is_push_update=True),
+                            self.video_db_watcher._schedule_video_update(
+                                '_'.join(key.split('_')[0:2]), 
+                                is_push_update=True),
                             async=True)
                     self.video_db_watcher._table_subscribers.append(sub) 
                     self._thumbnails_subscribed_pg = True
@@ -1656,7 +1659,6 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
                                        activity_watcher)
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
-        videoDbThread._change_subscriber.subscribe_to_db_changes()
         statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
                                        activity_watcher)
         statsDbThread.start()
