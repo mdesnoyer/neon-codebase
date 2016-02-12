@@ -131,14 +131,13 @@ class Cluster():
 
     # We are basing it on a combination of memory and disk space
     instance_info = {
-        #'m2.2xlarge' : (1.0, 0.49),
-        #'m2.4xlarge' : (2.1, 0.98),
-        #'r3.4xlarge' : (3.1, 1.40),
-        #'r3.8xlarge' : (6.2, 2.80),
-        'hi1.4xlarge' : (6.1, 3.1),
-        'cc2.8xlarge' : (9.1, 2.0),
-        'd2.2xlarge' : (6.5,1.38),
-        'd2.4xlarge' : (9.7,2.76),
+        'd2.2xlarge'  : (2.0, 1.38),
+        'd2.4xlarge'  : (4.1, 2.76),
+        'd2.8xlarge'  : (8.3, 5.52),
+        'cc2.8xlarge' : (2.2, 2.0),
+        'hi1.4xlarge' : (1.6, 3.1),
+        'i2.4xlarge'  : (3.0, 3.41),
+        'i2.8xlarge'  : (6.1, 6.82)
         }
 
     # Possible cluster roles
@@ -822,7 +821,7 @@ class Cluster():
             boto.emr.step.InstallHiveStep('0.11.0.2')]
 
             
-        subnet_id, instance_group = self._get_core_instance_group() 
+        subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
             InstanceGroup(1, 'MASTER', 'r3.large', 'ON_DEMAND',
                           'Master Instance Group'),
@@ -890,8 +889,7 @@ class Cluster():
         self.public_ip = None
         self.set_public_ip(cluster_ip)
 
-    def _get_core_instance_group(self):   
-             
+    def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
         avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
             'us-east-1d' : 'subnet-53fa1901' 
@@ -900,7 +898,7 @@ class Cluster():
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
                  x[1], cur_price, avg_price, availability_zone)
-                 for availability_zone in [ 'us-east-1c', 'us-east-1d' ]
+                 for availability_zone in avail_zone_to_subnet_id.keys()
                  for itype, x in Cluster.instance_info.items()
                  for cur_price, avg_price in [self._get_spot_prices(itype, 
                    availability_zone)]]
