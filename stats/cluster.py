@@ -823,7 +823,7 @@ class Cluster():
             
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.large', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
@@ -891,9 +891,9 @@ class Cluster():
 
     def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
-            'us-east-1d' : 'subnet-53fa1901' 
-        } 
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
+            'us-east-1d' : 'subnet-abf214f2'
+        }
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
