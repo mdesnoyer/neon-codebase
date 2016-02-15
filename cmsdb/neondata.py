@@ -1809,40 +1809,48 @@ class StoredObject(object):
             conn = yield db.get_connection()
             if len(keys) == 0:
                 raise tornado.gen.Return({})
-            # get the items, sql in a loop -- i would prefer 
-            # an IN here, but trying to maintain create_missing
                 
             mappings = {}
-            orig_objects = {}
-             
-            for key in keys:
-                query = "SELECT _data, _type \
-                         FROM %s \
-                         WHERE _data->>'key' = '%s'" % (create_class(key)._baseclass_name().lower(), key)
+            key_to_object = {}  
+            for key in keys: 
+                key_to_object[key] = None
+ 
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' IN(%s)" % (create_class(key)._baseclass_name().lower(), 
+                                                    ",".join("'{0}'".format(k) for k in keys))
 
-                cursor = yield conn.execute(query)
-                item = cursor.fetchone()
-                if item is None:
+            cursor = yield conn.execute(query)
+            items = cursor.fetchall()
+            for item in items:
+                current_key = item['_data']['key']
+                key_to_object[current_key] = item
+            
+            for key, item in key_to_object.iteritems(): 
+                if item is None:  
                     if create_missing:
                         cur_obj = create_class(key)
                     else:
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
-                    cur_obj = create_class._create(key, item)
-                    orig_objects[key] = create_class._create(key, item)
+                    # hack we need two copies of the object, copy won't work here
+                    # on the class create itself since it's a class. dump and load 
+                    # the item instead  
+                    item_one = json.loads(json.dumps(item))
+                    cur_obj = create_class._create(key, item_one)
 
-                mappings[key] = cur_obj
+                mappings[key] = cur_obj 
             try:
                 func(mappings)
             finally:
                 sql_statements = []
                 for key, obj in mappings.iteritems():
-                   original_object = orig_objects.get(key, None)
+                   original_object = key_to_object.get(key, None)
                    if obj is not None and original_object is None: 
                        query_tuple = db.get_insert_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
-                   elif obj is not None:
+                   elif obj is not None and obj != original_object:
                        query_tuple = db.get_update_json_query_tuple(obj)
                        sql_statements.append(query_tuple) 
             try: 
