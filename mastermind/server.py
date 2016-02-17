@@ -1350,7 +1350,7 @@ class DirectivePublisher(threading.Thread):
                         len(new_serving_videos))
                     video_list = list(new_serving_videos) 
                     list_chunks = [video_list[i:i+5000] for i in
-                               xrange(0, len(video_list), 5000)] 
+                               xrange(0, len(video_list), 5000)]
                     for chunk in list_chunks: 
                         t = threading.Thread(
                             target=self._enable_videos_in_database,
@@ -1572,27 +1572,30 @@ class DirectivePublisher(threading.Thread):
         with self._enable_video_lock:
             # First grab the videos and requests
             videos = neondata.VideoMetadata.get_many(video_ids) 
-            job_ids = [(v.job_id, v.get_account_id()) for v in videos]
+            job_ids = [(v.job_id, v.get_account_id()) 
+                          if v is not None else (None, None) 
+                          for v in videos]
             requests = neondata.NeonApiRequest.get_many(job_ids)  
                                 
         for video, request in zip(videos, requests): 
             try:
                 if video is None: 
-                    return 
+                    continue 
                 if request is None or request.state != neondata.RequestState.FINISHED: 
-                    return
+                    continue 
 
                 video_id = video.get_id() 
                 start_time = time.time()
                 if video_id in self.waiting_on_isp_videos:
                     # we are already waiting on this video_id, do not 
                     # start another long loop for it 
-                    return 
+                    continue 
                 else: 
                     # Now we wait until the video is serving on the isp
                     with self.lock: 
                         self.waiting_on_isp_videos.add(video_id) 
                         statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
+                    found = True 
                     while not video.image_available_in_isp():
                         if (time.time() - start_time) > options.isp_wait_timeout:
                             statemon.state.increment('timeout_waiting_for_isp')
@@ -1601,8 +1604,13 @@ class DirectivePublisher(threading.Thread):
                             with self.lock:
                                 self.last_published_videos.discard(video_id)
                                 self.waiting_on_isp_videos.discard(video_id) 
-                            return
+                            found = False 
+                            break
                         time.sleep(5.0 * random.random())
+
+                    if not found: 
+                        continue 
+
                 with self.lock: 
                     self.waiting_on_isp_videos.discard(video_id) 
                     statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
