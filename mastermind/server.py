@@ -1582,7 +1582,7 @@ class DirectivePublisher(threading.Thread):
                 if request is None or request.state != neondata.RequestState.FINISHED: 
                     return
 
-                video_id = v.get_id() 
+                video_id = video.get_id() 
                 start_time = time.time()
                 if video_id in self.waiting_on_isp_videos:
                     # we are already waiting on this video_id, do not 

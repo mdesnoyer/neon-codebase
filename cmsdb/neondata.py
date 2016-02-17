@@ -248,8 +248,11 @@ class PostgresDB(tornado.web.RequestHandler):
                                 pool = self.io_loop_dict[key]['pool']
                                 pool.close() 
                             except (KeyError, TypeError, AttributeError): 
-                                pass 
-                            del self.io_loop_dict[key]
+                                pass
+                            try: 
+                                del self.io_loop_dict[key]
+                            except Exception as e: 
+                                _log.error('Unknown Error : cleaning up the io loop dict %s' % e) 
             _clean_up_io_dict() 
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
