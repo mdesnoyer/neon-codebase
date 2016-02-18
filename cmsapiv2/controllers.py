@@ -83,7 +83,7 @@ class NewAccountHandler(APIV2Handler):
                    % (user['customer_name'], user['account_id']))
         statemon.state.increment('post_account_oks')
  
-        self.success(json.dumps(user))
+        self.success(user)
 
     @classmethod
     def get_access_levels(self):
@@ -122,7 +122,7 @@ class AccountHandler(APIV2Handler):
  
         user_account = AccountHelper.db2api(user_account, fields=fields)
         statemon.state.increment('get_account_oks')
-        self.success(json.dumps(user_account))
+        self.success(user_account)
  
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -152,7 +152,7 @@ class AccountHandler(APIV2Handler):
  
         result = yield tornado.gen.Task(neondata.NeonUserAccount.modify, acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
-        self.success(json.dumps(acct_for_return))
+        self.success(acct_for_return)
 
     @classmethod
     def get_access_levels(self):
@@ -306,7 +306,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
         integration = yield tornado.gen.Task(IntegrationHelper.create_integration, acct, args, neondata.IntegrationType.OOYALA)
         statemon.state.increment('post_ooyala_oks')
-        self.success(json.dumps(integration.__dict__))
+        self.success(integration.__dict__)
  
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -324,7 +324,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                     neondata.IntegrationType.OOYALA)
 
         statemon.state.increment('get_ooyala_oks')
-        self.success(json.dumps(integration.__dict__))
+        self.success(integration.__dict__)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -358,7 +358,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                             neondata.IntegrationType.OOYALA)
  
         statemon.state.increment('put_ooyala_oks')
-        self.success(json.dumps(ooyala_integration.__dict__))
+        self.success(ooyala_integration.__dict__)
 
     @classmethod
     def get_access_levels(self):
@@ -397,7 +397,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                                              args, 
                                                              neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('post_brightcove_oks')
-        self.success(json.dumps(integration.__dict__))
+        self.success(integration.__dict__)
 
     @tornado.gen.coroutine
     def get(self, account_id):  
@@ -414,7 +414,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         integration = yield IntegrationHelper.get_integration(integration_id,  
                                                        neondata.IntegrationType.BRIGHTCOVE) 
         statemon.state.increment('get_brightcove_oks')
-        self.success(json.dumps(integration.__dict__))
+        self.success(integration.__dict__)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -455,7 +455,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                                   neondata.IntegrationType.BRIGHTCOVE) 
  
         statemon.state.increment('put_brightcove_oks')
-        self.success(json.dumps(integration.__dict__))
+        self.success(integration.__dict__)
 
     @classmethod
     def get_access_levels(self):
@@ -528,7 +528,7 @@ class ThumbnailHandler(APIV2Handler):
 
         if new_video: 
             statemon.state.increment('post_thumbnail_oks')
-            self.success(json.dumps(ThumbnailHelper.db2api(new_thumbnail)),
+            self.success(ThumbnailHelper.db2api(new_thumbnail),
                          code=ResponseCode.HTTP_ACCEPTED)
         else:
             raise SaveError('unable to save thumbnail to video') 
@@ -557,7 +557,7 @@ class ThumbnailHandler(APIV2Handler):
                                            _update_thumbnail)
  
         statemon.state.increment('put_thumbnail_oks')
-        self.success(json.dumps(ThumbnailHelper.db2api(thumbnail)))
+        self.success(ThumbnailHelper.db2api(thumbnail))
 
     @tornado.gen.coroutine
     def get(self, account_id): 
@@ -581,8 +581,7 @@ class ThumbnailHandler(APIV2Handler):
         fields = args.get('fields', None)
         if fields:
             fields = set(fields.split(','))
-        self.success(json.dumps(
-            ThumbnailHelper.db2api(thumbnail, fields)))
+        self.success(ThumbnailHelper.db2api(thumbnail, fields))
 
     @classmethod
     def get_access_levels(self):
@@ -623,6 +622,7 @@ class ThumbnailHelper(object):
             elif field == 'frameno':
                 obj[field] = tmeta.frameno
             elif field == 'neon_score':
+                # TODO(mdesnoyer): convert the model score into the neon score
                 obj[field] = tmeta.model_score
             elif field == 'enabled':
                 obj[field] = tmeta.enabled
@@ -770,7 +770,7 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled']
+                      'testing_enabled', 'job_id']
 
         new_video = {}
         for field in fields:
@@ -844,7 +844,7 @@ class VideoHandler(APIV2Handler):
           'integration_id' : Any(str, unicode, Length(min=1, max=256)),
           'video_url': Any(str, unicode, Length(min=1, max=512)), 
           'callback_url': Any(str, unicode, Length(min=1, max=512)), 
-          'video_title': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=256)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
@@ -885,9 +885,10 @@ class VideoHandler(APIV2Handler):
         if response and response.code is ResponseCode.HTTP_OK: 
             job_info = {} 
             job_info['job_id'] = api_request.job_id
-            job_info['video'] = new_video.__dict__
+            job_info['video'] = yield VideoHelper.db2api(new_video,
+                                                         api_request)
             statemon.state.increment('post_video_oks')
-            self.success(json.dumps(job_info),
+            self.success(job_info,
                          code=ResponseCode.HTTP_ACCEPTED) 
         else:
             raise Exception('unable to communicate with video server', 
@@ -952,7 +953,7 @@ class VideoHandler(APIV2Handler):
                                 (args['video_id']))
 
         statemon.state.increment('get_video_oks')
-        self.success(json.dumps(vid_dict))
+        self.success(vid_dict)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -983,7 +984,7 @@ class VideoHandler(APIV2Handler):
         output = yield VideoHelper.db2api(video, None,
                                           fields=['testing_enabled',
                                                   'video_id'])
-        self.success(json.dumps(output))
+        self.success(output)
 
     @classmethod
     def get_access_levels(self):
@@ -1030,7 +1031,7 @@ class VideoStatsHandler(APIV2Handler):
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)
 
-        self.success(json.dumps(stats_dict))
+        self.success(stats_dict)
 
     @classmethod
     def get_access_levels(self):
@@ -1094,9 +1095,9 @@ class ThumbnailStatsHandler(APIV2Handler):
         thumbnail_ids = args.get('thumbnail_id', None) 
         video_ids = args.get('video_id', None)
         if not video_ids and not thumbnail_ids: 
-            raise MultipleInvalid('thumbnail_id or video_id is required') 
+            raise Invalid('thumbnail_id or video_id is required') 
         if video_ids and thumbnail_ids: 
-            raise MultipleInvalid('you can only have one of thumbnail_id or video_id') 
+            raise Invalid('you can only have one of thumbnail_id or video_id') 
         
         fields = args.get('fields', None)
         if fields:
@@ -1132,7 +1133,7 @@ class ThumbnailStatsHandler(APIV2Handler):
         stats_dict['statistics'] = objects
         stats_dict['count'] = len(objects)
 
-        self.success(json.dumps(stats_dict))
+        self.success(stats_dict)
 
     @classmethod
     def get_access_levels(self):

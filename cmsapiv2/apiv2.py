@@ -75,7 +75,11 @@ class TokenTypes(object):
 
 class APIV2Sender(object): 
     def success(self, data, code=ResponseCode.HTTP_OK):
-        self.set_status(code) 
+        # Add an empty error field if it's not there
+        if isinstance(data, dict) and 'error' not in data:
+            data['error'] = None
+            
+        self.set_status(code)
         self.write(data) 
         self.finish()
 
@@ -86,7 +90,7 @@ class APIV2Sender(object):
             error_json['code'] = code 
         if extra_data: 
             error_json['data'] = extra_data 
-        self.write(error_json)
+        self.write({'error' : error_json})
         self.finish() 
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
@@ -114,14 +118,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 pass
         elif len(self.request.body) > 0: 
             content_type = self.request.headers.get('Content-Type', None)
-            if content_type and 'application/json' in content_type: 
+            if content_type is None or 'application/json' not in content_type:
+                raise BadRequestError('Content-Type must be JSON')
+            else:
                 bjson = json.loads(self.request.body) 
                 try:
                     self.access_token = str(bjson['token'])
                 except KeyError: 
                     pass
-            else:
-                raise BadRequestError('Content-Type Not Supported')
         
     def set_account_id(request):
         parsed_url = urlparse(request.uri) 
@@ -136,10 +140,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     args[key] = value[0]
         # otherwise let's use what we find in the body, json only
         elif len(self.request.body) > 0: 
-            bjson = json.loads(self.request.body) 
-            for key, value in bjson.items():
-                if key != 'token' or keep_token: 
-                    args[key] = value
+            content_type = self.request.headers.get('Content-Type', None)
+            if content_type is None or 'application/json' not in content_type:
+                raise BadRequestError('Content-Type must be JSON')
+            else:
+                bjson = json.loads(self.request.body) 
+                for key, value in bjson.items():
+                    if key != 'token' or keep_token: 
+                        args[key] = value
 
         return args
     
