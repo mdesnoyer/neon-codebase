@@ -1,5 +1,5 @@
 '''
-Fox API Interface class
+Microsoft API Interface class
 '''
 
 import os
