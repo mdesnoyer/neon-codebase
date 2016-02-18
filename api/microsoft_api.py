@@ -75,13 +75,3 @@ class MicrosoftApi(object):
             raise tornado.gen.Return(json.loads(response.body))
         else: 
             raise tornado.gen.Return(response.body)
-        
-
-
-@tornado.gen.coroutine 
-def main(): 
-    ma = MicrosoftApi('AAc7iy')
-    yield ma.search()   
-
-if __name__ == "__main__":
-    tornado.ioloop.IOLoop.current().run_sync(lambda: main())

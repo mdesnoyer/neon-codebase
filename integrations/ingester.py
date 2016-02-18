@@ -86,7 +86,6 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
     start_time = datetime.datetime.now()
     pi_class = get_platform_class() 
     # TODO hack once these platform objects go away
-    # import pdb; pdb.set_trace()
     if options.service_name.lower() == 'brightcove': 
         platform = yield tornado.gen.Task(pi_class.get, api_key, integration_id)
     else: 
