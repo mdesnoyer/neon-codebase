@@ -74,11 +74,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
 
 class APIV2Sender(object): 
-    def success(self, data, code=ResponseCode.HTTP_OK):
-        # Add an empty error field if it's not there
-        if isinstance(data, dict) and 'error' not in data:
-            data['error'] = None
-            
+    def success(self, data, code=ResponseCode.HTTP_OK):            
         self.set_status(code)
         self.write(data) 
         self.finish()
@@ -294,6 +290,64 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         raise NotImplementedError('delete not implemented')  
 
     __delete = delete
+
+    @classmethod
+    @tornado.gen.coroutine 
+    def db2api(cls, obj, fields=None):
+        """Converts a database object to a response dictionary
+         
+        Keyword arguments: 
+        obj - The database object to convert
+        fields - List of fields to return
+        """
+        if fields is None:
+            fields = cls._get_default_returned_fields()
+        
+        retval = {}
+        passthrough_fields = set(cls._get_passthrough_fields())
+        
+        for field in fields:
+            if field in passthrough_fields:
+                retval[field] = getattr(obj, field)
+            else:
+                retval[field] = yield cls._convert_special_field(obj, field)
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        '''Return a list of fields that should be returned in this API call.'''
+        raise NotImplementedError(
+            'List of default fields must be specified for this object. %s'
+            % cls.__name__)
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        '''Return a list of fields in a database object that should be 
+           returned by the api without change.
+        '''
+        raise NotImplementedError(
+            'List of passthrough fields must be specified for this object. %s'
+            % cls.__name__)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        '''Converts a field on a database object that requires special 
+        processing.
+
+        Inputs:
+        obj - The database object
+        field - The name of the field to process
+
+        Returns:
+        The value to place in a dictionay to represent this field.
+
+        Raises:
+        BadRequestError if the field not handled
+        '''
+        raise NotImplementedError(
+            'Must specify how to convert %s for object %s' % 
+            (field, cls.__name__))
 
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place 

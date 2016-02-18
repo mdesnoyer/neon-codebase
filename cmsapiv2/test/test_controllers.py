@@ -185,7 +185,6 @@ class TestNewAccountHandler(TestControllersBase):
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
-        self.assertIsNone(rjson['error'])
  
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
@@ -1226,8 +1225,7 @@ class TestVideoHandler(TestControllersBase):
             'state': neondata.ExternalRequestState.PROCESSED,
             'video_id': 'vid1',
             'publish_date' : '2015-06-10',
-            'title' : 'Title',
-            'error' : None
+            'title' : 'Title'
             },
             rjson['videos'][0])
 
@@ -1248,6 +1246,7 @@ class TestVideoHandler(TestControllersBase):
         request = neondata.NeonApiRequest('job1', self.account_id_api_key,
                                           title='Title',
                                           publish_date='2015-06-10')
+        request.response = {'error': 'Some error'}
         request.state = neondata.RequestState.FINISHED
         request.save()
         url = '/api/v2/%s/videos?video_id=vid1&fields=state,integration_id,testing_enabled,job_id,title,video_id,serving_url,publish_date,thumbnails,duration,custom_data' % (self.account_id_api_key)
@@ -1267,7 +1266,7 @@ class TestVideoHandler(TestControllersBase):
             'publish_date' : '2015-06-10',
             'duration' : 31.5,
             'custom_data' : {'my_data' : 'happygo'},
-            'error' : None
+            'error' : 'Some error'
             },
             rjson['videos'][0])
         tids = [x['thumbnail_id'] for x in rjson['videos'][0]['thumbnails']]
@@ -1353,8 +1352,8 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
 
         self.assertIsNotNone(videos[0]['created']) 
-        self.assertIsNone(videos[0]['error'])
-        self.assertItemsEqual(videos[0].keys(), ['created', 'error'])
+        self.assertNotIn('error', videos[0])
+        self.assertItemsEqual(videos[0].keys(), ['created'])
     
     @tornado.testing.gen_test
     def test_get_single_video_with_invalid_fields(self):
