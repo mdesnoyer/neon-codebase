@@ -19,6 +19,9 @@ import urllib
 import utils.http
 import utils.neon 
 
+import logging
+_log = logging.getLogger(__name__)
+
 class MicrosoftApi(object):
     BASE_URL = 'http://query.prod.cms.msn.com' 
     def __init__(self, feed_id):
@@ -56,11 +59,14 @@ class MicrosoftApi(object):
                 img_json = yield self._get_response_body_from_url(url)
                 res_json['thumbnail']['address'] = img_json['_name'] 
                 res_json['thumbnail']['id'] = img_json['_id'] 
-                video_info.append(res_json) 
+                video_info.append(res_json)
+        except IndexError:
+            # nothing returned back, continue on
+            pass  
         except Exception as e: 
-            raise
-
-        raise tornado.gen.Return(video_info) 
+            _log.error('Unhandled Exception : %s when getting videos' % e) 
+        finally: 
+            raise tornado.gen.Return(video_info) 
 
     @tornado.gen.coroutine
     def _get_response_body_from_url(self, url, want_json=True): 
