@@ -19,6 +19,7 @@ import integrations.brightcove
 import integrations.cnn
 import integrations.fox
 import integrations.exceptions
+import integrations.microsoft
 import signal
 import multiprocessing
 import os.path
@@ -52,6 +53,7 @@ def get_platform_class():
     types = { 
               'fox' : neondata.FoxIntegration, 
               'cnn' : neondata.CNNIntegration, 
+              'microsoft' : neondata.MicrosoftIntegration, 
               'brightcove' : neondata.BrightcovePlatform 
             } 
     try: 
@@ -67,6 +69,7 @@ def get_integration_class():
     types = { 
               'fox' : integrations.fox.FoxIntegration, 
               'cnn' : integrations.cnn.CNNIntegration, 
+              'microsoft' : integrations.microsoft.MicrosoftIntegration, 
               'brightcove' : integrations.brightcove.BrightcoveIntegration 
             } 
     try: 
