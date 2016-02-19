@@ -3087,8 +3087,12 @@ class NeonUserAccount(NamespacedStoredObject):
 
         for res in cursor.fetchall():
             ts = self._create(res['_data']['key'], res) 
-            video_id = ts.get_video_id() 
-            video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
+            video_id = ts.get_video_id()
+            try:  
+                video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
+            except KeyError as e: 
+                _log.error('video_id %s was not in the dictionary : %s' % (video_id, e)
+                continue  
             
         db.return_connection(conn)
         raise tornado.gen.Return(video_to_status_dict)
