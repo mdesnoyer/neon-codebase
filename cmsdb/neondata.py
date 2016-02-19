@@ -1820,7 +1820,7 @@ class StoredObject(object):
  
             query = "SELECT _data, _type \
                      FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (create_class(key)._baseclass_name().lower(), 
+                     WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
 
             cursor = yield conn.execute(query)
@@ -3036,6 +3036,63 @@ class NeonUserAccount(NamespacedStoredObject):
                                  page_size=max_request_size,
                                  skip_missing=True))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_videos_and_statuses(self):
+        ''' 
+            the join on this is slow in the database 
+              perform via two separate queries 
+        '''  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        video_to_status_dict = {}
+        query = "SELECT video_id, serving_enabled, video_status_data, video_status_type FROM (" \
+                "  SELECT v._data->>'key' AS video_id, v._data->>'serving_enabled' AS serving_enabled" \
+                "   FROM videometadata v" \
+                "   WHERE v._data->>'key'  LIKE %s" \
+                "  ) q1 LEFT JOIN LATERAL ( " \
+                "    SELECT vs._data AS video_status_data, vs._type AS video_status_type " \
+                "      FROM videostatus vs " \
+                "      WHERE replace(vs._data->>'key', 'videostatus_', '') = q1.video_id " \
+                "  ) q2 ON TRUE"
+        params = [self.neon_api_key+'_%']
+        cursor = yield conn.execute(
+                    query, 
+                    params, 
+                    cursor_factory=psycopg2.extensions.cursor)
+        for res in cursor.fetchall():
+            try: 
+                obj_dict = {} 
+                obj_dict['_data'] = res[2]
+                key = obj_dict['_data']['key']  
+                obj_dict['_type'] = res[3] 
+                video_to_status_dict[res[0]] = {
+                    'serving_enabled' : res[1], 
+                    'video_status_obj' : self._create(key, obj_dict), 
+                    'thumbnail_status_list' : [] 
+                }
+            except (TypeError, KeyError): 
+                pass  
+        
+        query = "SELECT _data, _type FROM thumbnailstatus " \
+                " WHERE replace(_data->>'key', 'thumbnailstatus_', '') IN( "\
+                "  SELECT jsonb_array_elements_text(v._data->'thumbnail_ids') " \
+                "   FROM videometadata v " \
+                "   WHERE v._data->>'key' LIKE %s)"
+ 
+        params = [self.neon_api_key+'_%']
+        cursor = yield conn.execute(
+                    query, 
+                    params) 
+
+        for res in cursor.fetchall():
+            ts = self._create(res['_data']['key'], res) 
+            video_id = ts.get_video_id() 
+            video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
+            
+        db.return_connection(conn)
+        raise tornado.gen.Return(video_to_status_dict)
+        
 # define a ProcessingStrategy, that will dictate the behavior of the model.
 class ProcessingStrategy(DefaultedStoredObject):
     '''
@@ -5251,6 +5308,9 @@ class ThumbnailStatus(DefaultedStoredObject):
             return True
         return False
             
+    def get_video_id(self): 
+        splits = self.key.split('_')
+        return '_'.join([splits[1], splits[2]])
 
     @classmethod
     def _baseclass_name(cls):

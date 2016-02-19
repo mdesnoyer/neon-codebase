@@ -441,7 +441,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
 
-    @patch('cmsdb.neondata.NeonUserAccount.iterate_all_videos')
+    @patch('cmsdb.neondata.NeonUserAccount.get_videos_and_statuses')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_initialize_serving_directives(self, 
          get_ivids_mock, 
@@ -498,11 +498,28 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         get_ivids_mock.side_effect = [ ['a1_vid1'],   
             ['a2_vid1','a2_vid2'] 
         ] 
-        #datamock.VideoMetadata.get_many_with_key_like.side_effect = [ 
+        def _bigger_object():  
+            obj = {} 
+            obj['a2_vid1'] = { 'serving_enabled' : True, 
+                               'video_status_obj' : vid_status['a2_vid1'], 
+                               'thumbnail_status_list' : [ tid_status['a2_vid1_t01'], 
+                                  tid_status['a2_vid1_t02']       
+                               ] 
+                             }
+            obj['a2_vid2'] = { 'serving_enabled' : True, 
+                               'video_status_obj' : vid_status['a2_vid2'], 
+                               'thumbnail_status_list' : [] 
+                             }
+            return obj 
+              
         iter_all_vids_mock.side_effect = [ 
-              [vid_meta['a1_vid1']],   
-              [vid_meta['a2_vid1'],
-               vid_meta['a2_vid2']] 
+              { 'a1_vid1' : 
+                { 'serving_enabled' : True, 
+                  'video_status_obj' : vid_status['a1_vid1'], 
+                  'thumbnail_status_list' : [ tid_status['a1_vid1_t01'] ]
+                } 
+              }, 
+              _bigger_object() 
             ] 
         self.watcher._initialize_serving_directives()
 

@@ -3380,7 +3380,22 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         so = neondata.NeonUserAccount(uuid.uuid1().hex)
         yield so.save(async=True)
         so2 = neondata.NeonUserAccount(so.account_id)
-        self.assertEquals(so.neon_api_key, so2.neon_api_key) 
+        self.assertEquals(so.neon_api_key, so2.neon_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_get_videos_and_statuses(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        ThumbnailMetadata(tid, i_vid).save()
+        VideoMetadata(i_vid, [tid],'job1').save()
+        neondata.VideoStatus(i_vid, 'complete').save()
+        neondata.ThumbnailStatus(tid, 0.2).save()
+
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        yield so.get_videos_and_statuses(async=True)
+
 
     @tornado.testing.gen_test 
     def test_mm_neon_user_account(self):

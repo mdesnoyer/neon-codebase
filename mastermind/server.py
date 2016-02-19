@@ -505,27 +505,20 @@ class VideoDBWatcher(threading.Thread):
             self._accounts_options[account.neon_api_key] = (account.abtest, 
                  account.serving_enabled)
             
-            for video_metadata in account.iterate_all_videos(
-               max_request_size=5000): 
-                video_id = video_metadata.key
-                if not video_metadata.serving_enabled:
+            videos_and_statuses = account.get_videos_and_statuses() 
+            
+            for video_id, obj in videos_and_statuses.iteritems(): 
+                if not obj['serving_enabled']:  
                     continue
-                video_status = neondata.VideoStatus.get(video_id,
-                                                        log_missing=False)
-                if video_status is None:
-                    continue
-
-                # Get all thumbnails
-                thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    set(video_metadata.thumbnail_ids), log_missing=False)
-                thumbnail_status_list = [x for x in thumbnail_status_list if
-                                         x is not None]
-
+                video_status = obj['video_status_obj']
+                if video_status is None: 
+                    continue  
+                thumbnail_status_list = obj['thumbnail_status_list'] 
                 self.mastermind.update_experiment_state_directive(
                     video_id,
                     video_status,
                     thumbnail_status_list)
-
+                
     def _process_db_data(self, is_initialized):
         _log.info('Polling the video database for a full batch update')
 

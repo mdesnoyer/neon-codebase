@@ -427,7 +427,13 @@ CREATE INDEX thumbnailmetadata_video_id ON thumbnailmetadata USING btree (((_dat
 CREATE INDEX videometadata_job_id ON videometadata USING btree (((_data ->> 'job_id'::text)));
 CREATE INDEX videometadata_integration_id ON videometadata USING btree (((_data ->> 'integration_id'::text)));
 CREATE INDEX videometadata_thumbnail_ids ON videometadata USING gin (((_data->'thumbnail_ids')));
- 
+
+-- Text pattern ops indexes, for places we do a lot of text comps
+
+CREATE INDEX videometadata_key_text_idx ON videometadata ((_data->>'key') text_pattern_ops);
+CREATE INDEX thumbnailstatus_key_text_idx ON thumbnailstatus ((_data->>'key') text_pattern_ops);
+CREATE INDEX videostatus_key_text_idx ON videostatus ((_data->>'key') text_pattern_ops);
+
 -- 
 -- Notify Trigger, notifies all listeners of changes  
 -- 
