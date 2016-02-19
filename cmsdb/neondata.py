@@ -3091,8 +3091,8 @@ class NeonUserAccount(NamespacedStoredObject):
             try:  
                 video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
             except KeyError as e: 
-                _log.error('video_id %s was not in the dictionary : %s' % (video_id, e)
-                continue  
+                _log.error('video_id %s was not in the dictionary : %s' % (video_id, e))
+                continue 
             
         db.return_connection(conn)
         raise tornado.gen.Return(video_to_status_dict)
