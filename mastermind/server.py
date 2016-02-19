@@ -1679,7 +1679,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
     ioloop = tornado.ioloop.IOLoop()
     ioloop.make_current()
     ioloop.add_callback(lambda:
-        self.videoDbThread._change_subscriber.subscribe_to_db_changes())
+        videoDbThread._change_subscriber.subscribe_to_db_changes())
     
     atexit.register(ioloop.stop)
     atexit.register(publisher.stop)
