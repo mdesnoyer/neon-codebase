@@ -1688,26 +1688,32 @@ class StoredObject(object):
             raise tornado.gen.Return([])
 
         if options.wants_postgres and func_level_wpg:
+            chunk_size = 500
             rv = []
             obj_map = OrderedDict() 
             db = PostgresDB()
             conn = yield db.get_connection()
-               
-            query = "SELECT _data, _type \
+            # let's use a server-side cursor here 
+            # since momoko won't let me declare a cursor by name, I need to 
+            # do this manually 
+            yield conn.execute("BEGIN")
+ 
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
+            
             cursor = yield conn.execute(query)
+            for key in keys: 
+                obj_map[key] = None 
 
             def _map_new_results(results):
-                for key in keys: 
-                    obj_map[key] = None 
                 for result in results:
                     obj_key = result['_data']['key'] 
-                    #obj_map[obj_key] = result['_data'] 
                     obj_map[obj_key] = result
  
             def _build_return_items(): 
+                rv = [] 
                 for key, item in obj_map.iteritems():
                     if item: 
                         obj = cls._create(key, item) 
@@ -1719,12 +1725,20 @@ class StoredObject(object):
                         else:
                             obj = None
                     rv.append(obj) 
-                  
-            _map_new_results(cursor.fetchall())
-            _build_return_items() 
-            db.return_connection(conn)
+                return rv
+ 
+            rows = True
+            while rows:
+                cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
+                rows = cursor.fetchall() 
+                _map_new_results(rows)
 
-            raise tornado.gen.Return(rv)
+            _build_return_items()
+            yield conn.execute("CLOSE get_many")  
+            yield conn.execute("COMMIT")
+ 
+            db.return_connection(conn)
+            raise tornado.gen.Return(_build_return_items())
         else: 
             db_connection = DBConnection.get(cls)
     

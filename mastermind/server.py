@@ -1342,8 +1342,8 @@ class DirectivePublisher(threading.Thread):
                     _log.info('Enabling %d new videos' % 
                         len(new_serving_videos))
                     video_list = list(new_serving_videos) 
-                    list_chunks = [video_list[i:i+5000] for i in
-                               xrange(0, len(video_list), 5000)]
+                    list_chunks = [video_list[i:i+1000] for i in
+                               xrange(0, len(video_list), 1000)]
                     for chunk in list_chunks: 
                         t = threading.Thread(
                             target=self._enable_videos_in_database,
