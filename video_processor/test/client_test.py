@@ -727,7 +727,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             'job_id' : 'job1',
             'video_id' : 'vid1',
             'framenos' : [6],
-            'thumbnails' : [n_thumbs[0].urls[0]],
+            'thumbnails' : [n_thumbs[0].key],
             'error' : None
             }
         self.assertDictContainsSubset(expected_response,

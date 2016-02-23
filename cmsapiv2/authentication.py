@@ -78,7 +78,7 @@ class AuthenticateHandler(APIV2Handler):
             self.success(json.dumps(result)) 
         else: 
             statemon.state.increment('failed_authenticates')
-            raise NotFoundError()
+            raise NotAuthorizedError('User is Not Authorized')
 
     @classmethod
     def get_access_levels(self):
@@ -182,7 +182,10 @@ class RefreshTokenHandler(APIV2Handler):
                 u.access_token = access_token
 
             yield tornado.gen.Task(neondata.User.modify, username, _update_user)
-            result = { 'access_token' : access_token }
+            result = { 
+                       'access_token' : access_token, 
+                       'refresh_token' : refresh_token 
+                     }
 
             self.success(json.dumps(result)) 
             

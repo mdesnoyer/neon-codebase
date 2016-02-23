@@ -25,6 +25,9 @@ from utils import statemon
 define('max_vids_for_new_account', default=100, 
        help='Maximum videos to process for a new account')
 
+define('max_submit_retries', default=3, 
+       help='Maximum times we will retry a video submit before passing on it.')
+
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
 statemon.define('unexpected_submition_error', int)
@@ -74,6 +77,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         self.bc_api = brightcove_api.BrightcoveApi(
             self.platform.neon_api_key, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
+        self.is_platform_dual_keyed = True
+        self.skip_old_videos = False
+        self.needs_platform_videos = True 
+        self.neon_api_key = self.platform.neon_api_key  
 
     @staticmethod
     def get_submit_video_fields():
@@ -187,10 +194,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                        'platform %s: %s' % (self.platform.get_id(), e))
             raise integrations.ovp.OVPError(e)
             
-
-        retval = yield self.submit_many_videos(
-            bc_video_info,
-            continue_on_error=continue_on_error)
+        self.set_video_iter_with_videos(bc_video_info) 
+        retval = yield self.submit_ovp_videos(self.get_next_video_item_playlist, 
+                                              continue_on_error=continue_on_error)
 
         raise tornado.gen.Return(retval)
 
@@ -230,8 +236,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                            'Brightcove for platform %s: %s' % 
                            (playlist_id, self.platform.get_id(), e))
                 raise integrations.ovp.OVPError(e)
-
-            cur_jobs = yield self.submit_many_videos(cur_results['videos'])
+            
+ 
+            self.set_video_iter_with_videos(cur_results['videos']) 
+            cur_jobs = yield self.submit_ovp_videos(self.get_next_video_item_playlist)
             retval.update(cur_jobs)
 
         raise tornado.gen.Return(retval)
@@ -239,250 +247,153 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def submit_new_videos(self):
         '''Submits new videos in the account.'''
+        self.skip_old_videos = True
+        self.set_video_iter()  
+        video_tuple_list = yield self.submit_ovp_videos(self.get_next_video_item_normal)
+    
+    @tornado.gen.coroutine
+    def process_publisher_stream(self):
+        yield self.submit_playlist_videos()
+        yield self.submit_new_videos()
+
+    def get_video_id(self, video):
+        '''override from ovp''' 
+        # Get the video id to use to key this video
+        if self.platform.id_field == neondata.BrightcovePlatform.REFERENCE_ID:
+            video_id = video.get('referenceId', None)
+            if video_id is None:
+                msg = ('No valid reference id in video %s for account %s'
+                       % (video['id'], self.platform.neon_api_key))
+                statemon.state.increment('cant_get_refid')
+                _log.error_n(msg)
+                raise integrations.ovp.OVPRefIDError(msg)
+        elif (self.platform.id_field == 
+              neondata.BrightcovePlatform.BRIGHTCOVE_ID):
+            video_id = video['id']
+        else:
+            # It's a custom field, so look for it
+            custom_data = self.get_video_custom_data(video)
+            video_id = custom_data.get(self.platform.id_field, None)
+            if video_id is None:
+                msg = ('No valid id in custom field %s in video %s for '
+                       'account %s' %
+                       (self.platform.id_field, video['id'],
+                        self.platform.neon_api_key))
+                _log.error_n(msg)
+                statemon.state.increment('cant_get_custom_id')
+                raise integrations.ovp.OVPCustomRefIDError(msg)
+        return video_id
+ 
+    def get_video_url(self, video):
+        '''override from ovp''' 
+        return self._get_video_url_to_download(video)
+
+    def get_video_callback_url(self, video):
+        '''override from ovp''' 
+        return self.platform.callback_url
+
+    def get_video_title(self, video):
+        '''override from ovp'''
+        video_title = video.get('name', '') 
+        return unicode(video_title) 
+
+    def get_video_custom_data(self, video):
+        '''override from ovp''' 
+        custom_data = video.get('customFields', {})
+        custom_data['_bc_int_data'] = {
+            'bc_id' : video['id'],
+            'bc_refid' : video.get('referenceId', None)
+            }
+        return custom_data
+
+    def get_video_duration(self, video):
+        '''override from ovp''' 
+        return float(video['length']) / 1000.0
+
+    def get_video_publish_date(self, video):
+        '''override from ovp'''
+        publish_date = video.get('publishedDate', None)
+        if publish_date is not None:
+            publish_date = datetime.datetime.utcfromtimestamp(
+                int(publish_date) / 1000.0)
+        return publish_date
+ 
+    def get_video_last_modified_date(self, video):
+        return int(video['lastModifiedDate']) / 1000.0 
+
+    def get_video_thumbnail_info(self, video):
+        '''override from ovp''' 
+        thumb_url, thumb_data = BrightcoveIntegration._get_best_image_info(video)
+        thumb_ref = None
+        if thumb_data is not None:
+            thumb_ref = unicode(thumb_data['id'])
+        return { 'thumb_url' : thumb_url, 
+                 'thumb_ref' : thumb_ref }
+
+    def set_video_iter(self):
         from_date = datetime.datetime(1980, 1, 1)
         if (self.platform.last_process_date is not None and 
             not self.platform.uses_batch_provisioning):
             from_date = datetime.datetime.utcfromtimestamp(
                 self.platform.last_process_date)
 
-        video_iter = self.bc_api.find_modified_videos_iter(
-            from_date=from_date,
-            _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
-            sort_by='MODIFIED_DATE',
-            sort_order='DESC',
-            video_fields=BrightcoveIntegration.get_submit_video_fields(),
-            custom_fields=self.get_custom_fields())
-
-        count = 0
-        last_mod_date = None
-        while True:
-            if (self.platform.last_process_date is None and 
-                count >= options.max_vids_for_new_account):
-                # New account, so only process the most recent videos
-                break
-
-            try:
-                item = yield video_iter.next(async=True)
-                if isinstance(item, StopIteration):
-                    break
-            except brightcove_api.BrightcoveApiServerError as e:
-                statemon.state.increment('bc_apiserver_errors')
-                _log.error('Server error getting new videos from '
-                           'Brightcove for platform %s: %s' % 
-                           (self.platform.get_id(), e))
-                raise integrations.ovp.OVPError(e)
-            except brightcove_api.BrightcoveApiClientError as e:
-                statemon.state.increment('bc_apiclient_errors')
-                _log.error('Client error getting new videos from '
-                           'Brightcove for platform %s: %s' % 
-                           (self.platform.get_id(), e))
-                raise integrations.ovp.OVPError(e)
-
-            if (self.platform.last_process_date is not None and 
-                int(item['lastModifiedDate']) <=  
-                (self.platform.last_process_date * 1000)):
-                # No new videos
-                break
-
-            yield self.submit_one_video_object(item, skip_old_video=True)
-
-            count += 1
-            last_mod_date = max(last_mod_date,
-                                int(item['lastModifiedDate']))
-
-        if last_mod_date is not None:
-            def _set_mod_date(x):
-                x.last_process_date = last_mod_date / 1000.0
-            self.platform = yield tornado.gen.Task(
-                neondata.BrightcovePlatform.modify,
-                self.platform.neon_api_key,
-                self.platform.integration_id,
-                _set_mod_date)
-            
-            _log.debug(
-                'updated last process date for account %s integration %s'
-                % (self.platform.neon_api_key, self.platform.integration_id))
-
+        self.video_iter = self.bc_api.find_modified_videos_iter(
+                from_date=from_date,
+                _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
+                sort_by='MODIFIED_DATE',
+                sort_order='ASC',
+                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                custom_fields=self.get_custom_fields())
+    
+    def set_video_iter_with_videos(self, videos):
+        self.video_iter = iter(videos) 
+  
     @tornado.gen.coroutine
-    def process_publisher_stream(self):
-        yield self.submit_playlist_videos()
-        yield self.submit_new_videos()
-
-    @tornado.gen.coroutine
-    def submit_many_videos(self, vid_objs, grab_new_thumb=True,
-                           continue_on_error=False):
-        '''Submits many video requests.
-
-        Inputs:
-        vid_objs - Iterator of video objects from Brightcove
-        grab_new_thumbs - True if new thumbnails for the video should be
-                          grabbed
-        continue_on_error - If there is an error, do we continue and log
-                            the exception in the return value.
-
-        Returns: dictionary of video_id => job_id or exception
-        
-        '''
-        retval = {}
-        for data in vid_objs:
-            try:
-                retval[data['id']] = yield self.submit_one_video_object(
-                    data, grab_new_thumb)
-            except Exception as e:
-                if continue_on_error:
-                    retval[data['id']] = e
-                else:                
-                    raise
-
-        raise tornado.gen.Return(retval)
-
-    @tornado.gen.coroutine
-    def submit_one_video_object(self, vid_obj, grab_new_thumb=True,
-                                skip_old_video=False):
-        '''Submits one video object
-
-        Inputs:
-        vid_obj - A video object from the response from the Brightcove API
-        grab_new_thumb - True if new thumbnails for the video should be grabbed
-
-        Outputs:
-        the job id
-        '''
+    def get_next_video_item_normal(self):
         try:
-            retval = yield self._submit_one_video_object_impl(vid_obj,
-                                                              grab_new_thumb,
-                                                              skip_old_video)
-        except integrations.ovp.CMSAPIError as e:
-            # Error is already logged
-            raise
-        except integrations.ovp.OVPError as e:
-            raise
-        except Exception as e:
-            _log.exception('Unexpected error submiting video %s' % vid_obj)
-            statemon.state.increment('unexpected_submition_error')
-            raise
-        raise tornado.gen.Return(retval)
-
+            item = yield self.video_iter.next(async=True)
+            if isinstance(item, StopIteration):
+                item = StopIteration('hacky')
+        except brightcove_api.BrightcoveApiServerError as e:
+            statemon.state.increment('bc_apiserver_errors')
+            _log.error('Server error getting new videos from '
+                       'Brightcove for platform %s: %s' % 
+                       (self.platform.get_id(), e))
+            raise integrations.ovp.OVPError(e)
+        except brightcove_api.BrightcoveApiClientError as e:
+            statemon.state.increment('bc_apiclient_errors')
+            _log.error('Client error getting new videos from '
+                       'Brightcove for platform %s: %s' % 
+                       (self.platform.get_id(), e))
+            raise integrations.ovp.OVPError(e)
+  
+        raise tornado.gen.Return(item)
+ 
     @tornado.gen.coroutine
-    def _submit_one_video_object_impl(self, vid_obj, grab_new_thumb=True,
-                                      skip_old_video=False):
-        # Get the video url to process
-        video_url = self._get_video_url_to_download(vid_obj)
-        if (video_url is None or 
-            vid_obj['length'] < 0 or 
-            video_url.endswith('.m3u8') or 
-            video_url.startswith('rtmp://') or 
-            video_url.endswith('.csmil')):
-            _log.warn_n('Brightcove id %s for account %s is a live stream' 
-                        % (vid_obj['id'], self.platform.neon_api_key))
-            raise tornado.gen.Return(None)
+    def get_next_video_item_playlist(self):
+        video = None 
+        try:  
+            video = self.video_iter.next()
+        except StopIteration: 
+            video = StopIteration('hacky')
+  
+        raise tornado.gen.Return(video)  
 
-        # Get the thumbnail attached to the video
-        thumb_url, thumb_data = \
-              BrightcoveIntegration._get_best_image_info(vid_obj)
-        thumb_id = None
-        if thumb_data is not None:
-            thumb_id = unicode(thumb_data['id'])
+    def skip_old_video(self, publish_date, video_id):
+        rv = False
+        if (self.skip_old_videos and 
+            publish_date is not None and 
+            self.platform.oldest_video_allowed is not None and
+            publish_date < 
+            dateutil.parser.parse(self.platform.oldest_video_allowed)):
+            _log.info('Skipped video %s from account %s because it is too'
+                      ' old' % (video_id, self.platform.neon_api_key))
+            statemon.state.increment('old_videos_skipped')
+            rv = True
+        return rv
 
-        # Build up the custom data we are going to store in our database.
-        # TODO: Determine all the information we want to grab and store
-        custom_data = vid_obj.get('customFields', {})
-        custom_data['_bc_int_data'] = {
-            'bc_id' : vid_obj['id'],
-            'bc_refid' : vid_obj.get('referenceId', None)
-            }
-
-        # Get the video id to use to key this video
-        if self.platform.id_field == neondata.BrightcovePlatform.REFERENCE_ID:
-            video_id = vid_obj.get('referenceId', None)
-            if video_id is None:
-                msg = ('No valid reference id in video %s for account %s'
-                       % (vid_obj['id'], self.platform.neon_api_key))
-                statemon.state.increment('cant_get_refid')
-                _log.error_n(msg)
-                raise integrations.ovp.OVPError(msg)
-        elif (self.platform.id_field == 
-              neondata.BrightcovePlatform.BRIGHTCOVE_ID):
-            video_id = vid_obj['id']
-        else:
-            # It's a custom field, so look for it
-            video_id = custom_data.get(self.platform.id_field, None)
-            if video_id is None:
-                msg = ('No valid id in custom field %s in video %s for '
-                       'account %s' %
-                       (self.platform.id_field, vid_obj['id'],
-                        self.platform.neon_api_key))
-                _log.error_n(msg)
-                statemon.state.increment('cant_get_custom_id')
-                raise integrations.ovp.OVPError(msg)
-        video_id = unicode(video_id)
-
-        # Get the published date
-        publish_date = vid_obj.get('publishedDate', None)
-        if publish_date is not None:
-            publish_date = datetime.datetime.utcfromtimestamp(
-                int(publish_date) / 1000.0)
-
-        if not video_id in self.platform.videos:
-            # See if the video should be skipped because it is too old
-            if (skip_old_video and 
-                publish_date is not None and 
-                self.platform.oldest_video_allowed is not None and
-                publish_date < 
-                dateutil.parser.parse(self.platform.oldest_video_allowed)):
-                _log.info('Skipped video %s from account %s because it is too'
-                          ' old' % (video_id, self.platform.neon_api_key))
-                statemon.state.increment('old_videos_skipped')
-                raise tornado.gen.Return(None)
-        
-            # The video hasn't been submitted before
-            job_id = None
-            try:
-                response = yield self.submit_video(
-                    video_id,
-                    video_url,
-                    video_title=unicode(vid_obj['name']),
-                    default_thumbnail=thumb_url,
-                    external_thumbnail_id=thumb_id,
-                    callback_url=self.platform.callback_url,
-                    custom_data = custom_data,
-                    duration=float(vid_obj['length']) / 1000.0,
-                    publish_date=(publish_date.isoformat() if 
-                                  publish_date is not None else None))
-                job_id = response['job_id']
-
-            except Exception as e:
-                # If the video metadata object is there, then try to
-                # find the job id in that oject.
-                new_video = yield tornado.gen.Task(
-                    neondata.VideoMetadata.get,
-                    neondata.InternalVideoID.generate(
-                        self.platform.neon_api_key, video_id))
-                if new_video is not None:
-                    job_id = new_video.job_id
-                raise e
-
-            finally:
-                # TODO: Remove this hack once videos aren't attached to
-                # platform objects.
-                # HACK: Add the video to the platform object because our call 
-                # will put it on the NeonPlatform object.
-                if job_id is not None:
-                    self.platform = yield tornado.gen.Task(
-                        neondata.BrightcovePlatform.modify,
-                        self.platform.neon_api_key,
-                        self.platform.integration_id,
-                    lambda x: x.add_video(video_id, job_id))
-
-
-        else:
-            job_id = self.platform.videos[video_id]
-            if job_id is not None:
-                yield self._update_video_info(vid_obj, video_id, job_id)
-            if grab_new_thumb:
-                yield self._grab_new_thumb(vid_obj, video_id)
-
-        raise tornado.gen.Return(job_id)
+    def does_video_exist(self, video_meta, video_ref): 
+        return video_ref in self.platform.videos   
 
     @tornado.gen.coroutine
     def _update_video_info(self, data, bc_video_id, job_id):

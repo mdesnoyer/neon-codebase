@@ -706,7 +706,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_submit_old_video(self):
         self.platform.oldest_video_allowed = '2015-01-01'
-
+        self.integration.skip_old_videos = True 
         with self.assertLogExists(logging.INFO, 'Skipped video.*old'):
             job_id = yield self.integration.submit_one_video_object(
                 { 'id' : 'v1',
@@ -727,8 +727,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                 },
                 'FLVURL' : 'http://video.mp4',
                 'publishedDate' : "1413657557000"
-                },
-                skip_old_video=True)
+                })
 
         self.assertIsNone(job_id)
 
@@ -899,31 +898,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.integration.platform.videos['465972'],
                           job_id)
 
-        # Now try a video without a reference id
-        with self.assertLogExists(logging.ERROR, 
-                                  'No valid id in custom field .* in video'):
-            with self.assertRaises(integrations.ovp.OVPError):
-                yield self.integration.submit_one_video_object(
-                    { 'id' : 'v1',
-                      'referenceId': None,
-                      'name' : 'Some video',
-                      'length' : 100,
-                      'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-                      'videoStill' : {
-                          'id' : 'still_id',
-                          'referenceId' : None,
-                          'remoteUrl' : None
-                          },
-                      'FLVURL' : 'http://video.mp4',
-                      'customFields' : {
-                          'mediaapiid' : None,
-                          }
-                      })
-
     @tornado.testing.gen_test
     def test_submit_live_video_feeds(self):
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -931,10 +909,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.mp4'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -942,10 +920,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.m3u8'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -953,10 +931,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'http://video.csmil'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
         with self.assertLogExists(logging.WARNING,
-                                  'Brightcove id .* for account .* is a '
+                                  'Video ID .* for account .* is a '
                                   'live stream'):
             job_id = yield self.integration.submit_one_video_object(
                     { 'id' : 'v1',
@@ -964,7 +942,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                       'FLVURL' : 'rtmp://video.mp4'
                       })
             self.assertIsNone(job_id)
-        logging.getLogger('integrations.brightcove').reset_sample_counters()
+        logging.getLogger('integrations.ovp').reset_sample_counters()
 
 class TestChooseDownloadUrl(test_utils.neontest.TestCase):
     def setUp(self):      
@@ -1219,6 +1197,160 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
 
         response = cargs[0]
         return response.url, json.loads(response.body)
+    
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_one(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 0
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1410012300)
+        self.assertEquals(bp.video_submit_retries, 1)
+        submit_video_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_two(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+            x.video_submit_retries = 1
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 1
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1410012300)
+        self.assertEquals(bp.video_submit_retries, 2)
+        submit_video_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_bc_submit_video_retry_max(self): 
+        def _set_last_processed(x): 
+            x.last_process_date = 1410012300
+            x.video_submit_retries = 3
+        self.platform = neondata.BrightcovePlatform.modify(
+            'acct1', 'i1', _set_last_processed, create_missing=True)
+        self.integration.platform.video_submit_retries = 3
+        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
+        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
+        submit_video_mock.side_effect = Exception('blah') 
+
+        video_obj = { 'id' : 'v1',
+              'length' : 100,
+              'FLVURL' : 'http://video.mp4',
+              'lastModifiedDate' : 1420080400000,
+              'name' : 'Some Video',
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : 'my_still_ref',
+                  'remoteUrl' : None
+                  },
+            }
+        # should reset in this case
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+        yield self.integration.submit_new_videos()
+        bp = neondata.BrightcovePlatform.get('acct1', 'i1') 
+        self.assertEquals(bp.last_process_date, 1420080400.000)
+        self.assertEquals(bp.video_submit_retries, 0)
+        submit_video_mocker.stop()
+        
+    @tornado.testing.gen_test
+    def test_bc_account_with_custom_last_mod_date_updated(self):
+        def _create_platform(x): 
+            x.id_field = 'newmediapaid'
+
+        self.integration.platform.last_process_date = 1430012300l
+        self.platform.id_field = 'newmediapaid' 
+        video_obj = { "referenceId": "1234",
+	              "videoStillURL": "http://imageinvalid.jpg",
+ 	              "publishedDate": "1449508690055",
+                      "lastModifiedDate": "1449514583914",
+  	              "thumbnailURL": "http://tnimageurl.jpg",
+	              "id": 4650024830001,
+                      "videoStill": {
+		          "displayName": None,
+                          "referenceId": "1234-videoStillUrl",
+                          "remoteUrl": "http://image.jpg",
+                          "id": 4650033445001,
+                          "type": "VIDEO_STILL"
+                      },
+	              "name": "Testa Video",
+                      "renditions": [{
+		          "referenceId": None,
+		          "displayName": None,
+		          "url": "http://video.mp4",
+		          "encodingRate": 1084000,
+		          "frameWidth": 640,
+		          "audioOnly": False,
+		          "controllerType": "DEFAULT",
+		          "videoDuration": 244000,
+		          "videoCodec": "H264",
+		          "videoContainer": "MP4",
+		          "frameHeight": 360,
+		          "remoteStreamName": None,
+		          "remoteUrl": "http://video.mp4",
+		          "uploadTimestampMillis": 1449508687502,
+		          "id": 4650027261001,
+		          "size": 33044327
+		      }],
+		      "length": 244000,
+		      "FLVURL": "http://flvurl.m3u8",
+		      "customFields": {},
+		      "thumbnail": {
+			      "displayName": None,
+			      "referenceId": "1234-thumbnailSmallImage",
+			      "remoteUrl": "http://image.jpg",
+			      "id": 4650033945001,
+			      "type": "THUMBNAIL"
+		      }
+                    } 
+        self.mock_find_videos.side_effect = [[video_obj],[]]
+
+        yield self.integration.submit_new_videos()
+
+        # Make sure that the last processed date was updated
+        self.assertEquals(self.integration.platform.last_process_date,
+                          1449514583.914)
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
+            1449514583.914)
 
     @tornado.testing.gen_test
     def test_typical_bc_account(self):
@@ -1261,7 +1393,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1283,7 +1415,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 46, 40),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1327,7 +1459,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             ]
 
         with options._set_bounded(
-                'integrations.brightcove.max_vids_for_new_account', 1):
+                'integrations.ovp.max_vids_for_new_account', 1):
             yield self.integration.submit_new_videos()
 
         # Make sure that the last processed date was updated
@@ -1349,7 +1481,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(1980, 1, 1),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1388,9 +1520,6 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             neondata.BrightcovePlatform.get('acct1', 'i1').last_process_date,
             1420080300l)
-
-        # Make sure that no video was submitted
-        self.assertEquals(self.submit_mock.call_count, 0)
 
     @tornado.testing.gen_test
     def test_get_custom_platform_id(self):
@@ -1432,7 +1561,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             'from_date' : datetime.datetime(2015, 1, 1, 2, 45),
             '_filter' : ['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
             'sort_by' : 'MODIFIED_DATE',
-            'sort_order' : 'DESC',
+            'sort_order' : 'ASC',
             'video_fields' : ['id', 'videoStill', 'videoStillURL', 
                               'thumbnail', 'thumbnailURL', 'FLVURL', 
                               'renditions', 'length', 'name', 
@@ -1754,7 +1883,6 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
 
         results = yield self.integration.lookup_and_submit_videos(
             [1234567, 'v2'], continue_on_error=True)
-
         self.assertEquals(results['v2'], 'job1')
         self.assertIsInstance(results[1234567], integrations.ovp.CMSAPIError)
 

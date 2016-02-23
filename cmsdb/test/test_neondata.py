@@ -45,6 +45,8 @@ from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
         ExperimentState, NeonApiRequest, CDNHostingMetadata,\
         S3CDNHostingMetadata, CloudinaryCDNHostingMetadata, \
         NeonCDNHostingMetadata, CDNHostingMetadataList, ThumbnailType
+from cvutils import smartcrop
+import numpy as np
 
 _log = logging.getLogger(__name__)
 
@@ -472,6 +474,30 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertListEqual(np.get_videos(), [u'dummyv'])
         
         #TODO: Add more failure test cases
+
+    def test_delete_video_data(self):
+        api_key = 'key'
+
+        NeonApiRequest('job1', api_key, 'vid1').save()
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        ThumbnailMetadata(tid, i_vid).save()
+        VideoMetadata(i_vid, [tid],'job1').save()
+        neondata.VideoStatus(i_vid, 'complete').save()
+        neondata.ThumbnailStatus(tid, 0.2).save()
+        ThumbnailServingURLs(tid, sizes=[(640,480)]).save()
+
+        VideoMetadata.delete_related_data(i_vid)
+
+        self.assertIsNone(VideoMetadata.get(i_vid))
+        self.assertEquals(neondata.VideoStatus.get(i_vid).experiment_state,
+                          'unknown')
+        self.assertIsNone(NeonApiRequest.get('job1', api_key))
+        self.assertIsNone(ThumbnailMetadata.get(tid))
+        self.assertIsNone(ThumbnailServingURLs.get(tid))
+        self.assertIsNone(neondata.ThumbnailStatus.get(tid).serving_frac)
+        
+        
 
     def test_ThumbnailServingURLs(self):
         input1 = ThumbnailServingURLs('acct1_vid1_tid1')
@@ -1846,24 +1872,81 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
 
       yield request.send_callback(async=True)
 
-      self.assertEquals(NeonApiRequest.get('j1', 'key1').callback_state,
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
                         neondata.CallbackState.SUCESS)
+      expected_response = {
+        'job_id' : 'j1',
+         'video_id' : 'vid1',
+         'error': None,
+         'framenos' : [34, 61],
+         'serving_url' : 'http://some_serving_url.com',
+         'processing_state' : neondata.ExternalRequestState.SERVING,
+         'experiment_state' : neondata.ExperimentState.COMPLETE,
+         'winner_thumbnail' : 'key1_vid1_t2'}
+      
+      self.assertDictContainsSubset(expected_response, found_request.response)
 
       # Check the callback
       self.assertTrue(fetch_mock.called)
       cargs, kwargs = fetch_mock.call_args
       found_request = cargs[0]
       response_dict = json.loads(found_request.body)
-      self.assertDictContainsSubset(
-        {'job_id' : 'j1',
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+    @patch('cmsdb.neondata.utils.http')
+    @tornado.testing.gen_test
+    def test_callback_with_error_state(self, http_mock):
+      fetch_mock = self._future_wrap_mock(http_mock.send_request,
+                                          require_async_kw=True)
+      fetch_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+      request = NeonApiRequest('j1', 'key1', 'vid1',
+                               http_callback='http://some.where')
+      request.state = neondata.RequestState.CUSTOMER_ERROR
+      request.response['framenos'] = []
+      request.response['serving_url'] = None
+      request.response['error'] = 'some customer error'
+      request.save()
+
+      yield request.send_callback(async=True)
+
+      found_request = NeonApiRequest.get('j1', 'key1')
+      self.assertEquals(found_request.callback_state,
+                        neondata.CallbackState.SUCESS)
+      expected_response = {
+        'job_id' : 'j1',
          'video_id' : 'vid1',
-         'error': None,
-         'framenos' : [34, 61],
-         'serving_url' : 'http://some_serving_url.com',
-         'processing_state' : neondata.RequestState.SERVING,
-         'experiment_state' : neondata.ExperimentState.COMPLETE,
-         'winner_thumbnail' : 'key1_vid1_t2'},
-        response_dict)
+         'error': 'some customer error',
+         'framenos' : [],
+         'serving_url' : None,
+         'processing_state' : neondata.ExternalRequestState.FAILED,
+         'experiment_state' : neondata.ExperimentState.UNKNOWN,
+         'winner_thumbnail' : None}
+      
+      self.assertDictContainsSubset(expected_response, found_request.response)
+
+      # Check the callback
+      self.assertTrue(fetch_mock.called)
+      cargs, kwargs = fetch_mock.call_args
+      found_request = cargs[0]
+      response_dict = json.loads(found_request.body)
+      self.assertDictContainsSubset(expected_response, response_dict)
+
+    def test_request_state_conversion(self):
+      for state_name, val in neondata.RequestState.__dict__.items():
+        if state_name.startswith('__'):
+          # It's not a state name
+          continue
+        # The only state that should map to unknown is the unknown state
+        if val == neondata.RequestState.UNKNOWN:
+          self.assertEquals(
+          neondata.ExternalRequestState.from_internal_state(val), 
+          neondata.ExternalRequestState.UNKNOWN)
+        else:
+          self.assertNotEquals(
+            neondata.ExternalRequestState.from_internal_state(val), 
+            neondata.ExternalRequestState.UNKNOWN,
+            'Internal state %s does not map to an external one' % state_name)
 
     @patch('cmsdb.neondata.utils.http')
     @tornado.testing.gen_test
@@ -2301,6 +2384,7 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_lookup_cdn_info(self):
+
         # Create the necessary buckets so that we can write to them
         self.s3conn.create_bucket('n3.neon-images.com')
         self.s3conn.create_bucket('customer-bucket')
@@ -2309,11 +2393,24 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # Setup the CDN information in the database
         VideoMetadata(InternalVideoID.generate('acct1', 'vid1'),
                       i_id='i6').save()
+        neon_cdnhosting_metadata = NeonCDNHostingMetadata(do_salt=False)
+        neon_cdnhosting_metadata.crop_with_saliency = False
+        neon_cdnhosting_metadata.crop_with_face_detection = False
+        neon_cdnhosting_metadata.crop_with_text_detection = False
+        s3_cdnhosting_metadata = \
+            S3CDNHostingMetadata(bucket_name='customer-bucket',
+                                 do_salt=False)
+        s3_cdnhosting_metadata.crop_with_saliency = False
+        s3_cdnhosting_metadata.crop_with_face_detection = False
+        s3_cdnhosting_metadata.crop_with_text_detection = False
+
         cdn_list = CDNHostingMetadataList(
             CDNHostingMetadataList.create_key('acct1', 'i6'), 
-            [ NeonCDNHostingMetadata(do_salt=False),
-              S3CDNHostingMetadata(bucket_name='customer-bucket',
-                                   do_salt=False) ])
+            [neon_cdnhosting_metadata,
+             s3_cdnhosting_metadata])
+            # [ NeonCDNHostingMetadata(do_salt=False),
+            #   S3CDNHostingMetadata(bucket_name='customer-bucket',
+            #                        do_salt=False) ])
         cdn_list.save()
 
         thumb_info = ThumbnailMetadata(None, 'acct1_vid1',
@@ -2535,11 +2632,21 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_add_account_default_thumb(self):
+        _log.info('here**')
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
         account = NeonUserAccount('a1')
 
+        self.smartcrop_patcher = patch('cvutils.smartcrop.SmartCrop')
+        self.mock_crop_and_resize = self.smartcrop_patcher.start()
+        self.mock_responses = MagicMock()
+        mock_image = PILImageUtils.create_random_image(540, 640)
+        self.mock_crop_and_resize().crop_and_resize.side_effect = \
+            lambda x, *kw: np.array(PILImageUtils.create_random_image(540, 640))
+
         yield account.add_default_thumbnail(self.image, async=True)
+        self.assertGreater(self.mock_crop_and_resize.call_count, 0)
+        self.smartcrop_patcher.stop()
 
         # Make sure that the thumbnail id is put in
         self.assertIsNotNone(account.default_thumbnail_id)
@@ -2565,6 +2672,8 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
         # If we try to add another image as the default, we should
         # throw an error
         new_image = PILImageUtils.create_random_image(540, 640)
+
+
         with self.assertRaises(ValueError):
             yield account.add_default_thumbnail(new_image, async=True)
 

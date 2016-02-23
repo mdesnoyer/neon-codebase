@@ -72,25 +72,18 @@ def main():
     n_failures = 0
     
     account = neondata.NeonUserAccount.get(options.api_key)
-    for plat in account.get_platforms():
-        _log.info('Processing platform %s which has %i videos' %
-                  (plat.get_id(), len(plat.videos)))
-        vids_processed = 0
+    vids_processed = 0
+    for vid_obj in account.iterate_all_videos():
+        job_obj = neondata.NeonApiRequest.get(vid_obj.job_id, options.api_key)
+        if vid_obj and job_obj and test_video_func(vid_obj, job_obj):
+            if not send_reprocess_request(job_obj):
+                n_failures += 1
+            n_reprocessed += 1
 
-        for external_vid, job_id in plat.videos.iteritems():
-            vid_obj = neondata.VideoMetadata.get(
-                neondata.InternalVideoID.generate(options.api_key,
-                                                  external_vid))
-            job_obj = neondata.NeonApiRequest.get(job_id, options.api_key)
-            if vid_obj and job_obj and test_video_func(vid_obj, job_obj):
-                if not send_reprocess_request(job_obj):
-                    n_failures += 1
-                n_reprocessed += 1
-
-            vids_processed += 1
-            if vids_processed % 50 == 0:
-                _log.info('Processed %i of %i videos in this platform' %
-                          (vids_processed, len(plat.videos)))
+        vids_processed += 1
+        if vids_processed % 50 == 0:
+            _log.info('Processed %i videos' %
+                      (vids_processed))
 
     _log.info('Submitted %i jobs. %i failures' % (n_reprocessed, n_failures))
 

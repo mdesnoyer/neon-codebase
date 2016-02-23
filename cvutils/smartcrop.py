@@ -106,6 +106,7 @@ class SmartCrop(object):
     '''Crop and resize images using face, text and saliency.
     '''
     _instance_ = None
+    _dlib_face_detector = None
     def __init__(self, image,
                  with_saliency=True,
                  with_face_detection=True,
@@ -118,7 +119,10 @@ class SmartCrop(object):
             self.haar_profile = options.haar_profile
             self.profile_face_cascade = cv2.CascadeClassifier()
             self.profile_face_cascade.load(self.haar_profile)
-            self.dlib_face_detector = dlib.get_frontal_face_detector()
+            if SmartCrop._dlib_face_detector is None:
+                SmartCrop._dlib_face_detector = \
+                  dlib.get_frontal_face_detector()
+            self.dlib_face_detector = SmartCrop._dlib_face_detector
             self.haar_params = {'minNeighbors': 8,
                                 'minSize': (100, 100),
                                 'scaleFactor': 1.1}
@@ -478,7 +482,8 @@ class SmartCrop(object):
         if self.with_text_detection:
             cropped_im = self.text_crop(new_x, new_y, new_width, new_height)
         else:
-            cropped_im = im[new_y:new_y+new_height, new_x:new_x+new_width]
+            cropped_im = self.image[new_y:new_y+new_height,
+                                    new_x:new_x+new_width]
 
         resized_im = cv2.resize(cropped_im, (w, h))
         return resized_im

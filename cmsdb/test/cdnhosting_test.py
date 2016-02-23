@@ -27,6 +27,8 @@ from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import urlparse
 from cvutils.imageutils import PILImageUtils
 import utils.neon
+from cvutils import smartcrop
+import numpy as np
 
 _log = logging.getLogger(__name__)
 
@@ -71,6 +73,53 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.cdn_check_patcher.stop()
         super(TestAWSHosting, self).tearDown()
 
+    @patch('cmsdb.cdnhosting.smartcrop.SmartCrop.crop_and_resize', 
+        side_effect=lambda x, y: np.zeros((x, y, 3), dtype=np.uint8))
+    @tornado.testing.gen_test
+    def test_source_and_smart_crop(self, mock_smartcrop):
+        '''
+        Tests that the source cropping and smart cropping is only performed when
+        we're dealing with a NEON image.
+        '''
+        # # set the return value for resize_and_crop
+        # mock_smartcrop.crop_and_resize.side_effect = \
+        #                             lambda s, x, y: np.array(x, y, 3)
+        # make the first thumb -- with smart cropping
+        thumb_with_smart_crop = neondata.ThumbnailMetadata(
+            'test_thumb_from_neon', ttype=neondata.ThumbnailType.NEON)
+        self.assertTrue(thumb_with_smart_crop.do_smart_crop)
+        self.assertTrue(thumb_with_smart_crop.do_source_crop)
+
+        # make the second thumb, without smart cropping
+        thumb_without_smart_crop = neondata.ThumbnailMetadata(
+            'test_thumb_from_default', ttype=neondata.ThumbnailType.DEFAULT)
+        self.assertFalse(thumb_without_smart_crop.do_smart_crop)
+        self.assertFalse(thumb_without_smart_crop.do_source_crop)
+        # make the CDN Hosting metdata
+        cdn_metadata = neondata.S3CDNHostingMetadata(None,
+                'access_key', 'secret_key',
+                'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
+                'folder1', source_crop=[0, .33, 0, 0],
+                resize=True, rendition_sizes=[(300, 300), (690, 450)])
+        # make the thumbnail metadata
+        # add the side effect from the ThumbnailMetadata.get
+        # create the CDNHosting object 1
+        hoster = cmsdb.cdnhosting.CDNHosting.create(cdn_metadata)
+        yield hoster.upload(self.image, 'test_thumb_from_neon', async=True,
+                        do_smart_crop=thumb_with_smart_crop.do_smart_crop,
+                        do_source_crop=thumb_with_smart_crop.do_source_crop)
+        # ensure that smartcrop was called
+        self.assertGreater(mock_smartcrop.call_count, 0)
+
+        cur_call_count = mock_smartcrop.call_count
+
+        yield hoster.upload(self.image, 'test_thumb_from_default', 
+                    async=True,
+                    do_smart_crop=thumb_without_smart_crop.do_smart_crop,
+                    do_source_crop=thumb_without_smart_crop.do_source_crop)
+        # ensure that smartcrop was called
+        self.assertEquals(mock_smartcrop.call_count, cur_call_count)
+
     @tornado.testing.gen_test
     def test_host_single_image(self):
         '''
@@ -96,7 +145,6 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.datamock.ThumbnailServingURLs.modify.call_count,
                           0)
     
-        
     @tornado.testing.gen_test
     def test_primary_hosting_single_image(self):
         '''
@@ -333,6 +381,9 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.metadata = neondata.NeonCDNHostingMetadata(None,
             'hosting-bucket', ['cdn1.cdn.com', 'cdn2.cdn.com'],
             'folder1', True, True, False, False, sizes)
+        self.metadata.crop_with_saliency = False
+        self.metadata.crop_with_face_detection = False
+        self.metadata.crop_with_text_detection = False
 
         self.image = PILImageUtils.create_random_image(480, 640)
         super(TestAWSHostingWithServingUrls, self).setUp()

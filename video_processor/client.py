@@ -700,7 +700,7 @@ class VideoProcessor(object):
         frames = [x[0].frameno for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
         fnos = frames[:self.n_thumbs]
-        thumbs = [x[0].urls[0] for x in self.thumbnails 
+        thumbs = [x[0].key for x in self.thumbnails 
             if x[0].type == neondata.ThumbnailType.NEON]
         thumbs = thumbs[:self.n_thumbs]
 
