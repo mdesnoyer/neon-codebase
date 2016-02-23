@@ -37,5 +37,5 @@ shortuuid==0.3
 simplejson==2.3.2
 svmlight==0.4
 thrift==0.9.1
-tornado==4.1
+tornado==4.2.1
 winpdb==1.4.8
