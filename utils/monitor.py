@@ -58,7 +58,7 @@ class MonitoringAgent(threading.Thread):
             time.sleep(options.sleep_interval)
 
 agent = MonitoringAgent()
-def start_agent(self):
+def start_agent():
     if not agent.is_alive():
         agent.start()
     
