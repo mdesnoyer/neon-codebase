@@ -22,6 +22,7 @@ from tornado.concurrent import run_on_executor
 import utils.botoutils
 import utils.http
 import utils.ps
+from utils import statemon
 
 import logging
 _log = logging.getLogger(__name__)
@@ -32,6 +33,10 @@ define('queue_prefix', default="Priority_", type=str,
        help="The prefix of the name of each queue")
 define('default_timeout', default=300, help='Default timeout for a message')
 define('region', default='us-east-1', help='region where the queue resides')
+
+statemon.define('write_failure', int)
+statemon.define('read_failure', int)
+statemon.define('delete_failure', int)
 
 class VideoProcessingQueue(object):
     '''Replaces the current server code with an AWS SQS instance'''
@@ -228,6 +233,7 @@ class VideoProcessingQueue(object):
         except tornado.gen.Return:
             raise tornado.gen.Return(final_message.get_body())
         except ValueError, e:
+            statemon.state.increment('write_failure')
             raise ValueError(e.message)
 
     @tornado.gen.coroutine
@@ -269,6 +275,7 @@ class VideoProcessingQueue(object):
         except tornado.gen.Return:
             raise tornado.gen.Return(deleted_message)
         except Exception, e:
+            statemon.state.increment('delete_failure')
             raise Exception(e.message)
 
     @utils.sync.optional_sync

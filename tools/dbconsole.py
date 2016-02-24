@@ -67,7 +67,7 @@ def find_db_address():
         except KeyError:
             pass
     _log.info('Found db at %s' % ip)
-    return '10.0.89.251'
+    return ip
 
 def forward_port(local_port):
     cmd = ('ssh -L {local}:localhost:{rem} {db_addr}').format(

@@ -12,8 +12,6 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
-import boto.exception
-import boto.sqs
 import cmsapiv2.client
 import datetime
 import json
@@ -31,8 +29,6 @@ import tornado.escape
 import tornado.gen
 import tornado.httpclient
 import traceback
-import urlparse
-import urllib
 import utils.neon
 import utils.logs
 import utils.http
@@ -120,7 +116,6 @@ statemon.define('invalid_custom_upload', int)
 statemon.define('invalid_json', int)
 statemon.define('malformed_request', int)
 statemon.define('not_supported', int)
-statemon.define("failed_to_write_message", int)
 
 #Place holder images for processing
 placeholder_images = [

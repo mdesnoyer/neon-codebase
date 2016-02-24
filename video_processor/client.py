@@ -20,9 +20,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import atexit
-import boto
 import boto.exception
-from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import cv2
@@ -39,7 +37,6 @@ import Queue
 import random
 import re
 import signal
-import server
 import socket
 import tempfile
 import tornado.web
@@ -111,10 +108,10 @@ define('min_load_to_throttle', default=0.50,
              'be throttled'))
 define('video_queue_region', default='us-east-1', 
        help='region of the SQS queue to connect to')
-define('fail_count', default=2, help='Number of failures allowed before a '
-       'message is deleted')
-define('attempt_count', default=5, help='Number of attempts allowed before a '
-       'message is deleted')
+define('max_fail_count', default=2, 
+       help='Number of failures allowed before a job is discarded')
+define('max_attempt_count', default=5, 
+       help='Number of attempts allowed before a job is discarded')
 define('timeout_length', default=5.0, help='Amount of time that dequeue_job is '
        'allowed to run before timing out')
 
@@ -129,6 +126,8 @@ class OtherWorkerCompleted(Exception): pass
 
 # TimeoutError Exception
 class TimeoutError(Exception): pass
+class DequeueError(Exception): pass
+class UninterestingJob(Exception): pass
 
 ###########################################################################
 # Process Video File
@@ -817,60 +816,52 @@ class VideoClient(multiprocessing.Process):
             result = message.get_body()
             _log.info(result)
             if result is not None and result != "{}":
-                try:
-                    job_params = tornado.escape.json_decode(result)
-                    #Change Job State
-                    api_key = job_params['api_key']
-                    job_id  = job_params['job_id']
-                    job_params['reprocess'] = False
-                    def _change_job_state(request):
-                        request.try_count +=1
-                        if request.state in [neondata.RequestState.SUBMIT,
-                                             neondata.RequestState.REPROCESS,
-                                             neondata.RequestState.REQUEUED]:
-                            if request.state in [
-                                    neondata.RequestState.REPROCESS]:
-                                _log.info('Reprocessing job %s for account %s'
-                                          % (job_id, api_key))
-                                job_params['reprocess'] = True
-                            request.state = \
-                                neondata.RequestState.PROCESSING
-                            request.model_version = self.model_version
-                                
-                    api_request = neondata.NeonApiRequest.modify(
-                        job_id, api_key, _change_job_state)
-                    if api_request is None:
-                        _log.error('Could not get job %s for %s' %
-                                   (job_id, api_key))
-                        statemon.state.increment('dequeue_error')
-                        raise Exception('Api Request does not exist.')
-                    if api_request.state != neondata.RequestState.PROCESSING:
-                        _log.info('Job %s for account %s ignored' %
-                                  (job_id, api_key))
-                        raise Exception('Job is not processing.')
-                    _log.info("key=worker [%s] msg=processing request %s for "
-                              "%s." % (self.pid, job_id, api_key))
-                    if (api_request.fail_count > options.fail_count or 
-                            api_request.try_count > options.attempt_count):
-                        _log.info('Job %s for account %s has failed too many ' \
-                                   'times' %
-                                    (job_id, api_key))
-                        yield self.job_queue.delete_message(message)
-                        raise Exception('Too many attempts. Aborting')
-                except Exception as e:
-                    _log.error("key=worker [%s] msg=db error %s" %(
-                        self.pid, e.message))
-                    raise Exception(e.message)
+                job_params = tornado.escape.json_decode(result)
+                #Change Job State
+                api_key = job_params['api_key']
+                job_id  = job_params['job_id']
+                job_params['reprocess'] = False
+                def _change_job_state(request):
+                    request.try_count +=1
+                    if request.state in [neondata.RequestState.SUBMIT,
+                                         neondata.RequestState.REPROCESS,
+                                         neondata.RequestState.REQUEUED]:
+                        if request.state in [
+                                neondata.RequestState.REPROCESS]:
+                            _log.info('Reprocessing job %s for account %s'
+                                      % (job_id, api_key))
+                            job_params['reprocess'] = True
+                        request.state = \
+                            neondata.RequestState.PROCESSING
+                        request.model_version = self.model_version
+
+                api_request = neondata.NeonApiRequest.modify(
+                    job_id, api_key, _change_job_state)
+                if api_request is None:
+                    _log.error('Could not get job %s for %s' %
+                               (job_id, api_key))
+                    statemon.state.increment('dequeue_error')
+                    raise DequeueError('Api Request does not exist.')
+                if api_request.state != neondata.RequestState.PROCESSING:
+                    _log.info('Job %s for account %s ignored' %
+                              (job_id, api_key))
+                    raise UninterestingJob('Job already finished')
+                _log.info("key=worker [%s] msg=processing request %s for "
+                          "%s." % (self.pid, job_id, api_key))
+                if (api_request.fail_count > options.fail_count or 
+                        api_request.try_count > options.attempt_count):
+                    _log.info('Job %s for account %s has failed too many '
+                              'times' % (job_id, api_key))
+                    raise UninterestingJob('Job failed')
             if(job_params):
                 _log.debug("Dequeue Successful")
                 job_and_message = (job_params, message)
                 raise tornado.gen.Return(job_and_message)
- 
-            raise tornado.gen.Return(result)
+
+            _log.warning('Job body %s was uninteresting' % result)
+            raise DequeueError('Job did not have parameters')
         else:
-            _log.error("Dequeue Error")
-            statemon.state.increment('dequeue_error')
-            raise Exception('Server is empty')
+            raise Queue.Empty()
 
     ##### Model Methods #####
 
@@ -909,8 +900,6 @@ class VideoClient(multiprocessing.Process):
         ''' do actual work here'''
         try:
             job, message = yield self.dequeue_job()
-            if not job or job == "{}": #string match
-                raise Queue.Empty
 
             # TODO(mdesnoyer): Only load the model once. Right now,
             # there's a memory problem so we load the model for every
@@ -933,12 +922,19 @@ class VideoClient(multiprocessing.Process):
         except Queue.Empty:
             _log.debug("Q,Empty")
             time.sleep(options.dequeue_period * random.random())
+
+        except DequeueError:
+            # Already logged
+            time.sleep(options.dequeue_period * random.random())
+
+        except UninterestingJob:
+            yield self.job_queue.delete_message(message)
         
         except Exception,e:
             statemon.state.increment('unknown_exception')
             _log.exception("key=worker [%s] "
                     " msg=exception %s" %(self.pid, e.message))
-            time.sleep(options.dequeue_period)
+            time.sleep(options.dequeue_period * random.random())
 
     def stop(self):
         self.kill_received.set()
