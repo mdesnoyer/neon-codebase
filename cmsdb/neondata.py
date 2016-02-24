@@ -216,10 +216,13 @@ class PostgresDB(tornado.web.RequestHandler):
     ''' 
     class _PostgresDB: 
         def __init__(self):
+            # where the db is located 
+            self.db_info = None 
             # keeps track of the io_loops we have seen, mapped from 
             # io_loop_obj -> pool
-            self.db_info = None 
             self.io_loop_dict = {}
+            # cleanup lock, for cleaning up io_loop_dict
+            self.clean_up_lock = tornado.locks.Lock()  
         
         def _set_current_host(self): 
             self.old_host = self.host 
@@ -231,16 +234,15 @@ class PostgresDB(tornado.web.RequestHandler):
                         self.db_info['host'], 
                         self.db_info['port'], 
                         self.db_info['password'])
-                        
 
         @tornado.gen.coroutine
-        def get_connection(self): 
-            '''gets a connection to postgres, this is ioloop based 
-            we want to be able to share pools across ioloops 
-            however, since we have optional_sync (which creates a new ioloop) 
-            we have to manage how the pools/connections are created.  
-            '''
-            def _clean_up_io_dict():
+        def _clean_up_io_dict(self):
+            '''since we allow optional_sync on many of these calls 
+                  and it creates a ton of io_loops, walk through this 
+                  dict and cleanup any io_loops that have been killed 
+                  recently 
+            '''  
+            with (yield self.clean_up_lock.acquire()): 
                 if len(self.io_loop_dict) > options.max_io_loop_dict_size:
                     for key in self.io_loop_dict.keys():
                         if key._running is False:
@@ -253,8 +255,17 @@ class PostgresDB(tornado.web.RequestHandler):
                             try: 
                                 del self.io_loop_dict[key]
                             except Exception as e: 
-                                _log.error('Unknown Error : cleaning up the io loop dict %s' % e) 
-            _clean_up_io_dict() 
+                                _log.error('Unknown Error : '\
+                                    'cleaning up the io loop dict %s' % e) 
+                        
+        @tornado.gen.coroutine
+        def get_connection(self): 
+            '''gets a connection to postgres, this is ioloop based 
+                 we want to be able to share pools across ioloops 
+                 however, since we have optional_sync (which creates a new ioloop) 
+                 we have to manage how the pools/connections are created.  
+            '''
+            yield self._clean_up_io_dict() 
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
@@ -276,10 +287,10 @@ class PostgresDB(tornado.web.RequestHandler):
                                          ioloop=current_io_loop,
                                          cursor_factory=psycopg2.extras.RealDictCursor)
                 return conn
-            
+
             if self.db_info is None: 
                 self.db_info = current_db_info = _get_db_information()
-            else: 
+            else:
                 current_db_info = _get_db_information()
   
             if dict_item is None: 
@@ -308,8 +319,17 @@ class PostgresDB(tornado.web.RequestHandler):
             else:
                 # we have seen this ioloop before, it has a pool use it
                 if dict_item['pool'] is None:
-                    pool = _get_momoko_pool()  
-                    dict_item['pool'] = yield pool.connect()
+                    pool = _get_momoko_pool() 
+                    try:  
+                        dict_item['pool'] = yield pool.connect()
+                    except momoko.PartiallyConnectedError as e: 
+                        if current_db_info != self.db_info: 
+                            self.db_info = current_db_info  
+                            dict_item['pool'] = yield _get_momoko_pool().connect()
+                        else: 
+                            _log.error('Unable to get a postgres pool for host %s : %s' 
+                                        % (self.db_info['host'], e))  
+                            raise 
                 pool = dict_item['pool']
                 try: 
                     conn = yield self._get_momoko_connection(pool, True)
@@ -350,10 +370,10 @@ class PostgresDB(tornado.web.RequestHandler):
                     try: 
                         pool.putconn(conn) 
                     except AssertionError: 
-                        # generally a release of a already released conn, move on
+                        # probably a release of a already released conn
                         pass 
             except Exception as e: 
-                _log.exception('Unknown Error : trying to close connection %s. ' % e) 
+                _log.exception('Unknown Error : on close connection %s' % e) 
                 
         @tornado.gen.coroutine 
         def _get_momoko_connection(self, db, is_pool=False):
@@ -367,9 +387,11 @@ class PostgresDB(tornado.web.RequestHandler):
                         conn = yield db.connect()
                     break
                 except Exception as e: 
-                    time.sleep(0.3) 
-                    _log.error('Retrying PG connection : attempt=%d : exception=%s' % 
+                    _log.error('Retrying PG connection : attempt=%d : %s' % 
                                (int(i+1), e))
+                    sleepy_time = (1 << (i+1)) * 0.1 
+                    yield tornado.gen.sleep(sleepy_time)
+ 
             if conn: 
                 raise tornado.gen.Return(conn)
             else: 
@@ -796,7 +818,8 @@ class PostgresPubSub(object):
                 notifications = [] 
                 connection = channel['connection'].connection 
                 connection.poll()
-                _log.info('Notifying listeners of db changes - %s' % (connection.notifies))
+                _log.info_n('Notifying listeners of db changes - %s' % 
+                    (connection.notifies),5)
                 while connection.notifies:
                     notification = connection.notifies.pop() 
                     payload = notification.payload

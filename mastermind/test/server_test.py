@@ -2440,6 +2440,9 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         options._set('mastermind.server.serving_update_delay', 0)
 
         self.mastermind = mastermind.core.Mastermind()
+        self.old_publishing_period = options.get(
+            'mastermind.server.publishing_period') 
+        options._set('mastermind.server.publishing_period', 0.001)
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind, activity_watcher=self.activity_watcher)
         self.video_watcher = mastermind.server.VideoDBWatcher(
@@ -2460,6 +2463,8 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         self.sqlite_connect_patcher.stop()
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
+        options._set('mastermind.server.publishing_period',
+                     self.old_publishing_period)
         self.directive_publisher.stop()
         self.video_watcher.stop()
         self.stats_watcher.stop()
@@ -2570,84 +2575,82 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t1', iv=3, ic=1)
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
-        # set the db update delay to 0
-        with options._set_bounded('mastermind.server.publishing_period', 1.0):
-            # Now start all the threads
-            self.video_watcher.start()
-            self.video_watcher.wait_until_loaded(10.0)
-            tornado.ioloop.IOLoop.current().add_callback(lambda: 
-                self.video_watcher._change_subscriber.subscribe_to_db_changes())
-            while not self.video_watcher._change_subscriber._is_subscribed: 
-                yield tornado.gen.sleep(0.1)
-            self.stats_watcher.start()
-            self.stats_watcher.wait_until_loaded(5.0)
-            self.directive_publisher.start()
-            time.sleep(1) # Make sure that the directive publisher gets busy
-            self.activity_watcher.wait_for_idle()
+        # Start all the threads
+        self.video_watcher.start()
+        self.video_watcher.wait_until_loaded(10.0)
+        tornado.ioloop.IOLoop.current().add_callback(lambda: 
+            self.video_watcher._change_subscriber.subscribe_to_db_changes())
+        while not self.video_watcher._change_subscriber._is_subscribed: 
+            yield tornado.gen.sleep(0.1)
+        self.stats_watcher.start()
+        self.stats_watcher.wait_until_loaded(5.0)
+        self.directive_publisher.start()
+        time.sleep(1) # Make sure that the directive publisher gets busy
+        self.activity_watcher.wait_for_idle()
 
-            self.directive_publisher.wait_for_pending_modifies()
-            # See if there is anything in S3 (which there should be)
-            bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
-            data = bucket.get_key('mastermind').get_contents_as_string()
-            gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
-            lines = gz.read().split('\n')
-            self.assertEqual(len(lines), 5)
+        self.directive_publisher.wait_for_pending_modifies()
+        # See if there is anything in S3 (which there should be)
+        bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
+        data = bucket.get_key('mastermind').get_contents_as_string()
+        gz = gzip.GzipFile(fileobj=StringIO(data), mode='rb')
+        lines = gz.read().split('\n')
+        self.assertEqual(len(lines), 5)
 
-            # check the DB to ensure it has changed
-            req = neondata.VideoMetadata.get_video_request('key1_vid1')
-            self.assertEqual(req.state, neondata.RequestState.SERVING)
-            self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
+        # check the DB to ensure it has changed
+        req = neondata.VideoMetadata.get_video_request('key1_vid1')
+        self.assertEqual(req.state, neondata.RequestState.SERVING)
+        self.assertEqual(req.callback_state, neondata.CallbackState.SUCESS)
 
-            # Make sure a callback was sent
-            self.assertEqual(self.callback_mock.call_count, 1)
+        # Make sure a callback was sent
+        self.assertEqual(self.callback_mock.call_count, 1)
 
-            # Trigger new videos with different states via a push
-            # (finished, customer_error)
-            for i in [2, 3]:
-                job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
-                if i == 2:
-                    job.state = neondata.RequestState.FINISHED 
-                if i == 3:
-                    job.state = neondata.RequestState.CUSTOMER_ERROR
-                job.save()
-        
-                # Create a video with a couple of thumbs in the database
-                vid = neondata.VideoMetadata('key1_vid%d'%i,
-                                        request_id='job%d'%i,
-                                        tids=['key1_vid%d_t%d' % (i, j)
-                                              for j in range(2)],
-                                        i_id='i1')
-                yield vid.save(async=True)
-                yield neondata.BrightcovePlatform.modify(
-                    'key1', 'i1', 
-                    lambda x: x.add_video('vid%d' % i,
-                                          vid.job_id), async=True)
-                thumbs =  [neondata.ThumbnailMetadata(
-                    'key1_vid%d_t%d'% (i,j),
-                    'key1_vid%d' % i,
-                    ttype='neon',
-                    rank=j) for j in range(2)]
-                yield neondata.ThumbnailMetadata.save_all(thumbs, async=True)
-                yield neondata.ThumbnailServingURLs.save_all([
-                    neondata.ThumbnailServingURLs(
-                        'key1_vid%d_t%d' % (i,j),
-                        {(160, 90) : 't21.jpg'})
-                        for j in range(2)], async=True)
+        # Trigger new videos with different states via a push
+        # (finished, customer_error)
+        for i in [2, 3]:
+            job = neondata.NeonApiRequest('job%d'%i, 'key1', 'vid%d'%i)
+            if i == 2:
+                job.state = neondata.RequestState.FINISHED 
+            if i == 3:
+                job.state = neondata.RequestState.CUSTOMER_ERROR
+            job.save()
+    
+            # Create a video with a couple of thumbs in the database
+            vid = neondata.VideoMetadata('key1_vid%d'%i,
+                                    request_id='job%d'%i,
+                                    tids=['key1_vid%d_t%d' % (i, j)
+                                          for j in range(2)],
+                                    i_id='i1')
+            yield vid.save(async=True)
+            yield neondata.BrightcovePlatform.modify(
+                'key1', 'i1', 
+                lambda x: x.add_video('vid%d' % i,
+                                      vid.job_id), async=True)
+            thumbs =  [neondata.ThumbnailMetadata(
+                'key1_vid%d_t%d'% (i,j),
+                'key1_vid%d' % i,
+                ttype='neon',
+                rank=j) for j in range(2)]
+            yield neondata.ThumbnailMetadata.save_all(thumbs, async=True)
+            yield neondata.ThumbnailServingURLs.save_all([
+                neondata.ThumbnailServingURLs(
+                    'key1_vid%d_t%d' % (i,j),
+                    {(160, 90) : 't21.jpg'})
+                    for j in range(2)], async=True)
 
-            yield self.assertWaitForEquals(
-                lambda: 'key1_vid2' in \
-                self.directive_publisher.last_published_videos,
-                True, async=True)
+        yield self.assertWaitForEquals(
+            lambda: 'key1_vid2' in \
+            self.directive_publisher.last_published_videos,
+            True, async=True)
 
-            # Check state for the customer_error video and ensure its in the 
-            # list of last published videos
-            yield self.assertWaitForEquals(
-                lambda: 'key1_vid3' in \
-                self.directive_publisher.last_published_videos,
-                True, async=True)
-            self.assertEquals(
-                neondata.NeonApiRequest.get('job3', 'key1').state,
-                neondata.RequestState.CUSTOMER_ERROR)
+        # Check state for the customer_error video and ensure its in the 
+        # list of last published videos
+        yield self.assertWaitForEquals(
+            lambda: 'key1_vid3' in \
+            self.directive_publisher.last_published_videos,
+            True, async=True)
+        self.assertEquals(
+            neondata.NeonApiRequest.get('job3', 'key1').state,
+            neondata.RequestState.CUSTOMER_ERROR)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

@@ -1170,7 +1170,7 @@ class DirectivePublisher(threading.Thread):
         # the timer that will fire the publisher every publishing_period
         self.timer = utils.sync.PeriodicCoroutineTimer(
              self._publish_directives, 
-             options.publishing_period, 
+             options.publishing_period*1000.0, 
              io_loop=self.io_loop)
 
     def __del__(self):
@@ -1579,7 +1579,8 @@ class DirectivePublisher(threading.Thread):
             try:
                 if video is None: 
                     continue 
-                if request is None or request.state != neondata.RequestState.FINISHED: 
+                if request is None or \
+                  request.state != neondata.RequestState.FINISHED: 
                     continue 
 
                 video_id = video.get_id() 

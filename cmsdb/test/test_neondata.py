@@ -2846,22 +2846,18 @@ class TestPGAddingImageData(TestAddingImageData):
 class TestPostgresDB(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
         super(TestPostgresDB, self).setUp()
+        # do this in setup because its tough to shutdown, and restart 
+        # from tests otherwise, this should be the only place where 
+        # this is done, as the operation is slow. 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        self.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     def tearDown(self): 
         super(TestPostgresDB, self).tearDown()
-    
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
-
+        self.postgresql.stop()
+    
     @tornado.testing.gen_test 
     def test_singletoness(self): 
         pg1 = neondata.PostgresDB() 
@@ -2869,8 +2865,8 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(id(pg1), id(pg2))
     
-    @tornado.testing.gen_test 
-    def test_retry_connection(self): 
+    @tornado.testing.gen_test(timeout=20.0) 
+    def test_retry_connection_fails(self): 
         exception_mocker = patch('momoko.Connection.connect')
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
@@ -2880,18 +2876,40 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
             yield pg1.get_connection()
         exception_mocker.stop()
 
-    @tornado.testing.gen_test 
-    def database_name_changing(self):
+    @tornado.testing.gen_test(timeout=20.0) 
+    def test_retry_connection_fails_then_success(self): 
+        exception_mocker = patch('momoko.Connection.connect')
+        exception_mock = self._future_wrap_mock(exception_mocker.start())
+        exception_mock.side_effect = psycopg2.OperationalError('blah blah')
+
+        pg1 = neondata.PostgresDB()
+        with self.assertRaises(psycopg2.OperationalError):
+            yield pg1.get_connection()
+        exception_mocker.stop()
+
+        conn = yield pg1.get_connection() 
+        self.assertTrue("dbname=test" in conn.dsn)
+
+    @tornado.testing.gen_test(timeout=20.0) 
+    def test_database_restarting(self):
+        pg = neondata.PostgresDB()
+        conn = yield pg.get_connection()  
+        self.assertTrue("dbname=test" in conn.dsn) 
+        self.postgresql.stop() 
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         postgresql_two = test_utils.postgresql.Postgresql(dump_file=dump_file, 
                   dbname='test2')
-        
-        pass
+        conn = yield pg.get_connection()
+        self.assertTrue("dbname=test2" in conn.dsn)
+        self.postgresql.setup() 
+        self.postgresql.start()
+        conn = yield pg.get_connection()
+        self.assertTrue("dbname=test" in conn.dsn)
  
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test(timeout=20.0) 
     def test_max_io_loop_size(self):
-        pg = neondata.PostgresDB() 
+        pg = neondata.PostgresDB()
         old_io_loop_size = options.get('cmsdb.neondata.max_io_loop_dict_size')
         options._set('cmsdb.neondata.max_io_loop_dict_size', 2)
         i1 = tornado.ioloop.IOLoop()
