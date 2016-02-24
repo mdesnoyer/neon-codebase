@@ -2047,7 +2047,8 @@ class StoredObject(object):
                 sql_statements.append(query) 
             #TODO figure out rv
             cursor = yield conn.transaction(sql_statements)
-            db.return_connection(conn)  
+            db.return_connection(conn) 
+            raise tornado.gen.Return(True)  
         else:  
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
@@ -2639,6 +2640,11 @@ class InternalVideoID(object):
     def is_no_video(internal_vid):
         '''Returns true if this video id refers to there not being a video'''
         return internal_vid.partition('_')[2] == InternalVideoID.NOVIDEO
+
+    @staticmethod
+    def from_thumbnail_id(thumbnail_id):
+        '''Extracts the video id from a thumbnail id'''
+        return thumbnail_id.rpartition('_')[0]
 
     @staticmethod
     def to_external(internal_vid):
@@ -4467,6 +4473,33 @@ class RequestState(object):
     FAILED     = "failed" # DEPRECATED in favor of INT_ERROR, CUSTOMER_ERROR
     ACTIVE     = "active" # DEPRECATED. Thumbnail selected by editor; Only releavant to BC
 
+class ExternalRequestState(object):
+    '''State enums for the request state that will be sent to the user.'''
+    UNKNOWN = 'unknown' # We don't know the state
+    PROCESSING = 'processing' # The object is being analyzed
+    PROCESSED = 'processed' # The object has been analyzed 
+    SERVING = 'serving' # The object is available for serving at scale
+    FAILED = 'failed' # There was an error processing the object
+
+    @staticmethod
+    def from_internal_state(state):
+        '''Converts the internal state to an external one.'''
+        state_map = {
+            RequestState.SUBMIT : ExternalRequestState.PROCESSING,
+            RequestState.PROCESSING : ExternalRequestState.PROCESSING,
+            RequestState.FINALIZING : ExternalRequestState.PROCESSING,
+            RequestState.REQUEUED : ExternalRequestState.PROCESSING,
+            RequestState.REPROCESS : ExternalRequestState.PROCESSING,
+            RequestState.FINISHED : ExternalRequestState.PROCESSED,
+            RequestState.ACTIVE : ExternalRequestState.PROCESSED,
+            RequestState.SERVING : ExternalRequestState.SERVING,
+            RequestState.SERVING_AND_ACTIVE : ExternalRequestState.SERVING,
+            RequestState.FAILED : ExternalRequestState.FAILED,
+            RequestState.INT_ERROR : ExternalRequestState.FAILED,
+            RequestState.CUSTOMER_ERROR : ExternalRequestState.FAILED}
+        return state_map.get(state, ExternalRequestState.UNKNOWN)
+            
+
 class CallbackState(object):
     '''State enums for callbacks being sent.'''
     NOT_SENT = 'not_sent' # Callback has not been sent
@@ -4767,7 +4800,7 @@ class NeonApiRequest(NamespacedStoredObject):
                 vstatus = yield tornado.gen.Task(VideoStatus.get, internal_vid)
                 response.experiment_state = vstatus.experiment_state
                 response.winner_thumbnail = vstatus.winner_tid
-                response.processing_state = self.state
+                response.set_processing_state(self.state)
                 response.job_id = self.job_id
                 response.video_id = self.video_id
             
@@ -4909,6 +4942,7 @@ class ThumbnailID(AbstractHashGenerator):
     @classmethod
     def is_valid_key(cls, key):
         return len(key.split('_')) == 3
+        
 
 class ThumbnailMD5(AbstractHashGenerator):
     '''Static class to generate the thumbnail md5.
@@ -5775,9 +5809,13 @@ class VideoCallbackResponse(AbstractJsonResponse):
         self.serving_url = s_url
         self.error = err
         self.timestamp = str(time.time())
-        self.processing_state = processing_state
+        self.set_processing_state(processing_state)
         self.experiment_state = experiment_state
         self.winner_thumbnail = winner_thumbnail
+
+    def set_processing_state(self, internal_state):
+        self.processing_state = ExternalRequestState.from_internal_state(
+            internal_state)
     
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks

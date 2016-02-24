@@ -244,6 +244,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
     def test_job_failed(self):
         self.request.state = neondata.RequestState.FAILED
         self.request.response = {'error' : 'some_error'}
+        self.request.fail_count = 3
         self.request.save()
 
         # The callback should be received and handled correctly
