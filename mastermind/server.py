@@ -228,7 +228,7 @@ class ChangeSubscriber(threading.Thread):
         except Exception as e: 
             _log.error('Unexpected error starting ioloop for database changes %s' % e) 
             statemon.state.increment('unexpected_video_handle_error')
-
+    
     @tornado.gen.coroutine
     def subscribe_to_db_changes(self):
         '''Subscribe to all the changes we care about in the database.'''
@@ -1161,8 +1161,17 @@ class DirectivePublisher(threading.Thread):
         statemon.state.pending_modifies = 0
         self._lock = multiprocessing.RLock()
         self.modify_waiter = multiprocessing.Condition()
-
+         
         self._enable_video_lock = threading.BoundedSemaphore(20)
+
+        # io_loop for this thread, responsible for running publisher 
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+
+        # the timer that will fire the publisher every publishing_period
+        self.timer = utils.sync.PeriodicCoroutineTimer(
+             self._publish_directives, 
+             options.publishing_period, 
+             io_loop=self.io_loop)
 
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
@@ -1184,26 +1193,20 @@ class DirectivePublisher(threading.Thread):
                 self.modify_waiter.wait()
 
     def run(self):
-        self._stopped.clear()
-        while not self._stopped.is_set():
-            last_woke_up = datetime.datetime.now()
-
-            try:
-                with self.activity_watcher.activate():
-                    self._publish_directives()
-            except Exception as e:
-                _log.exception('Uncaught exception when publishing %s' %
+        try:
+            self.io_loop.make_current()
+            self.timer.start() 
+            self.io_loop.start()  
+        except Exception as e:
+            _log.exception('Uncaught exception when publishing %s' %
                                e)
-                statemon.state.increment('publish_error')
-
-
-            self._stopped.wait(options.publishing_period -
-                               (datetime.datetime.now() - 
-                                last_woke_up).total_seconds())
-
+            statemon.state.increment('publish_error')
+    
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
+        self.timer.stop()
+        self.io_loop.stop()
 
     def update_tracker_id_map(self, new_map):
         with self.lock:
@@ -1257,7 +1260,9 @@ class DirectivePublisher(threading.Thread):
             10.0, self._update_time_since_publish)
         self._update_publish_timer.daemon = True
         self._update_publish_timer.start()
-
+   
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _publish_directives(self):
 
         '''Publishes the directives to S3'''
@@ -1344,12 +1349,8 @@ class DirectivePublisher(threading.Thread):
                     video_list = list(new_serving_videos) 
                     list_chunks = [video_list[i:i+1000] for i in
                                xrange(0, len(video_list), 1000)]
-                    for chunk in list_chunks: 
-                        t = threading.Thread(
-                            target=self._enable_videos_in_database,
-                            args=(chunk,))
-                        t.daemon = True
-                        t.start()
+                    for chunk in list_chunks:
+                        yield self._enable_videos_in_database(chunk)  
                 if len(just_stopped_videos) > 0:
                     self._incr_pending_modify(len(just_stopped_videos))
                     _log.info('Processing %d stopped videos - by disabling' % 
@@ -1557,18 +1558,22 @@ class DirectivePublisher(threading.Thread):
                       self.last_published_videos + set(cur_vid_ids)
             finally:
                 self._incr_pending_modify(-len(cur_vid_ids))
-
+    
+    @tornado.gen.coroutine
     def _enable_videos_in_database(self, video_ids):
         '''Flags a video as being updated in the database and sends a
         callback if necessary.
         '''
         with self._enable_video_lock:
-            # First grab the videos and requests
-            videos = neondata.VideoMetadata.get_many(video_ids) 
+            videos = yield neondata.VideoMetadata.get_many(
+                         video_ids, 
+                         async=True) 
             job_ids = [(v.job_id, v.get_account_id()) 
                           if v is not None else (None, None) 
                           for v in videos]
-            requests = neondata.NeonApiRequest.get_many(job_ids)  
+            requests = yield neondata.NeonApiRequest.get_many(
+                           job_ids, 
+                           async=True) 
                                 
         for video, request in zip(videos, requests): 
             try:
@@ -1616,13 +1621,17 @@ class DirectivePublisher(threading.Thread):
                 with self._enable_video_lock:
                     def _set_serving_url(x):
                         x.serving_url = x.get_serving_url(save=False)
-                    neondata.VideoMetadata.modify(video_id, _set_serving_url)
+                    yield neondata.VideoMetadata.modify(
+                        video_id, 
+                        _set_serving_url, 
+                        async=True)
                     def _set_serving(x):
                         x.state = neondata.RequestState.SERVING
-                    request = neondata.NeonApiRequest.modify(
+                    request = yield neondata.NeonApiRequest.modify(
                         video.job_id,
                         video.get_account_id(),
-                        _set_serving)
+                        _set_serving, 
+                        async=True)
 
                 # And send the callback
                 if (request is not None and 

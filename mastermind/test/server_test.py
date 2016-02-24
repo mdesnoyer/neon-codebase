@@ -1445,7 +1445,7 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         
         self.assertTrue(self.watcher.is_loaded)
 
-class TestDirectivePublisher(test_utils.neontest.TestCase):
+class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestDirectivePublisher, self).setUp()
 
@@ -1557,6 +1557,29 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         # We will fill the data structures in the mastermind core
         # directly because it's too complicated to insert them using
         # the update* functions and mocking out all the db calls.
+        vid_meta = {
+            'acct1_vid1': neondata.VideoMetadata('acct1_vid1',
+                                            tids=['acct1_vid1_tid11', 
+                                                  'acct1_vid1_tid12', 
+                                                  'acct1_vid1_tid13'], 
+                                            request_id='job1'), 
+            'acct1_vid2': neondata.VideoMetadata('acct1_vid2', 
+                                            tids=['acct1_vid2_t21', 
+                                             'acct1_vid2_t22'],
+                                            request_id='job2')
+            }
+        get_many_mocker = patch('mastermind.server.neondata.VideoMetadata.get_many')
+        get_many_mock = self._future_wrap_mock(get_many_mocker.start()) 
+        get_many_mock.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
+        job_info = { 
+            ('job1','acct1'): neondata.NeonApiRequest('job1', 'acct1', 'acct1_vid1'), 
+            ('job2','acct1'): neondata.NeonApiRequest('job2', 'acct1', 'acct1_vid2') 
+        }
+        job_many_mocker = patch('mastermind.server.neondata.NeonApiRequest.get_many') 
+        job_many_mock = self._future_wrap_mock(job_many_mocker.start()) 
+        job_many_mock.side_effect = \
+                        lambda jobs: [job_info[job] for job in jobs]
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
                            [('tid11', 0.1),
@@ -1698,8 +1721,34 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
         self.assertLessEqual(
             dateutil.parser.parse(directives[('acct1', 'acct1_vid2')]['sla']),
             date.datetime.now(dateutil.tz.tzutc()))
-
+        job_many_mocker.stop()
+        get_many_mocker.stop()
+    
+    @tornado.testing.gen_test
     def test_different_default_urls(self):
+        api_key = 'acct1'
+        vid_meta = {
+            'acct1_vid1': neondata.VideoMetadata('acct1_vid1',
+                                            tids=['acct1_vid1_t11'], 
+                                            request_id='job1'), 
+            'acct2_vid2': neondata.VideoMetadata('acct2_vid2', 
+                                            tids=['acct2_vid2_t21', 
+                                             'acct2_vid2_t22'],
+                                            request_id='job2')
+            }
+        get_many_mocker = patch('mastermind.server.neondata.VideoMetadata.get_many')
+        get_many_mock = self._future_wrap_mock(get_many_mocker.start()) 
+        get_many_mock.side_effect = \
+                        lambda vids: [vid_meta[vid] for vid in vids]
+        job_info = { 
+            ('job1','acct1'): neondata.NeonApiRequest('job1', 'acct1', 'acct1_vid1'), 
+            ('job2','acct2'): neondata.NeonApiRequest('job2', 'acct2', 'acct2_vid2') 
+        }
+        job_many_mocker = patch('mastermind.server.neondata.NeonApiRequest.get_many') 
+        job_many_mock = self._future_wrap_mock(job_many_mocker.start()) 
+        job_many_mock.side_effect = \
+                        lambda jobs: [job_info[job] for job in jobs]
+        
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
                            [('tid11', 1.0)]),
@@ -1763,6 +1812,8 @@ class TestDirectivePublisher(test_utils.neontest.TestCase):
                          {'acct1_vid1_tid11': {'h': 480, 'w': 640}, 
                           'acct2_vid2_tid21': {'h': 90, 'w': 160},
                           'acct2_vid2_tid22': {'h': 90, 'w': 160}})
+        job_many_mocker.stop()
+        get_many_mocker.stop()
 
     def test_serving_url_missing(self):
         self.mastermind.serving_directive = {
@@ -2531,7 +2582,6 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
             self.stats_watcher.start()
             self.stats_watcher.wait_until_loaded(5.0)
             self.directive_publisher.start()
-
             time.sleep(1) # Make sure that the directive publisher gets busy
             self.activity_watcher.wait_for_idle()
 
@@ -2567,22 +2617,22 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
                                         tids=['key1_vid%d_t%d' % (i, j)
                                               for j in range(2)],
                                         i_id='i1')
-                vid.save()
-                neondata.BrightcovePlatform.modify(
+                yield vid.save(async=True)
+                yield neondata.BrightcovePlatform.modify(
                     'key1', 'i1', 
                     lambda x: x.add_video('vid%d' % i,
-                                          vid.job_id))
+                                          vid.job_id), async=True)
                 thumbs =  [neondata.ThumbnailMetadata(
                     'key1_vid%d_t%d'% (i,j),
                     'key1_vid%d' % i,
                     ttype='neon',
                     rank=j) for j in range(2)]
-                neondata.ThumbnailMetadata.save_all(thumbs)
-                neondata.ThumbnailServingURLs.save_all([
+                yield neondata.ThumbnailMetadata.save_all(thumbs, async=True)
+                yield neondata.ThumbnailServingURLs.save_all([
                     neondata.ThumbnailServingURLs(
                         'key1_vid%d_t%d' % (i,j),
                         {(160, 90) : 't21.jpg'})
-                        for j in range(2)])
+                        for j in range(2)], async=True)
 
             yield self.assertWaitForEquals(
                 lambda: 'key1_vid2' in \

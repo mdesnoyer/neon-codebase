@@ -246,7 +246,8 @@ class PostgresDB(tornado.web.RequestHandler):
                         if key._running is False:
                             try: 
                                 pool = self.io_loop_dict[key]['pool']
-                                pool.close() 
+                                if not pool.closed: 
+                                    pool.close() 
                             except (KeyError, TypeError, AttributeError): 
                                 pass
                             try: 
@@ -1688,7 +1689,7 @@ class StoredObject(object):
             raise tornado.gen.Return([])
 
         if options.wants_postgres and func_level_wpg:
-            chunk_size = 500
+            chunk_size = 1000
             rv = []
             obj_map = OrderedDict() 
             db = PostgresDB()
@@ -1703,7 +1704,7 @@ class StoredObject(object):
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
             
-            cursor = yield conn.execute(query)
+            yield conn.execute(query)
             for key in keys: 
                 obj_map[key] = None 
 
@@ -1724,16 +1725,15 @@ class StoredObject(object):
                             obj = cls(key)
                         else:
                             obj = None
-                    rv.append(obj) 
+                    rv.append(obj)
                 return rv
  
             rows = True
             while rows:
                 cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
-                rows = cursor.fetchall() 
+                rows = cursor.fetchmany(chunk_size) 
                 _map_new_results(rows)
 
-            _build_return_items()
             yield conn.execute("CLOSE get_many")  
             yield conn.execute("COMMIT")
  
@@ -1820,7 +1820,6 @@ class StoredObject(object):
         '''
         if create_class is None:
             create_class = cls
-            
         if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
