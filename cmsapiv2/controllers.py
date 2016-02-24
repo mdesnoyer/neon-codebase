@@ -6,43 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import boto.exception
-
-import traceback
-import datetime
-import json
-import hashlib
-import logging
-import os
-import signal
-import time
-import ast
-
-import tornado.httpserver
-import tornado.ioloop
-import tornado.web
-import tornado.escape
-import tornado.gen
-import tornado.httpclient
-
-import urlparse
-import urllib
-
-import utils.neon
-import utils.logs
-import utils.http
-
 import video_processor.video_processing_queue
-
-import dateutil.parser
-
-from cmsdb import neondata
-from datetime import datetime
-from functools import wraps 
-import utils.sync
-from utils.options import define, options
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Invalid, Coerce, Any, Optional
-from urlparse import urlparse 
 
 import logging
 from apiv2 import *
@@ -50,7 +14,6 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
-define('video_queue_region', default='us-east-1', help='region of the SQS queue to connect to')
 
 statemon.define('post_account_oks', int) 
 statemon.define('put_account_oks', int) 
@@ -685,6 +648,7 @@ class VideoHelper(object):
         request.default_thumbnail = args.get('default_thumbnail_url', None) 
         request.external_thumbnail_ref = args.get('thumbnail_ref', None) 
         request.publish_date = args.get('publish_date', None) 
+        request.api_param = args.get('n_thumbs', None)
         yield tornado.gen.Task(request.save)
 
         if request: 
@@ -705,11 +669,6 @@ class VideoHelper(object):
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
         if video is None:
             # make sure we can download the image before creating requests 
-            # create the api_request
-            api_request = yield tornado.gen.Task(
-                VideoHelper.create_api_request, 
-                args, 
-                account_id_api_key)
 
             video = neondata.VideoMetadata(
                 neondata.InternalVideoID.generate(account_id_api_key, video_id),
@@ -742,52 +701,23 @@ class VideoHelper(object):
             # add the job id save the video
             video.job_id = api_request.job_id
             yield tornado.gen.Task(video.save)
-            raise tornado.gen.Return((video,api_request))
+            raise tornado.gen.Return((video, api_request))
         else:
             reprocess = args.get('reprocess', False)
             if reprocess:
-                # get the neonapirequest 
-                api_request = neondata.NeonApiRequest.get(video.job_id,
-                                                          account_id_api_key)
+                # Flag the request to be reprocessed
+                def _flag_reprocess(x):
+                    x.state = neondata.RequestState.REPROCESS
+                    x.fail_count = 0
+                    x.attempt_count = 0
+                    x.response = {}
+                api_request = yield tornado.gen.Task(
+                    neondata.NeonApiRequest.modify,
+                    video.job_id,
+                    account_id_api_key,
+                    _flag_reprocess)
                 
-                account = neondata.NeonUserAccount.get(account_id_api_key)
-                # send the request to the video server
-                server = video_processor.video_processing_queue
-                sqs_queue = server.VideoProcessingQueue()
-
-                yield sqs_queue.connect_to_server(options.video_queue_region)
-            
-                duration = video.duration
-                if video.url and not duration:
-                    _log.debug("Duration is None")
-                    url_parse = urlparse(video.url)
-                    url_parse = list(url_parse)
-                    url_parse[2] = urllib.quote(url_parse[2])
-                    req = tornado.httpclient.HTTPRequest(
-                        method='HEAD',
-                        url=urlparse.urlunparse(url_parse),
-                        request_timeout=5.0) 
-                
-                    result = yield utils.http.send_request(req, async=True)
-                    if not result.error:
-                        headers = result.headers
-                        duration = (int(headers.get('Content-Length', 0)))
-                    else:
-                        duration = 300
-                elif not video.url and not duration:
-                    _log.debug("Video URL and Duration are None")
-                    duration = 300
-                
-                message = yield sqs_queue.write_message(
-                    account.get_processing_priority(), 
-                    api_request.to_json(),
-                    duration)
-
-                if message: 
-                    raise tornado.gen.Return((video,api_request))
-                else:  
-                    raise Exception('unable to communicate with SQS queue',
-                                    ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+                raise tornado.gen.Return((video, api_request))
             else: 
                 raise AlreadyExists('job_id=%s' % (video.job_id))
 
@@ -821,13 +751,15 @@ class VideoHandler(APIV2Handler):
           Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
           Optional('url'): Any(str, unicode, Length(min=1, max=512)),
           Optional('reprocess'): Boolean(),
-          'integration_id' : Any(str, unicode, Length(min=1, max=256)),          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
+          'integration_id' : Any(str, unicode, Length(min=1, max=256)),       
+          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
           'title': Any(str, unicode, Length(min=1, max=256)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
           'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
-          'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
+          'thumbnail_ref': Any(str, unicode, Length(min=1, max=512)),
+          'n_thumbs' : All(Coerce(int), Range(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -858,27 +790,9 @@ class VideoHandler(APIV2Handler):
 
         yield sqs_queue.connect_to_server(options.video_queue_region)
 
-        account = neondata.NeonUserAccount.get(account_id)
+        account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                         account_id)
         duration = new_video.duration
-        if new_video.url and not duration:
-            _log.debug("duration is none. Using video url to get duration")
-            url_parse = urlparse(new_video.url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = tornado.httpclient.HTTPRequest(
-                method='HEAD',
-                url=urlparse.urlunparse(url_parse),
-                request_timeout=5.0) 
-                
-            result = yield utils.http.send_request(req, async=True)
-            if not result.error:
-                headers = result.headers
-                duration = (int(headers.get('Content-Length', 0)))
-            else:
-                duration = 300
-        elif not new_video.url and not duration:
-            _log.debug("video url and duration are None")
-            duration = 300
                 
         message = yield sqs_queue.write_message(
                     account.get_processing_priority(), 
@@ -894,7 +808,7 @@ class VideoHandler(APIV2Handler):
             self.success(job_info,
                          code=ResponseCode.HTTP_ACCEPTED) 
         else:
-            raise Exception('unable to communicate with video server', 
+            raise Exception('Unable to submit job to queue', 
                             ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
         
     @tornado.gen.coroutine

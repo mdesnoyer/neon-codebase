@@ -31,6 +31,7 @@ define('num_queues', default=3, help='Number of queues in the SQS server')
 define('queue_prefix', default="Priority_", type=str,
        help="The prefix of the name of each queue")
 define('default_timeout', default=300, help='Default timeout for a message')
+define('region', default='us-east-1', help='region where the queue resides')
 
 class VideoProcessingQueue(object):
     '''Replaces the current server code with an AWS SQS instance'''
@@ -51,13 +52,10 @@ class VideoProcessingQueue(object):
         self.io_loop = ioloop.IOLoop.current()
 
     @tornado.gen.coroutine
-    def connect_to_server(self, region, timeout=options.default_timeout):
+    def connect_to_server(self, timeout=options.default_timeout):
         '''Connect to AWS and creates N SQS queues (if they don't already exist)
         
         Inputs:
-        region - the region the server resides in
-        access_key - the AWS access access_key
-        secret_key - the AWS secret_key
 
         timeout (optional) - sets the visibility timeout for all the messages
                              in the queue. Default value is 30 seconds
@@ -65,12 +63,13 @@ class VideoProcessingQueue(object):
         Returns:
         Nothing, but creates pointers to the SQS queues
         '''
-        yield self._create_sqs_server(region)
+        yield self._create_sqs_server(options.region)
 
         for i in range(options.num_queues):
             try:
-                new_queue = yield self._create_queue(options.queue_prefix + str(i),
-                                                 timeout)
+                new_queue = yield self._create_queue(
+                    options.queue_prefix + str(i),
+                    timeout)
                 self.queue_list.append(new_queue)
             except AttributeError, e:
                 raise AttributeError(e.message)
@@ -82,6 +81,8 @@ class VideoProcessingQueue(object):
             '''
             self.max_priority += 1.0/2**(i)
             self.cumulative_priorities.append(self.max_priority)
+
+        _log.info("Connected to SQS server on region %s" % options.region)
     
     @run_on_executor
     def _create_sqs_server(self, region):
@@ -89,8 +90,6 @@ class VideoProcessingQueue(object):
 
         Inputs:
         region - the region the server resides in
-        access_key - the AWS access access_key
-        secret_key - the AWS secret_key
 
         Returns:
         Nothing, but creates the connection to the SQS system
@@ -143,7 +142,7 @@ class VideoProcessingQueue(object):
         '''
         return self.queue_list[priority]
  
-    def _add_attributes(self, priority, message, timeout):
+    def _add_attributes(self, priority, message, duration):
         '''Adds priority information to the message. This way, the client that
            reads the message does not need to know about the priority information
            of the queue it comes from, or even that such information exists.
@@ -163,13 +162,7 @@ class VideoProcessingQueue(object):
                         "string_value": str(priority)
                  }, "duration": {
                         "data_type": "Number",
-                        "string_value": str(timeout)
-                 }, "times_read": {
-                        "data_type": "Number",
-                        "string_value": '0'
-                 }, "times_failed": {
-                        "data_type": "Number",
-                        "string_value": '0'
+                        "string_value": str(duration)
                  }
         }
         return message
@@ -205,7 +198,8 @@ class VideoProcessingQueue(object):
         return queue.delete_message(message)
 
     @tornado.gen.coroutine
-    def write_message(self, priority, message_body, timeout=options.default_timeout):
+    def write_message(self, priority, message_body,
+                      duration=None):
         '''Writes a message to the specified priority queue. The priority and
            durations attributes are written to the message first by calling 
            _add_attributes
@@ -213,8 +207,7 @@ class VideoProcessingQueue(object):
            Inputs:
            priority - the priority of the queue to be written to
            message_body - the body of the message to be written
-           timeout (optional) - the visibility timeout of the message,
-                                default is 300 seconds (5 minutes)
+           duration - Duration of the video if known
 
            Returns:
            The message body if successful, False otherwise
@@ -229,10 +222,7 @@ class VideoProcessingQueue(object):
             queue = self._get_queue(priority)
             message = Message()
             message.set_body(message_body)
-            if timeout is None:
-              timeout = options.default_timeout
-            timeout = timeout * 2
-            message = self._add_attributes(priority, message, timeout)
+            message = self._add_attributes(priority, message, duration)
             final_message = yield self._sqs_write(queue, message)
             raise tornado.gen.Return(final_message.get_body())
         except tornado.gen.Return:
@@ -255,16 +245,10 @@ class VideoProcessingQueue(object):
         '''
         priority = self._get_priority_qindex()
         message = None
-        while priority < options.num_queues and message == None:
+        while priority < options.num_queues and message is None:
             queue = self._get_queue(priority)
             message = yield self._sqs_read(queue)
             priority += 1
-
-        timeout = 300
-        if(message):
-            if(message.message_attributes['duration']['string_value']):
-                timeout = int(message.message_attributes['duration']['string_value'])
-            yield self._change_message_visibility(message, queue, timeout)
         raise tornado.gen.Return(message)
 
     @tornado.gen.coroutine
@@ -286,3 +270,28 @@ class VideoProcessingQueue(object):
             raise tornado.gen.Return(deleted_message)
         except Exception, e:
             raise Exception(e.message)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def hide_message(self, message, timeout):
+        '''Hides a message for timeout so that other workers won't see it.
+
+        Inputs:
+        message - The message to hide
+        timeout - The length of time in seconds to hide it.
+        '''
+        priority = int(message.message_attributes['priority']['string_value'])
+        queue = self._get_queue(priority)
+        yield self._change_message_visibility(message, queue, timeout)
+
+    def get_duration(self, message):
+        '''Returns the duration of the job encoded in the message.
+
+        Returns None if the duration is unknown.
+        '''
+        try:
+            return int(message.message_attributes['duration']['string_value'])
+        except KeyError:
+            return None
+        except ValueError:
+            return None

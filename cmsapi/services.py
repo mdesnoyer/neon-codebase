@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 import api.brightcove_api
 import boto.exception
 import boto.sqs
+import cmsapiv2.client
 import datetime
 import json
 import hashlib
@@ -35,7 +36,6 @@ import urllib
 import utils.neon
 import utils.logs
 import utils.http
-import video_processor.video_processing_queue
 
 from StringIO import StringIO
 from cmsdb import neondata
@@ -48,11 +48,11 @@ define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 define("port", default=8083, help="run on the given port", type=int)
 define("local", default=0, help="call local service", type=int)
-define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
 define("max_videoid_size", default=128, help="max vid size", type=int)
 # max tid size = vid_size + 40(md5 hexdigest)
 define("max_tid_size", default=168, help="max tid size", type=int)
-define('video_queue_region', default='us-east-1', help='region of the SQS queue to connect to')
+define("apiv2_user", default=None, help="Username for calls to APIv2")
+define("apiv2_pass", default=None, help="Password for calls to APIv2")
 
 import logging
 _log = logging.getLogger(__name__)
@@ -675,28 +675,30 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         '''
 
         request_body = {}
-        request_body["topn"] = topn 
-        request_body["api_key"] = api_key 
-        request_body["video_id"] = video_id 
-        request_body["video_title"] = \
+        request_body["external_video_ref"] = video_id 
+        request_body["title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
-        request_body["video_url"] = video_url
-        request_body["default_thumbnail"] = default_thumbnail 
-        request_body["external_thumbnail_id"] = external_thumbnail_id
+        request_body["url"] = video_url
+        request_body["default_thumbnail_url"] = default_thumbnail 
+        request_body["thumbnail_ref"] = external_thumbnail_id
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
-        url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, api_key)
+        
+        url = '/api/v2/%s/videos' % (api_key)
+        v2client = cmsapiv2.client.Client(options.apiv2_user,
+                                          options.apiv2_pass)
+        
         request = tornado.httpclient.HTTPRequest(url,
                                                  method="POST",
                                                  headers=hdr,
                                                  body=body,
-                                                 request_timeout=300.0,
+                                                 request_timeout=30.0,
                                                  connect_timeout=30.0)
-        response = yield tornado.gen.Task(utils.http.send_request, request)
+        response = yield v2client.send_request(request)
         
         if response.code == 409:
             job_id = json.loads(response.body)["job_id"]
@@ -713,7 +715,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         if response.error:
             _log.error("key=create_neon_thumbnail_api_request "
-                    "msg=thumbnail api error %s" %response.error)
+                    "msg=thumbnail api error %s" % response.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
             return
@@ -768,26 +770,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             statemon.state.increment('malformed_request')
             self.send_json_response('{"error":"missing video_url"}', 400)
             return
-
-        # Create the video metadata object
-        internal_video_id = neondata.InternalVideoID.generate(self.api_key,
-                                                              video_id)
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       internal_video_id)
-        if video is not None:
-            data = {'error' : 'request already processed',
-                    'video_id' : video_id,
-                    'job_id' : video.job_id}
-            self.send_json_response(json.dumps(data), 409)
-            return
-        video = neondata.VideoMetadata(internal_video_id,
-                                       video_url=video_url,
-                                       i_id=integration_id,
-                                       serving_enabled=False,
-                                       custom_data=custom_data,
-                                       duration=duration,
-                                       publish_date=publish_date)
-        yield tornado.gen.Task(video.save)
         
         #Create Neon API Request
         yield self.submit_neon_video_request(
@@ -854,62 +836,12 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                 return
 
         video_id = hashlib.md5(video_url).hexdigest()
-        request_body = {}
-        request_body["topn"] = 6 
-        request_body["api_key"] = self.api_key 
-        request_body["video_id"] = video_id 
-        request_body["video_title"] = \
-                video_url.split('//')[-1] if title is None else title 
-        request_body["video_url"]   = video_url
-        request_body["callback_url"] = None
-        body = tornado.escape.json_encode(request_body)
-        url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, self.api_key)
-        hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
-        req = tornado.httpclient.HTTPRequest(url=url,
-                                             method="POST",
-                                             headers=hdr,
-                                             body=body,
-                                             request_timeout=30.0,
-                                             connect_timeout=10.0)
-        
-        result = utils.http.send_request(req)
-        if result.code == 409:
-            data = '{"error":"url already processed","video_id":"%s"}'%video_id
-            self.send_json_response(data, 409)
-            return
-        
-        if result.error:
-            _log.error("key=create_neon_video_request_from_ui "
-                    "msg=thumbnail api error %s" %result.error)
-            data = '{"error":"neon thumbnail api error"}'
-            self.send_json_response(data, 502)
-            return
-        
-        # NOTE: job id gets inserted into Neon platform account on video server
-
-        job_id = json.loads(result.body)["job_id"] # get job id from response
-        t_urls = [] 
-        thumbs = []
-        im_index = int(hashlib.md5(video_id).hexdigest(), 16) \
-                                        % len(placeholder_images)
-        placeholder_url = placeholder_images[im_index] 
-        t_urls.append(placeholder_url)
-        ctime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        tm = neondata.ThumbnailMetadata(0, video_id, t_urls, ctime, 0, 0,
-                                        neondata.ThumbnailType.CENTERFRAME,
-                                        0, 0)
-        thumbs.append(tm.to_dict_for_video_response())
-        vr = neondata.VideoResponse(video_id,
-                            job_id,
-                            neondata.RequestState.PROCESSING,
-                            "neon",
-                            "0",
-                            title,
-                            None, #duration
-                            time.time() * 1000,
-                            0, 
-                            thumbs)
-        self.send_json_response(vr.to_json(), 200)
+        yield self.submit_neon_video_request(
+            self.api_key,
+            video_id,
+            video_url,
+            title,
+            6)
 
     ##### Generic get_video_status #####
 
@@ -1669,26 +1601,6 @@ class HealthCheckHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def get(self, *args, **kwargs):
         '''Handle a test tracking request.'''
-        if "video_server" in  self.request.uri:
-            # Make a call to video server health check
-            client_url = 'http://%s:8081/healthcheck'\
-                            % options.video_server 
-            #TODO: Get the api key so we can use this url instead of client_url
-            #client_url uses the video server still, while the url below will
-            #connect to SQS via cmsapiv2
-            #url = 'http://localhost:%d/api/v2/%s/videos' % (options.port, api_key)
-            req = tornado.httpclient.HTTPRequest(url=url,
-                                                 method="GET",
-                                                 request_timeout=5.0)
-            result = yield tornado.gen.Task(utils.http.send_request, req)
-            if result.error:
-                self.set_status(502)
-                self.write('{"error": "videoserver healthcheck fails"}') 
-            else:
-                self.set_status(200)
-            self.finish()
-            return
-
         self.write("<html> Server OK </html>")
         self.finish()
 

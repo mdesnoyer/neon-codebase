@@ -144,7 +144,7 @@ class VideoProcessor(object):
     retry_codes = [403, 500, 502, 503, 504]
 
     def __init__(self, params, model, model_version, cv_semaphore,
-                 reprocess=False):
+                 job_queue, job_message, reprocess=False):
         '''
         @input
         params: dict of request
@@ -154,6 +154,8 @@ class VideoProcessor(object):
         self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
         self.reprocess = reprocess
+        self.job_queue = job_queue
+        self.job_message = job_message
         self.video_url = self.job_params['video_url']
         #get the video file extension
         parsed = urlparse.urlparse(self.video_url)
@@ -189,7 +191,7 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
-    def start(self, sqs_queue, message):
+    def start(self):
         '''
         Actual work done here
         '''
@@ -251,7 +253,7 @@ class VideoProcessor(object):
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
-            sqs_queue.delete_message(message)
+            self.job_queue.delete_message(message)
 
     def download_video_file(self):
         '''
@@ -259,6 +261,9 @@ class VideoProcessor(object):
         '''
         CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
+
+        # Get the duration of the video
+        video_duration = self.job_queue.get_duration(self.job_message)
 
         # Find out if we should throttle
         do_throttle = False
@@ -281,6 +286,7 @@ class VideoProcessor(object):
                     s3conn = S3Connection()
                     bucket = s3conn.get_bucket(bucket_name)
                     key = bucket.get_key(key_name)
+                    self._set_job_timeout(video_duration, key.size)
                     key.get_contents_to_file(self.tempfile)
                     self.tempfile.flush()
                     return
@@ -295,14 +301,19 @@ class VideoProcessor(object):
             url_parse[2] = urllib.quote(url_parse[2])
             req = urllib2.Request(urlparse.urlunparse(url_parse),
                                   headers=self.headers)
-            import pdb; pdb.set_trace()
             response = urllib2.urlopen(req, timeout=self.timeout)
+            try:
+                video_size = int(response.info().getheader('Content-Length',
+                                                           None))
+            except TypeError:
+                video_size = None
+            self._set_job_timeout(video_duration, video_size,
+                                  time_factor=(4.0 if do_throttle else 3.0))
             last_time = time.time()
             data = response.read(CHUNK_SIZE)
             while data != '':
                 if do_throttle:
                     time_spent = time.time() - last_time
-                    print 'sleep time: %f, %f' % (chunk_time, chunk_time-time_spent)
                     time.sleep(max(0, chunk_time-time_spent))
                 self.tempfile.write(data)
                 self.tempfile.flush()
@@ -755,6 +766,27 @@ class VideoProcessor(object):
         if response.error:
             _log.error("Notification response not sent to %r " % request)
 
+    def _set_job_timeout(self, duration=None, size=None,
+                         time_factor):
+        '''Set the job timeout so that this worker gets the job for this time.
+
+        Inputs:
+        duration - Duration of the video in seconds
+        size - Size of the video file in bytes
+        time_factor - How long the job should run as a multiple of the video 
+                      length.
+        '''
+        if not duration:
+            if not size:
+                # Do not set a timeout because we have no idea
+                return
+
+            # Approximate the length of the video
+            duration = size * 8.0 / 1024 / 800
+
+        self.job_queue.hide_message(self.job_message,
+                                    int(duration * time_factor))
+
 class VideoClient(multiprocessing.Process):
    
     '''
@@ -769,19 +801,18 @@ class VideoClient(multiprocessing.Process):
         self.model = None
         self.cv_semaphore = cv_semaphore
         self.videos_processed = 0
-        self.sqs_queue = video_processing_queue.VideoProcessingQueue()
+        self.job_queue = video_processing_queue.VideoProcessingQueue()
 
     @tornado.gen.coroutine
     def dequeue_job(self):
-        ''' Asynchronous SQS call to dequeue work
+        ''' Asynchronous call to dequeue work
             Change state to PROCESSING after dequeue
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        yield self.sqs_queue.connect_to_server(options.video_queue_region)
+        yield self.job_queue.connect_to_server(options.video_queue_region)
 
-        _log.info("Connected to SQS server")
-        message = yield self.sqs_queue.read_message()
+        message = yield self.job_queue.read_message()
         if message:
             result = message.get_body()
             _log.info(result)
@@ -824,7 +855,7 @@ class VideoClient(multiprocessing.Process):
                         _log.info('Job %s for account %s has failed too many ' \
                                    'times' %
                                     (job_id, api_key))
-                        self.sqs_queue.delete_message(message)
+                        yield self.job_queue.delete_message(message)
                         raise Exception('Too many attempts. Aborting')
                 except Exception as e:
                     _log.error("key=worker [%s] msg=db error %s" %(
@@ -888,11 +919,13 @@ class VideoClient(multiprocessing.Process):
             vprocessor = VideoProcessor(job, self.model,
                                         self.model_version,
                                         self.cv_semaphore,
+                                        self.job_queue,
+                                        self.message,
                                         job['reprocess'])
             statemon.state.increment('workers_processing')
 
             try:
-                vprocessor.start(self.sqs_queue, message)
+                vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
             self.videos_processed += 1
