@@ -61,6 +61,7 @@ _log = logging.getLogger(__name__)
 #Monitoring
 statemon.define('processed_video', int)
 statemon.define('processing_error', int)
+statemon.define('too_many_failures', int)
 statemon.define('dequeue_error', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
@@ -215,6 +216,8 @@ class VideoProcessor(object):
             #response
             self.finalize_response()
 
+            # Delete the job from the queue
+            self.job_queue.delete_message(message)
 
         except OtherWorkerCompleted as e:
             statemon.state.increment('other_worker_completed')
@@ -248,11 +251,13 @@ class VideoProcessor(object):
             # error that they might be able to fix
             if isinstance(e, VideoError):
                 api_request.send_callback()
+
+            # Let another node pick up the job to try again
+            self.job_queue.hide_message(self.job_message, 0)
        
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
-            self.job_queue.delete_message(message)
 
     def download_video_file(self):
         '''
@@ -843,15 +848,18 @@ class VideoClient(multiprocessing.Process):
                     statemon.state.increment('dequeue_error')
                     raise DequeueError('Api Request does not exist.')
                 if api_request.state != neondata.RequestState.PROCESSING:
-                    _log.info('Job %s for account %s ignored' %
-                              (job_id, api_key))
-                    raise UninterestingJob('Job already finished')
+                    _log.error('Job %s for account %s could not set to '
+                               'PROCESSING' %
+                               (job_id, api_key))
+                    statemon.state.increment('dequeue_error')
+                    raise DequeueError('Could not set processing')
                 _log.info("key=worker [%s] msg=processing request %s for "
                           "%s." % (self.pid, job_id, api_key))
                 if (api_request.fail_count > options.fail_count or 
                         api_request.try_count > options.attempt_count):
-                    _log.info('Job %s for account %s has failed too many '
+                    _log.error('Job %s for account %s has failed too many '
                               'times' % (job_id, api_key))
+                    statemon.state.increment('too_many_failures')
                     raise UninterestingJob('Job failed')
             if(job_params):
                 _log.debug("Dequeue Successful")
