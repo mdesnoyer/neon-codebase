@@ -420,6 +420,31 @@ class PostgresDB(tornado.web.RequestHandler):
                     " WHERE _data->>'key' = %s" 
             params = (obj.get_json_data(), obj.key)   
             return (query, params)
+ 
+        def get_update_many_query_tuple(self, objects): 
+            ''' helper function to build up an update multiple 
+                   query  
+                builds queries of the form 
+                UPDATE table AS t SET t._data = changes.data
+                FROM (values (obj.key, obj.get_json_data())) 
+                  AS changes(key, data)
+                WHERE changes.key = t._data->>'key' 
+            '''
+            try: 
+                param_list = []
+                table = objects[0]._baseclass_name().lower()
+                query = "UPDATE %s AS t SET _data = changes.data "\
+                        " FROM (VALUES " % table 
+                for obj in objects: 
+                    query += '(%s, %s::jsonb),' 
+                    param_list.append(obj.key)
+                    param_list.append(obj.get_json_data()) 
+                query = query[:-1] 
+                query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
+                return (query, tuple(param_list))  
+            except KeyError: 
+                return 
+            
     
     instance = None 
     
@@ -1883,8 +1908,6 @@ class StoredObject(object):
                         cur_obj = None
                 else:
                     # hack we need two copies of the object, copy won't work here
-                    # on the class create itself since it's a class. dump and load 
-                    # the item instead  
                     item_one = json.loads(json.dumps(item))
                     cur_obj = create_class._create(key, item_one)
 
@@ -1892,22 +1915,40 @@ class StoredObject(object):
             try:
                 func(mappings)
             finally:
-                sql_statements = []
+                insert_statements = []
+                update_objs = [] 
                 for key, obj in mappings.iteritems():
                    original_object = key_to_object.get(key, None)
                    if obj is not None and original_object is None: 
                        query_tuple = db.get_insert_json_query_tuple(obj)
-                       sql_statements.append(query_tuple) 
+                       insert_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
-                       query_tuple = db.get_update_json_query_tuple(obj)
-                       sql_statements.append(query_tuple) 
-            try: 
-                cursor = yield conn.transaction(sql_statements)
-            except Exception as e: 
-                _log.error('unknown error when running sql_statments %s in transaction %s' % (sql_statements, e))
-            finally: 
-                db.return_connection(conn)
-                raise tornado.gen.Return(mappings) 
+                       update_objs.append(obj)
+
+            if update_objs:  
+                try: 
+                    update_query = db.get_update_many_query_tuple(
+                        update_objs)
+                    yield conn.execute(update_query[0], 
+                                       update_query[1]) 
+                except Exception as e: 
+                    _log.error('unknown error when running \
+                                update_query %s : %s' % 
+                                (update_query, e))
+
+            if insert_statements: 
+                try: 
+                    for it in insert_statements:  
+                        yield conn.execute(it[0], it[1])
+                except psycopg2.IntegrityError:
+                    pass  
+                except Exception as e: 
+                    _log.error('unknown error when running \
+                                inserts %s : %s' % 
+                                (insert_statements, e))
+                
+            db.return_connection(conn)
+            raise tornado.gen.Return(mappings)
         else:  
             def _getandset(pipe):
                 # mget can't handle an empty list 

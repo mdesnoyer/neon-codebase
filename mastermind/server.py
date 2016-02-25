@@ -1261,7 +1261,6 @@ class DirectivePublisher(threading.Thread):
         self._update_publish_timer.daemon = True
         self._update_publish_timer.start()
    
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _publish_directives(self):
 
