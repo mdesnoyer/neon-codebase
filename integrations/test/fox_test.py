@@ -18,17 +18,17 @@ import random
 import string 
 import test_utils.redis
 import test_utils.neontest
+import test_utils.postgresql
 import time
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
+from utils.options import define, options
 import unittest
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestSubmitVideo, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.submit_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
 
@@ -46,10 +46,22 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.fox_api_mock = self._future_wrap_mock(self.fox_api_mocker.start()) 
          
     def tearDown(self):
-        self.redis.stop()
         self.submit_mocker.stop() 
         self.fox_api_mocker.stop() 
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         super(TestSubmitVideo, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_submit_success(self):
@@ -131,3 +143,39 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         response['entryCount'] = num_of_results
         response['entries'] = _generate_docs()
         return response
+
+class TestSubmitVideoPG(TestSubmitVideo):
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+        self.submit_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
+        self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
+
+        user_id = '134234adfs' 
+        self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
+        self.user.save()
+        self.integration = neondata.FoxIntegration(self.user.neon_api_key,  
+                                                   last_process_date=1451942786, 
+                                                   feed_pid_ref='meisafeedpidref')
+        self.integration.save()
+
+        self.external_integration = integrations.fox.FoxIntegration(
+            self.user.neon_api_key, self.integration)
+        self.fox_api_mocker = patch('api.fox_api.FoxApi.search')
+        self.fox_api_mock = self._future_wrap_mock(self.fox_api_mocker.start()) 
+         
+    def tearDown(self):
+        self.submit_mocker.stop() 
+        self.fox_api_mocker.stop()
+        self.postgresql.clear_all_tables() 
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
