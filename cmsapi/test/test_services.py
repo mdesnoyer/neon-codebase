@@ -164,7 +164,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.job_ids = [] #ordered list
         self.video_ids = []
         self.images = {} 
-
         random.seed(19449)
         
     def tearDown(self):
@@ -1812,7 +1811,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.assertEqual(response.code, 200)
 
 class TestServicesPG(TestServices):
-    ''' Services Test '''
         
     def setUp(self):
         super(TestServices, self).setUp()

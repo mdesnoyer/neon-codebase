@@ -1038,6 +1038,7 @@ class TestVideoHandler(TestControllersBase):
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
+        super(TestVideoHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1047,7 +1048,6 @@ class TestVideoHandler(TestControllersBase):
     @classmethod
     def tearDownClass(cls): 
         cls.redis.stop()
-        super(TestVideoHandler, cls).tearDownClass() 
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -1668,8 +1668,11 @@ class TestVideoHandlerPG(TestVideoHandler):
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
+        neondata.ThumbnailMetadata('testing_vtid_one', width=500,
+                                   urls=['s']).save()
+        neondata.ThumbnailMetadata('testing_vtid_two', width=500,
+                                   urls=['d']).save()
+        neondata.NeonApiRequest('job1', self.account_id_api_key).save()
         defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
@@ -1690,14 +1693,15 @@ class TestVideoHandlerPG(TestVideoHandler):
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
+        self.maxDiff = 5000
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestVideoHandler, self).tearDown()
 
     @classmethod
@@ -1710,7 +1714,6 @@ class TestVideoHandlerPG(TestVideoHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-        super(TestVideoHandlerPG, cls).tearDownClass() 
 
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
@@ -1748,6 +1751,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
+        super(TestThumbnailHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1892,7 +1896,7 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save() 
         self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500).save()
+        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
         self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
                              'tn_test_vid1')).save()
         neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
@@ -1916,10 +1920,10 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestThumbnailHandler, self).tearDown()
 
     @classmethod
@@ -1932,7 +1936,6 @@ class TestThumbnailHandlerPG(TestThumbnailHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-        super(TestThumbnailHandlerPG, cls).tearDownClass() 
 
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
@@ -1999,6 +2002,7 @@ class TestVideoStatsHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestVideoStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2254,7 +2258,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.assertRegexpMatches(rjson['error']['message'],
                                  'thumbnail_id or video_id is required') 
 
-class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler): 
+class TestThumbnailStatsHandlerPG(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
@@ -2269,12 +2273,12 @@ class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler):
         neondata.ThumbnailMetadata('testingtid', width=800).save()
         neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
-        super(TestThumbnailStatsHandler, self).setUp()
+        super(TestThumbnailStatsHandlerPG, self).setUp()
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
         self.postgresql.clear_all_tables()
-        super(TestThumbnailStatsHandler, self).tearDown()
+        super(TestThumbnailStatsHandlerPG, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2286,6 +2290,116 @@ class TestThumbnailStatsHandlerPG(TestThumbnailStatsHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_account_id_video_id(self): 
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
+                                    tids=['testingtid','testing_vtid_one'])
+        vm.save()
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?video_id=vid1,vid2' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+
+    @tornado.testing.gen_test
+    def test_account_id_video_id_dne(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=does_not_exist' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200) 
+        self.assertEquals(rjson['count'], 0) 
+        self.assertEquals(len(rjson['statistics']), 0) 
+
+    @tornado.testing.gen_test
+    def test_account_id_thumbnail_id(self): 
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 1)
+        status_one = rjson['statistics'][0] 
+        self.assertEquals(status_one['ctr'], 0.23)
+
+    @tornado.testing.gen_test
+    def test_account_id_multiple_thumbnail_ids(self): 
+        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
+        ts.save() 
+        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
+        ts.save() 
+        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid,testing_vtid_one' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+        
+        # test url encoded 
+        encoded_params = urllib.urlencode({ 'thumbnail_id' : 'testingtid,testing_vtid_one' })
+        self.assertEquals('thumbnail_id=testingtid%2Ctesting_vtid_one', encoded_params) 
+        url = '/api/v2/%s/stats/thumbnails?%s' % (self.account_id_api_key, encoded_params) 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['count'], 2)
+        status_one = rjson['statistics'][0]  
+        status_two = rjson['statistics'][1] 
+        self.assertEquals(status_one['ctr'], 0.23)
+        self.assertEquals(status_two['ctr'], 0.12)
+
+    def test_video_id_limit(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'list exceeds limit') 
+
+    def test_video_id_and_thumbnail_id(self): 
+        url = '/api/v2/%s/stats/thumbnails?video_id=1&thumbnail_id=abc' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'you can only have') 
+
+    def test_no_video_id_or_thumbnail_id(self): 
+        url = '/api/v2/%s/stats/thumbnails' % (self.account_id_api_key) 
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               method='GET')
+        response = self.wait() 
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 400)
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'thumbnail_id or video_id is required') 
 
 class TestAPIKeyRequired(TestControllersBase):
     def setUp(self):

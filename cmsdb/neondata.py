@@ -129,8 +129,10 @@ statemon.define('invalid_callback_url', int)
 
 statemon.define('postgres_pubsub_connections', int) 
 statemon.define('postgres_unknown_errors', int) 
+statemon.define('postgres_connection_failed', int) 
 statemon.define('postgres_listeners', int) 
 statemon.define('postgres_successful_pubsub_callbacks', int) 
+statemon.define('postgres_pools', int) 
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -242,21 +244,23 @@ class PostgresDB(tornado.web.RequestHandler):
                   dict and cleanup any io_loops that have been killed 
                   recently 
             '''  
-            with (yield self.clean_up_lock.acquire()): 
-                if len(self.io_loop_dict) > options.max_io_loop_dict_size:
-                    for key in self.io_loop_dict.keys():
-                        if key._running is False:
-                            try: 
-                                pool = self.io_loop_dict[key]['pool']
-                                if not pool.closed: 
-                                    pool.close() 
-                            except (KeyError, TypeError, AttributeError): 
-                                pass
-                            try: 
-                                del self.io_loop_dict[key]
-                            except Exception as e: 
-                                _log.error('Unknown Error : '\
-                                    'cleaning up the io loop dict %s' % e) 
+            #with (yield self.clean_up_lock.acquire()): 
+            if len(self.io_loop_dict) > options.max_io_loop_dict_size:
+                for key in self.io_loop_dict.keys():
+                    if key._running is False:
+                        try: 
+                            pool = self.io_loop_dict[key]['pool']
+                            if not pool.closed: 
+                                pool.close() 
+                        except (KeyError, TypeError, AttributeError): 
+                            pass
+                        try: 
+                            del self.io_loop_dict[key]
+                        except Exception as e: 
+                            pass 
+                            #_log.error('Unknown Error : '\
+                            #    'cleaning up the io loop dict %s' % e)
+            statemon.state.postgres_pools = len(self.io_loop_dict)
                         
         @tornado.gen.coroutine
         def get_connection(self): 
@@ -265,7 +269,7 @@ class PostgresDB(tornado.web.RequestHandler):
                  however, since we have optional_sync (which creates a new ioloop) 
                  we have to manage how the pools/connections are created.  
             '''
-            yield self._clean_up_io_dict() 
+            self._clean_up_io_dict() 
             conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
@@ -308,10 +312,12 @@ class PostgresDB(tornado.web.RequestHandler):
                         db = _get_momoko_db()
                         conn = yield self._get_momoko_connection(db) 
                     else: 
+                        statemon.state.increment('postgres_connection_failed')
                         _log.error('Unable to get a postgres connection for host %s : %s' 
                                    % (self.db_info['host'], e))  
                         raise
                 except Exception as e: 
+                    statemon.state.increment('postgres_connection_failed')
                     _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
                                % (self.db_info['host'], e))  
                     raise 
@@ -327,6 +333,7 @@ class PostgresDB(tornado.web.RequestHandler):
                             self.db_info = current_db_info  
                             dict_item['pool'] = yield _get_momoko_pool().connect()
                         else: 
+                            statemon.state.increment('postgres_connection_failed')
                             _log.error('Unable to get a postgres pool for host %s : %s' 
                                         % (self.db_info['host'], e))  
                             raise 
@@ -341,10 +348,12 @@ class PostgresDB(tornado.web.RequestHandler):
                         dict_item['pool'] = yield pool.connect()
                         conn = yield self._get_momoko_connection(pool, True)
                     else: 
+                        statemon.state.increment('postgres_connection_failed')
                         _log.error('Unable to get a postgres connection for host %s : %s' 
                                     % (self.db_info['host'], e))  
                         raise 
                 except Exception as e: 
+                    statemon.state.increment('postgres_connection_failed')
                     _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
                                % (self.db_info['host'], e))  
                     raise 
