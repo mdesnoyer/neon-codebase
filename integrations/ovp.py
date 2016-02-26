@@ -85,14 +85,16 @@ class OVPIntegration(object):
                     added_jobs >= options.max_vids_for_new_account):
                     # New account, so only process the most recent videos
                     break
+                video = None 
                 video = yield iter_func()
                 if isinstance(video, StopIteration):
                     break
                 try: 
-                    job_id = yield self.submit_one_video_object(video,   
+                    job_id = yield self.submit_one_video_object(video, 
                                                                 grab_new_thumb=grab_new_thumb)
                 except TypeError: 
-                    break 
+                    break
+ 
                 if job_id: 
                     video_dict[self.get_video_id(video)] = job_id 
                     added_jobs += 1 
@@ -144,7 +146,7 @@ class OVPIntegration(object):
                 else:
                     _log.error('Unknown error, reached max retries on '
                                'video submit for account %s: item %s: %s' % 
-                               (self.account_id, video, e))
+                               (self.account_id, video if video else None, e))
                     statemon.state.define_and_increment(
                         'submit_video_bc_error.%s' % self.account_id)
                     pass
@@ -170,7 +172,7 @@ class OVPIntegration(object):
         except OVPError as e: 
             raise
         except TypeError as e: 
-            raise  
+            raise 
         except Exception as e:
             _log.exception('Unexpected error submitting video %s' % video)
             statemon.state.increment('unexpected_submission_error') 

@@ -150,7 +150,7 @@ class Manager(object):
         
         if options.service_name.lower() == 'brightcove': 
             cur_keys = set([(x.neon_api_key, x.integration_id) for x in platforms
-                             if x is not None and x.enabled])
+                             if x is not None and x.enabled and isinstance(x, pi_class)])
         else: 
             cur_keys = set([(x.account_id, x.integration_id) for x in platforms
                              if x is not None and x.enabled and isinstance(x, pi_class)])
