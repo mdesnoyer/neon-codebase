@@ -107,8 +107,6 @@ define('max_bandwidth_per_core', default=15500000.0,
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
-define('video_queue_region', default='us-east-1', 
-       help='region of the SQS queue to connect to')
 define('max_fail_count', default=2, 
        help='Number of failures allowed before a job is discarded')
 define('max_attempt_count', default=5, 
@@ -771,7 +769,7 @@ class VideoProcessor(object):
             _log.error("Notification response not sent to %r " % request)
 
     def _set_job_timeout(self, duration=None, size=None,
-                         time_factor):
+                         time_factor=3.0):
         '''Set the job timeout so that this worker gets the job for this time.
 
         Inputs:
@@ -814,7 +812,6 @@ class VideoClient(multiprocessing.Process):
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        yield self.job_queue.connect_to_server(options.video_queue_region)
 
         message = yield self.job_queue.read_message()
         if message:
@@ -855,8 +852,8 @@ class VideoClient(multiprocessing.Process):
                     raise DequeueError('Could not set processing')
                 _log.info("key=worker [%s] msg=processing request %s for "
                           "%s." % (self.pid, job_id, api_key))
-                if (api_request.fail_count > options.fail_count or 
-                        api_request.try_count > options.attempt_count):
+                if (api_request.fail_count > options.max_fail_count or 
+                        api_request.try_count > options.max_attempt_count):
                     _log.error('Job %s for account %s has failed too many '
                               'times' % (job_id, api_key))
                     statemon.state.increment('too_many_failures')

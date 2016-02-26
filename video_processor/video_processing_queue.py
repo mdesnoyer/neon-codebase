@@ -49,16 +49,22 @@ class VideoProcessingQueue(object):
         Returns:
         None
         '''
+        self._reset()
+
+        self.executor = concurrent.futures.ThreadPoolExecutor(10)
+
+    def _reset(self):
         self.queue_list = []
         self.max_priority = 0.0
         self.cumulative_priorities = []
 
-        self.executor = concurrent.futures.ThreadPoolExecutor(10)
-        self.io_loop = ioloop.IOLoop.current()
-
+        self.region = None
+        self.queue_prefix = None
+        self.conn = None
+        
     @tornado.gen.coroutine
-    def connect_to_server(self, timeout=options.default_timeout):
-        '''Connect to AWS and creates N SQS queues (if they don't already exist)
+    def _connect_to_server(self, timeout=options.default_timeout):
+        '''Connect to AWS and creates N SQS queues (if necessary)
         
         Inputs:
 
@@ -68,26 +74,40 @@ class VideoProcessingQueue(object):
         Returns:
         Nothing, but creates pointers to the SQS queues
         '''
-        yield self._create_sqs_server(options.region)
+        if (self.region is None or
+            self.region != options.region or
+            self.queue_prefix != options.queue_prefix or
+            options.num_queues != len(self.queue_list)):
 
-        for i in range(options.num_queues):
-            try:
+            self._reset()
+            
+            yield self._create_sqs_server(options.region)
+
+            self.region = options.region
+            self.queue_prefix = options.queue_prefix
+
+            for i in range(options.num_queues):
+                queue_name = '%s%i' % (self.queue_prefix, i)
                 new_queue = yield self._create_queue(
-                    options.queue_prefix + str(i),
+                    queue_name,
                     timeout)
                 self.queue_list.append(new_queue)
-            except AttributeError, e:
-                raise AttributeError(e.message)
-            '''The next two lines define how the queues are picked. 
-            Each new queue is half as likely to be selected as the previous one.
-            When selecting a queue (in _get_priority_qindex), a random uniform
-            number is generated and it is checked against these values. The range
-            it lies in defines which queue is selected. 
-            '''
-            self.max_priority += 1.0/2**(i)
-            self.cumulative_priorities.append(self.max_priority)
+                
+                # The next two lines define how the queues are picked.
+                # Each new queue is half as likely to be selected as
+                # the previous one.  When selecting a queue (in
+                # _get_priority_qindex), a random uniform number is
+                # generated and it is checked against these
+                # values. The range it lies in defines which queue is
+                # selected.
+                
+                self.max_priority += 1.0/2**(i)
+                self.cumulative_priorities.append(self.max_priority)
 
-        _log.info("Connected to SQS server on region %s" % options.region)
+            self.region = options.region
+            self.queue_prefix = options.queue_prefix
+
+            _log.info("Connected to SQS server on region %s" % options.region)
     
     @run_on_executor
     def _create_sqs_server(self, region):
@@ -110,7 +130,7 @@ class VideoProcessingQueue(object):
         queue_name - the name of the queue to lookup/creates
         timeout - sets the visibility timeout for all the messages in the queue. 
                   Default value is 30 seconds (this is the default value as 
-                  defined by connect_to_server, which is what calls this def)
+                  defined by _connect_to_server, which is what calls this def)
 
         Returns:
         The queue object
@@ -202,9 +222,23 @@ class VideoProcessingQueue(object):
     def _sqs_delete(self, queue, message):
         return queue.delete_message(message)
 
+    @run_on_executor
+    def _sqs_count(self, queue):
+        return queue.count()
+
     @tornado.gen.coroutine
-    def write_message(self, priority, message_body,
-                      duration=None):
+    def size(self):
+        '''Return the approximate size of the queue.'''
+        yield self._connect_to_server()
+        count = 0
+        for q in self.queue_list:
+            x = yield self._sqs_count(q)
+            count += x
+
+        raise tornado.gen.Return(count)
+
+    @tornado.gen.coroutine
+    def write_message(self, priority, message_body, duration=None):
         '''Writes a message to the specified priority queue. The priority and
            durations attributes are written to the message first by calling 
            _add_attributes
@@ -217,11 +251,12 @@ class VideoProcessingQueue(object):
            Returns:
            The message body if successful, False otherwise
         '''
+        yield self._connect_to_server()
         try:
             if priority >= options.num_queues:
                 raise ValueError('Invalid Priority. The valid range is 0 to %s' 
                                  % str(options.num_queues - 1))
-            if type(message_body) is not str:
+            if not isinstance(message_body, basestring):
                 raise ValueError('Message_body must be string, instead got %s'
                                  % type(message_body))
             queue = self._get_queue(priority)
@@ -234,7 +269,7 @@ class VideoProcessingQueue(object):
             raise tornado.gen.Return(final_message.get_body())
         except ValueError, e:
             statemon.state.increment('write_failure')
-            raise ValueError(e.message)
+            raise
 
     @tornado.gen.coroutine
     def read_message(self):
@@ -247,8 +282,9 @@ class VideoProcessingQueue(object):
            None
 
            Returns:
-           A message if successful, None otherwise
+           A boto.sqs.Message if successful, None otherwise
         '''
+        yield self._connect_to_server()
         priority = self._get_priority_qindex()
         message = None
         while priority < options.num_queues and message is None:
@@ -267,6 +303,7 @@ class VideoProcessingQueue(object):
            Returns:
            True if successful, False otherwise
         '''
+        yield self._connect_to_server()
         try:
             priority = int(message.message_attributes['priority']['string_value'])
             queue = self._get_queue(priority)
@@ -287,9 +324,10 @@ class VideoProcessingQueue(object):
         message - The message to hide
         timeout - The length of time in seconds to hide it.
         '''
+        yield self._connect_to_server()
         priority = int(message.message_attributes['priority']['string_value'])
         queue = self._get_queue(priority)
-        yield self._change_message_visibility(message, queue, timeout)
+        yield self._change_message_visibility(queue, message, timeout)
 
     def get_duration(self, message):
         '''Returns the duration of the job encoded in the message.

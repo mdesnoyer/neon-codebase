@@ -31,6 +31,7 @@ import os
 import pdb
 import pickle
 from PIL import Image
+import Queue
 import re
 import redis
 import random
@@ -116,27 +117,36 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         #setup process video object
         self.api_request = None
 
-        # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
-                                 'VideoProcessingQueue.connect_to_server')
+        # Mock the video queue
+        self.job_queue_patcher = patch(
+            'video_processor.video_processing_queue.' \
+            'VideoProcessingQueue')
+        self.job_queue_mock = self.job_queue_patcher.start()()
+
+        self.job_queue_mock.get_duration.return_value = 600.0
+
+        self.job_delete_mock = self._future_wrap_mock(
+            self.job_queue_mock.delete_message)
+        self.job_delete_mock.return_value = True
         
-        self.mock_sqs_future = self._future_wrap_mock(
-            self.sqs_patcher.start(),
-            require_async_kw=False)
+        self.job_read_mock = self._future_wrap_mock(
+            self.job_queue_mock.read_message)
+        self.job_message = Message()
+        message_body = json.dumps({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
 
-        self.read_patcher = patch('video_processor.video_processing_queue.'\
-                                  'VideoProcessingQueue.read_message')
-        self.mock_read_future = self._future_wrap_mock(
-            self.read_patcher.start(),
-            require_async_kw=False)
-
-        self.delete_patcher = patch('video_processor.video_processing_queue.'\
-                                    'VideoProcessingQueue.delete_message')
-        self.mock_delete_future = self._future_wrap_mock(
-            self.delete_patcher.start(),
-            require_async_kw=False)
-
-        self.mock_delete_future.return_value = True
+        self.job_message.set_body(message_body)
+        self.job_read_mock.side_effect = [self.job_message]
+        
+        
+        self.job_hide_mock = self._future_wrap_mock(
+            self.job_queue_mock.hide_message)
 
         #patch for download_and_add_thumb
         self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
@@ -150,11 +160,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         random.seed(984695198)
         
     def tearDown(self):
+        self.job_queue_patcher.stop()
         self.utils_patch.stop()
         self.redis.stop()
-        self.sqs_patcher.stop()
-        self.read_patcher.stop()
-        self.delete_patcher.stop()
         super(TestVideoClient, self).tearDown()
         
     def setup_video_processor(self, request_type, url='http://url.com'):
@@ -211,7 +219,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = video_processor.client.VideoProcessor(
             job, self.model,
             self.model_version,
-            multiprocessing.BoundedSemaphore(1))
+            multiprocessing.BoundedSemaphore(1),
+            self.job_queue_mock,
+            self.job_message)
         
         return vprocessor
 
@@ -220,6 +230,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
     def test_download_video_file(self, mock_client):
         # Createa a 10MB random string
         vdata = StringIO('%030x' % random.randrange(16**(10*1024*1024)))
+        vdata.info = MagicMock()
         mock_client.return_value = vdata
         
         vprocessor = self.setup_video_processor("neon")
@@ -423,8 +434,12 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(job, self.model,
-                self.model_version, multiprocessing.BoundedSemaphore(1))
+        vprocessor = video_processor.client.VideoProcessor(
+            job,
+            self.model,
+            self.model_version, multiprocessing.BoundedSemaphore(1),
+            self.job_queue_mock,
+            self.job_message)
         vprocessor._get_center_frame(self.test_video_file)
         meta, img = vprocessor.thumbnails[0]
         self.assertIsNotNone(img)
@@ -441,8 +456,14 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(job, self.model,
-                self.model_version, multiprocessing.BoundedSemaphore(1))
+        vprocessor = video_processor.client.VideoProcessor(
+            job,
+            self.model,
+            self.model_version,
+            multiprocessing.BoundedSemaphore(1),
+            self.job_queue_mock,
+            self.job_message
+            )
         vprocessor._get_random_frame(self.test_video_file)
         meta1, img1 = vprocessor.thumbnails[0]
         self.assertIsNotNone(img1)
@@ -456,50 +477,28 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_dequeue_job(self):
-        message = Message()
 
-        message_body = json.dumps({
+        with self.assertLogExists(logging.DEBUG, "Dequeue Successful"):
+            job, message = yield self.video_client.dequeue_job()
+
+        self.assertEqual(job, {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 'http://video.mp4',
+            'reprocess' : False
             })
-
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        with self.assertLogExists(logging.DEBUG, "Dequeue Successful"):
-            message_read = yield self.video_client.dequeue_job()
-
-        #Dequeue_job returns a tuple, but only one of the return values
-        #is used.
-        self.assertEqual(message_read[1].get_body(), message.get_body())
 
     @tornado.testing.gen_test
     def test_dequeue_job_with_empty_server(self):
-        self.mock_read_future.return_value = None
-        with self.assertRaises(Exception) as cm:
+        self.job_read_mock.side_effect = [None]
+        with self.assertRaises(Queue.Empty) as cm:
             yield self.video_client.dequeue_job()
-        self.assertEqual(cm.exception.message, 'Server is empty')
 
     @tornado.testing.gen_test
     def test_dequeue_job_with_failed_attempts(self):
-        message = Message()
-        message_body = json.dumps({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
-            })
-
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
 
         def _change_job_state(request):
             request.fail_count = 4
@@ -507,36 +506,23 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                       
         req = neondata.NeonApiRequest.modify('job1', self.api_key, 
                                              _change_job_state)
-        with self.assertRaises(Exception) as cm:
-            yield self.video_client.dequeue_job()
-        self.assertEqual(cm.exception.message, 'Too many attempts. Aborting')
+        with self.assertLogExists(logging.ERROR, 'has failed too many times'):
+            with self.assertRaises(video_processor.client.UninterestingJob):
+                yield self.video_client.dequeue_job()
 
-    #@patch('cmsdb.neondata.NeonApiRequest')
     @tornado.testing.gen_test
     def test_dequeue_job_with_too_many_attempts(self):
-        message = Message()
-        message_body = json.dumps({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
-            })
-
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
 
         def _change_job_state(request):
             request.try_count = 7
+            request.fail_count = 1
             request.state = neondata.RequestState.PROCESSING
                       
         req = neondata.NeonApiRequest.modify('job1', self.api_key, 
                                              _change_job_state)
-        with self.assertRaises(Exception) as cm:
-            yield self.video_client.dequeue_job()
-        self.assertEqual(cm.exception.message, 'Too many attempts. Aborting')
+        with self.assertLogExists(logging.ERROR, 'has failed too many times'):
+            with self.assertRaises(video_processor.client.UninterestingJob):
+                yield self.video_client.dequeue_job()
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
     ''' 

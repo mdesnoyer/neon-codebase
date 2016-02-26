@@ -12,9 +12,11 @@ Modified by Ahmaidan
 
 '''
 from boto.sqs.message import Message
+import copy
 import random
 from random import randrange
 import threading
+import uuid
 
 import logging
 _log = logging.getLogger(__name__)
@@ -24,10 +26,10 @@ class SQSQueueMock(object):
     SQS Mock Queue class
     '''
     name = None  
-    def __init__(self):
+    def __init__(self, name):
         self.lock = threading.RLock()
+        self.name = name
 
-        self.attributes = {}
         self.message_queue = []
         
     #Deprecated function           
@@ -46,11 +48,7 @@ class SQSQueueMock(object):
         return self.count(page_size=10, vtimeout=10)
        
     def delete(self):
-        try:
-            del self.message_queue[:]
-        except OSError:
-            return False
-        return True
+        raise NotImplementedError()
       
     def delete_message(self, message):
         with self.lock:
@@ -71,27 +69,34 @@ class SQSQueueMock(object):
             with self.lock:
                 try:
                     msg = self.message_queue[i]
-                    for attr in attributes:
-                        try:
-                            msg.attributes[attr] = self.attributes[attr]
-                        except KeyError:
-                            pass
                     messages.append(msg)
                 except IndexError:
                     pass
                 i += 1
         return messages
        
-    def read(self, visibility_timeout=None, message_attributes=['All']):
+    def read(self, visibility_timeout=None, message_attributes=None):
         with self.lock:
             if self.message_queue:
-                return self.message_queue[0]
+                msg = copy.deepcopy(self.message_queue[0])
+                all_attrs = msg.message_attributes
+                msg.message_attributes = {}
+                if (message_attributes and
+                    message_attributes[0] != 'All' and
+                    message_attributes[0] != ['.*']):
+                    for attr in message_attributes:
+                        msg.message_attributes[attr] = all_attrs[attr]
+                else:
+                    msg.message_attributes = all_attrs
+                return msg
+                        
             else:
                 return None
     
     def write(self, message):
         try:
             with self.lock:
+                message.receipt_handle = uuid.uuid4()
                 self.message_queue.append(message)
         except IndexError:
             raise Exception()
@@ -100,44 +105,46 @@ class SQSQueueMock(object):
 class SQSConnectionMock(object):
     def __init__(self):
         self.queue_dict = {}
-        self.queue_list = []
         self.regions = ['us-east-1', 'us-west-2', 'us-west-1',
                         'eu-west-1', 'eu-central-1', 'ap-southeast-1',
                         'ap-southeast-2', 'ap-northeast-1', 'sa-east-1']
-
-    def connect_to_region(self, region):
-        _log.info("Yes")
-        if region not in self.regions:
-            raise AttributeError
 
     def get_queue(self, queue_name):
         try:
             return self.queue_dict[queue_name]
         except SyntaxError:
             return None
+        except KeyError:
+            return None
              
     def get_all_queues(self, prefix=""):
-        return self.queue_list
+        return self.queue_dict.values()
         
     def delete_queue(self, queue, force_deletion=False):
-        q = self.get_queue(queue)
-        if q.count() != 0:
-            # Can only delete empty queues
-            return False
-        return q.close()
+        try:
+            del self.queue_dict[queue.name]
+        except KeyError:
+            pass
                 
     def delete_message(self, queue, message):
         return queue.delete_message(message)
                
     def create_queue(self, name, visibility_timeout=None):
-        q = SQSQueueMock()
+        try:
+            q = self.queue_dict[name]
+        except KeyError as e:
+            q = SQSQueueMock(name)
         self.queue_dict[name] = q
-        self.queue_list.append(q)
         return q
 
     def lookup(self, name):
-        return self.queue_dict.get(name)
+        return self.queue_dict.get(name, None)
 
     #TODO: change this so it can actually approximate the functionality        
     def change_message_visibility(self, queue, receipt_handle, timeout):
+        if queue not in self.queue_dict.values():
+            raise ValueError('Must be a known queue')
+        elif not isinstance(receipt_handle, basestring):
+            raise ValueError('Must be a valid receipt handle')
+        float(timeout)
         return True

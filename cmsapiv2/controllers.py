@@ -788,8 +788,6 @@ class VideoHandler(APIV2Handler):
         # add the job
         sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        yield sqs_queue.connect_to_server(options.video_queue_region)
-
         account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                          account_id)
         duration = new_video.duration
