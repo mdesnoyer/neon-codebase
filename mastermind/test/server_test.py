@@ -2012,6 +2012,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.assertEquals(neondata.VideoMetadata.get('acct1_vid1').serving_url,
                           None)
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # Make sure that vid1 was changed in the database to serving
@@ -2047,6 +2048,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         # Now remove the video and make sure it goes back to state finished
         self.mastermind.remove_video_info('acct1_vid1')
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
         self.assertEquals(neondata.NeonApiRequest.get('job1', 'acct1').state,
                           neondata.RequestState.FINISHED)
@@ -2061,6 +2063,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.publisher.serving_urls = {}
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # The video shouldn't serve because there are not valid serving urls
@@ -2090,6 +2093,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.mastermind.video_info = self.mastermind.serving_directive
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # The video shouldn't be in a serving state because there is only
@@ -2114,6 +2118,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         neondata.NeonApiRequest.modify('job1', 'acct1', _mod_request)
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # Make sure that vid1 was changed in the database to serving
@@ -2135,17 +2140,21 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.WARNING,
                                   'Error when sending callback'):
             yield self.publisher._publish_directives()
+            yield tornado.gen.sleep(0.1)
             self._wait_for_db_updates()
 
         # Make sure that vid1 was changed in the database to serving
         # because it was just added.
-        request = neondata.NeonApiRequest.get('job1', 'acct1')
-        self.assertEquals(request.state,
-                          neondata.RequestState.SERVING)
+        request = yield neondata.NeonApiRequest.get('job1', 'acct1', async=True)
+        yield self.assertWaitForEquals(
+            lambda: request.state == \
+            neondata.RequestState.SERVING,
+            True, async=True)
 
-        # Make sure the callback was flagged as error
-        self.assertEquals(request.callback_state,
-                          neondata.CallbackState.ERROR)
+        yield self.assertWaitForEquals(
+            lambda: request.callback_state == \
+            neondata.CallbackState.ERROR,
+            True, async=True)
 
         self.assertIn('acct1_vid1', self.publisher.last_published_videos)
 
@@ -2157,6 +2166,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.WARNING,
                                   'Unexpected error when sending'):
             yield self.publisher._publish_directives()
+            yield tornado.gen.sleep(0.1)
             self._wait_for_db_updates()
 
         # Make sure that vid1 was changed in the database to serving
@@ -2179,6 +2189,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         with options._set_bounded('mastermind.server.isp_wait_timeout', -1.0):
             with self.assertLogExists(logging.ERROR, 'Timed out waiting for'):
                 yield self.publisher._publish_directives()
+                yield tornado.gen.sleep(0.1)
                 self._wait_for_db_updates()
 
         self.assertEquals(statemon.state.get(
@@ -2202,6 +2213,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         request.save()
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # Don't need to send callback
@@ -2211,12 +2223,13 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.assertIn('acct1_vid1', self.publisher.last_published_videos)
 
     @tornado.testing.gen_test
-    def test_error_then_sucess(self):
+    def test_error_then_success(self):
         request = neondata.NeonApiRequest.get('job1', 'acct1')
         request.state = neondata.RequestState.INT_ERROR
         request.save()
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # Don't need to send callback
@@ -2231,6 +2244,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.publisher.set_video_updated('acct1_vid1')
 
         yield self.publisher._publish_directives()
+        yield tornado.gen.sleep(0.1)
         self._wait_for_db_updates()
 
         # Check the state and callback
