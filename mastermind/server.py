@@ -21,6 +21,7 @@ from cmsdb import neondata
 import cPickle as pickle
 import datetime
 import dateutil.parser
+import functools
 import gzip
 import happybase
 import impala.dbapi
@@ -1346,18 +1347,16 @@ class DirectivePublisher(threading.Thread):
                     _log.info('Enabling %d new videos' % 
                         len(new_serving_videos))
                     tornado.ioloop.IOLoop.current().spawn_callback( 
-                        lambda: self._enable_videos_in_database(
-                            list(new_serving_videos)))
+                        functools.partial(self._enable_videos_in_database, 
+                            new_serving_videos))
                 if len(just_stopped_videos) > 0:
                     self._incr_pending_modify(len(just_stopped_videos))
                     _log.info('Processing %d stopped videos - by disabling' % 
                         len(just_stopped_videos))
-                    t = threading.Thread(
-                        target=self._disable_videos_in_database,
-                        args=(just_stopped_videos,))
-                    t.daemon = True
-                    t.start()
-
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._disable_videos_in_database, 
+                            just_stopped_videos))
+                    
                 self.last_publish_time = curtime
 
     def _write_directives(self, stream):
@@ -1516,7 +1515,8 @@ class DirectivePublisher(threading.Thread):
                                                                   urls)])),
                 'img_sizes' : [ { 'h': h, 'w': w} for w, h in urls.sizes]
                 }
-
+    
+    @tornado.gen.coroutine
     def _disable_videos_in_database(self, video_ids):
         '''Disables a number of videos in the database to say that
         they are not serving anymore.
@@ -1530,8 +1530,8 @@ class DirectivePublisher(threading.Thread):
                     for vidobj in videos_dict.itervalues():
                         if vidobj is not None:
                             vidobj.serving_url = None
-                videos = neondata.VideoMetadata.modify_many(
-                    cur_vid_ids, _remove_serving_url)
+                videos = yield neondata.VideoMetadata.modify_many(
+                    cur_vid_ids, _remove_serving_url, async=True)
 
                 request_keys = [(video.job_id, video.get_account_id()) for
                                 video in videos.itervalues()
@@ -1540,8 +1540,10 @@ class DirectivePublisher(threading.Thread):
                     for obj in request_dict.itervalues():
                         if obj is not None:
                             obj.state = neondata.RequestState.FINISHED
-                requests = neondata.NeonApiRequest.modify_many(request_keys,
-                                                               _set_state)
+                requests = yield neondata.NeonApiRequest.modify_many(
+                               request_keys,
+                               _set_state, 
+                               async=True)
 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
@@ -1557,25 +1559,17 @@ class DirectivePublisher(threading.Thread):
                 self._incr_pending_modify(-len(cur_vid_ids))
     
     @tornado.gen.coroutine
-    def _enable_videos_in_database(self, video_list):
+    def _enable_videos_in_database(self, video_ids):
         '''Flags a video as being updated in the database and sends a
         callback if necessary.
         '''
+        video_list = list(video_ids)
         list_chunks = [video_list[i:i+1000] for i in
                        xrange(0, len(video_list), 1000)]
 
-        for video_ids in list_chunks:
-            with self._enable_video_lock:
-                videos = yield neondata.VideoMetadata.get_many(
-                             video_ids, 
-                             async=True) 
-                job_ids = [(v.job_id, v.get_account_id()) 
-                              if v is not None else (None, None) 
-                              for v in videos]
-                requests = yield neondata.NeonApiRequest.get_many(
-                               job_ids, 
-                               async=True) 
-            for video, request in zip(videos, requests): 
+        @tornado.gen.coroutine
+        def _handle_videos_and_requests(videos, requests): 
+            for video, request in zip(videos, requests):
                 try:
                     if video is None: 
                         continue 
@@ -1597,10 +1591,13 @@ class DirectivePublisher(threading.Thread):
                                 self.waiting_on_isp_videos)  
                         found = True 
                         while not video.image_available_in_isp():
-                            if (time.time() - start_time) > options.isp_wait_timeout:
-                                statemon.state.increment('timeout_waiting_for_isp')
-                                _log.error('Timed out waiting for ISP for video %s' %
-                                           video.key)
+                            if (time.time() - start_time) > \
+                              options.isp_wait_timeout:
+                                statemon.state.increment(
+                                    'timeout_waiting_for_isp')
+                                _log.error(
+                                    'Timed out waiting for ISP for video %s' %
+                                     video.key)
                                 with self.lock:
                                     self.last_published_videos.discard(video_id)
                                     self.waiting_on_isp_videos.discard(video_id) 
@@ -1653,9 +1650,24 @@ class DirectivePublisher(threading.Thread):
                         self.last_published_videos.discard(video_id)
     
                     continue 
-                      
-                finally:
-                    self._incr_pending_modify(-1)
+
+        for video_ids in list_chunks:
+            try: 
+                with self._enable_video_lock:
+                    videos = yield neondata.VideoMetadata.get_many(
+                                 video_ids, 
+                                 async=True) 
+                    job_ids = [(v.job_id, v.get_account_id()) 
+                                  if v is not None else (None, None) 
+                                  for v in videos]
+                    requests = yield neondata.NeonApiRequest.get_many(
+                                   job_ids, 
+                                   async=True) 
+
+                yield _handle_videos_and_requests(videos, requests)
+  
+            finally:
+                self._incr_pending_modify(-len(video_ids))
 
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
