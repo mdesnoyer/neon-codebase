@@ -309,11 +309,9 @@ class PostgresDB(tornado.web.RequestHandler):
                                dict_item)
                 except Exception as e: 
                     pool.close() 
-                    dict_item['pool'] = None  
-                    statemon.state.increment('postgres_connection_failed')
-                    _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
-                               % (self.db_info['host'], e))  
-                    raise 
+                    dict_item['pool'] = None 
+                    raise
+ 
             raise tornado.gen.Return(conn)
 
         def return_connection(self, conn): 
