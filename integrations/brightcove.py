@@ -319,7 +319,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return publish_date
  
     def get_video_last_modified_date(self, video):
-        return int(video['lastModifiedDate']) / 1000.0 
+        try: 
+            return int(video['lastModifiedDate']) / 1000.0 
+        except TypeError:
+            return None  
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp''' 

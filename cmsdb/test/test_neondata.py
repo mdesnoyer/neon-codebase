@@ -2906,7 +2906,7 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
         pg1 = neondata.PostgresDB()
-        with self.assertRaises(psycopg2.OperationalError):
+        with self.assertRaises(Exception):
             yield pg1.get_connection()
         exception_mocker.stop()
 
@@ -2917,10 +2917,9 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         exception_mock.side_effect = psycopg2.OperationalError('blah blah')
 
         pg1 = neondata.PostgresDB()
-        with self.assertRaises(psycopg2.OperationalError):
+        with self.assertRaises(Exception):
             yield pg1.get_connection()
         exception_mocker.stop()
-
         conn = yield pg1.get_connection() 
         self.assertTrue("dbname=test" in conn.dsn)
 

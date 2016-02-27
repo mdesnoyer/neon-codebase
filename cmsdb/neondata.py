@@ -237,14 +237,12 @@ class PostgresDB(tornado.web.RequestHandler):
                         self.db_info['port'], 
                         self.db_info['password'])
 
-        @tornado.gen.coroutine
         def _clean_up_io_dict(self):
             '''since we allow optional_sync on many of these calls 
                   and it creates a ton of io_loops, walk through this 
                   dict and cleanup any io_loops that have been killed 
                   recently 
             '''  
-            #with (yield self.clean_up_lock.acquire()): 
             if len(self.io_loop_dict) > options.max_io_loop_dict_size:
                 for key in self.io_loop_dict.keys():
                     if key._running is False:
@@ -258,9 +256,14 @@ class PostgresDB(tornado.web.RequestHandler):
                             del self.io_loop_dict[key]
                         except Exception as e: 
                             pass 
-                            #_log.error('Unknown Error : '\
-                            #    'cleaning up the io loop dict %s' % e)
             statemon.state.postgres_pools = len(self.io_loop_dict)
+
+        def _get_momoko_db(self): 
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            conn = momoko.Connection(dsn=self._build_dsn(),
+                                     ioloop=current_io_loop,
+                                     cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn
                         
         @tornado.gen.coroutine
         def get_connection(self): 
@@ -274,16 +277,6 @@ class PostgresDB(tornado.web.RequestHandler):
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
-            def _get_momoko_pool(size=1,
-                                 auto_shrink=True):
-                current_io_loop = tornado.ioloop.IOLoop.current()
-                pool = momoko.Pool(dsn=self._build_dsn(),  
-                                   ioloop=current_io_loop, 
-                                   size=size, 
-                                   max_size=options.pool_size,
-                                   auto_shrink=auto_shrink,  
-                                   cursor_factory=psycopg2.extras.RealDictCursor)
-                return pool
 
             def _get_momoko_db(): 
                 current_io_loop = tornado.ioloop.IOLoop.current()
@@ -304,55 +297,19 @@ class PostgresDB(tornado.web.RequestHandler):
                 item['pool'] = None 
                 self.io_loop_dict[io_loop_id] = item 
                 db = _get_momoko_db()
-                try:  
-                    conn = yield self._get_momoko_connection(db) 
-                except psycopg2.OperationalError as e:
-                    if current_db_info != self.db_info:
-                        self.db_info = current_db_info  
-                        db = _get_momoko_db()
-                        conn = yield self._get_momoko_connection(db) 
-                    else: 
-                        statemon.state.increment('postgres_connection_failed')
-                        _log.error('Unable to get a postgres connection for host %s : %s' 
-                                   % (self.db_info['host'], e))  
-                        raise
-                except Exception as e: 
-                    statemon.state.increment('postgres_connection_failed')
-                    _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
-                               % (self.db_info['host'], e))  
-                    raise 
-                 
+                conn = yield self._get_momoko_connection(db) 
             else:
                 # we have seen this ioloop before, it has a pool use it
                 if dict_item['pool'] is None:
-                    pool = _get_momoko_pool() 
-                    try:  
-                        dict_item['pool'] = yield pool.connect()
-                    except momoko.PartiallyConnectedError as e: 
-                        if current_db_info != self.db_info: 
-                            self.db_info = current_db_info  
-                            dict_item['pool'] = yield _get_momoko_pool().connect()
-                        else: 
-                            statemon.state.increment('postgres_connection_failed')
-                            _log.error('Unable to get a postgres pool for host %s : %s' 
-                                        % (self.db_info['host'], e))  
-                            raise 
+                    dict_item['pool'] = yield self._connect_a_pool()
                 pool = dict_item['pool']
                 try: 
-                    conn = yield self._get_momoko_connection(pool, True)
-                except psycopg2.OperationalError as e: 
-                    if current_db_info != self.db_info: 
-                        self.db_info = current_db_info  
-                        pool.close() 
-                        pool = _get_momoko_pool()  
-                        dict_item['pool'] = yield pool.connect()
-                        conn = yield self._get_momoko_connection(pool, True)
-                    else: 
-                        statemon.state.increment('postgres_connection_failed')
-                        _log.error('Unable to get a postgres connection for host %s : %s' 
-                                    % (self.db_info['host'], e))  
-                        raise 
+                    conn = yield self._get_momoko_connection(pool, 
+                               True, 
+                               dict_item)
                 except Exception as e: 
+                    pool.close() 
+                    dict_item['pool'] = None  
                     statemon.state.increment('postgres_connection_failed')
                     _log.error('Unknown Error : unable to get a postgres connection for host %s : %s' 
                                % (self.db_info['host'], e))  
@@ -383,9 +340,45 @@ class PostgresDB(tornado.web.RequestHandler):
                         pass 
             except Exception as e: 
                 _log.exception('Unknown Error : on close connection %s' % e) 
-                
+      
         @tornado.gen.coroutine 
-        def _get_momoko_connection(self, db, is_pool=False):
+        def _connect_a_pool(self): 
+            def _get_momoko_pool(size=1,
+                                 auto_shrink=True):
+                current_io_loop = tornado.ioloop.IOLoop.current()
+                pool = momoko.Pool(dsn=self._build_dsn(),  
+                                   ioloop=current_io_loop, 
+                                   size=size, 
+                                   max_size=options.pool_size,
+                                   auto_shrink=auto_shrink,  
+                                   cursor_factory=psycopg2.extras.RealDictCursor)
+                return pool
+
+            pool = _get_momoko_pool() 
+            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            for i in range(int(num_of_tries)):
+                try: 
+                    pool_connection = yield pool.connect()
+                    break 
+                except Exception as e: 
+                    current_db_info = _get_db_information() 
+                    if current_db_info != self.db_info: 
+                        self.db_info = current_db_info 
+                        pool = _get_momoko_pool() 
+                    _log.error('Retrying PG Pool connection : attempt=%d : %s' % 
+                               (int(i+1), e))
+                    sleepy_time = (1 << (i+1)) * 0.1 
+                    yield tornado.gen.sleep(sleepy_time)
+
+            if pool_connection: 
+                raise tornado.gen.Return(pool_connection)
+            else: 
+                _log.error('Unable to create a pool for Postgres Database')
+                statemon.state.increment('postgres_connection_failed')
+                raise Exception('Unable to get a pool of connections')
+ 
+        @tornado.gen.coroutine 
+        def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
             conn = None 
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
             for i in range(int(num_of_tries)):
@@ -396,6 +389,15 @@ class PostgresDB(tornado.web.RequestHandler):
                         conn = yield db.connect()
                     break
                 except Exception as e: 
+                    current_db_info = _get_db_information()  
+                    if current_db_info != self.db_info: 
+                        self.db_info = current_db_info
+                        if is_pool:
+                            db = yield self._connect_a_pool()
+                            dict_item['pool'] = db  
+                        else: 
+                            db = self._get_momoko_db()
+ 
                     _log.error('Retrying PG connection : attempt=%d : %s' % 
                                (int(i+1), e))
                     sleepy_time = (1 << (i+1)) * 0.1 
@@ -405,7 +407,8 @@ class PostgresDB(tornado.web.RequestHandler):
                 raise tornado.gen.Return(conn)
             else: 
                 _log.error('Unable to get a connection to Postgres Database')
-                raise psycopg2.OperationalError('Unable to get a connection')
+                statemon.state.increment('postgres_connection_failed')
+                raise Exception('Unable to get a connection')
 
         def get_insert_json_query_tuple(self, obj):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
