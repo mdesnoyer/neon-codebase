@@ -2998,7 +2998,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         refresh_token = rjson['refresh_token']
         url = '/api/v2/refresh_token' 
         params = json.dumps({'token': refresh_token }) 
- 
+        time.sleep(1.0) 
         self.http_client.fetch(self.get_url(url), 
                                body=params, 
                                method='POST', 
