@@ -1343,7 +1343,6 @@ class DirectivePublisher(threading.Thread):
                                        written_video_ids)
                 self.last_published_videos = written_video_ids
                 if len(new_serving_videos) > 0:
-                    self._incr_pending_modify(len(new_serving_videos))
                     _log.info('Enabling %d new videos' % 
                         len(new_serving_videos))
                     tornado.ioloop.IOLoop.current().spawn_callback( 
@@ -1653,6 +1652,7 @@ class DirectivePublisher(threading.Thread):
 
         for video_ids in list_chunks:
             try: 
+                self._incr_pending_modify(len(video_ids))
                 with self._enable_video_lock:
                     videos = yield neondata.VideoMetadata.get_many(
                                  video_ids, 
