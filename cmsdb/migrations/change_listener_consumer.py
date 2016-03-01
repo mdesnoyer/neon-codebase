@@ -115,8 +115,11 @@ def consumer(queue):
     # loop on our queue 
     while True:
         # this runs infinitely with no timeout, and pulls items 
-        # from the producers queue  
-        item = yield queue.get()
+        # from the producers queue 
+        try:  
+            item = yield queue.get()
+        except Exception: 
+            pass 
         try: 
             if item['type'] is 'normal':
                 with (yield lock_normal.acquire()):  
@@ -128,8 +131,10 @@ def consumer(queue):
                 with (yield lock_platform.acquire()):  
                     yield modify_platform(item['key'], item['obj'], item['op']) 
             yield tornado.gen.sleep(0.01) 
+        except Exception: 
+            pass 
         finally:
             try:  
                 queue.task_done() 
-            except ValueError: 
+            except Exception: 
                 pass 
