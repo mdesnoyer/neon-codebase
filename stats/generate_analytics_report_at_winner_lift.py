@@ -145,7 +145,7 @@ def get_video_objects(impression_metric):
         cursor = conn.cursor()
         cursor.execute(
         """select distinct regexp_extract(thumbnail_id, 
-        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_', 1) from eventsequences where 
+        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_', 1) from eventsequences where 
         thumbnail_id is not NULL and
         %s is not null and
         tai='%s' %s""" % (impala_col_map[impression_metric],
