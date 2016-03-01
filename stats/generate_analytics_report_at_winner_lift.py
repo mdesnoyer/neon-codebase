@@ -153,7 +153,7 @@ def get_video_objects(impression_metric):
                           statutils.get_time_clause(options.start_time,
                                                     options.end_time)))
 
-        vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-]+)')
+        vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-\~]+)')
         video_ids = [vidRe.match(x[0]).group(2) for 
                      x in cursor if vidRe.match(x[0])]
 
@@ -170,7 +170,7 @@ def get_time_range(video_ids):
         """select min(servertime), max(servertime) 
            from eventsequences where
            tai='%s' and 
-           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
            1) in (%s)
         """ % (options.pub_id,
                ','.join(["'%s'" % x for x in video_ids])))
@@ -202,7 +202,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             from EventSequences where tai='%s' and 
             hr is not null and
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
             1) in (%s)
             %s
             %s
@@ -224,7 +224,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             EventSequences
             where tai='%s' and 
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
             1) in (%s) 
             %s
             %s
