@@ -2623,14 +2623,17 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # Start all the threads
+        #import pdb; pdb.set_trace()
         self.video_watcher.start()
+        #import pdb; pdb.set_trace()
         self.video_watcher.wait_until_loaded(10.0)
-        tornado.ioloop.IOLoop.current().add_callback(lambda: 
-            self.video_watcher._change_subscriber.subscribe_to_db_changes())
+        #tornado.ioloop.IOLoop.current().add_callback(lambda: 
+        #    self.video_watcher._change_subscriber.subscribe_to_db_changes())
         while not self.video_watcher._change_subscriber._is_subscribed: 
             yield tornado.gen.sleep(0.1)
         self.stats_watcher.start()
         self.stats_watcher.wait_until_loaded(5.0)
+        #import pdb; pdb.set_trace()
         self.directive_publisher.start()
         time.sleep(1) # Make sure that the directive publisher gets busy
         self.activity_watcher.wait_for_idle()

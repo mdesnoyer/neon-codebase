@@ -439,7 +439,10 @@ class VideoDBWatcher(threading.Thread):
         self._change_subscriber = ChangeSubscriber(self)
         self._accounts_options_lock = threading.RLock()
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
-        self._accounts_options = {} 
+        self._accounts_options = {}
+
+        # videodbwatchers ioloop 
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
     def __del__(self):
         self.stop()
@@ -457,8 +460,6 @@ class VideoDBWatcher(threading.Thread):
 
     def run(self):
         is_initialized = False
-        if not self._change_subscriber.is_alive(): 
-            self._change_subscriber.start()
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
@@ -475,6 +476,14 @@ class VideoDBWatcher(threading.Thread):
             except Exception as e:
                 _log.exception('Uncaught video DB Error: %s' % e)
                 statemon.state.increment('videodb_error')
+
+            finally: 
+                if not self._change_subscriber.is_alive(): 
+                    self._change_subscriber.start()
+                    self.io_loop.make_current()
+                    tornado.ioloop.IOLoop.current().add_callback(lambda:
+                        self._change_subscriber.subscribe_to_db_changes())
+                    self.io_loop.start()  
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
@@ -1349,7 +1358,6 @@ class DirectivePublisher(threading.Thread):
                         functools.partial(self._enable_videos_in_database, 
                             new_serving_videos))
                 if len(just_stopped_videos) > 0:
-                    self._incr_pending_modify(len(just_stopped_videos))
                     _log.info('Processing %d stopped videos - by disabling' % 
                         len(just_stopped_videos))
                     tornado.ioloop.IOLoop.current().spawn_callback( 
@@ -1522,6 +1530,7 @@ class DirectivePublisher(threading.Thread):
         '''
         MAX_VIDS_PER_CALL = 100
         video_ids = list(video_ids)
+        self.pending_modifies.value += len(video_ids)
         for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
             cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
             try:
@@ -1555,7 +1564,7 @@ class DirectivePublisher(threading.Thread):
                     self.last_published_videos = \
                       self.last_published_videos + set(cur_vid_ids)
             finally:
-                self._incr_pending_modify(-len(cur_vid_ids))
+                self.pending_modifies.value -= len(video_ids)
     
     @tornado.gen.coroutine
     def _enable_videos_in_database(self, video_ids):
@@ -1652,7 +1661,7 @@ class DirectivePublisher(threading.Thread):
 
         for video_ids in list_chunks:
             try: 
-                self._incr_pending_modify(len(video_ids))
+                self.pending_modifies.value += len(video_ids) 
                 with self._enable_video_lock:
                     videos = yield neondata.VideoMetadata.get_many(
                                  video_ids, 
@@ -1667,7 +1676,7 @@ class DirectivePublisher(threading.Thread):
                 yield _handle_videos_and_requests(videos, requests)
   
             finally:
-                self._incr_pending_modify(-len(video_ids))
+                self.pending_modifies.value -= len(video_ids) 
 
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
@@ -1702,8 +1711,6 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
     ioloop = tornado.ioloop.IOLoop()
     ioloop.make_current()
-    ioloop.add_callback(lambda:
-        videoDbThread._change_subscriber.subscribe_to_db_changes())
     
     atexit.register(ioloop.stop)
     atexit.register(publisher.stop)
