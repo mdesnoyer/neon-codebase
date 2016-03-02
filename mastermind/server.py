@@ -225,6 +225,8 @@ class ChangeSubscriber(threading.Thread):
     def run(self):
         try:
             self.io_loop.make_current()
+            tornado.ioloop.IOLoop.current().add_callback(lambda:
+                self.subscribe_to_db_changes())
             self.io_loop.start()  
         except Exception as e: 
             _log.error('Unexpected error starting ioloop for database changes %s' % e) 
@@ -442,7 +444,7 @@ class VideoDBWatcher(threading.Thread):
         self._accounts_options = {}
 
         # videodbwatchers ioloop 
-        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+        #self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
     def __del__(self):
         self.stop()
@@ -480,10 +482,10 @@ class VideoDBWatcher(threading.Thread):
             finally: 
                 if not self._change_subscriber.is_alive(): 
                     self._change_subscriber.start()
-                    self.io_loop.make_current()
-                    tornado.ioloop.IOLoop.current().add_callback(lambda:
-                        self._change_subscriber.subscribe_to_db_changes())
-                    self.io_loop.start()  
+                    #self.io_loop.make_current()
+                    #tornado.ioloop.IOLoop.current().add_callback(lambda:
+                    #    self._change_subscriber.subscribe_to_db_changes())
+                    #self.io_loop.start()  
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
@@ -1560,9 +1562,8 @@ class DirectivePublisher(threading.Thread):
                 # We didn't update the database so don't say that the
                 # videos were published. This will trigger a retry next
                 # time the directives are pushed.
-                with self.lock:
-                    self.last_published_videos = \
-                      self.last_published_videos + set(cur_vid_ids)
+                self.last_published_videos = \
+                  self.last_published_videos + set(cur_vid_ids)
             finally:
                 self.pending_modifies.value -= len(video_ids)
     
@@ -1593,10 +1594,9 @@ class DirectivePublisher(threading.Thread):
                         continue 
                     else: 
                         # Now we wait until the video is serving on the isp
-                        with self.lock: 
-                            self.waiting_on_isp_videos.add(video_id) 
-                            statemon.state.videos_waiting_on_isp = len(
-                                self.waiting_on_isp_videos)  
+                        self.waiting_on_isp_videos.add(video_id) 
+                        statemon.state.videos_waiting_on_isp = len(
+                            self.waiting_on_isp_videos)  
                         found = True 
                         while not video.image_available_in_isp():
                             if (time.time() - start_time) > \
@@ -1606,9 +1606,8 @@ class DirectivePublisher(threading.Thread):
                                 _log.error(
                                     'Timed out waiting for ISP for video %s' %
                                      video.key)
-                                with self.lock:
-                                    self.last_published_videos.discard(video_id)
-                                    self.waiting_on_isp_videos.discard(video_id) 
+                                self.last_published_videos.discard(video_id)
+                                self.waiting_on_isp_videos.discard(video_id) 
                                 found = False 
                                 break
                             time.sleep(5.0 * random.random())
@@ -1616,30 +1615,28 @@ class DirectivePublisher(threading.Thread):
                         if not found: 
                             continue 
     
-                    with self.lock: 
-                        self.waiting_on_isp_videos.discard(video_id) 
-                        statemon.state.videos_waiting_on_isp = len(
-                            self.waiting_on_isp_videos)  
+                    self.waiting_on_isp_videos.discard(video_id) 
+                    statemon.state.videos_waiting_on_isp = len(
+                        self.waiting_on_isp_videos)  
                   
                     statemon.state.isp_ready_delay = time.time() - start_time
                     # Wait a bit so that it gets to all the ISPs
                     time.sleep(options.serving_update_delay)
     
                     # Now do the database updates
-                    with self._enable_video_lock:
-                        def _set_serving_url(x):
-                            x.serving_url = x.get_serving_url(save=False)
-                        yield neondata.VideoMetadata.modify(
-                            video_id, 
-                            _set_serving_url, 
-                            async=True)
-                        def _set_serving(x):
-                            x.state = neondata.RequestState.SERVING
-                        request = yield neondata.NeonApiRequest.modify(
-                            video.job_id,
-                            video.get_account_id(),
-                            _set_serving, 
-                            async=True)
+                    def _set_serving_url(x):
+                        x.serving_url = x.get_serving_url(save=False)
+                    yield neondata.VideoMetadata.modify(
+                        video_id, 
+                        _set_serving_url, 
+                        async=True)
+                    def _set_serving(x):
+                        x.state = neondata.RequestState.SERVING
+                    request = yield neondata.NeonApiRequest.modify(
+                        video.job_id,
+                        video.get_account_id(),
+                        _set_serving, 
+                        async=True)
     
                     # And send the callback
                     if (request is not None and 
@@ -1654,24 +1651,23 @@ class DirectivePublisher(threading.Thread):
                     statemon.state.increment('unexpected_db_update_error')
                     _log.exception('Unexpected error when enabling video '
                                    'in database %s' % e)
-                    with self.lock:
-                        self.last_published_videos.discard(video_id)
+
+                    self.last_published_videos.discard(video_id)
     
                     continue 
 
         for video_ids in list_chunks:
             try: 
                 self.pending_modifies.value += len(video_ids) 
-                with self._enable_video_lock:
-                    videos = yield neondata.VideoMetadata.get_many(
-                                 video_ids, 
-                                 async=True) 
-                    job_ids = [(v.job_id, v.get_account_id()) 
-                                  if v is not None else (None, None) 
-                                  for v in videos]
-                    requests = yield neondata.NeonApiRequest.get_many(
-                                   job_ids, 
-                                   async=True) 
+                videos = yield neondata.VideoMetadata.get_many(
+                             video_ids, 
+                             async=True) 
+                job_ids = [(v.job_id, v.get_account_id()) 
+                              if v is not None else (None, None) 
+                              for v in videos]
+                requests = yield neondata.NeonApiRequest.get_many(
+                               job_ids, 
+                               async=True) 
 
                 yield _handle_videos_and_requests(videos, requests)
   
