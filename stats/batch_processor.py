@@ -125,6 +125,8 @@ class ImpalaTableBuilder(threading.Thread):
             hive.execute('SET parquet.compression=SNAPPY')
             hive.execute(
                 'SET hive.exec.dynamic.partition.mode=nonstrict')
+            hive.execute(
+                'SET hive.exec.max.created.files=500000')
 
 
             self.status = 'RUNNING'
