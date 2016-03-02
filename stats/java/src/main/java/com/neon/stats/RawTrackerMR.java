@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.regex.Pattern;
 
 import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.BinaryEncoder;
@@ -1163,7 +1164,12 @@ public class RawTrackerMR extends Configured implements Tool {
     if (thumbnailId == null) {
       return null;
     }
-    return thumbnailId.toString().replaceAll("\\-", "_");
+    Pattern dashRe = Pattern.compile("^[0-9a-zA-Z]+\\-[0-9a-zA-Z~\\.]+\\-[0-9a-zA-Z]+$");
+    if (dashRe.matcher(thumbnailId.toString()).matches()) {
+      return thumbnailId.toString().replaceAll("\\-", "_");
+    } else {
+      return thumbnailId.toString();
+    }
   }
 
   /**
