@@ -44,6 +44,7 @@ import test_utils
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
+import test_utils.postgresql
 import test_utils.redis
 from tornado.concurrent import Future
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
@@ -398,6 +399,52 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor._get_random_frame(self.test_video_file)
         meta2, img2 = vprocessor.thumbnails[1]
         self.assertNotEqual(meta2.frameno, meta1.frameno)
+
+# TODO delete/replace other class after postgres hot swap 
+class TestVideoClientPG(TestVideoClient):
+    ''' 
+    Test Video Processing client
+    '''
+    def setUp(self):
+        super(TestVideoClient, self).setUp()
+        
+        #setup properties,model
+        self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
+        self.model_version = "test" 
+        self.model = MagicMock()
+
+        #Mock Model methods, use pkl to load captured outputs
+        ct_output, ft_output = pickle.load(open(self.model_file)) 
+        self.model.choose_thumbnails.return_value = ct_output
+        self.model.score.return_value = 1, 2 
+        self.test_video_file = os.path.join(os.path.dirname(__file__), 
+                                "test.mp4") 
+        self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
+                                "test2.mp4") 
+        #setup process video object
+        self.api_request = None
+        
+        #patch for download_and_add_thumb
+        self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
+        self.uc = self.utils_patch.start()
+
+        random.seed(984695198)
+        
+    def tearDown(self):
+        #self.utils_patch.stop()
+        self.postgresql.clear_all_tables()
+        super(TestVideoClient, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
     ''' 
@@ -980,6 +1027,126 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
 
+# TODO delete/replace other class after postgres hot swap 
+class TestFinalizeResponsePG(TestFinalizeResponse):
+    ''' 
+    Test the cleanup and responding after the video has been processed
+    '''
+    def setUp(self):
+        super(TestFinalizeResponse, self).setUp()
+
+        statemon.state._reset_values()
+
+        random.seed(984695198)
+
+        # populate some data
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.api_request = neondata.BrightcoveApiRequest(
+            'job1', self.api_key,
+            'vid1',
+            'some fun video',
+            'http://video.mp4',
+            None, None, 'pubid',
+            'http://callback.com',
+            '0',
+            'http://default_thumb.jpg')
+        self.api_request.api_param = '1'
+        self.api_request.api_method = 'topn'
+        self.api_request.state = neondata.RequestState.PROCESSING
+        self.api_request.save()
+
+        # Mock out s3
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('host-thumbnails')
+        self.s3conn.create_bucket('n3.neon-images.com')
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(),
+            require_async_kw=True)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock.return_value = self.random_image
+
+        # Mock out http callbacks
+        self.http_mocker = patch('video_processor.client.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
+                                                require_async_kw=True)
+        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
+
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.return_value = future
+
+        # Setup the processor object
+        job = self.api_request.__dict__
+        self.vprocessor = video_processor.client.VideoProcessor(
+            job,
+            MagicMock(),
+            'test_version',
+            multiprocessing.BoundedSemaphore(1))
+        self.vprocessor.video_metadata.duration = 130.0
+        self.vprocessor.video_metadata.frame_size = (640, 480)
+
+        self.vprocessor.thumbnails = [
+            (neondata.ThumbnailMetadata(None,
+                                        ttype=neondata.ThumbnailType.NEON,
+                                        rank=0,
+                                        model_score=2.3,
+                                        model_version='model1',
+                                        frameno=6,
+                                        filtered=''),
+             imageutils.PILImageUtils.create_random_image(480, 640)),
+             (neondata.ThumbnailMetadata(None,
+                                         ttype=neondata.ThumbnailType.NEON,
+                                         rank=1,
+                                         model_score=2.1,
+                                         model_version='model1',
+                                         frameno=69),
+             imageutils.PILImageUtils.create_random_image(480, 640)),
+             (neondata.ThumbnailMetadata(None,
+                                         ttype=neondata.ThumbnailType.RANDOM,
+                                         rank=0,
+                                         frameno=67),
+              imageutils.PILImageUtils.create_random_image(480, 640))]
+
+        
+    def tearDown(self):
+        #self.s3_patcher.stop()
+        #self.http_mocker.stop()
+        #self.im_download_mocker.stop()
+        #self.cloudinary_patcher.stop()
+        self.postgresql.clear_all_tables() 
+        super(TestFinalizeResponse, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
         
 class SmokeTest(test_utils.neontest.TestCase):
     ''' 
@@ -1138,6 +1305,397 @@ class SmokeTest(test_utils.neontest.TestCase):
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://L\xc3\xb6rick_video.mp4'
+            })
+                    
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertEquals(video_meta.model_version, 'my_model')
+
+        # Check the thumbnail data
+        thumbs = neondata.ThumbnailMetadata.get_many(
+            video_meta.thumbnail_ids)
+        self.assertNotIn(None, thumbs)
+        self.assertGreater(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.NEON]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.OOYALA]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.RANDOM]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+    def test_reprocessing_smoke(self):
+        self.api_request.state = neondata.RequestState.REPROCESS
+        self.api_request.save()
+
+        # Add the results from the previous run to the database
+        thumbs = [
+            neondata.ThumbnailMetadata(
+                '%s_thumb1' % self.video_id,
+                self.video_id,
+                model_score=3.0,
+                ttype=neondata.ThumbnailType.NEON,
+                model_version='old_model',
+                frameno=167,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb2' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.RANDOM,
+                rank=0),
+            neondata.ThumbnailMetadata(
+                '%s_thumb3' % self.video_id,
+                self.video_id,
+                ttype=neondata.ThumbnailType.OOYALA,
+                rank=0)]
+        neondata.ThumbnailMetadata.save_all(thumbs)
+        video_meta = neondata.VideoMetadata(
+            self.video_id,
+            tids = [x.key for x in thumbs],
+            duration=97.0,
+            model_version='old_model')
+        video_meta.serving_url = 'my_serving_url.jpg'
+        video_meta.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.FINISHED)
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertNotIn('%s_thumb1' % self.video_id, video_meta.thumbnail_ids)
+        self.assertNotIn('%s_thumb2' % self.video_id, video_meta.thumbnail_ids)
+        self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)
+        
+    def test_video_processing_error(self):
+        self.video_download_mock.side_effect = [
+            urllib2.URLError('Oops')]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.SUCESS)
+
+        # Check the state variables
+        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
+                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.video_download_error'),
+            1)
+
+    @patch('video_processor.client.neondata.VideoMetadata.modify')
+    def test_db_update_error(self, modify_mock):
+        modify_mock.side_effect = [
+            redis.ConnectionError("Connection Error")]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.INT_ERROR)
+
+        # Check the state variables
+        self.assertEquals(statemon.state.get('video_processor.client.processing_error'),
+                          1)
+        self.assertEquals(
+            statemon.state.get('video_processor.client.save_vmdata_error'),
+            1)
+
+    def test_no_need_to_process(self):
+        self.api_request.state = neondata.RequestState.SERVING
+        self.api_request.save()
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+        
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.SERVING)
+
+    def test_download_default_thumb_error(self):
+        # In this case, we should still allow the video serve, but
+        # register it as a customer error in the database.
+        self.im_download_mock.side_effect = [IOError('Cannot download')]
+        
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.CUSTOMER_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.SUCESS)
+        response = api_request.response
+        self.assertEquals(response['video_id'], 'vid1')
+        self.assertEquals(response['job_id'], 'job1')
+        self.assertRegexpMatches(response['error'],
+                                 'Failed to download default')
+
+        # Check the video data
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertGreater(len(video_meta.thumbnail_ids), 0)
+        self.assertTrue(video_meta.serving_enabled)
+
+        
+        # Check the thumbnail data
+        thumbs = neondata.ThumbnailMetadata.get_many(
+            video_meta.thumbnail_ids)
+        self.assertNotIn(None, thumbs)
+        self.assertGreater(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.NEON]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.OOYALA]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.DEFAULT]), 0)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.RANDOM]), 1)
+        self.assertEquals(
+            len([x for x in thumbs if 
+                 x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+    def test_unexpected_error(self):
+        self.video_download_mock.side_effect = [Exception('Some bad error')]
+
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4'
+            })
+
+        # Check the api request in the database
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state,
+                          neondata.RequestState.INT_ERROR)
+        self.assertEquals(api_request.callback_state,
+                          neondata.CallbackState.NOT_SENT)
+
+# TODO delete/replace other class after postgres hot swap 
+class SmokeTestPG(test_utils.neontest.TestCase):
+    ''' 
+    Smoke test for the video processing client
+    '''
+    def setUp(self):
+        super(SmokeTestPG, self).setUp()
+        statemon.state._reset_values()
+
+        random.seed(984695198)
+
+        # Populate some data
+        na = neondata.NeonUserAccount('acct1')
+        self.api_key = na.neon_api_key
+        na.save()
+        neondata.NeonPlatform.modify(self.api_key, '0', 
+                                     lambda x: x, create_missing=True)
+
+        cdn = neondata.CDNHostingMetadataList(
+            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
+            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
+        cdn.save()
+
+        self.video_id = '%s_vid1' % self.api_key
+        self.api_request = neondata.OoyalaApiRequest(
+            'job1', self.api_key,
+            'int1', 'vid1',
+            'some fun video',
+            'http://video.mp4', None, None,
+            'http://callback.com',
+            'http://default_thumb.jpg')
+        self.api_request.save()
+
+        # Mock out the video download
+        self.test_video_file = os.path.join(os.path.dirname(__file__), 
+                                            "test.mp4") 
+        self.video_download_patcher = patch('video_processor.client.urllib2.urlopen')
+        self.video_download_mock = self.video_download_patcher.start()
+        self.video_download_mock.side_effect = [open(self.test_video_file,
+                                                     'rb')]
+
+        # Mock out s3
+        self.s3conn = boto_mock.MockConnection()
+        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
+        self.mock_conn = self.s3_patcher.start()
+        self.mock_conn.return_value = self.s3conn
+        self.s3conn.create_bucket('host-thumbnails')
+        self.s3conn.create_bucket('n3.neon-images.com')
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(),
+            require_async_kw=True)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock.side_effect = [self.random_image]
+
+        # Mock out http requests.
+        self.http_mocker = patch(
+            'video_processor.client.utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
+                                                require_async_kw=True)
+        self.callback_mock = MagicMock()
+        self.callback_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.job_queue = multiprocessing.Queue() # Queue of job param dics
+        def _http_response(request, **kw):
+            if request.url.endswith('dequeue'):
+                if not self.job_queue.empty():
+                    body = json.dumps(self.job_queue.get())
+                else:
+                    body = '{}'
+                return HTTPResponse(request, 200, buffer=StringIO(body))
+            elif request.url == 'http://callback.com':
+                return self.callback_mock(request)
+            else:
+                return HTTPResponse(request, 200)
+                    
+        self.http_mock.side_effect = _http_response
+
+        # Mock out cloudinary
+        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
+        self.cloudinary_mock = self.cloudinary_patcher.start()
+        future = Future()
+        future.set_result(None)
+        self.cloudinary_mock().upload.side_effect = [future]
+
+        # Mock out the model
+        self.model_patcher = patch('video_processor.client.model.load_model')
+        self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
+        self.model_version = "test" 
+        self.model = MagicMock()
+        load_model_mock = self.model_patcher.start()
+        load_model_mock.return_value = self.model
+        ct_output, ft_output = pickle.load(open(self.model_file)) 
+        self.model.choose_thumbnails.return_value = ct_output
+
+        # create the client object
+        self.video_client = video_processor.client.VideoClient(
+            'some/dir/my_model.model',
+            multiprocessing.BoundedSemaphore(1))
+        
+    def tearDown(self):
+        self.video_download_patcher.stop()
+        self.s3_patcher.stop()
+        self.http_mocker.stop()
+        self.im_download_mocker.stop()
+        self.cloudinary_patcher.stop()
+        self.model_patcher.stop()
+        self.postgresql.clear_all_tables() 
+        super(SmokeTestPG, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    def _run_job(self, job):
+        '''Runs the job'''
+        self.job_queue.put(job)
+        
+        with options._set_bounded('video_processor.client.dequeue_period', 0.01):
+            self.video_client.start()
+
+            try:
+                # Wait for the job results to show up in the database. We
+                # can't check the mocks because it is a separate process
+                # and the mocks just get copied. That's why this is a
+                # smoke test.
+                start_time = time.time() 
+                while (neondata.NeonApiRequest.get(job['job_id'],
+                                                   job['api_key']).state in 
+                       [neondata.RequestState.SUBMIT,
+                        neondata.RequestState.PROCESSING,
+                        neondata.RequestState.REPROCESS]):
+                    # See if we timeout
+                    self.assertLess(time.time() - start_time, 10.0,
+                                    'Timed out while running the smoke test')
+
+                    time.sleep(0.1)
+
+            finally:
+                # Clean up the job process
+                self.video_client.stop()
+                self.video_client.join(10.0)
+                if self.video_client.is_alive():
+                    # SIGKILL it
+                    utils.ps.send_signal_and_wait(signal.SIGKILL,
+                                                  [self.video_client.pid])
+                    self.fail('The subprocess did not die cleanly')
+
+    def test_smoke_test(self):
+        self._run_job({
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://Lbrick_video.mp4'
             })
                     
         # Check the api request in the database

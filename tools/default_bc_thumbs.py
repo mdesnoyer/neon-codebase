@@ -38,20 +38,16 @@ def main():
         accts = neondata.NeonUserAccount.get_many([options.api_key])
     for acct in accts:
         _log.info('Processing account %s' % acct.get_id())
-        for plat in acct.get_platforms():
-            if not isinstance(plat, neondata.BrightcovePlatform):
-                continue
-
-            n_processed = 0
-            for video in neondata.VideoMetadata.get_many(
-                    plat.get_internal_video_ids()):
-                if video is not None:
-                    neondata.ThumbnailMetadata.modify_many(video.thumbnail_ids,
-                                                           bc_type_to_default)
-                n_processed += 1
-                if n_processed % 1000 == 0:
-                    _log.info('Processed %i of %i videos for this account' %
-                              (n_processed, len(plat.videos)))
+        n_processed = 0
+        for video in neondata.VideoMetadata.get_many(
+                acct.get_internal_video_ids()):
+            if video is not None:
+                neondata.ThumbnailMetadata.modify_many(video.thumbnail_ids,
+                                                       bc_type_to_default)
+            n_processed += 1
+            if n_processed % 1000 == 0:
+                _log.info('Processed %i of %i videos for this account' %
+                          (n_processed, len(plat.videos)))
             
 
                 

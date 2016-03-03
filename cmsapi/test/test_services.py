@@ -25,6 +25,7 @@ from PIL import Image
 from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
+import test_utils.postgresql
 import test_utils.redis
 import time
 import tornado.gen
@@ -143,10 +144,6 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     ''' Services Test '''
         
-    @classmethod
-    def setUpClass(cls):
-        super(TestServices, cls).setUpClass()
-
     def setUp(self):
         super(TestServices, self).setUp()
         #NOTE: Make sure that you don't repatch objects
@@ -167,16 +164,26 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.job_ids = [] #ordered list
         self.video_ids = []
         self.images = {} 
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
-        self.redis.stop()
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         super(TestServices, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+        super(TestServices, cls).setUpClass()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
+        super(TestServices, cls).tearDownClass()
     
     def get_app(self):
         ''' return services app '''
@@ -735,14 +742,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         ordered_videos = sorted(self._get_videos(), reverse=True)
         test_video_ids = ordered_videos[:2]
         video_ids = ",".join(test_video_ids)
-
         url = self.get_url('/api/v1/accounts/%s/brightcove_integrations/'
                 '%s/videos/?video_ids=15238901589,%s'
                 %(self.a_id, self.b_id, video_ids))
         jresp = self.get_request(url, self.api_key)
         resp = json.loads(jresp.body)
-        self.assertEqual(resp["total_count"], 3)
-        self.assertEqual(len(resp["items"]), 3)
+        self.assertEqual(resp["total_count"], 2)
+        self.assertEqual(len(resp["items"]), 2)
 
         #result_vids = [x['video_id'] for x in items]
         #self.assertItemsEqual(result_vids, test_video_ids)
@@ -1161,9 +1167,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             self.api_key, '0',
             _add_videos)
         random.seed(1123)
-
-        self._process_brightcove_neon_api_requests(api_requests[:-1])
-
+        self._process_brightcove_neon_api_requests(api_requests)
+        
         page_no = 0
         page_size = 2
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1173,7 +1178,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         self.assertEqual(len(items), page_size)
         result_vids = [x['video_id'] for x in items]
-        
+
         # recommended
         page_size = 5
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
@@ -1185,6 +1190,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         result_vids = [ x['video_id'] for x in items]
 
         # processing
+        page_size = 5
+        api_requests[0].state = neondata.RequestState.SUBMIT
+        api_requests[0].save()
         url = self.get_url('/api/v1/accounts/%s/neon_integrations/'
                 '%s/videos/processing?page_no=%s&page_size=%s'
                 %(self.a_id, "0", page_no, page_size))
@@ -1231,8 +1239,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         items = json.loads(resp.body)['items']
         status = [item['status'] for item in items]
         self.assertEqual(status.count("serving"), 1)
-
-        
 
     def _setup_neon_account_and_request_object(self, vid="testvideo1",
                                             job_id = "j1"):
@@ -1554,7 +1560,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             return response
         
         mock_img_download.side_effect = _handle_img_download 
-        
         self._setup_initial_brightcove_state()
         vid = self._get_videos()[0]
         url = self.get_url("/api/v1/accounts/%s/brightcove_integrations"
@@ -1804,6 +1809,52 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         url = self.get_url("/healthcheck/video_server")
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
+
+class TestServicesPG(TestServices):
+        
+    def setUp(self):
+        super(TestServices, self).setUp()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        #Http Connection pool Mock
+        self.cp_async_patcher = \
+          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
+        self.cp_mock_async_client = self._future_wrap_mock(
+            self.cp_async_patcher.start()().fetch)
+
+        self.api_key = "" # filled later
+        self.a_id = "unittester-0"
+        self.rtoken = "rtoken"
+        self.wtoken = "wtoken"
+        self.b_id = "i12345" #i_id bcove
+        self.pub_id = "p124"
+        self.thumbnail_url_to_image = {} # mock url => raw image buffer data
+        self.job_ids = [] #ordered list
+        self.video_ids = []
+        self.images = {} 
+
+        random.seed(19449)
+        
+    def tearDown(self):
+        self.cp_async_patcher.stop()
+        self.postgresql.clear_all_tables() 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        super(TestServices, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        super(TestServices, cls).setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+        super(TestServices, cls).tearDownClass()
+
+    def test_create_video_request_utf8(self):
+        pass 
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

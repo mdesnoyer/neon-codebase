@@ -52,11 +52,12 @@ def resave_namespaced_objects(cls):
 def resave_videos_and_thumbs(save_videos, save_thumbs):
     _log.info('Iterating through accounts to save videos and thumbs')
 
-    for platform in neondata.AbstractPlatform.get_all():
+    #TODO change made, but it's not tested
+    for account in neondata.NeonUserAccount.get_all():
         _log.info('Processing platform %s for account %s' % 
                   (platform.integration_id, platform.neon_api_key))
         
-        video_ids = platform.get_internal_video_ids()  
+        video_ids = account.get_internal_video_ids()  
         for i in range(0, len(video_ids), BATCH_SIZE):
             cur_vids = video_ids[i:(i+BATCH_SIZE)]
             if save_videos:
