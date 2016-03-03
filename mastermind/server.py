@@ -225,8 +225,6 @@ class ChangeSubscriber(threading.Thread):
     def run(self):
         try:
             self.io_loop.make_current()
-            tornado.ioloop.IOLoop.current().add_callback(lambda:
-                self.subscribe_to_db_changes())
             self.io_loop.start()  
         except Exception as e: 
             _log.error('Unexpected error starting ioloop for database changes %s' % e) 
@@ -371,8 +369,10 @@ class ChangeSubscriber(threading.Thread):
                                update_videos=True, 
                                force_subscribe=False):
         '''Handler for when a NeonUserAccount object changes in the database.'''
-        if (operation == 'set' or operation == 'INSERT' or operation == 'UPDATE') and \
-            account is not None:
+        if (operation == 'set' or 
+             operation == 'INSERT' or 
+             operation == 'UPDATE') and \
+             account is not None:
             # Update default size and default thumbs
             self.video_db_watcher.directive_pusher.default_sizes[account_id] = \
               account.default_size
@@ -385,14 +385,13 @@ class ChangeSubscriber(threading.Thread):
                 except KeyError: pass
             
             new_options = (account.abtest, account.serving_enabled)
-            with self._accounts_options_lock:
-                # if the serving_enabled/abtest state has not changed, don't 
-                # do anything 
-                old_options = self.video_db_watcher._accounts_options.get(account_id, None)
-                if new_options != old_options: 
-                    self.video_db_watcher._accounts_options[account_id] = new_options
-                elif not force_subscribe: 
-                    return 
+            # if the serving_enabled/abtest state has not changed, don't 
+            # do anything 
+            old_options = self.video_db_watcher._accounts_options.get(account_id, None)
+            if new_options != old_options: 
+                self.video_db_watcher._accounts_options[account_id] = new_options
+            elif not force_subscribe: 
+                return 
  
             # Subscribe to this account if we aren't subscribed yet
             if account.serving_enabled: 
@@ -444,7 +443,7 @@ class VideoDBWatcher(threading.Thread):
         self._accounts_options = {}
 
         # videodbwatchers ioloop 
-        #self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
     def __del__(self):
         self.stop()
@@ -482,10 +481,10 @@ class VideoDBWatcher(threading.Thread):
             finally: 
                 if not self._change_subscriber.is_alive(): 
                     self._change_subscriber.start()
-                    #self.io_loop.make_current()
-                    #tornado.ioloop.IOLoop.current().add_callback(lambda:
-                    #    self._change_subscriber.subscribe_to_db_changes())
-                    #self.io_loop.start()  
+                    self.io_loop.make_current()
+                    tornado.ioloop.IOLoop.current().add_callback(lambda:
+                        self._change_subscriber.subscribe_to_db_changes())
+                    self.io_loop.start()  
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)

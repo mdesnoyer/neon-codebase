@@ -854,7 +854,7 @@ class PostgresPubSub(object):
                 connection = channel['connection'].connection 
                 connection.poll()
                 _log.info_n('Notifying listeners of db changes - %s' % 
-                    (connection.notifies),5)
+                    (connection.notifies),25)
                 while connection.notifies:
                     notification = connection.notifies.pop() 
                     payload = notification.payload
