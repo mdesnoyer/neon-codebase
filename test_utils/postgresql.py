@@ -35,7 +35,8 @@ from subprocess import call
 __all__ = ['Postgresql', 'skipIfNotFound']
 
 SEARCH_PATHS = (['/usr/local/pgsql', '/usr/local'] +
-                glob('/usr/lib/postgresql/*') +  # for Debian/Ubuntu
+                glob('/usr/lib/postgresql/9.4') +  # for Debian/Ubuntu
+                glob('/usr/lib/postgresql/9.5') +  # for Debian/Ubuntu
                 glob('/opt/local/lib/postgresql*'))  # for MacPorts
 DEFAULT_SETTINGS = dict(auto_start=2,
                         base_dir=None,
