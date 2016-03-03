@@ -19,6 +19,7 @@ from mock import patch, MagicMock
 import multiprocessing
 import test_utils.redis
 import test_utils.neontest
+import test_utils.postgresql
 import tornado.gen
 import tornado.testing
 import unittest
@@ -30,9 +31,6 @@ from utils import statemon
 
 class SmokeTesting(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
         statemon.state._reset_values()
 
         # Mock brightcove integration
@@ -64,9 +62,21 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         options._set('integrations.ingester.poll_period',
                      self.old_poll_cycle)
         self.int_mocker.stop()
-        self.redis.stop()
+        conn = neondata.DBConnection.get(VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(ThumbnailMetadata)
+        conn.clear_db()
 
         super(SmokeTesting, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_correct_platform(self):
@@ -213,7 +223,51 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(self.process_mock.call_count, 2)
 
-        
+class SmokeTestingPG(SmokeTesting):
+    def setUp(self):
+        statemon.state._reset_values()
+
+        # Mock brightcove integration
+        self.int_mocker = patch(
+            'integrations.ingester.integrations.brightcove.'
+            'BrightcoveIntegration')
+        self.int_mock = self.int_mocker.start()
+        self.process_mock = self._future_wrap_mock(
+            self.int_mock().process_publisher_stream)
+
+        # Build a platform
+        def _set_platform(x):
+            x.account_id = 'a1'
+        neondata.BrightcovePlatform.modify('acct1', 'i1', 
+                                           _set_platform,
+                                           create_missing=True)
+
+        self.old_poll_cycle = options.get(
+            'integrations.ingester.poll_period')
+        options._set('integrations.ingester.poll_period', 0.1)
+        options._set('integrations.ingester.service_name', 'brightcove')
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+        self.manager = integrations.ingester.Manager()
+
+    def tearDown(self):
+        self.manager.stop()
+        options._set('integrations.ingester.poll_period',
+                     self.old_poll_cycle)
+        self.int_mocker.stop()
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
             
 if __name__ == '__main__':
     utils.neon.InitNeon()

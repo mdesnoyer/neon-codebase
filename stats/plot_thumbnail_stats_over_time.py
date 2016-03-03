@@ -99,9 +99,9 @@ def get_data():
 
 def main():
     data = get_data()
-    st = stats.metrics.calc_lift_at_first_significant_hour(
-        data['views'], data['clicks'])
-    print('View Lift: %s' % st['lift'])
+    #st = stats.metrics.calc_lift_at_first_significant_hour(
+    #    data['views'], data['clicks'])
+    #print('View Lift: %s' % st['lift'])
     for stat, df in data.iteritems():
         df.plot(title=stat)
 

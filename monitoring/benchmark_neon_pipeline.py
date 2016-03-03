@@ -254,8 +254,8 @@ class JobManager(object):
 
         data =     { 
             "external_video_ref": self.video_id,
-            "video_url": video_url, 
-            "video_title": video_title,
+            "url": video_url, 
+            "title": video_title,
             "callback_url": "http://%s:%s/callback" %(utils.net.get_local_ip(),
                                                       options.callback_port)
         }

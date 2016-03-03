@@ -948,6 +948,8 @@ class HealthCheckHandler(tornado.web.RequestHandler):
             # state
         except redis.ConnectionError, e:
             self.write("Error connecting to the video database")
+        except neondata.psycopg2.OperationalError as e: 
+            self.write("Error connecting to the video database")
         
         self.set_status(503)
         self.finish()

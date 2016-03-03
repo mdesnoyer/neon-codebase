@@ -21,6 +21,7 @@ from cmsdb import neondata
 import cPickle as pickle
 import datetime
 import dateutil.parser
+import functools
 import gzip
 import happybase
 import impala.dbapi
@@ -42,6 +43,8 @@ import thrift
 import thrift.Thrift
 import threading
 import tornado.ioloop
+import tornado.gen
+import tornado.web
 import utils.neon
 from utils.options import define, options
 import utils.http
@@ -206,6 +209,206 @@ class VideoUpdater(threading.Thread):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
 
+class ChangeSubscriber(threading.Thread): 
+    def __init__(self, video_db_watcher):
+        super(ChangeSubscriber, self).__init__(name='ChangeSubscriber')
+        self.video_db_watcher = video_db_watcher
+        self.daemon = True
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+        self._stopped = threading.Event()
+        self._subscribe_lock = threading.RLock()
+        self._accounts_options_lock = threading.RLock()
+        self._videos_subscribed_pg = False 
+        self._thumbnails_subscribed_pg = False
+        self._is_subscribed = False  
+
+    def run(self):
+        try:
+            self.io_loop.make_current()
+            self.io_loop.start()  
+        except Exception as e: 
+            _log.error('Unexpected error starting ioloop for database changes %s' % e) 
+            statemon.state.increment('unexpected_video_handle_error')
+    
+    @tornado.gen.coroutine
+    def subscribe_to_db_changes(self):
+        '''Subscribe to all the changes we care about in the database.'''
+        with self._subscribe_lock:
+            def _update_serving_url(key, obj, op):
+                if op == 'del' or op == 'DELETE':
+                    try:
+                        # we rely on get_id on the object, but on delete 
+                        # the object isn't there, and we have to pass key 
+                        if options.get('cmsdb.neondata.wants_postgres'):
+                            key = key.replace('thumbnailservingurls_', '')  
+                        self.video_db_watcher.directive_pusher.del_serving_urls(key)
+                    except KeyError:
+                        pass
+                elif op == 'set' or op == 'INSERT' or op == 'UPDATE':
+                    if self.video_db_watcher.mastermind.is_serving_video(
+                            self.video_db_watcher.video_id_cache.find_video_id(key)):
+                        self.video_db_watcher.directive_pusher.add_serving_urls(key, obj)
+
+            if options.get('cmsdb.neondata.wants_postgres'):
+                sub = yield neondata.ThumbnailServingURLs.subscribe_to_changes(
+                           _update_serving_url,
+                           async=True) 
+                self.video_db_watcher._table_subscribers.append(sub)
+
+                sub = yield neondata.ExperimentStrategy.subscribe_to_changes(
+                              lambda key, obj, op:
+                              self.video_db_watcher.mastermind.update_experiment_strategy(key, obj),
+                              async=True)
+                self.video_db_watcher._table_subscribers.append(sub) 
+               
+                sub = yield neondata.TrackerAccountIDMapper.subscribe_to_changes(
+                              lambda key, obj, op:
+                              self.video_db_watcher.directive_pusher.add_to_tracker_id_map(
+                                  str(obj.get_tai()), str(obj.value)),
+                              async=True)
+                self.video_db_watcher._table_subscribers.append(sub)
+
+                sub = yield neondata.NeonUserAccount.subscribe_to_changes(
+                          self._handle_account_change, 
+                          async=True)
+                self.video_db_watcher._table_subscribers.append(sub) 
+
+                if self._videos_subscribed_pg is False:
+                    sub = yield neondata.VideoMetadata.subscribe_to_changes(
+                             lambda key, obj, op: 
+                             self.video_db_watcher._schedule_video_update(
+                                 key, is_push_update=True),
+                             async=True) 
+                    self.video_db_watcher._table_subscribers.append(sub) 
+                    self._videos_subscribed_pg = True
+
+                if self._thumbnails_subscribed_pg is False:
+                    sub = yield neondata.ThumbnailMetadata.subscribe_to_changes(
+                            lambda key, obj, op: 
+                            self.video_db_watcher._schedule_video_update(
+                                '_'.join(key.split('_')[0:2]), 
+                                is_push_update=True),
+                            async=True)
+                    self.video_db_watcher._table_subscribers.append(sub) 
+                    self._thumbnails_subscribed_pg = True
+            else: 
+                self.video_db_watcher._table_subscribers.append(
+                    neondata.NeonUserAccount.subscribe_to_changes(
+                        self._handle_account_change))
+
+                self.video_db_watcher._table_subscribers.append(
+                    neondata.ExperimentStrategy.subscribe_to_changes(
+                        lambda key, obj, op: 
+                        self.video_db_watcher.mastermind.update_experiment_strategy(key, obj)))
+
+                self.video_db_watcher._table_subscribers.append(
+                    neondata.TrackerAccountIDMapper.subscribe_to_changes(
+                        lambda key, obj, op: 
+                        self.video_db_watcher.directive_pusher.add_to_tracker_id_map(
+                            str(obj.get_tai()), str(obj.value))))
+
+                self.video_db_watcher._table_subscribers.append(
+                    neondata.ThumbnailServingURLs.subscribe_to_changes(
+                    _update_serving_url))
+
+            if not self.video_db_watcher._video_updater.is_alive():
+                self.video_db_watcher._video_updater.start()
+
+            self._is_subscribed = True 
+
+    def _subscribe_to_video_changes(self, account_id):
+        '''Subscribe to changes to video and thumbnail objects for a given 
+           account.
+        '''
+        with self._subscribe_lock:
+            # in postgres we must subscribe to all changes on videometadata 
+            # and thumbnailmetadata tables, TODO clean this up a bit, once redis 
+            # is no longer required   
+            if options.get('cmsdb.neondata.wants_postgres'):
+                # these are subscribed in the main subscribe_to_changes now
+                # but let's add the account_id to the list, so we can check in 
+                # schedule_video_update if we should do this 
+                self.video_db_watcher._account_subscribers[account_id] = (True, True)  
+            else: 
+                if account_id not in self.video_db_watcher._account_subscribers:
+                    _log.debug('Subscribing to changes in account %s' % account_id)
+                    thumb_pubsub = neondata.ThumbnailMetadata.subscribe_to_changes(
+                        lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                            '_'.join(key.split('_')[0:2]), is_push_update=True),
+                        pattern='%s_*' % account_id,
+                        get_object=False)
+                    video_pubsub = neondata.VideoMetadata.subscribe_to_changes(
+                        lambda key, obj, op: self.video_db_watcher._schedule_video_update(
+                            key, is_push_update=True),
+                        pattern='%s_*' % account_id,
+                        get_object=False)
+                    self.video_db_watcher._account_subscribers[account_id] = (video_pubsub,
+                                                                              thumb_pubsub)
+                    statemon.state.accounts_subscribed_to = \
+                        len(self.video_db_watcher._account_subscribers)
+
+    def _unsubscribe_from_video_changes(self, account_id):
+        '''Unsubscribe from changes to videos in a given account'''
+        pubsubs = []
+        with self._subscribe_lock:
+            try:
+                pubsubs = self.video_db_watcher._account_subscribers.pop(account_id)
+                statemon.state.accounts_subscribed_to = \
+                  len(self.video_db_watcher._account_subscribers)
+            except KeyError:
+                return
+        
+        for sub in pubsubs:
+            if sub:
+                try: 
+                    sub.close()
+                except AttributeError: 
+                    pass 
+
+    def _handle_account_change(self, account_id, account, operation, 
+                               update_videos=True, 
+                               force_subscribe=False):
+        '''Handler for when a NeonUserAccount object changes in the database.'''
+        if (operation == 'set' or 
+             operation == 'INSERT' or 
+             operation == 'UPDATE') and \
+             account is not None:
+            # Update default size and default thumbs
+            self.video_db_watcher.directive_pusher.default_sizes[account_id] = \
+              account.default_size
+            if account.default_thumbnail_id is not None:
+                self.video_db_watcher.directive_pusher.default_thumbs[account_id] = \
+                  account.default_thumbnail_id
+            else:
+                try:
+                    del self.video_db_watcher.directive_pusher.default_thumbs[account_id]
+                except KeyError: pass
+            
+            new_options = (account.abtest, account.serving_enabled)
+            # if the serving_enabled/abtest state has not changed, don't 
+            # do anything 
+            old_options = self.video_db_watcher._accounts_options.get(account_id, None)
+            if new_options != old_options: 
+                self.video_db_watcher._accounts_options[account_id] = new_options
+            elif not force_subscribe: 
+                return 
+ 
+            # Subscribe to this account if we aren't subscribed yet
+            if account.serving_enabled: 
+                self._subscribe_to_video_changes(account_id)
+            else:
+                self._unsubscribe_from_video_changes(account_id)
+
+            if update_videos:
+                for internal_video_id in account.get_internal_video_ids():
+                    self.video_db_watcher._schedule_video_update(internal_video_id)
+
+    def stop(self):
+        self._is_subscribed = False  
+        self._stopped.set()
+        if self.io_loop: 
+            self.io_loop.stop()
+
 class VideoDBWatcher(threading.Thread):
     '''This thread polls the video database for changes.'''
     def __init__(self, mastermind, directive_pusher,
@@ -234,9 +437,13 @@ class VideoDBWatcher(threading.Thread):
         self._vids_waiting = threading.Event()
         self._vid_processing_done = threading.Event()
         self._video_updater = VideoUpdater(self)
+        self._change_subscriber = ChangeSubscriber(self)
         self._accounts_options_lock = threading.RLock()
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
-        self._accounts_options = {} 
+        self._accounts_options = {}
+
+        # videodbwatchers ioloop 
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
     def __del__(self):
         self.stop()
@@ -247,7 +454,10 @@ class VideoDBWatcher(threading.Thread):
         for subs in self._account_subscribers.itervalues():
             for sub in subs:
                 if sub is not None:
-                    sub.close()
+                    try: 
+                        sub.close()
+                    except AttributeError: 
+                        pass 
 
     def run(self):
         is_initialized = False
@@ -268,6 +478,14 @@ class VideoDBWatcher(threading.Thread):
                 _log.exception('Uncaught video DB Error: %s' % e)
                 statemon.state.increment('videodb_error')
 
+            finally: 
+                if not self._change_subscriber.is_alive(): 
+                    self._change_subscriber.start()
+                    self.io_loop.make_current()
+                    tornado.ioloop.IOLoop.current().add_callback(lambda:
+                        self._change_subscriber.subscribe_to_db_changes())
+                    self.io_loop.start()  
+
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
 
@@ -280,6 +498,7 @@ class VideoDBWatcher(threading.Thread):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
         self._video_updater.stop()
+        self._change_subscriber.stop() 
 
     def _initialize_serving_directives(self):
         '''Save current experiment state and serving fracs to mastermind
@@ -296,28 +515,21 @@ class VideoDBWatcher(threading.Thread):
 
             self._accounts_options[account.neon_api_key] = (account.abtest, 
                  account.serving_enabled)
- 
-            for video_id in account.get_internal_video_ids():
-                video_metadata = neondata.VideoMetadata.get(video_id)
-                account_id = video_metadata.get_account_id()
-                if not video_metadata.serving_enabled:
+            
+            videos_and_statuses = account.get_videos_and_statuses() 
+            
+            for video_id, obj in videos_and_statuses.iteritems(): 
+                if not obj['serving_enabled']:  
                     continue
-                video_status = neondata.VideoStatus.get(video_id,
-                                                        log_missing=False)
-                if video_status is None:
-                    continue
-
-                # Get all thumbnails
-                thumbnail_status_list = neondata.ThumbnailStatus.get_many(
-                    set(video_metadata.thumbnail_ids), log_missing=False)
-                thumbnail_status_list = [x for x in thumbnail_status_list if
-                                         x is not None]
-
+                video_status = obj['video_status_obj']
+                if video_status is None: 
+                    continue  
+                thumbnail_status_list = obj['thumbnail_status_list'] 
                 self.mastermind.update_experiment_state_directive(
                     video_id,
                     video_status,
                     thumbnail_status_list)
-
+                
     def _process_db_data(self, is_initialized):
         _log.info('Polling the video database for a full batch update')
 
@@ -345,7 +557,7 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
 
         for account in neondata.NeonUserAccount.iterate_all():
-            self._handle_account_change(account.neon_api_key, account, 'set', 
+            self._change_subscriber._handle_account_change(account.neon_api_key, account, 'set', 
                                         update_videos=False, 
                                         force_subscribe=(not is_initialized)) 
             self.mastermind.update_experiment_strategy(
@@ -360,78 +572,6 @@ class VideoDBWatcher(threading.Thread):
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
 
-    def subscribe_to_db_changes(self):
-        '''Subscribe to all the changes we care about in the database.'''
-        with self._subscribe_lock:
-            self._table_subscribers.append(
-                neondata.NeonUserAccount.subscribe_to_changes(
-                    self._handle_account_change))
-
-            self._table_subscribers.append(
-                neondata.ExperimentStrategy.subscribe_to_changes(
-                    lambda key, obj, op: 
-                    self.mastermind.update_experiment_strategy(key, obj)))
-
-            self._table_subscribers.append(
-                neondata.TrackerAccountIDMapper.subscribe_to_changes(
-                    lambda key, obj, op: 
-                    self.directive_pusher.add_to_tracker_id_map(
-                        str(obj.get_tai()), str(obj.value))))
-
-            def _update_serving_url(key, obj, op):
-                if op == 'del':
-                    try:
-                        self.directive_pusher.del_serving_urls(key)
-                    except KeyError:
-                        pass
-                elif op == 'set':
-                    if self.mastermind.is_serving_video(
-                            self.video_id_cache.find_video_id(key)):
-                        self.directive_pusher.add_serving_urls(key, obj)
-            self._table_subscribers.append(
-                neondata.ThumbnailServingURLs.subscribe_to_changes(
-                _update_serving_url))
-
-            if not self._video_updater.is_alive():
-                self._video_updater.start()
-
-    def _subscribe_to_video_changes(self, account_id):
-        '''Subscribe to changes to video and thumbnail objects for a given 
-           account.
-        '''
-        with self._subscribe_lock:
-            if account_id not in self._account_subscribers:
-                _log.debug('Subscribing to changes in account %s' % account_id)
-                thumb_pubsub = neondata.ThumbnailMetadata.subscribe_to_changes(
-                    lambda key, obj, op: self._schedule_video_update(
-                        '_'.join(key.split('_')[0:2]), is_push_update=True),
-                    pattern='%s_*' % account_id,
-                    get_object=False)
-                video_pubsub = neondata.VideoMetadata.subscribe_to_changes(
-                    lambda key, obj, op: self._schedule_video_update(
-                        key, is_push_update=True),
-                    pattern='%s_*' % account_id,
-                    get_object=False)
-                self._account_subscribers[account_id] = (video_pubsub,
-                                                         thumb_pubsub)
-                statemon.state.accounts_subscribed_to = \
-                  len(self._account_subscribers)
-
-    def _unsubscribe_from_video_changes(self, account_id):
-        '''Unsubscribe from changes to videos in a given account'''
-        pubsubs = []
-        with self._subscribe_lock:
-            try:
-                pubsubs = self._account_subscribers.pop(account_id)
-                statemon.state.accounts_subscribed_to = \
-                  len(self._account_subscribers)
-            except KeyError:
-                return
-        
-        for sub in pubsubs:
-            if sub:
-                sub.close()
-
     def _schedule_video_update(self, video_id, is_push_update=False):
         '''Add a video to the queue to update in the mastermind core.'''
         if neondata.InternalVideoID.is_no_video(video_id):
@@ -443,42 +583,6 @@ class VideoDBWatcher(threading.Thread):
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
     
-    def _handle_account_change(self, account_id, account, operation, 
-                               update_videos=True, 
-                               force_subscribe=False):
-        '''Handler for when a NeonUserAccount object changes in the database.'''
-        if operation == 'set' and account is not None:
-            # Update default size and default thumbs
-            self.directive_pusher.default_sizes[account_id] = \
-              account.default_size
-            if account.default_thumbnail_id is not None:
-                self.directive_pusher.default_thumbs[account_id] = \
-                  account.default_thumbnail_id
-            else:
-                try:
-                    del self.directive_pusher.default_thumbs[account_id]
-                except KeyError: pass
-            
-            new_options = (account.abtest, account.serving_enabled)
-            with self._accounts_options_lock:
-                # if the serving_enabled/abtest state has not changed, don't 
-                # do anything 
-                old_options = self._accounts_options.get(account_id, None)
-                if new_options != old_options: 
-                    self._accounts_options[account_id] = new_options
-                elif not force_subscribe: 
-                    return 
- 
-            # Subscribe to this account if we aren't subscribed yet
-            if account.serving_enabled: 
-                self._subscribe_to_video_changes(account_id)
-            else: 
-                self._unsubscribe_from_video_changes(account_id)
-
-            if update_videos:
-                for internal_video_id in account.get_internal_video_ids():
-                    self._schedule_video_update(internal_video_id)
-
     def _handle_video_update(self, video_id, video_metadata):
         '''Processes a new video state for a single video.'''
         if video_metadata is None:
@@ -491,8 +595,10 @@ class VideoDBWatcher(threading.Thread):
         acct_abtest, acct_serving_enabled = self._accounts_options[
                 video_metadata.get_account_id()] 
  
+        account_id = video_id.split('_')[0]
+        in_sub_list = account_id in self._account_subscribers 
         abtest = video_metadata.testing_enabled and acct_abtest 
-        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled
+        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled and in_sub_list
 
         if serving_enabled:
             thumbnails = []
@@ -1066,8 +1172,17 @@ class DirectivePublisher(threading.Thread):
         statemon.state.pending_modifies = 0
         self._lock = multiprocessing.RLock()
         self.modify_waiter = multiprocessing.Condition()
-
+         
         self._enable_video_lock = threading.BoundedSemaphore(20)
+
+        # io_loop for this thread, responsible for running publisher 
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+
+        # the timer that will fire the publisher every publishing_period
+        self.timer = utils.sync.PeriodicCoroutineTimer(
+             self._publish_directives, 
+             options.publishing_period*1000.0, 
+             io_loop=self.io_loop)
 
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
@@ -1089,26 +1204,20 @@ class DirectivePublisher(threading.Thread):
                 self.modify_waiter.wait()
 
     def run(self):
-        self._stopped.clear()
-        while not self._stopped.is_set():
-            last_woke_up = datetime.datetime.now()
-
-            try:
-                with self.activity_watcher.activate():
-                    self._publish_directives()
-            except Exception as e:
-                _log.exception('Uncaught exception when publishing %s' %
+        try:
+            self.io_loop.make_current()
+            self.timer.start() 
+            self.io_loop.start()  
+        except Exception as e:
+            _log.exception('Uncaught exception when publishing %s' %
                                e)
-                statemon.state.increment('publish_error')
-
-
-            self._stopped.wait(options.publishing_period -
-                               (datetime.datetime.now() - 
-                                last_woke_up).total_seconds())
-
+            statemon.state.increment('publish_error')
+    
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
+        self.timer.stop()
+        self.io_loop.stop()
 
     def update_tracker_id_map(self, new_map):
         with self.lock:
@@ -1162,7 +1271,8 @@ class DirectivePublisher(threading.Thread):
             10.0, self._update_time_since_publish)
         self._update_publish_timer.daemon = True
         self._update_publish_timer.start()
-
+   
+    @tornado.gen.coroutine
     def _publish_directives(self):
 
         '''Publishes the directives to S3'''
@@ -1243,21 +1353,18 @@ class DirectivePublisher(threading.Thread):
                                        written_video_ids)
                 self.last_published_videos = written_video_ids
                 if len(new_serving_videos) > 0:
-                    self._incr_pending_modify(len(new_serving_videos))
-                    for new_serving_video in new_serving_videos:
-                        t = threading.Thread(
-                            target=self._enable_video_in_database,
-                            args=(new_serving_video,))
-                        t.daemon = True
-                        t.start()
+                    _log.info('Enabling %d new videos' % 
+                        len(new_serving_videos))
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._enable_videos_in_database, 
+                            new_serving_videos))
                 if len(just_stopped_videos) > 0:
-                    self._incr_pending_modify(len(just_stopped_videos))
-                    t = threading.Thread(
-                        target=self._disable_videos_in_database,
-                        args=(just_stopped_videos,))
-                    t.daemon = True
-                    t.start()
-
+                    _log.info('Processing %d stopped videos - by disabling' % 
+                        len(just_stopped_videos))
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._disable_videos_in_database, 
+                            just_stopped_videos))
+                    
                 self.last_publish_time = curtime
 
     def _write_directives(self, stream):
@@ -1416,13 +1523,15 @@ class DirectivePublisher(threading.Thread):
                                                                   urls)])),
                 'img_sizes' : [ { 'h': h, 'w': w} for w, h in urls.sizes]
                 }
-
+    
+    @tornado.gen.coroutine
     def _disable_videos_in_database(self, video_ids):
         '''Disables a number of videos in the database to say that
         they are not serving anymore.
         '''
         MAX_VIDS_PER_CALL = 100
         video_ids = list(video_ids)
+        self.pending_modifies.value += len(video_ids)
         for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
             cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
             try:
@@ -1430,8 +1539,8 @@ class DirectivePublisher(threading.Thread):
                     for vidobj in videos_dict.itervalues():
                         if vidobj is not None:
                             vidobj.serving_url = None
-                videos = neondata.VideoMetadata.modify_many(
-                    cur_vid_ids, _remove_serving_url)
+                videos = yield neondata.VideoMetadata.modify_many(
+                    cur_vid_ids, _remove_serving_url, async=True)
 
                 request_keys = [(video.job_id, video.get_account_id()) for
                                 video in videos.itervalues()
@@ -1440,8 +1549,10 @@ class DirectivePublisher(threading.Thread):
                     for obj in request_dict.itervalues():
                         if obj is not None:
                             obj.state = neondata.RequestState.FINISHED
-                requests = neondata.NeonApiRequest.modify_many(request_keys,
-                                                               _set_state)
+                requests = yield neondata.NeonApiRequest.modify_many(
+                               request_keys,
+                               _set_state, 
+                               async=True)
 
             except Exception as e:
                 statemon.state.increment('unexpected_db_update_error')
@@ -1450,88 +1561,117 @@ class DirectivePublisher(threading.Thread):
                 # We didn't update the database so don't say that the
                 # videos were published. This will trigger a retry next
                 # time the directives are pushed.
-                with self.lock:
-                    self.last_published_videos = \
-                      self.last_published_videos + set(cur_vid_ids)
+                self.last_published_videos = \
+                  self.last_published_videos + set(cur_vid_ids)
             finally:
-                self._incr_pending_modify(-len(cur_vid_ids))
-
-    def _enable_video_in_database(self, video_id):
+                self.pending_modifies.value -= len(video_ids)
+    
+    @tornado.gen.coroutine
+    def _enable_videos_in_database(self, video_ids):
         '''Flags a video as being updated in the database and sends a
         callback if necessary.
         '''
-        try:
-            with self._enable_video_lock:
-                # First see if the video is already serving in the
-                # database. If is, we're done.
-                video = neondata.VideoMetadata.get(video_id)
-                if video is None:
-                    return
-                request = neondata.NeonApiRequest.get(video.job_id,
-                                                      video.get_account_id())
-                if (request is None or 
-                    request.state != neondata.RequestState.FINISHED):
-                    return
-                
+        video_list = list(video_ids)
+        list_chunks = [video_list[i:i+1000] for i in
+                       xrange(0, len(video_list), 1000)]
 
-            # Now we wait until the video is serving on the isp
-            start_time = time.time()
-            if video_id in self.waiting_on_isp_videos:
-                # we are already waiting on this video_id, do not 
-                # start another long loop for it 
-                return 
-            else: 
-                with self.lock: 
-                    self.waiting_on_isp_videos.add(video_id) 
-                    statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
-                while not video.image_available_in_isp():
-                    if (time.time() - start_time) > options.isp_wait_timeout:
-                        statemon.state.increment('timeout_waiting_for_isp')
-                        _log.error('Timed out waiting for ISP for video %s' %
-                                   video.key)
-                        with self.lock:
-                            self.last_published_videos.discard(video_id)
-                            self.waiting_on_isp_videos.discard(video_id) 
-                        return
-                    time.sleep(5.0 * random.random())
-            with self.lock: 
-                self.waiting_on_isp_videos.discard(video_id) 
-                statemon.state.videos_waiting_on_isp = len(self.waiting_on_isp_videos)  
-              
-            statemon.state.isp_ready_delay = time.time() - start_time
-            # Wait a bit so that it gets to all the ISPs
-            time.sleep(options.serving_update_delay)
-
-            # Now do the database updates
-            with self._enable_video_lock:
-                def _set_serving_url(x):
-                    x.serving_url = x.get_serving_url(save=False)
-                neondata.VideoMetadata.modify(video_id, _set_serving_url)
-                def _set_serving(x):
-                    x.state = neondata.RequestState.SERVING
-                request = neondata.NeonApiRequest.modify(
-                    video.job_id,
-                    video.get_account_id(),
-                    _set_serving)
-
-            # And send the callback
-            if (request is not None and 
-                request.callback_state == 
-                neondata.CallbackState.NOT_SENT and 
-                request.callback_url):
-
-                statemon.state.increment('pending_callbacks')
-                self._send_callback(request)
-            
-        except Exception as e:
-            statemon.state.increment('unexpected_db_update_error')
-            _log.exception('Unexpected error when enabling video '
-                           'in database %s' % e)
-            with self.lock:
-                self.last_published_videos.discard(video_id)
+        @tornado.gen.coroutine
+        def _handle_videos_and_requests(videos, requests): 
+            for video, request in zip(videos, requests):
+                try:
+                    if video is None: 
+                        continue 
+                    if request is None or \
+                      request.state != neondata.RequestState.FINISHED: 
+                        continue 
+    
+                    video_id = video.get_id() 
+                    start_time = time.time()
+                    if video_id in self.waiting_on_isp_videos:
+                        # we are already waiting on this video_id, do not 
+                        # start another long loop for it 
+                        continue 
+                    else: 
+                        # Now we wait until the video is serving on the isp
+                        self.waiting_on_isp_videos.add(video_id) 
+                        statemon.state.videos_waiting_on_isp = len(
+                            self.waiting_on_isp_videos)  
+                        found = True 
+                        while not video.image_available_in_isp():
+                            if (time.time() - start_time) > \
+                              options.isp_wait_timeout:
+                                statemon.state.increment(
+                                    'timeout_waiting_for_isp')
+                                _log.error(
+                                    'Timed out waiting for ISP for video %s' %
+                                     video.key)
+                                self.last_published_videos.discard(video_id)
+                                self.waiting_on_isp_videos.discard(video_id) 
+                                found = False 
+                                break
+                            time.sleep(5.0 * random.random())
+    
+                        if not found: 
+                            continue 
+    
+                    self.waiting_on_isp_videos.discard(video_id) 
+                    statemon.state.videos_waiting_on_isp = len(
+                        self.waiting_on_isp_videos)  
                   
-        finally:
-            self._incr_pending_modify(-1)
+                    statemon.state.isp_ready_delay = time.time() - start_time
+                    # Wait a bit so that it gets to all the ISPs
+                    time.sleep(options.serving_update_delay)
+    
+                    # Now do the database updates
+                    def _set_serving_url(x):
+                        x.serving_url = x.get_serving_url(save=False)
+                    yield neondata.VideoMetadata.modify(
+                        video_id, 
+                        _set_serving_url, 
+                        async=True)
+                    def _set_serving(x):
+                        x.state = neondata.RequestState.SERVING
+                    request = yield neondata.NeonApiRequest.modify(
+                        video.job_id,
+                        video.get_account_id(),
+                        _set_serving, 
+                        async=True)
+    
+                    # And send the callback
+                    if (request is not None and 
+                        request.callback_state == 
+                        neondata.CallbackState.NOT_SENT and 
+                        request.callback_url):
+    
+                        statemon.state.increment('pending_callbacks')
+                        self._send_callback(request)
+                
+                except Exception as e:
+                    statemon.state.increment('unexpected_db_update_error')
+                    _log.exception('Unexpected error when enabling video '
+                                   'in database %s' % e)
+
+                    self.last_published_videos.discard(video_id)
+    
+                    continue 
+
+        for video_ids in list_chunks:
+            try: 
+                self.pending_modifies.value += len(video_ids) 
+                videos = yield neondata.VideoMetadata.get_many(
+                             video_ids, 
+                             async=True) 
+                job_ids = [(v.job_id, v.get_account_id()) 
+                              if v is not None else (None, None) 
+                              for v in videos]
+                requests = yield neondata.NeonApiRequest.get_many(
+                               job_ids, 
+                               async=True) 
+
+                yield _handle_videos_and_requests(videos, requests)
+  
+            finally:
+                self.pending_modifies.value -= len(video_ids) 
 
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
@@ -1557,7 +1697,6 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
                                        activity_watcher)
         videoDbThread.start()
         videoDbThread.wait_until_loaded()
-        videoDbThread.subscribe_to_db_changes()
         statsDbThread = StatsDBWatcher(mastermind, video_id_cache,
                                        activity_watcher)
         statsDbThread.start()
@@ -1567,7 +1706,7 @@ def main(activity_watcher = utils.ps.ActivityWatcher()):
 
     ioloop = tornado.ioloop.IOLoop()
     ioloop.make_current()
-
+    
     atexit.register(ioloop.stop)
     atexit.register(publisher.stop)
     atexit.register(videoDbThread.stop)

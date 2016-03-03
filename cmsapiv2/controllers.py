@@ -642,9 +642,9 @@ class VideoHelper(object):
         request.video_id = args['external_video_ref'] 
         if integration_id: 
             request.integration_id = integration_id
-        request.video_url = args.get('video_url', None) 
+        request.video_url = args.get('url', None) 
         request.callback_url = args.get('callback_url', None)
-        request.video_title = args.get('video_title', None) 
+        request.video_title = args.get('title', None) 
         request.default_thumbnail = args.get('default_thumbnail_url', None) 
         request.external_thumbnail_ref = args.get('thumbnail_ref', None) 
         request.publish_date = args.get('publish_date', None) 
@@ -676,7 +676,7 @@ class VideoHelper(object):
 
             video = neondata.VideoMetadata(
                 neondata.InternalVideoID.generate(account_id_api_key, video_id),
-                video_url=args.get('video_url', None),
+                video_url=args.get('url', None),
                 publish_date=args.get('publish_date', None),
                 duration=float(args.get('duration', 0.0)) or None, 
                 custom_data=args.get('custom_data', None), 
@@ -707,7 +707,7 @@ class VideoHelper(object):
             yield tornado.gen.Task(video.save)
             raise tornado.gen.Return((video,api_request))
         else:
-            reprocess = bool(int(args.get('reprocess', 0))) 
+            reprocess = args.get('reprocess', False)
             if reprocess:
                 
                 reprocess_url = 'http://%s:%s/reprocess' % (
@@ -760,21 +760,25 @@ class VideoHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
-          'integration_id' : Any(str, unicode, Length(min=1, max=256)),
-          'video_url': Any(str, unicode, Length(min=1, max=512)), 
-          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
+          Optional('url'): Any(str, unicode, Length(min=1, max=512)),
+          Optional('reprocess'): Boolean(),
+          'integration_id' : Any(str, unicode, Length(min=1, max=256)),          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
           'title': Any(str, unicode, Length(min=1, max=256)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
           'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
-          'reprocess': All(Coerce(int), Range(min=0, max=1)),
           'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
         })
 
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
+
+        reprocess = args.get('reprocess', None)
+        url = args.get('url', None)
+        if (reprocess is None) == (url is None):
+            raise Invalid('Exactly one of reprocess or url is required')
           
         # add the video / request
         video_and_request = yield tornado.gen.Task(
