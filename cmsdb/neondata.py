@@ -101,7 +101,7 @@ define("db_user", default="postgres", type=str, help="postgresql database user")
 define("db_password", default="", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
-define("wants_postgres", default=0, type=int, help="should we use postgres")
+define("wants_postgres", default=1, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
