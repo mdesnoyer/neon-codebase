@@ -15,6 +15,7 @@ from mock import MagicMock, patch
 from monitoring import benchmark_neon_pipeline
 from StringIO import StringIO
 import test_utils.neontest
+import test_utils.postgresql
 import test_utils.redis
 import tornado
 import tornado.httpclient
@@ -384,6 +385,83 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
 
         self.assertEquals(statemon.state.get(
             'monitoring.benchmark_neon_pipeline.result_submission_error'), 1)
+
+class BenchmarkTestPG(BenchmarkTest):
+    def setUp(self):
+        self.benchmarker = benchmark_neon_pipeline.Benchmarker()
+        
+        super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
+
+        # Mock out the http calls for creating the job and checking the isp
+        self.create_job_patcher = patch('monitoring.benchmark_neon_pipeline.cmsapiv2.client')
+        self.create_job_mock = self._future_wrap_mock(
+            self.create_job_patcher.start().Client().send_request)
+        self.create_job_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x, 200, buffer=StringIO('{"job_id": "myjobid"}'))
+
+        # Mock out the isp request
+        self.isp_call_mock = MagicMock()
+        self.isp_call_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(
+              x, code=200, effective_url="http://www.where.com/neontntid.jpg")
+
+        # Mock out the result submission
+        self.result_mock = MagicMock()
+        self.result_mock.side_effect = \
+          lambda x: tornado.httpclient.HTTPResponse(x, code=200)
+
+        # Mock out the http requests
+        self.send_request_patcher = patch('utils.http.send_request')
+        self.send_request_mock = self._future_wrap_mock(
+            self.send_request_patcher.start(), require_async_kw=True)
+        def _handle_http_request(req, **kw):
+            if req.url == options.get('monitoring.benchmark_neon_pipeline.result_endpoint'):
+                return self.result_mock(req)
+            else:
+                return self.isp_call_mock(req)
+        self.send_request_mock.side_effect = _handle_http_request
+        
+        self.api_key = 'apikey'
+        options._set('monitoring.benchmark_neon_pipeline.account',
+                     self.api_key)
+        options._set('monitoring.benchmark_neon_pipeline.serving_timeout', 0)
+        options._set('monitoring.benchmark_neon_pipeline.isp_timeout', 0)
+
+        acct = neondata.NeonUserAccount('a1', self.api_key)
+        acct.save()
+
+        self.request = neondata.NeonApiRequest('myjobid', self.api_key, 'vid1')
+        self.request.save()
+
+        video = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.api_key, 'vid1'),
+            request_id=self.request.job_id)
+        video.save()
+        video.get_serving_url()
+
+    def get_app(self):
+        return self.benchmarker.application
+        
+    def tearDown(self):
+        self.benchmarker.job_manager.stop()
+        self.benchmarker.timer.stop()
+        self.send_request_patcher.stop()
+        self.create_job_patcher.stop()
+        statemon.state._reset_values()
+        super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
