@@ -61,6 +61,9 @@ class VideoProcessingQueue(object):
         self.region = None
         self.queue_prefix = None
         self.conn = None
+
+    def __del__(self):
+        self.exectuor.shutdown(False)
         
     @tornado.gen.coroutine
     def _connect_to_server(self, timeout=options.default_timeout):
@@ -315,7 +318,6 @@ class VideoProcessingQueue(object):
             statemon.state.increment('delete_failure')
             raise Exception(e.message)
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def hide_message(self, message, timeout):
         '''Hides a message for timeout so that other workers won't see it.

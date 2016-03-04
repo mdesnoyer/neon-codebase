@@ -21,6 +21,7 @@ from boto.sqs.message import Message
 import boto.exception
 import cmsdb.cdnhosting
 from cmsdb import neondata
+from cvutils.imageutils import PILImageUtils
 import json
 import logging
 from mock import MagicMock, patch
@@ -113,9 +114,6 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             'http://callback.com',
             'http://default_thumb.jpg')
         self.api_request.save() 
-
-        #setup process video object
-        self.api_request = None
 
         # Mock the video queue
         self.job_queue_patcher = patch(
@@ -227,6 +225,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
     ##### Process video tests ####
     @patch('video_processor.client.urllib2.urlopen')
+    @tornado.testing.gen_test
     def test_download_video_file(self, mock_client):
         # Createa a 10MB random string
         vdata = StringIO('%030x' % random.randrange(16**(10*1024*1024)))
@@ -234,11 +233,15 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         mock_client.return_value = vdata
         
         vprocessor = self.setup_video_processor("neon")
-        vprocessor.download_video_file()
+        yield vprocessor.download_video_file()
         vprocessor.tempfile.seek(0) 
         self.assertEqual(vprocessor.tempfile.read(), vdata.getvalue()) 
 
+        self.job_hide_mock.assert_called_with(self.job_message,
+                                              3.0*600.0)
+
     @patch('video_processor.client.urllib2.urlopen')
+    @tornado.testing.gen_test
     def test_download_video_errors(self, mock_client):
         mock_client.side_effect = [
             urllib2.URLError('Oops'),
@@ -249,19 +252,20 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         vprocessor = self.setup_video_processor("neon")
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
 
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
                 
         
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
                 
 
     @patch('video_processor.client.S3Connection')
+    @tornado.testing.gen_test
     def test_download_s3_video(self, s3_mock):
         vdata = '%030x' % random.randrange(16**(10*1024*1024))
         
@@ -274,11 +278,15 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         vprocessor = self.setup_video_processor(
             "neon", url='s3://customer-videos/some/video.mp4')
-        vprocessor.download_video_file()
+        yield vprocessor.download_video_file()
         vprocessor.tempfile.seek(0) 
         self.assertEqual(vprocessor.tempfile.read(), vdata)
 
+        self.job_hide_mock.assert_called_with(self.job_message,
+                                              3.0*600.0)
+
     @patch('video_processor.client.S3Connection')
+    @tornado.testing.gen_test
     def test_download_s3_video_http_path(self, s3_mock):
         vdata = '%030x' % random.randrange(16**(10*1024*1024))
         
@@ -291,11 +299,15 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         vprocessor = self.setup_video_processor(
             "neon", url='https://s3-us-west-2.amazonaws.com/customer-videos/some/video.mp4')
-        vprocessor.download_video_file()
+        yield vprocessor.download_video_file()
         vprocessor.tempfile.seek(0) 
         self.assertEqual(vprocessor.tempfile.read(), vdata)
 
+        self.job_hide_mock.assert_called_with(self.job_message,
+                                              3.0*600.0)
+
     @patch('video_processor.client.S3Connection')
+    @tornado.testing.gen_test
     def test_download_s3_video_error(self, s3_mock):
         s3_mock.side_effect = [
             boto.exception.BotoClientError("Permissions error"),
@@ -308,23 +320,24 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
        
         with self.assertLogExists(logging.ERROR, "Client error downloading"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
         
         with self.assertLogExists(logging.ERROR, "Server error downloading"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
         
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
 
+    @tornado.testing.gen_test
     def test_process_video(self):
        
         '''
         Verify execution of the process_all call in ProcessVideo
         '''
         vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        vprocessor.process_video(self.test_video_file, n_thumbs=5)
+        yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
 
         # Check that the model was called correctly
         self.assertTrue(self.model.choose_thumbnails.called)
@@ -349,31 +362,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.assertNotIn(float('-inf'), 
                          [x[0].model_score for x in vprocessor.thumbnails])
     
-    @unittest.skip('refactor the test')
-    def test_process_video_after_int_error(self):
-       
-        '''
-        Verify video gets in to valid state after failing a couple of times
-        and being in INT_ERROR state
-        '''
-        
-        vprocessor = self.setup_video_processor("neon", url='http://video.com')
-        self.api_request.state = neondata.RequestState.INT_ERROR
-        self.api_request.failed_count = 2
-        self.api_request.save()
 
-        vprocessor.process_video(self.test_video_file, n_thumbs=5)
-        
-        # Check that the model was called correctly
-        self.assertTrue(self.model.choose_thumbnails.called)
-        
-        api_request = neondata.NeonApiRequest.get(self.api_request.job_id,
-                                    self.na.neon_api_key)
-        self.assertEquals(api_request.state, neondata.RequestState.INT_ERROR)
-        
-        #verify video metadata has been populated
-        self.assertEqual(vprocessor.video_metadata.duration, 8.8)
-
+    @tornado.testing.gen_test
     def test_somebody_else_processed_first(self):
         # Try when somebody else was sucessful
         for state in [neondata.RequestState.FINISHED,
@@ -383,7 +373,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.api_request.state = state
             self.api_request.save()
             with self.assertRaises(video_processor.client.OtherWorkerCompleted):
-                vprocessor.process_video(self.test_video_file, n_thumbs=5)
+                yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
 
         # Try when the current run should continue
         for state in [neondata.RequestState.SUBMIT,
@@ -395,16 +385,19 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             vprocessor = self.setup_video_processor('neon')
             self.api_request.state = state
             self.api_request.save()
-            vprocessor.process_video(self.test_video_file, n_thumbs=5)
+            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
             self.assertGreater(len(vprocessor.thumbnails), 0)
 
+    @tornado.testing.gen_test
     def test_missing_video_file(self):
         vprocessor = self.setup_video_processor("neon")
 
         with self.assertLogExists(logging.ERROR, "Error reading"):
             with self.assertRaises(video_processor.client.BadVideoError):
-                vprocessor.process_video('a_garbage_video_thats_gone.mov')
+                yield vprocessor.process_video(
+                    'a_garbage_video_thats_gone.mov')
 
+    @tornado.testing.gen_test
     def test_process_all_filtered_video(self):
         '''Test processing a video where every frame is filtered.'''
         self.model.choose_thumbnails.return_value = (
@@ -415,7 +408,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
              (np.zeros((480, 640, 3), np.uint8), float('-inf'), 900, 30.0,
               'black')])
         vprocessor = self.setup_video_processor("neon")
-        vprocessor.process_video(self.test_video_file2, n_thumbs=3)
+        yield vprocessor.process_video(self.test_video_file2, n_thumbs=3)
 
         # Verify that all the frames were added to the data maps
         neon_thumbs = [x[0] for x in vprocessor.thumbnails if
@@ -479,7 +472,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
     def test_dequeue_job(self):
 
         with self.assertLogExists(logging.DEBUG, "Dequeue Successful"):
-            job, message = yield self.video_client.dequeue_job()
+            job = yield self.video_client.dequeue_job()
 
         self.assertEqual(job, {
             'api_key': self.api_key,
@@ -507,8 +500,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         req = neondata.NeonApiRequest.modify('job1', self.api_key, 
                                              _change_job_state)
         with self.assertLogExists(logging.ERROR, 'has failed too many times'):
-            with self.assertRaises(video_processor.client.UninterestingJob):
-                yield self.video_client.dequeue_job()
+            yield self.video_client.do_work(async=True)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
 
     @tornado.testing.gen_test
     def test_dequeue_job_with_too_many_attempts(self):
@@ -521,10 +516,41 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         req = neondata.NeonApiRequest.modify('job1', self.api_key, 
                                              _change_job_state)
         with self.assertLogExists(logging.ERROR, 'has failed too many times'):
-            with self.assertRaises(video_processor.client.UninterestingJob):
-                yield self.video_client.dequeue_job()
+            yield self.video_client.do_work(async=True)
 
-class TestFinalizeResponse(test_utils.neontest.TestCase):
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+
+    @tornado.testing.gen_test
+    def test_dequeue_job_when_missing_from_db(self):
+        neondata.NeonApiRequest.delete(self.api_request.job_id, self.api_key)
+
+        with self.assertLogExists(logging.ERROR, 'Could not get job'):
+            with self.assertRaises(video_processor.client.DequeueError):
+                job = yield self.video_client.dequeue_job()
+
+    @tornado.testing.gen_test
+    def test_dequeue_invalid_job(self):
+        self.job_read_mock.side_effect = [self.job_message,
+                                          self.job_message,]
+        
+        self.job_message.set_body('{}')
+        with self.assertLogExists(logging.WARNING, 'Job body .* uninteresting'):
+            yield self.video_client.do_work(async=True)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+        self.job_delete_mock.reset_mock()
+
+
+        self.job_message.set_body('sad days')
+        with self.assertLogExists(logging.WARNING, 'Job body .* was not JSON'):
+            yield self.video_client.do_work(async=True)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+
+class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     ''' 
     Test the cleanup and responding after the video has been processed
     '''
@@ -596,13 +622,22 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         future.set_result(None)
         self.cloudinary_mock().upload.return_value = future
 
+        # Mock out the smart cropping to speed up the tests
+        self.smart_crop_patcher = patch('cmsdb.cdnhosting.smartcrop.SmartCrop')
+        crop_mocker = self.smart_crop_patcher.start()
+        crop_mocker().crop_and_resize.side_effect = \
+          lambda h, w: PILImageUtils.to_cv(
+              PILImageUtils.create_random_image(h,w))
+
         # Setup the processor object
         job = self.api_request.__dict__
         self.vprocessor = video_processor.client.VideoProcessor(
             job,
             MagicMock(),
             'test_version',
-            multiprocessing.BoundedSemaphore(1))
+            multiprocessing.BoundedSemaphore(1),
+            MagicMock(),
+            Message())
         self.vprocessor.video_metadata.duration = 130.0
         self.vprocessor.video_metadata.frame_size = (640, 480)
 
@@ -634,11 +669,13 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.http_mocker.stop()
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
+        self.smart_crop_patcher.stop()
         self.redis.stop()
         super(TestFinalizeResponse, self).tearDown()
 
+    @tornado.testing.gen_test
     def test_default_process(self):
-        self.vprocessor.finalize_response()
+        yield self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -743,7 +780,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # check video object again to ensure serving_url is not set
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertIsNone(video_data.serving_url)
-    
+
+    @tornado.testing.gen_test
     def test_broken_default_thumb(self):
         '''
         Test to validate the flow when default thumb is broken
@@ -753,7 +791,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                              HTTPError(500)]
         for i in range(3):
             with self.assertRaises(video_processor.client.DefaultThumbError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
             # Check the video metadata in the database. It is still
             # serving, but we will be in an error state (checked in
@@ -762,6 +800,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertEquals(len(video_data.thumbnail_ids), 3) # no default thumb
             self.assertTrue(video_data.serving_enabled)
 
+    @tornado.testing.gen_test
     def test_reprocess(self):
         # Add the results from the previous run to the database
         thumbs = [
@@ -805,7 +844,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         self.vprocessor.reprocess = True
 
-        self.vprocessor.finalize_response()
+        yield self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -857,7 +896,8 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(n_thumbs[0].urls, [
             'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
             re.sub('_', '/', n_thumbs[0].key)])
-    
+
+    @tornado.testing.gen_test
     def test_processing_after_requeue(self):
         '''
         Test processing video after a failed first attempt due to either internal error or
@@ -888,7 +928,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             api_request.fail_count = 1
             api_request.save()
 
-            self.vprocessor.finalize_response()
+            yield self.vprocessor.finalize_response()
 
             # Make sure that the api request is updated
             api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -906,6 +946,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                 statemon.state.get('video_processor.client.default_thumb_error'),
                 0)
 
+    @tornado.testing.gen_test
     def test_default_thumb_already_saved(self):
         # Add the video and the default thumb to the database
         self.vprocessor.video_metadata.save()
@@ -925,7 +966,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.vprocessor.video_metadata.thumbnail_ids[0]))
         self.assertIsNotNone(thumb_meta.key)
 
-        self.vprocessor.finalize_response()
+        yield self.vprocessor.finalize_response()
 
         # Check the video metadata in the database
         video_data = neondata.VideoMetadata.get(self.video_id)
@@ -944,11 +985,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(default_thumb.rank, 0)
         self.assertEquals(default_thumb.phash, thumb_meta.phash)
 
+    @tornado.testing.gen_test
     def test_no_thumbnails_found(self):
         self.vprocessor.thumbnails = []
 
         with self.assertLogExists(logging.WARNING, 'No thumbnails extracted'):
-            self.vprocessor.finalize_response()
+            yield self.vprocessor.finalize_response()
 
         # Make sure that serving is enabled
         video_meta = neondata.VideoMetadata.get(self.video_id)
@@ -959,6 +1001,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             video_meta.thumbnail_ids[0]).type, 
             neondata.ThumbnailType.BRIGHTCOVE)
 
+    @tornado.testing.gen_test
     def test_no_thumbnails_found_no_default_thumb(self):
         self.vprocessor.thumbnails = []
         neondata.BrightcoveApiRequest('job1', self.api_key, 'vid1',
@@ -968,7 +1011,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                                       '').save()
 
         with self.assertLogExists(logging.WARNING, 'No thumbnails extracted'):
-            self.vprocessor.finalize_response()
+            yield self.vprocessor.finalize_response()
 
         # Make sure that serving is disabled
         video_meta = neondata.VideoMetadata.get(self.video_id)
@@ -976,7 +1019,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(len(video_meta.thumbnail_ids), 0)
 
     @patch('video_processor.client.neondata.ThumbnailMetadata.modify_many')
+    @tornado.testing.gen_test
     def test_db_connection_error_thumb(self, modify_mock):
+        modify_mock = self._callback_wrap_mock(modify_mock)
         modify_mock.side_effect = [
             redis.ConnectionError("Connection Error"),
             {}
@@ -985,7 +1030,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Error writing thumbnail data'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
         self.api_request.state = neondata.RequestState.PROCESSING
         self.api_request.save()
@@ -993,10 +1038,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Error writing thumbnail data'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
     @patch('video_processor.client.neondata.VideoMetadata.modify')
+    @tornado.testing.gen_test
     def test_db_connection_error_video(self, modify_mock):
+        modify_mock = self._callback_wrap_mock(modify_mock)
         modify_mock.side_effect = [
             redis.ConnectionError("Connection Error"),
             False
@@ -1005,7 +1052,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Error writing video data'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
         self.api_request.state = neondata.RequestState.PROCESSING
         self.api_request.save()
@@ -1013,8 +1060,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Error writing video data'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
+    @tornado.testing.gen_test
     def test_frame_already_in_dict(self):
         # Add the video and the default thumb to the database
         self.vprocessor.video_metadata.save()
@@ -1035,7 +1083,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         # Reset the thumb we know about
         self.vprocessor.thumbnails[-1][0].urls = []
         
-        self.vprocessor.finalize_response()
+        yield self.vprocessor.finalize_response()
 
         # Check that the thumbnail was updated
         db_thumb = neondata.ThumbnailMetadata.get(rand_thumb[0].key)
@@ -1043,7 +1091,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.assertEquals(len(db_thumb.urls), 2)
 
     @patch('video_processor.client.neondata.NeonApiRequest.modify')
+    @tornado.testing.gen_test
     def test_api_request_update_fail(self, api_request_mock):
+        api_request_mock = self._callback_wrap_mock(api_request_mock)
         api_request_mock.side_effect = [
             # Connection error on setting finalizing state
             redis.ConnectionError("Connection Error"), 
@@ -1060,23 +1110,24 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR,
                                   'Error writing request state'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
         with self.assertLogExists(logging.ERROR,
                                   'Api Request finalizing failed'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
         
         with self.assertLogExists(logging.ERROR,
                                   'Error writing request state'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
         with self.assertLogExists(logging.ERROR,
                                   'Api Request finished failed'):
             with self.assertRaises(video_processor.client.DBError):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
 
+    @tornado.testing.gen_test(timeout=10.0)
     def test_somebody_else_processed(self):
 
         # Try when somebody else was sucessful
@@ -1087,7 +1138,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.api_request.state = state
             self.api_request.save()
             with self.assertRaises(video_processor.client.OtherWorkerCompleted):
-                self.vprocessor.finalize_response()
+                yield self.vprocessor.finalize_response()
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 state)
@@ -1100,7 +1151,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
                       neondata.RequestState.INT_ERROR]:
             self.api_request.state = state
             self.api_request.save()
-            self.vprocessor.finalize_response()
+            yield self.vprocessor.finalize_response()
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
@@ -1142,12 +1193,12 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.api_request.save()
 
         # Mock out the video download
-        self.test_video_file = os.path.join(os.path.dirname(__file__), 
-                                            "test.mp4") 
-        self.video_download_patcher = patch('video_processor.client.urllib2.urlopen')
-        self.video_download_mock = self.video_download_patcher.start()
-        self.video_download_mock.side_effect = [open(self.test_video_file,
-                                                     'rb')]
+        self.test_video_file = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "test.mp4"))
+        self.video_download_patcher = patch('video_processor.client.urllib2')
+        self.video_download_mock = self.video_download_patcher.start().urlopen
+        self.video_download_mock.side_effect = [
+            urllib2.urlopen('file:///%s' % self.test_video_file)]
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -1173,15 +1224,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                                                 require_async_kw=True)
         self.callback_mock = MagicMock()
         self.callback_mock.side_effect = lambda x: HTTPResponse(x, 200)
-        self.job_queue = multiprocessing.Queue() # Queue of job param dics
         def _http_response(request, **kw):
-            if request.url.endswith('dequeue'):
-                if not self.job_queue.empty():
-                    body = json.dumps(self.job_queue.get())
-                else:
-                    body = '{}'
-                return HTTPResponse(request, 200, buffer=StringIO(body))
-            elif request.url == 'http://callback.com':
+            if request.url == 'http://callback.com':
                 return self.callback_mock(request)
             else:
                 return HTTPResponse(request, 200)
@@ -1205,27 +1249,26 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         self.model.choose_thumbnails.return_value = ct_output
 
-        # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
-                                 'VideoProcessingQueue.connect_to_server')
+        # Mock the video queue
+        self.job_queue_patcher = patch(
+            'video_processor.video_processing_queue.' \
+            'VideoProcessingQueue')
+        self.job_queue_mock = self.job_queue_patcher.start()()
+
+        self.job_queue_mock.get_duration.return_value = 600.0
+
+        self.job_delete_mock = self._future_wrap_mock(
+            self.job_queue_mock.delete_message)
+        self.job_delete_mock.return_value = True
         
-        self.mock_sqs_future = self._future_wrap_mock(
-            self.sqs_patcher.start(),
-            require_async_kw=False)
-
-        self.read_patcher = patch('video_processor.video_processing_queue.'\
-                                  'VideoProcessingQueue.read_message')
-        self.mock_read_future = self._future_wrap_mock(
-            self.read_patcher.start(),
-            require_async_kw=False)
-
-        self.delete_patcher = patch('video_processor.video_processing_queue.'\
-                                    'VideoProcessingQueue.delete_message')
-        self.mock_delete_future = self._future_wrap_mock(
-            self.delete_patcher.start(),
-            require_async_kw=False)
-
-        self.mock_delete_future.return_value = True
+        self.job_read_mock = self._future_wrap_mock(
+            self.job_queue_mock.read_message)
+        self.job_message = Message()
+        self.job_read_mock.side_effect = [self.job_message, None]
+        
+        
+        self.job_hide_mock = self._future_wrap_mock(
+            self.job_queue_mock.hide_message)
        
         # create the client object
         self.video_client = video_processor.client.VideoClient(
@@ -1240,16 +1283,14 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.cloudinary_patcher.stop()
         self.model_patcher.stop()
         self.redis.stop()
-        self.sqs_patcher.stop()
-        self.read_patcher.stop()
-        self.delete_patcher.stop()
+        self.job_queue_patcher.stop()
         super(SmokeTest, self).tearDown()
 
-    @tornado.gen.coroutine
     def _run_job(self, job):
         '''Runs the job'''
-
-        with options._set_bounded('video_processor.client.dequeue_period', 0.01):
+        self.job_message.set_body(json.dumps(job))
+        with options._set_bounded('video_processor.client.dequeue_period',
+                                  0.01):
             self.video_client.start()
 
             try:
@@ -1281,24 +1322,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=10)
     def test_smoke_test(self):
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://L\xc3\xb6rick_video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
                     
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1326,6 +1359,9 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             len([x for x in thumbs if 
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
 
     @tornado.testing.gen_test(timeout=10)
     def test_reprocessing_smoke(self):
@@ -1361,24 +1397,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         video_meta.serving_url = 'my_serving_url.jpg'
         video_meta.save()
 
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
         
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1392,30 +1420,25 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertNotIn('%s_thumb1' % self.video_id, video_meta.thumbnail_ids)
         self.assertNotIn('%s_thumb2' % self.video_id, video_meta.thumbnail_ids)
         self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
         
     @tornado.testing.gen_test(timeout=10)
     def test_video_processing_error(self):
         self.video_download_mock.side_effect = [
             urllib2.URLError('Oops')]
 
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1431,28 +1454,27 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             statemon.state.get('video_processor.client.video_download_error'),
             1)
 
+        # Make sure the job was not deleted and that the message was
+        # opened up for somebody else to take a stab at it.
+        self.assertEquals(self.job_delete_mock.call_count, 0)
+        self.job_hide_mock.assert_called_with(self.job_message, 0)
+
     @patch('video_processor.client.neondata.VideoMetadata.modify')
     @tornado.testing.gen_test(timeout=10)
     def test_db_update_error(self, modify_mock):
         modify_mock.side_effect = [
             redis.ConnectionError("Connection Error"), False]
 
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-        self.mock_read_future.return_value = message
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1466,35 +1488,36 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(
             statemon.state.get('video_processor.client.save_vmdata_error'),
             1)
+        
+        # Make sure the job was not deleted and that the message was
+        # opened up for somebody else to take a stab at it.
+        self.assertEquals(self.job_delete_mock.call_count, 0)
+        self.job_hide_mock.assert_called_with(self.job_message, 0)
+        
 
     @tornado.testing.gen_test(timeout=10)
     def test_no_need_to_process(self):
         self.api_request.state = neondata.RequestState.SERVING
         self.api_request.save()
 
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
-
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+            }
+            
+        self._run_job(job)
         
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
         self.assertEquals(api_request.state,
                           neondata.RequestState.SERVING)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
     
     @tornado.testing.gen_test(timeout=10)
     def test_download_default_thumb_error(self):
@@ -1502,25 +1525,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # register it as a customer error in the database.
         self.im_download_mock.side_effect = [IOError('Cannot download')]
         
-
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1560,29 +1574,23 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             len([x for x in thumbs if 
                  x.type == neondata.ThumbnailType.CENTERFRAME]), 1)
 
-    @tornado.testing.gen_test(timeout=10)
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+
+    @tornado.testing.gen_test
     def test_unexpected_error(self):
         self.video_download_mock.side_effect = [Exception('Some bad error')]
 
-
-        message = Message()
-
-        message_body = json.dumps({
+        job = {
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
             'video_url' : 'http://video.mp4'
-            })
+            }
 
-        message.set_body(message_body)
-
-        self.mock_read_future.return_value = message
-
-        job = json.loads(message.get_body())
-
-        yield self._run_job(job)
+        self._run_job(job)
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1591,6 +1599,12 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.NOT_SENT)
 
+        
+        # Make sure the job was not deleted and that the message was
+        # opened up for somebody else to take a stab at it.
+        self.assertEquals(self.job_delete_mock.call_count, 0)
+        self.job_hide_mock.assert_called_with(self.job_message, 0)
+        
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

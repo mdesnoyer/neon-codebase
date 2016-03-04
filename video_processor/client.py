@@ -23,6 +23,7 @@ import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
+import concurrent.futures
 import cv2
 import ffvideo
 import hashlib
@@ -63,6 +64,7 @@ statemon.define('processed_video', int)
 statemon.define('processing_error', int)
 statemon.define('too_many_failures', int)
 statemon.define('dequeue_error', int)
+statemon.define('invalid_jobs', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('modify_request_error', int)
@@ -140,6 +142,7 @@ class VideoProcessor(object):
     '''
 
     retry_codes = [403, 500, 502, 503, 504]
+    CHUNK_SIZE = 4*1024*1024 # 4MB
 
     def __init__(self, params, model, model_version, cv_semaphore,
                  job_queue, job_message, reprocess=False):
@@ -189,6 +192,13 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(10)
+
+    def __del__(self):
+        # Clean up the executor
+        self.executor.shutdown(False)
+
+    @tornado.gen.coroutine
     def start(self):
         '''
         Actual work done here
@@ -196,7 +206,7 @@ class VideoProcessor(object):
         try:
             statemon.state.increment('workers_downloading')
             try:
-                self.download_video_file()
+                yield self.download_video_file()
             finally:
                 statemon.state.decrement('workers_downloading')
 
@@ -206,16 +216,18 @@ class VideoProcessor(object):
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
-                    self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
+                    yield self.process_video(self.tempfile.name,
+                                             n_thumbs=n_thumbs)
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
             #finalize response, if success send client and notification
             #response
-            self.finalize_response()
+            yield self.finalize_response()
 
             # Delete the job from the queue
-            self.job_queue.delete_message(message)
+            _log.info('Deleting on %s' % self.job_queue)
+            yield self.job_queue.delete_message(self.job_message)
 
         except OtherWorkerCompleted as e:
             statemon.state.increment('other_worker_completed')
@@ -227,7 +239,7 @@ class VideoProcessor(object):
             new_state = neondata.RequestState.CUSTOMER_ERROR
             if not isinstance(e, VideoError):
                 new_state = neondata.RequestState.INT_ERROR
-                _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
+                _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
                 
             # Flag that the job failed
             statemon.state.increment('processing_error')
@@ -240,7 +252,8 @@ class VideoProcessor(object):
                 request.state = new_state
                 request.response = cb.to_dict()
                 request.fail_count += 1
-            api_request = neondata.NeonApiRequest.modify(
+            api_request = yield tornado.gen.Task(
+                neondata.NeonApiRequest.modify,
                 self.job_params['job_id'],
                 self.job_params['api_key'],
                 _write_failure)
@@ -248,20 +261,35 @@ class VideoProcessor(object):
             # Send the callback to let the client know there was an
             # error that they might be able to fix
             if isinstance(e, VideoError):
-                api_request.send_callback()
+                yield api_request.send_callback(async=True)
 
             # Let another node pick up the job to try again
-            self.job_queue.hide_message(self.job_message, 0)
+            yield self.job_queue.hide_message(self.job_message, 0)
        
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
 
+    @tornado.concurrent.run_on_executor
+    def _urllib_read(self, response, do_throttle, chunk_time):
+        last_time = time.time()
+        data = response.read(VideoProcessor.CHUNK_SIZE)
+        while data != '':
+            if do_throttle:
+                time_spent = time.time() - last_time
+                time.sleep(max(0, chunk_time-time_spent))
+            self.tempfile.write(data)
+            self.tempfile.flush()
+            last_time = time.time()
+            data = response.read(VideoProcessor.CHUNK_SIZE)
+
+        self.tempfile.flush()
+
+    @tornado.gen.coroutine
     def download_video_file(self):
         '''
         Download the video file 
         '''
-        CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
 
         # Get the duration of the video
@@ -269,11 +297,13 @@ class VideoProcessor(object):
 
         # Find out if we should throttle
         do_throttle = False
+        chunk_time = 0.0
         frac_processing = (float(statemon.state.workers_processing) / 
                            max(statemon.state.running_workers, 1))
         if frac_processing > options.min_load_to_throttle:
             do_throttle=True
-            chunk_time = float(CHUNK_SIZE) / options.max_bandwidth_per_core
+            chunk_time = float(VideoProcessor.CHUNK_SIZE) / \
+              options.max_bandwidth_per_core
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
@@ -286,11 +316,14 @@ class VideoProcessor(object):
                     bucket_name = s3match.group(4)
                     key_name = s3match.group(5)
                     s3conn = S3Connection()
-                    bucket = s3conn.get_bucket(bucket_name)
-                    key = bucket.get_key(key_name)
-                    self._set_job_timeout(video_duration, key.size)
-                    key.get_contents_to_file(self.tempfile)
-                    self.tempfile.flush()
+                    bucket = yield self.executor.submit(
+                        s3conn.get_bucket, bucket_name)
+                    key = yield self.executor.submit(
+                        bucket.get_key, key_name)
+                    yield self._set_job_timeout(video_duration, key.size)
+                    yield self.executor.submit(
+                        key.get_contents_to_file, self.tempfile)
+                    yield self.executor.submit(self.tempfile.flush)
                     return
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
@@ -303,26 +336,18 @@ class VideoProcessor(object):
             url_parse[2] = urllib.quote(url_parse[2])
             req = urllib2.Request(urlparse.urlunparse(url_parse),
                                   headers=self.headers)
-            response = urllib2.urlopen(req, timeout=self.timeout)
+            response = yield self.executor.submit(urllib2.urlopen,
+                                                  req, timeout=self.timeout)
             try:
                 video_size = int(response.info().getheader('Content-Length',
                                                            None))
             except TypeError:
                 video_size = None
-            self._set_job_timeout(video_duration, video_size,
-                                  time_factor=(4.0 if do_throttle else 3.0))
-            last_time = time.time()
-            data = response.read(CHUNK_SIZE)
-            while data != '':
-                if do_throttle:
-                    time_spent = time.time() - last_time
-                    time.sleep(max(0, chunk_time-time_spent))
-                self.tempfile.write(data)
-                self.tempfile.flush()
-                last_time = time.time()
-                data = response.read(CHUNK_SIZE)
-
-            self.tempfile.flush()
+            yield self._set_job_timeout(
+                video_duration,
+                video_size,
+                time_factor=(4.0 if do_throttle else 3.0))
+            yield self._urllib_read(response, do_throttle, chunk_time)
 
             _log.info('Finished downloading video %s' % self.video_url)
         except urllib2.URLError as e:
@@ -357,12 +382,15 @@ class VideoProcessor(object):
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
 
+    @tornado.gen.coroutine
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
-        api_request = neondata.NeonApiRequest.get(self.job_params['job_id'],
-                                                  self.job_params['api_key'])
+        api_request = yield tornado.gen.Task(
+            neondata.NeonApiRequest.get,
+            self.job_params['job_id'],
+            self.job_params['api_key'])
         if api_request and api_request.state in [
                 neondata.RequestState.FINISHED,
                 neondata.RequestState.SERVING,
@@ -412,7 +440,8 @@ class VideoProcessor(object):
         account_id = self.job_params['api_key']
         
         try:
-            processing_strategy = neondata.ProcessingStrategy.get(account_id)
+            processing_strategy = yield tornado.gen.Task(
+                neondata.ProcessingStrategy.get, account_id)
         except Exception, e:
             _log.error(("Could not fetch processing strategy for account_id "
                         "%s: %s")%(str(account_id), e))
@@ -534,6 +563,7 @@ class VideoProcessor(object):
         statemon.state.increment('extract_frame_error')
         raise BadVideoError('Error reading frame %i of video' % frameno)
 
+    @tornado.gen.coroutine
     def finalize_response(self):
         '''
         Finalize the response after video has been processed.
@@ -561,10 +591,14 @@ class VideoProcessor(object):
             else:
                 somebody_else_finished[0] = True
         try:
-            api_request = neondata.NeonApiRequest.modify(job_id, api_key,
-                                                         _flag_for_finalize)
+            api_request = yield tornado.gen.Task(
+                neondata.NeonApiRequest.modify,
+                job_id,
+                api_key,
+                _flag_for_finalize)
             if api_request is None:
-                raise DBError('Api Request finalizing failed.It was not there')
+                raise DBError('Api Request finalizing failed. '
+                              'It was not there')
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
             statemon.state.increment('modify_request_error')
@@ -574,7 +608,8 @@ class VideoProcessor(object):
             raise OtherWorkerCompleted()
 
         # Get the CDN Metadata
-        cdn_metadata = neondata.CDNHostingMetadataList.get(
+        cdn_metadata = yield tornado.gen.Task(
+            neondata.CDNHostingMetadataList.get,
             neondata.CDNHostingMetadataList.create_key(
                 api_key,
                 self.video_metadata.integration_id))
@@ -592,11 +627,14 @@ class VideoProcessor(object):
             statemon.state.increment('no_thumbs')
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
+        
         for thumb_meta, image in self.thumbnails:
-            self.video_metadata.add_thumbnail(thumb_meta, image,
-                                              cdn_metadata=cdn_metadata,
-                                              save_objects=False)
-
+            yield self.video_metadata.add_thumbnail(
+                thumb_meta, image,
+                cdn_metadata=cdn_metadata,
+                save_objects=False,
+                async=True)
+            
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
@@ -616,7 +654,8 @@ class VideoProcessor(object):
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
         try:
-            new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
+            new_thumb_dict = yield tornado.gen.Task(
+                neondata.ThumbnailMetadata.modify_many,
                 [x[0].key for x in self.thumbnails],
                 _merge_thumbnails,
                 create_missing=True)
@@ -647,7 +686,8 @@ class VideoProcessor(object):
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
         try:
-            new_video_metadata = neondata.VideoMetadata.modify(
+            new_video_metadata = yield tornado.gen.Task(
+                neondata.VideoMetadata.modify,
                 self.video_metadata.key,
                 _merge_video_data,
                 create_missing=True)
@@ -660,12 +700,13 @@ class VideoProcessor(object):
         self.video_metadata = new_video_metadata
         try:
             # A second attempt to save the default thumb
-            api_request.save_default_thumbnail(cdn_metadata)
+            yield api_request.save_default_thumbnail(cdn_metadata, async=True)
             
             # Enable the video to be served if we have any thumbnails available
             def _set_serving_enabled(video_obj):
                 video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            new_video_metadata = neondata.VideoMetadata.modify(
+            new_video_metadata = yield tornado.gen.Task(
+                neondata.VideoMetadata.modify,
                 self.video_metadata.key,
                 _set_serving_enabled)
             # Everything is fine at this point, so lets mark it finished
@@ -688,9 +729,11 @@ class VideoProcessor(object):
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
         try:
-            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
-                                                    api_request.api_key,
-                                                    _flag_request_done_in_db)
+            sucess = yield tornado.gen.Task(
+                neondata.NeonApiRequest.modify,
+                api_request.job_id,
+                api_request.api_key,
+                _flag_request_done_in_db)
             if not sucess:
                 raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
@@ -699,7 +742,7 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send the notifications
-        self.send_notifiction_response(api_request)
+        yield self.send_notifiction_response(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -725,6 +768,7 @@ class VideoProcessor(object):
             self.video_metadata.get_serving_url(save=False))
         return cresp.to_dict()
 
+    @tornado.gen.coroutine
     def send_notifiction_response(self, api_request):
         '''
         Send Notification to endpoint
@@ -735,7 +779,8 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = neondata.NeonUserAccount.get(api_key)
+        account = yield tornado.gen.Task(
+            neondata.NeonUserAccount.get, api_key)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)
@@ -764,10 +809,11 @@ class VideoProcessor(object):
             body=urllib.urlencode(request_dict), 
             request_timeout=60.0, 
             connect_timeout=10.0)
-        response = utils.http.send_request(request)
+        response = yield utils.http.send_request(request, async=True)
         if response.error:
             _log.error("Notification response not sent to %r " % request)
 
+    @tornado.gen.coroutine
     def _set_job_timeout(self, duration=None, size=None,
                          time_factor=3.0):
         '''Set the job timeout so that this worker gets the job for this time.
@@ -786,8 +832,8 @@ class VideoProcessor(object):
             # Approximate the length of the video
             duration = size * 8.0 / 1024 / 800
 
-        self.job_queue.hide_message(self.job_message,
-                                    int(duration * time_factor))
+        yield self.job_queue.hide_message(self.job_message,
+                                          int(duration * time_factor))
 
 class VideoClient(multiprocessing.Process):
    
@@ -812,13 +858,18 @@ class VideoClient(multiprocessing.Process):
         '''
         _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-
-        message = yield self.job_queue.read_message()
-        if message:
-            result = message.get_body()
+        job_params = None
+        self.cur_message = yield self.job_queue.read_message()
+        if self.cur_message:
+            result = self.cur_message.get_body()
             _log.info(result)
             if result is not None and result != "{}":
-                job_params = tornado.escape.json_decode(result)
+                try:
+                    job_params = tornado.escape.json_decode(result)
+                except ValueError as e:
+                    _log.warning('Job body %s was not JSON' % result)
+                    statemon.state.increment('invalid_jobs')
+                    raise UninterestingJob()
                 #Change Job State
                 api_key = job_params['api_key']
                 job_id  = job_params['job_id']
@@ -850,21 +901,23 @@ class VideoClient(multiprocessing.Process):
                                (job_id, api_key))
                     statemon.state.increment('dequeue_error')
                     raise DequeueError('Could not set processing')
-                _log.info("key=worker [%s] msg=processing request %s for "
-                          "%s." % (self.pid, job_id, api_key))
                 if (api_request.fail_count > options.max_fail_count or 
                         api_request.try_count > options.max_attempt_count):
                     _log.error('Job %s for account %s has failed too many '
                               'times' % (job_id, api_key))
                     statemon.state.increment('too_many_failures')
                     raise UninterestingJob('Job failed')
+                
+                _log.info("key=worker [%s] msg=processing request %s for "
+                          "%s." % (self.pid, job_id, api_key))
             if(job_params):
+                
                 _log.debug("Dequeue Successful")
-                job_and_message = (job_params, message)
-                raise tornado.gen.Return(job_and_message)
+                raise tornado.gen.Return(job_params)
 
             _log.warning('Job body %s was uninteresting' % result)
-            raise DequeueError('Job did not have parameters')
+            statemon.state.increment('invalid_jobs')
+            raise UninterestingJob('Job did not have parameters')
         else:
             raise Queue.Empty()
 
@@ -904,7 +957,7 @@ class VideoClient(multiprocessing.Process):
     def do_work(self):   
         ''' do actual work here'''
         try:
-            job, message = yield self.dequeue_job()
+            job = yield self.dequeue_job()
 
             # TODO(mdesnoyer): Only load the model once. Right now,
             # there's a memory problem so we load the model for every
@@ -914,12 +967,12 @@ class VideoClient(multiprocessing.Process):
                                         self.model_version,
                                         self.cv_semaphore,
                                         self.job_queue,
-                                        self.message,
+                                        self.cur_message,
                                         job['reprocess'])
             statemon.state.increment('workers_processing')
 
             try:
-                vprocessor.start()
+                yield vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
             self.videos_processed += 1
@@ -933,12 +986,13 @@ class VideoClient(multiprocessing.Process):
             time.sleep(options.dequeue_period * random.random())
 
         except UninterestingJob:
-            yield self.job_queue.delete_message(message)
+            if self.cur_message:
+                yield self.job_queue.delete_message(self.cur_message)
         
-        except Exception,e:
+        except Exception as e:
             statemon.state.increment('unknown_exception')
-            _log.exception("key=worker [%s] "
-                    " msg=exception %s" %(self.pid, e.message))
+            _log.exception("Unexpected exception [%s]: %s"
+                           % (self.pid, e))
             time.sleep(options.dequeue_period * random.random())
 
     def stop(self):
