@@ -1535,28 +1535,32 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
 
         return expiry, tracker_ids, default_thumbs, directives
 
+    @tornado.testing.gen_test
     def test_s3_connection_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = socket.gaierror('Unknown name')
 
         with self.assertLogExists(logging.ERROR, 'Error connecting to S3'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_s3_bucket_missing(self):
         self.s3conn.delete_bucket('neon-image-serving-directives-test')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_s3_bucket_permission_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = boto.exception.S3PermissionsError('Ooops')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_basic_directive(self):
         # We will fill the data structures in the mastermind core
         # directly because it's too complicated to insert them using
@@ -1630,7 +1634,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                                           base_url = 'http://two_two.com',
                                           sizes=[(500,500), (160, 90)]))
 
-        self.publisher._publish_directives()
+        yield self.publisher._publish_directives()
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
@@ -1787,7 +1791,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                                           sizes=[(800,600), (240,180),
                                                  (160, 90)]))
 
-        self.publisher._publish_directives()
+        yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \
@@ -1819,6 +1823,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         job_many_mocker.stop()
         get_many_mocker.stop()
 
+    @tornado.testing.gen_test
     def test_serving_url_missing(self):
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
@@ -1849,7 +1854,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                 with self.assertLogNotExists(logging.ERROR,
                                              ('Could not find all serving '
                                               'URLs for video: acct1_vid2')):
-                    self.publisher._publish_directives()
+                    yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \
@@ -1874,6 +1879,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    @tornado.testing.gen_test
     def test_serving_url_list_empty(self):
         self.mastermind.serving_directive = {
             'acct1_vid2': (('acct1', 'acct1_vid2'), 
@@ -1893,7 +1899,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
             with self.assertLogExists(logging.WARNING,
                                       ('No valid sizes to serve for thumb '
                                        'acct1_vid2_tid21')):
-                self.publisher._publish_directives()
+                yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \

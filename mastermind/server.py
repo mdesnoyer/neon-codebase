@@ -16,6 +16,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+import concurrent.futures
 from contextlib import closing
 from cmsdb import neondata
 import cPickle as pickle
@@ -1184,6 +1185,8 @@ class DirectivePublisher(threading.Thread):
              options.publishing_period*1000.0, 
              io_loop=self.io_loop)
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(5)
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
@@ -1313,7 +1316,8 @@ class DirectivePublisher(threading.Thread):
                 # Create the connection to S3
                 s3conn = self.S3Connection()
                 try:
-                    bucket = s3conn.get_bucket(options.s3_bucket)
+                    bucket = yield self.executor.submit(s3conn.get_bucket,
+                                                        options.s3_bucket)
                 except boto.exception.BotoServerError as e:
                     _log.error('Could not get bucket %s: %s' % 
                                (options.s3_bucket, e))
@@ -1332,7 +1336,8 @@ class DirectivePublisher(threading.Thread):
                 # Write the file that is timestamped
                 key = bucket.new_key(filename)
                 gzip_file.seek(0)
-                data_size = key.set_contents_from_file(
+                data_size = yield self.executor.submit(
+                    key.set_contents_from_file,
                     gzip_file,
                     encrypt_key=True,
                     headers={'Content-Type': 'application/x-gzip'},
@@ -1340,9 +1345,11 @@ class DirectivePublisher(threading.Thread):
                 statemon.state.directive_file_size = data_size
 
                 # Copy the file to the REST endpoint
-                key.copy(bucket.name, options.directive_filename,
-                         encrypt_key=True,
-                         preserve_acl=True)
+                yield self.executor.submit(key.copy,
+                                           bucket.name,
+                                           options.directive_filename,
+                                           encrypt_key=True,
+                                           preserve_acl=True)
 
                 # Schedule updates to the database with the video request state
                 new_serving_videos = (written_video_ids - \
