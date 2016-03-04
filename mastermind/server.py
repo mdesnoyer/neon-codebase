@@ -16,6 +16,7 @@ import atexit
 from boto.s3.connection import S3Connection
 from boto.emr.connection import EmrConnection
 import boto
+import concurrent.futures
 from contextlib import closing
 from cmsdb import neondata
 import cPickle as pickle
@@ -1168,10 +1169,10 @@ class DirectivePublisher(threading.Thread):
         self.waiting_on_isp_videos = set([]) 
         
         # Counter for the number of pending modify calls to the database
-        self.pending_modifies = multiprocessing.Value('i', 0)
+        self.pending_modifies = 0
         statemon.state.pending_modifies = 0
         self._lock = multiprocessing.RLock()
-        self.modify_waiter = multiprocessing.Condition()
+        self.modify_waiter = tornado.locks.Condition()
          
         self._enable_video_lock = threading.BoundedSemaphore(20)
 
@@ -1184,6 +1185,8 @@ class DirectivePublisher(threading.Thread):
              options.publishing_period*1000.0, 
              io_loop=self.io_loop)
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(5)
+
     def __del__(self):
         if self._update_publish_timer and self._update_publish_timer.is_alive():
             self._update_publish_timer.cancel()
@@ -1191,17 +1194,15 @@ class DirectivePublisher(threading.Thread):
 
     def _incr_pending_modify(self, count):
         '''Safely increment the number of pending modifies by count.'''
-        with self._lock:
-            self.pending_modifies.value += count
+        self.pending_modifies += count
 
-        with self.modify_waiter:
-            self.modify_waiter.notify_all()
-        statemon.state.pending_modifies = self.pending_modifies.value
+        self.modify_waiter.notify_all()
+        statemon.state.pending_modifies = self.pending_modifies
 
-    def wait_for_pending_modifies(self):
-        with self.modify_waiter:
-            while self.pending_modifies.value > 0:
-                self.modify_waiter.wait()
+    @tornado.gen.coroutine
+    def wait_for_pending_modifies(self, timeout=None):
+        while self.pending_modifies > 0:
+            yield self.modify_waiter.wait(datetime.timedelta(seconds=timeout))
 
     def run(self):
         try:
@@ -1315,7 +1316,8 @@ class DirectivePublisher(threading.Thread):
                 # Create the connection to S3
                 s3conn = self.S3Connection()
                 try:
-                    bucket = s3conn.get_bucket(options.s3_bucket)
+                    bucket = yield self.executor.submit(s3conn.get_bucket,
+                                                        options.s3_bucket)
                 except boto.exception.BotoServerError as e:
                     _log.error('Could not get bucket %s: %s' % 
                                (options.s3_bucket, e))
@@ -1334,7 +1336,8 @@ class DirectivePublisher(threading.Thread):
                 # Write the file that is timestamped
                 key = bucket.new_key(filename)
                 gzip_file.seek(0)
-                data_size = key.set_contents_from_file(
+                data_size = yield self.executor.submit(
+                    key.set_contents_from_file,
                     gzip_file,
                     encrypt_key=True,
                     headers={'Content-Type': 'application/x-gzip'},
@@ -1342,9 +1345,11 @@ class DirectivePublisher(threading.Thread):
                 statemon.state.directive_file_size = data_size
 
                 # Copy the file to the REST endpoint
-                key.copy(bucket.name, options.directive_filename,
-                         encrypt_key=True,
-                         preserve_acl=True)
+                yield self.executor.submit(key.copy,
+                                           bucket.name,
+                                           options.directive_filename,
+                                           encrypt_key=True,
+                                           preserve_acl=True)
 
                 # Schedule updates to the database with the video request state
                 new_serving_videos = (written_video_ids - \
@@ -1531,7 +1536,7 @@ class DirectivePublisher(threading.Thread):
         '''
         MAX_VIDS_PER_CALL = 100
         video_ids = list(video_ids)
-        self.pending_modifies.value += len(video_ids)
+        self._incr_pending_modify(len(video_ids))
         for startI in range(0, len(video_ids), MAX_VIDS_PER_CALL):
             cur_vid_ids = video_ids[startI:(startI+MAX_VIDS_PER_CALL)]
             try:
@@ -1564,7 +1569,7 @@ class DirectivePublisher(threading.Thread):
                 self.last_published_videos = \
                   self.last_published_videos + set(cur_vid_ids)
             finally:
-                self.pending_modifies.value -= len(video_ids)
+                self._incr_pending_modify(-len(cur_vid_ids))
     
     @tornado.gen.coroutine
     def _enable_videos_in_database(self, video_ids):
@@ -1575,89 +1580,9 @@ class DirectivePublisher(threading.Thread):
         list_chunks = [video_list[i:i+1000] for i in
                        xrange(0, len(video_list), 1000)]
 
-        @tornado.gen.coroutine
-        def _handle_videos_and_requests(videos, requests): 
-            for video, request in zip(videos, requests):
-                try:
-                    if video is None: 
-                        continue 
-                    if request is None or \
-                      request.state != neondata.RequestState.FINISHED: 
-                        continue 
-    
-                    video_id = video.get_id() 
-                    start_time = time.time()
-                    if video_id in self.waiting_on_isp_videos:
-                        # we are already waiting on this video_id, do not 
-                        # start another long loop for it 
-                        continue 
-                    else: 
-                        # Now we wait until the video is serving on the isp
-                        self.waiting_on_isp_videos.add(video_id) 
-                        statemon.state.videos_waiting_on_isp = len(
-                            self.waiting_on_isp_videos)  
-                        found = True 
-                        while not video.image_available_in_isp():
-                            if (time.time() - start_time) > \
-                              options.isp_wait_timeout:
-                                statemon.state.increment(
-                                    'timeout_waiting_for_isp')
-                                _log.error(
-                                    'Timed out waiting for ISP for video %s' %
-                                     video.key)
-                                self.last_published_videos.discard(video_id)
-                                self.waiting_on_isp_videos.discard(video_id) 
-                                found = False 
-                                break
-                            time.sleep(5.0 * random.random())
-    
-                        if not found: 
-                            continue 
-    
-                    self.waiting_on_isp_videos.discard(video_id) 
-                    statemon.state.videos_waiting_on_isp = len(
-                        self.waiting_on_isp_videos)  
-                  
-                    statemon.state.isp_ready_delay = time.time() - start_time
-                    # Wait a bit so that it gets to all the ISPs
-                    time.sleep(options.serving_update_delay)
-    
-                    # Now do the database updates
-                    def _set_serving_url(x):
-                        x.serving_url = x.get_serving_url(save=False)
-                    yield neondata.VideoMetadata.modify(
-                        video_id, 
-                        _set_serving_url, 
-                        async=True)
-                    def _set_serving(x):
-                        x.state = neondata.RequestState.SERVING
-                    request = yield neondata.NeonApiRequest.modify(
-                        video.job_id,
-                        video.get_account_id(),
-                        _set_serving, 
-                        async=True)
-    
-                    # And send the callback
-                    if (request is not None and 
-                        request.callback_state == 
-                        neondata.CallbackState.NOT_SENT and 
-                        request.callback_url):
-    
-                        statemon.state.increment('pending_callbacks')
-                        self._send_callback(request)
-                
-                except Exception as e:
-                    statemon.state.increment('unexpected_db_update_error')
-                    _log.exception('Unexpected error when enabling video '
-                                   'in database %s' % e)
-
-                    self.last_published_videos.discard(video_id)
-    
-                    continue 
-
         for video_ids in list_chunks:
             try: 
-                self.pending_modifies.value += len(video_ids) 
+                self._incr_pending_modify(len(video_ids))
                 videos = yield neondata.VideoMetadata.get_many(
                              video_ids, 
                              async=True) 
@@ -1668,17 +1593,103 @@ class DirectivePublisher(threading.Thread):
                                job_ids, 
                                async=True) 
 
-                yield _handle_videos_and_requests(videos, requests)
+                yield self._enable_video_chunk(videos, requests)
   
             finally:
-                self.pending_modifies.value -= len(video_ids) 
+                self._incr_pending_modify(-len(video_ids))
 
+    @tornado.gen.coroutine
+    def _enable_video_chunk(self, videos, requests): 
+        for video, request in zip(videos, requests):
+            try:
+                if video is None: 
+                    continue 
+                if request is None or \
+                  request.state != neondata.RequestState.FINISHED: 
+                    continue 
+
+                video_id = video.get_id() 
+                start_time = time.time()
+                if video_id in self.waiting_on_isp_videos:
+                    # we are already waiting on this video_id, do not 
+                    # start another long loop for it 
+                    continue 
+                else: 
+                    # Now we wait until the video is serving on the isp
+                    self.waiting_on_isp_videos.add(video_id) 
+                    statemon.state.videos_waiting_on_isp = len(
+                        self.waiting_on_isp_videos)  
+                    found = True 
+                    image_available = yield video.image_available_in_isp(
+                        async=True)
+                    while not image_available:
+                        if (time.time() - start_time) > \
+                          options.isp_wait_timeout:
+                            statemon.state.increment(
+                                'timeout_waiting_for_isp')
+                            _log.error(
+                                'Timed out waiting for ISP for video %s' %
+                                 video.key)
+                            self.last_published_videos.discard(video_id)
+                            self.waiting_on_isp_videos.discard(video_id) 
+                            found = False 
+                            break
+                        yield tornado.gen.sleep(5.0 * random.random())
+                        image_available = yield video.image_available_in_isp(
+                            async=True)
+
+                    if not found: 
+                        continue 
+
+                self.waiting_on_isp_videos.discard(video_id) 
+                statemon.state.videos_waiting_on_isp = len(
+                    self.waiting_on_isp_videos)  
+
+                statemon.state.isp_ready_delay = time.time() - start_time
+                # Wait a bit so that it gets to all the ISPs
+                yield tornado.gen.sleep(options.serving_update_delay)
+
+                # Now do the database updates
+                def _set_serving_url(x):
+                    x.serving_url = x.get_serving_url(save=False)
+                yield neondata.VideoMetadata.modify(
+                    video_id, 
+                    _set_serving_url, 
+                    async=True)
+                def _set_serving(x):
+                    x.state = neondata.RequestState.SERVING
+                request = yield neondata.NeonApiRequest.modify(
+                    video.job_id,
+                    video.get_account_id(),
+                    _set_serving, 
+                    async=True)
+
+                # And send the callback
+                if (request is not None and 
+                    request.callback_state == 
+                    neondata.CallbackState.NOT_SENT and 
+                    request.callback_url):
+
+                    statemon.state.increment('pending_callbacks')
+                    yield self._send_callback(request)
+
+            except Exception as e:
+                statemon.state.increment('unexpected_db_update_error')
+                _log.exception('Unexpected error when enabling video '
+                               'in database %s' % e)
+
+                self.last_published_videos.discard(video_id)
+
+                continue 
+
+    @tornado.gen.coroutine
     def _send_callback(self, request):
         '''Send the callback for a given video request.'''
         try:
             # Do really slow retries on the callback request because
             # often, the customer's system won't be ready for it.
-            request.send_callback(send_kwargs=dict(base_delay=120.0))
+            yield request.send_callback(send_kwargs=dict(base_delay=120.0),
+                                        async=True)
         except Exception as e:
             _log.warn('Unexpected error when sending a customer callback: %s'
                       % e)

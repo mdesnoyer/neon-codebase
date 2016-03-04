@@ -824,9 +824,12 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
         self.acct.serving_enabled = False 
         yield self.acct.save(async=True)  
-        yield self.assertWaitForEquals(lambda: 'key1' in self.watcher._account_subscribers, False, async=True)
-        yield self.assertWaitForEquals(lambda: len([x for x in self.mastermind.get_directives()]),
-                          0, async=True)
+        yield self.assertWaitForEquals(
+            lambda: 'key1' in self.watcher._account_subscribers, 
+            False, async=True)
+        yield self.assertWaitForEquals(
+            lambda: len([x for x in self.mastermind.get_directives()]),
+            0, async=True)
 
     @tornado.testing.gen_test 
     def test_add_new_video(self):
@@ -843,7 +846,8 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
         yield vid.save(async=True)
 
         yield neondata.BrightcovePlatform.modify(
-            'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), async=True)
+            'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), 
+            async=True)
         yield self.assertWaitForEquals(lambda: 
             len([x for x in self.mastermind.get_directives()]), 
               2, 
@@ -1531,28 +1535,32 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
 
         return expiry, tracker_ids, default_thumbs, directives
 
+    @tornado.testing.gen_test
     def test_s3_connection_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = socket.gaierror('Unknown name')
 
         with self.assertLogExists(logging.ERROR, 'Error connecting to S3'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_s3_bucket_missing(self):
         self.s3conn.delete_bucket('neon-image-serving-directives-test')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_s3_bucket_permission_error(self):
         bucket_mock = MagicMock()
         self.s3conn.get_bucket = bucket_mock
         bucket_mock.side_effect = boto.exception.S3PermissionsError('Ooops')
 
         with self.assertLogExists(logging.ERROR, 'Could not get bucket'):
-            self.publisher._publish_directives()
+            yield self.publisher._publish_directives()
 
+    @tornado.testing.gen_test
     def test_basic_directive(self):
         # We will fill the data structures in the mastermind core
         # directly because it's too complicated to insert them using
@@ -1626,7 +1634,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                                           base_url = 'http://two_two.com',
                                           sizes=[(500,500), (160, 90)]))
 
-        self.publisher._publish_directives()
+        yield self.publisher._publish_directives()
 
         # Make sure that there are two directive files, one is the
         # REST endpoint and the second is a timestamped one.
@@ -1783,7 +1791,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                                           sizes=[(800,600), (240,180),
                                                  (160, 90)]))
 
-        self.publisher._publish_directives()
+        yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \
@@ -1815,6 +1823,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
         job_many_mocker.stop()
         get_many_mocker.stop()
 
+    @tornado.testing.gen_test
     def test_serving_url_missing(self):
         self.mastermind.serving_directive = {
             'acct1_vid1': (('acct1', 'acct1_vid1'), 
@@ -1845,7 +1854,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
                 with self.assertLogNotExists(logging.ERROR,
                                              ('Could not find all serving '
                                               'URLs for video: acct1_vid2')):
-                    self.publisher._publish_directives()
+                    yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \
@@ -1870,6 +1879,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
             },
             directives[('acct1', 'acct1_vid2')])
 
+    @tornado.testing.gen_test
     def test_serving_url_list_empty(self):
         self.mastermind.serving_directive = {
             'acct1_vid2': (('acct1', 'acct1_vid2'), 
@@ -1889,7 +1899,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
             with self.assertLogExists(logging.WARNING,
                                       ('No valid sizes to serve for thumb '
                                        'acct1_vid2_tid21')):
-                self.publisher._publish_directives()
+                yield self.publisher._publish_directives()
 
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         expiry, tracker_ids, default_thumbs, directives = \
@@ -2002,7 +2012,9 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         super(TestPublisherStatusUpdatesInDB, self).tearDown()
 
     def _wait_for_db_updates(self):
-        self.publisher.wait_for_pending_modifies()
+        self.io_loop.add_future(self.publisher.wait_for_pending_modifies(5),
+                                lambda x: self.io_loop.stop())
+        self.io_loop.start()
 
     @tornado.testing.gen_test
     def test_update_request_state_add_and_remove_video(self):
@@ -2190,6 +2202,25 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
             True, async=True)
 
         self.assertIn('acct1_vid1', self.publisher.last_published_videos)
+
+    @tornado.testing.gen_test
+    def test_callback_not_blocking(self):
+        cb_wait = tornado.locks.Event()
+        cb_done = tornado.locks.Event()
+        @tornado.gen.coroutine
+        def wait_for_event(x, **kwargs):
+            yield cb_wait.wait()
+            cb_done.set()
+            raise tornado.gen.Return(tornado.httpclient.HTTPResponse(x, 200))
+        self.callback_mock.side_effect = wait_for_event
+
+        yield self.publisher._publish_directives()
+        
+        cb_wait.set()
+        yield cb_done.wait()
+
+        self.assertTrue(self.callback_mock.called)
+        
     
     @tornado.testing.gen_test
     def test_isp_timeout(self):
@@ -2638,7 +2669,7 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         time.sleep(1) # Make sure that the directive publisher gets busy
         self.activity_watcher.wait_for_idle()
 
-        self.directive_publisher.wait_for_pending_modifies()
+        yield self.directive_publisher.wait_for_pending_modifies(5.0)
         # See if there is anything in S3 (which there should be)
         bucket = self.s3conn.get_bucket('neon-image-serving-directives-test')
         data = bucket.get_key('mastermind').get_contents_as_string()

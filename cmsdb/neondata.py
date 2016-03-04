@@ -194,23 +194,6 @@ def _object_to_classname(otype=None):
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
 
-def retry(num_of_tries, 
-          exceptions=(Exception), 
-          sleep_time=0.5, 
-          retry_message='Retrying call'):
-    def wrap(func): 
-       def wrapped_func(*args):
-            for i in range(int(num_of_tries)):
-                try: 
-                    return func(*args)
-                except Exception as e: 
-                    if sleep_time is not None: 
-                        time.sleep(sleep_time) 
-                    _log.error('%s : attempt=%i : exception=%s' % 
-                               (retry_message, int(i), e))
-       return wrapped_func 
-    return wrap 
-
 class PostgresDB(tornado.web.RequestHandler): 
     '''A DB singleton class for postgres. Manages 
        connections and pools that are currently 
