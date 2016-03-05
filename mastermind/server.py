@@ -236,16 +236,15 @@ class ChangeSubscriber(threading.Thread):
     def subscribe_to_db_changes(self):
         '''Subscribe to all the changes we care about in the database.'''
         def _update_serving_url(key, obj, op):
-            if op == 'del' or op == 'DELETE':
+            if op == 'DELETE':
                 try:
                     # we rely on get_id on the object, but on delete 
                     # the object isn't there, and we have to pass key 
-                    if options.get('cmsdb.neondata.wants_postgres'):
-                        key = key.replace('thumbnailservingurls_', '')  
+                    key = key.replace('thumbnailservingurls_', '')  
                     self.video_db_watcher.directive_pusher.del_serving_urls(key)
                 except KeyError:
                     pass
-            elif op == 'set' or op == 'INSERT' or op == 'UPDATE':
+            elif op == 'INSERT' or op == 'UPDATE':
                 if self.video_db_watcher.mastermind.is_serving_video(
                         self.video_db_watcher.video_id_cache.find_video_id(key)):
                     self.video_db_watcher.directive_pusher.add_serving_urls(key, obj)
