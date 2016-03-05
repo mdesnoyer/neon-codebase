@@ -1577,8 +1577,9 @@ class DirectivePublisher(threading.Thread):
         callback if necessary.
         '''
         video_list = list(video_ids)
-        list_chunks = [video_list[i:i+1000] for i in
-                       xrange(0, len(video_list), 1000)]
+        CHUNK_SIZE=500
+        list_chunks = [video_list[i:i+CHUNK_SIZE] for i in
+                       xrange(0, len(video_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
             self._incr_pending_modify(len(video_ids))
@@ -1592,20 +1593,22 @@ class DirectivePublisher(threading.Thread):
                            job_ids,
                            async=True)
  
-            for video, request in zip(videos, requests): 
+            for video, request in zip(videos, requests):
+                if video is None or \
+                   request is None or \
+                   request.state != neondata.RequestState.FINISHED: 
+                    self._incr_pending_modify(-1)
+                    continue 
                 tornado.ioloop.IOLoop.current().spawn_callback( 
                     functools.partial(self._enable_video_and_request, 
                         video, request))
+                        
+            # Throttle the callback spawning
+            yield tornado.gen.sleep(5.0)
   
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
         try:
-            if video is None: 
-                return 
-            if request is None or \
-              request.state != neondata.RequestState.FINISHED: 
-                return 
-
             video_id = video.get_id() 
             start_time = time.time()
             if video_id in self.waiting_on_isp_videos:
@@ -1677,8 +1680,7 @@ class DirectivePublisher(threading.Thread):
                            'in database %s' % e)
 
             self.last_published_videos.discard(video_id)
-
-            return
+            self.waiting_on_isp_videos.add(video_id)
 
         finally:  
             self._incr_pending_modify(-1)
