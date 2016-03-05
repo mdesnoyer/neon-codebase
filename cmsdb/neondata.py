@@ -349,7 +349,7 @@ class PostgresDB(tornado.web.RequestHandler):
                         pool = _get_momoko_pool() 
                     _log.error('Retrying PG Pool connection : attempt=%d : %s' % 
                                (int(i+1), e))
-                    sleepy_time = (1 << (i+1)) * 0.1 
+                    sleepy_time = (1 << (i+1)) * 0.2 * random.random()
                     yield tornado.gen.sleep(sleepy_time)
 
             if pool_connection: 
