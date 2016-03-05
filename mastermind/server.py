@@ -1677,8 +1677,7 @@ class DirectivePublisher(threading.Thread):
                            'in database %s' % e)
 
             self.last_published_videos.discard(video_id)
-
-            return
+            self.waiting_on_isp_videos(video_id)
 
         finally:  
             self._incr_pending_modify(-1)
