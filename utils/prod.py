@@ -7,6 +7,7 @@ Date: Nov 2015
 Copyright 2015 Neon Labs Inc.
 '''
 import boto.opsworks
+import boto.rds
 
 import logging
 _log = logging.getLogger(__name__)
@@ -46,3 +47,13 @@ def find_host_private_address(hostname, stack_name=None,
             except KeyError:
                 pass
     raise ValueError('Could not find host %s' % hostname)
+
+def find_rds_host(id):
+    '''Returns the (host, port) of the rds instance referenced by id.'''
+    conn = boto.rds.RDSConnection()
+
+    for instance in conn.get_all_dbinstances():
+        if instance.id == id:
+            return instance.endpoint
+
+    raise ValueError('Could not find RDS database %s' % id)

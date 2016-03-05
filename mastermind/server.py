@@ -1581,106 +1581,107 @@ class DirectivePublisher(threading.Thread):
                        xrange(0, len(video_list), 1000)]
 
         for video_ids in list_chunks:
-            try: 
-                self._incr_pending_modify(len(video_ids))
-                videos = yield neondata.VideoMetadata.get_many(
-                             video_ids, 
-                             async=True) 
-                job_ids = [(v.job_id, v.get_account_id()) 
-                              if v is not None else (None, None) 
-                              for v in videos]
-                requests = yield neondata.NeonApiRequest.get_many(
-                               job_ids, 
-                               async=True) 
-
-                yield self._enable_video_chunk(videos, requests)
+            self._incr_pending_modify(len(video_ids))
+            videos = yield neondata.VideoMetadata.get_many(
+                         video_ids, 
+                         async=True) 
+            videos = [x for x in videos if x]
+            job_ids = [(v.job_id, v.get_account_id())  
+                          for v in videos]
+            requests = yield neondata.NeonApiRequest.get_many(
+                           job_ids,
+                           async=True)
+ 
+            for video, request in zip(videos, requests): 
+                tornado.ioloop.IOLoop.current().spawn_callback( 
+                    functools.partial(self._enable_video_and_request, 
+                        video, request))
   
-            finally:
-                self._incr_pending_modify(-len(video_ids))
-
     @tornado.gen.coroutine
-    def _enable_video_chunk(self, videos, requests): 
-        for video, request in zip(videos, requests):
-            try:
-                if video is None: 
-                    continue 
-                if request is None or \
-                  request.state != neondata.RequestState.FINISHED: 
-                    continue 
+    def _enable_video_and_request(self, video, request): 
+        try:
+            if video is None: 
+                return 
+            if request is None or \
+              request.state != neondata.RequestState.FINISHED: 
+                return 
 
-                video_id = video.get_id() 
-                start_time = time.time()
-                if video_id in self.waiting_on_isp_videos:
-                    # we are already waiting on this video_id, do not 
-                    # start another long loop for it 
-                    continue 
-                else: 
-                    # Now we wait until the video is serving on the isp
-                    self.waiting_on_isp_videos.add(video_id) 
-                    statemon.state.videos_waiting_on_isp = len(
-                        self.waiting_on_isp_videos)  
-                    found = True 
-                    image_available = yield video.image_available_in_isp(
-                        async=True)
-                    while not image_available:
-                        if (time.time() - start_time) > \
-                          options.isp_wait_timeout:
-                            statemon.state.increment(
-                                'timeout_waiting_for_isp')
-                            _log.error(
-                                'Timed out waiting for ISP for video %s' %
-                                 video.key)
-                            self.last_published_videos.discard(video_id)
-                            self.waiting_on_isp_videos.discard(video_id) 
-                            found = False 
-                            break
-                        yield tornado.gen.sleep(5.0 * random.random())
-                        image_available = yield video.image_available_in_isp(
-                            async=True)
-
-                    if not found: 
-                        continue 
-
-                self.waiting_on_isp_videos.discard(video_id) 
+            video_id = video.get_id() 
+            start_time = time.time()
+            if video_id in self.waiting_on_isp_videos:
+                # we are already waiting on this video_id, do not 
+                # start another long loop for it 
+                return
+            else: 
+                # Now we wait until the video is serving on the isp
+                self.waiting_on_isp_videos.add(video_id) 
                 statemon.state.videos_waiting_on_isp = len(
                     self.waiting_on_isp_videos)  
-
-                statemon.state.isp_ready_delay = time.time() - start_time
-                # Wait a bit so that it gets to all the ISPs
-                yield tornado.gen.sleep(options.serving_update_delay)
-
-                # Now do the database updates
-                def _set_serving_url(x):
-                    x.serving_url = x.get_serving_url(save=False)
-                yield neondata.VideoMetadata.modify(
-                    video_id, 
-                    _set_serving_url, 
+                found = True 
+                image_available = yield video.image_available_in_isp(
                     async=True)
-                def _set_serving(x):
-                    x.state = neondata.RequestState.SERVING
-                request = yield neondata.NeonApiRequest.modify(
-                    video.job_id,
-                    video.get_account_id(),
-                    _set_serving, 
-                    async=True)
+                while not image_available:
+                    if (time.time() - start_time) > \
+                      options.isp_wait_timeout:
+                        statemon.state.increment(
+                            'timeout_waiting_for_isp')
+                        _log.error(
+                            'Timed out waiting for ISP for video %s' %
+                             video.key)
+                        self.last_published_videos.discard(video_id)
+                        self.waiting_on_isp_videos.discard(video_id) 
+                        found = False 
+                        break
+                    yield tornado.gen.sleep(5.0 * random.random())
+                    image_available = yield video.image_available_in_isp(
+                        async=True)
 
-                # And send the callback
-                if (request is not None and 
-                    request.callback_state == 
-                    neondata.CallbackState.NOT_SENT and 
-                    request.callback_url):
+                if not found: 
+                    return
 
-                    statemon.state.increment('pending_callbacks')
-                    yield self._send_callback(request)
+            self.waiting_on_isp_videos.discard(video_id) 
+            statemon.state.videos_waiting_on_isp = len(
+                self.waiting_on_isp_videos)  
 
-            except Exception as e:
-                statemon.state.increment('unexpected_db_update_error')
-                _log.exception('Unexpected error when enabling video '
-                               'in database %s' % e)
+            statemon.state.isp_ready_delay = time.time() - start_time
+            # Wait a bit so that it gets to all the ISPs
+            yield tornado.gen.sleep(options.serving_update_delay)
 
-                self.last_published_videos.discard(video_id)
+            # Now do the database updates
+            def _set_serving_url(x):
+                x.serving_url = x.get_serving_url(save=False)
+            yield neondata.VideoMetadata.modify(
+                video_id, 
+                _set_serving_url, 
+                async=True)
+            def _set_serving(x):
+                x.state = neondata.RequestState.SERVING
+            request = yield neondata.NeonApiRequest.modify(
+                video.job_id,
+                video.get_account_id(),
+                _set_serving, 
+                async=True)
 
-                continue 
+            # And send the callback
+            if (request is not None and 
+                request.callback_state == 
+                neondata.CallbackState.NOT_SENT and 
+                request.callback_url):
+
+                statemon.state.increment('pending_callbacks')
+                yield self._send_callback(request)
+
+        except Exception as e:
+            statemon.state.increment('unexpected_db_update_error')
+            _log.exception('Unexpected error when enabling video '
+                           'in database %s' % e)
+
+            self.last_published_videos.discard(video_id)
+
+            return
+
+        finally:  
+            self._incr_pending_modify(-1)
 
     @tornado.gen.coroutine
     def _send_callback(self, request):
