@@ -1581,26 +1581,22 @@ class DirectivePublisher(threading.Thread):
                        xrange(0, len(video_list), 1000)]
 
         for video_ids in list_chunks:
-            try: 
-                self._incr_pending_modify(len(video_ids))
-                videos = yield neondata.VideoMetadata.get_many(
-                             video_ids, 
-                             async=True) 
-                job_ids = [(v.job_id, v.get_account_id()) 
-                              if v is not None else (None, None) 
-                              for v in videos]
-                requests = yield neondata.NeonApiRequest.get_many(
-                               job_ids, 
-                               async=True)
+            self._incr_pending_modify(len(video_ids))
+            videos = yield neondata.VideoMetadata.get_many(
+                         video_ids, 
+                         async=True) 
+            videos = [x for x in videos if x]
+            job_ids = [(v.job_id, v.get_account_id())  
+                          for v in videos]
+            requests = yield neondata.NeonApiRequest.get_many(
+                           job_ids,
+                           async=True)
  
-                for video, request in zip(videos, requests): 
-                    tornado.ioloop.IOLoop.current().spawn_callback( 
-                        functools.partial(self._enable_video_and_request, 
-                            video, request))
+            for video, request in zip(videos, requests): 
+                tornado.ioloop.IOLoop.current().spawn_callback( 
+                    functools.partial(self._enable_video_and_request, 
+                        video, request))
   
-            finally:
-                self._incr_pending_modify(-len(video_ids))
-
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
         try:
@@ -1682,7 +1678,10 @@ class DirectivePublisher(threading.Thread):
 
             self.last_published_videos.discard(video_id)
 
-            return 
+            return
+
+        finally:  
+            self._incr_pending_modify(-1)
 
     @tornado.gen.coroutine
     def _send_callback(self, request):
