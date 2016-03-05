@@ -337,6 +337,7 @@ class PostgresDB(tornado.web.RequestHandler):
 
             pool = _get_momoko_pool() 
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            pool_connection = None
             for i in range(int(num_of_tries)):
                 try: 
                     pool_connection = yield pool.connect()
