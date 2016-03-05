@@ -1593,7 +1593,12 @@ class DirectivePublisher(threading.Thread):
                            job_ids,
                            async=True)
  
-            for video, request in zip(videos, requests): 
+            for video, request in zip(videos, requests):
+                if video is None or \
+                   request is None or \
+                   request.state != neondata.RequestState.FINISHED: 
+                    self._incr_pending_modify(-1)
+                    continue 
                 tornado.ioloop.IOLoop.current().spawn_callback( 
                     functools.partial(self._enable_video_and_request, 
                         video, request))
@@ -1604,12 +1609,6 @@ class DirectivePublisher(threading.Thread):
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
         try:
-            if video is None: 
-                return 
-            if request is None or \
-              request.state != neondata.RequestState.FINISHED: 
-                return 
-
             video_id = video.get_id() 
             start_time = time.time()
             if video_id in self.waiting_on_isp_videos:
@@ -1681,7 +1680,7 @@ class DirectivePublisher(threading.Thread):
                            'in database %s' % e)
 
             self.last_published_videos.discard(video_id)
-            self.waiting_on_isp_videos(video_id)
+            self.waiting_on_isp_videos.add(video_id)
 
         finally:  
             self._incr_pending_modify(-1)
