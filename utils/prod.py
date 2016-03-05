@@ -50,7 +50,7 @@ def find_host_private_address(hostname, stack_name=None,
 
 def find_rds_host(id):
     '''Returns the (host, port) of the rds instance referenced by id.'''
-    conn = boto.rds.Connection()
+    conn = boto.rds.RDSConnection()
 
     for instance in conn.get_all_dbinstances():
         if instance.id == id:
