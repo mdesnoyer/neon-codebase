@@ -92,8 +92,9 @@ class OVPIntegration(object):
                 try: 
                     job_id = yield self.submit_one_video_object(video, 
                                                                 grab_new_thumb=grab_new_thumb)
-                except TypeError: 
-                    _log.warning('Can not process this video due to %s' % e) 
+                except TypeError as e: 
+                    _log.warning('Can not process video : %s due to : %s' % 
+                        (video, e))
                     continue 
  
                 if job_id: 
