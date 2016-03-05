@@ -1577,8 +1577,9 @@ class DirectivePublisher(threading.Thread):
         callback if necessary.
         '''
         video_list = list(video_ids)
-        list_chunks = [video_list[i:i+1000] for i in
-                       xrange(0, len(video_list), 1000)]
+        CHUNK_SIZE=500
+        list_chunks = [video_list[i:i+CHUNK_SIZE] for i in
+                       xrange(0, len(video_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
             self._incr_pending_modify(len(video_ids))
@@ -1596,6 +1597,9 @@ class DirectivePublisher(threading.Thread):
                 tornado.ioloop.IOLoop.current().spawn_callback( 
                     functools.partial(self._enable_video_and_request, 
                         video, request))
+                        
+            # Throttle the callback spawning
+            yield tornado.gen.sleep(5.0)
   
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
