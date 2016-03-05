@@ -68,6 +68,7 @@ statemon.define('jobs_created', int)
 statemon.define('incorrect_callback', int)
 statemon.define('no_callback', int)
 statemon.define('result_submission_error', int)
+statemon.define('results_sent', int)
 
 import logging
 _log = logging.getLogger(__name__)
@@ -135,7 +136,8 @@ class BenchmarkVideoJobResult:
             _log.error('Error submitting job information: %s' %
                        response.error)
             statemon.state.increment('result_submission_error')
-
+        else:
+            statemon.state.increment('results_sent')
 class JobManager(object):
     def __init__(self, cb_collector):
         self.cb_collector = cb_collector
@@ -186,7 +188,6 @@ class JobManager(object):
             # Logging already done
             self.result.error_type = e.__class__.__name__
             self.result.error_msg = e.msg
-            pass
         except Exception as e:
             _log.exception('Exception when monitoring')
             statemon.state.unexpected_exception_thrown = 1
