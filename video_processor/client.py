@@ -33,9 +33,11 @@ import multiprocessing
 import numpy as np 
 from PIL import Image
 import psutil
+import pytube
 import Queue
 import random
 import re
+import shutil 
 import signal
 import socket
 import tempfile
@@ -83,6 +85,8 @@ statemon.define('other_worker_completed', int)
 statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
+statemon.define('youtube_video_download_error', int) 
+statemon.define('youtube_video_not_found', int) 
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -246,6 +250,7 @@ class VideoProcessor(object):
         '''
         CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
+        ytre = re.compile('(https?:\/\/[A-Za-z]*\.youtu.*be\..+\/watch\?).*(v=.+)') 
 
         # Find out if we should throttle
         do_throttle = False
@@ -275,7 +280,43 @@ class VideoProcessor(object):
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
-            
+
+            ytmatch = ytre.search(self.video_url) 
+            if ytmatch:
+                import pdb; pdb.set_trace() 
+                watch_portion = ytmatch.group(1) 
+                video_portion = ytmatch.group(2) 
+                youtube = pytube.YouTube('%s%s' % 
+                    (watch_portion, video_portion))
+                videos = youtube.filter('mp4')
+                found_video = None 
+                for v in videos:
+                    # they are ordered by resolution ASC, keep
+                    # and replace as we find a better reso up 
+                    # to 720p 
+                    if (v.resolution == '720p' or
+                       v.resolution == '480p' or 
+                       v.resolution == '360p'): 
+                        found_video = v 
+                try:
+                    if found_video:  
+                        #found_video.download(options.video_temp_dir) 
+                        def _move_file(path):
+                            shutil.move(path, self.tempfile.name)  
+                        found_video.download(os.path.dirname(
+                            self.tempfile.name), on_finish=_move_file) 
+                        self.tempfile.flush()  
+                    else: 
+                        _log.warning('Could not find a \
+                                      downloadable YouTube video') 
+                        statemon.state.increment('youtube_video_not_found') 
+                except Exception as e:
+                    _log.error('Unexpected Error downloading \
+                                YouTube content : %s' % e) 
+                    statemon.state.increment('youtube_video_download_error')
+                finally: 
+                    return
+ 
             # Use urllib2
             url_parse = urlparse.urlparse(self.video_url)
             url_parse = list(url_parse)
@@ -685,7 +726,7 @@ class VideoProcessor(object):
 
         '''
 
-        frames = [x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails
             if x[0].type == neondata.ThumbnailType.NEON]
         fnos = frames[:self.n_thumbs]
         thumbs = [x[0].key for x in self.thumbnails 
