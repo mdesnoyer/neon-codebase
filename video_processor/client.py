@@ -300,7 +300,6 @@ class VideoProcessor(object):
                         found_video = v 
                 try:
                     if found_video:  
-                        #found_video.download(options.video_temp_dir) 
                         def _move_file(path):
                             shutil.move(path, self.tempfile.name)  
                         found_video.download(os.path.dirname(

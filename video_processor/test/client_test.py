@@ -260,9 +260,10 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
      
-    @patch('video_processor.client.pytube')
+    @patch('video_processor.client.urllib2.urlopen')
     def test_download_youtube_video(self, models_mock):
         #models_mock = video_processor.client.pytube
+        models_mock.side_effect = [ ['blah'] ] 
         youtube_mock = video_processor.client.pytube.YouTube
         #youtube_mock.filter = MagicMock(return_value=[])
         vdata = '%030x' % random.randrange(16**(10*1024*1024))
