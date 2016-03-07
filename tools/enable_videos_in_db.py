@@ -17,6 +17,7 @@ import tornado.ioloop
 import utils.http
 import utils.neon
 
+_log = logging.getLogger(__name__)
 from utils.options import define, options
 '''
 define('api_key', default=None, help='api key of the account to backfill')
