@@ -25,16 +25,11 @@ define('api_key', default=None, help='api key of the account to backfill')
 class Enabler(object):
     def __init__(self): 
         self.waiting_on_isp_videos = set([]) 
-        self.enable_video_checker = utils.sync.PeriodicCoroutineTimer(
-            self.enable_videos_in_database,
-            300. * 1000.)
 
-    def start(self): 
-        self.enable_video_checker.start() 
+    def start(self):
+        tornado.ioloop.IOLoop.current().add_callback(
+            self.enable_videos_in_database) 
     
-    def stop(self): 
-        self.enable_video_checker.stop()
-
     @tornado.gen.coroutine
     def enable_videos_in_database(self):
         '''Flags a video as being updated in the database and sends a
@@ -179,7 +174,6 @@ def main():
      enabler = Enabler() 
      enabler.start() 
      atexit.register(ioloop.stop)
-     atexit.register(enabler.stop)
      ioloop.start()
 
 if __name__ == "__main__": 
