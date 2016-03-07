@@ -2877,9 +2877,9 @@ class TestPGAddingImageData(TestAddingImageData):
         cls.postgresql.stop()
         super(TestPGAddingImageData, cls).tearDownClass()
 
-class TestPostgresDB(test_utils.neontest.AsyncTestCase):
+class TestPostgresDBConnections(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
-        super(TestPostgresDB, self).setUp()
+        super(TestPostgresDBConnections, self).setUp()
         # do this in setup because its tough to shutdown, and restart 
         # from tests otherwise, this should be the only place where 
         # this is done, as the operation is slow. 
@@ -2888,16 +2888,9 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         self.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     def tearDown(self): 
-        super(TestPostgresDB, self).tearDown()
+        super(TestPostgresDBConnections, self).tearDown()
         options._set('cmsdb.neondata.wants_postgres', 0)
         self.postgresql.stop()
-    
-    @tornado.testing.gen_test 
-    def test_singletoness(self): 
-        pg1 = neondata.PostgresDB() 
-        pg2 = neondata.PostgresDB() 
-
-        self.assertEquals(id(pg1), id(pg2))
     
     @tornado.testing.gen_test(timeout=20.0) 
     def test_retry_connection_fails(self): 
@@ -2962,6 +2955,78 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
         conn = yield pg.get_connection() 
         self.assertEquals(len(pg.io_loop_dict), 1)
         options._set('cmsdb.neondata.max_io_loop_dict_size', old_io_loop_size)
+
+class TestPostgresDB(test_utils.neontest.AsyncTestCase):
+    def setUp(self): 
+        super(TestPostgresDB, self).setUp()
+    def tearDown(self): 
+        neondata.PostgresDB.instance = None
+        super(TestPostgresDB, self).tearDown()
+    
+    @classmethod
+    def setUpClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_singletoness(self): 
+        pg1 = neondata.PostgresDB() 
+        pg2 = neondata.PostgresDB() 
+
+        self.assertEquals(id(pg1), id(pg2))
+
+    @tornado.testing.gen_test
+    def test_pool_connections(self):
+        pg = neondata.PostgresDB()
+        conn = yield pg.get_connection()
+        conn = yield pg.get_connection()
+        conn = yield pg.get_connection()
+        conn = yield pg.get_connection()
+        # pool size should be 1 all from same ioloop
+        self.assertEquals(1, len(pg.io_loop_dict))
+
+    @tornado.testing.gen_test
+    def test_pool_momoko_connections(self):
+        pg = neondata.PostgresDB()
+        conn1 = yield pg.get_connection()
+        conn2 = yield pg.get_connection()
+        conn3 = yield pg.get_connection()
+        conn4 = yield pg.get_connection()
+        pool = pg.io_loop_dict[tornado.ioloop.IOLoop.current()]['pool']
+        self.assertEquals(len(pool.conns.free), 0)
+        # first conn won't be in the pool should be 3 
+        self.assertEquals(len(pool.conns.busy), 3)
+        pg.return_connection(conn2) 
+        self.assertEquals(len(pool.conns.busy), 2) 
+        self.assertEquals(len(pool.conns.free), 1)
+        pg.return_connection(conn3) 
+        self.assertEquals(len(pool.conns.busy), 1) 
+        self.assertEquals(len(pool.conns.free), 2)
+        pg.return_connection(conn4) 
+        self.assertEquals(len(pool.conns.busy), 0) 
+        self.assertEquals(len(pool.conns.free), 3)
+
+    @tornado.testing.gen_test(timeout=4.0)
+    def test_pool_momoko_going_dead(self):
+        pg = neondata.PostgresDB()
+        conn1 = yield pg.get_connection()
+        conn2 = yield pg.get_connection()
+        pool = pg.io_loop_dict[tornado.ioloop.IOLoop.current()]['pool']
+        pool.conns.dead.add(conn2)
+        self.assertEquals(len(pool.conns.dead), 1) 
+        conn3 = yield pg.get_connection()
+        # this would previously hang, and die out because momoko would 
+        # not return a connection
+        conn3 = yield pg.get_connection()
+        
+        self.assertEquals(len(pool.conns.dead), 0) 
 
 class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     def setUp(self): 
