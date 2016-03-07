@@ -206,8 +206,6 @@ class PostgresDB(tornado.web.RequestHandler):
             # keeps track of the io_loops we have seen, mapped from 
             # io_loop_obj -> pool
             self.io_loop_dict = {}
-            # cleanup lock, for cleaning up io_loop_dict
-            self.clean_up_lock = tornado.locks.Lock() 
             # amount of time to wait until we will reconnect a dead conn
             # this comes from momoko reconnect_interval 
             self.reconnect_dead = 250.0  
