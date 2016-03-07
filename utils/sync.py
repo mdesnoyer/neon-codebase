@@ -102,6 +102,11 @@ def bounded_io_loop():
 
     finally:
         old_ioloop.make_current()
+        # let's grab the httpclientinstance and 
+        # close it explicitly so we don't leak memory
+        client = tornado.httpclient.AsyncHTTPClient(
+            io_loop=temp_ioloop)
+        client.close() 
         temp_ioloop.close()
 
 class IOLoopThread(threading.Thread):
