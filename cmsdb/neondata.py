@@ -105,7 +105,7 @@ define("wants_postgres", default=0, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
-define("pool_size", default=25, type=int, help="size we want our connection pools to be")
+define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
 define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
 
 ## Parameters for thumbnail perceptual hashing
@@ -206,8 +206,11 @@ class PostgresDB(tornado.web.RequestHandler):
             # keeps track of the io_loops we have seen, mapped from 
             # io_loop_obj -> pool
             self.io_loop_dict = {}
-            # cleanup lock, for cleaning up io_loop_dict
-            self.clean_up_lock = tornado.locks.Lock()  
+            # amount of time to wait until we will reconnect a dead conn
+            # this comes from momoko reconnect_interval 
+            self.reconnect_dead = 250.0  
+            # the starting size of the pool 
+            self.pool_start_size = 3 
         
         def _set_current_host(self): 
             self.old_host = self.host 
@@ -252,8 +255,9 @@ class PostgresDB(tornado.web.RequestHandler):
         def get_connection(self): 
             '''gets a connection to postgres, this is ioloop based 
                  we want to be able to share pools across ioloops 
-                 however, since we have optional_sync (which creates a new ioloop) 
-                 we have to manage how the pools/connections are created.  
+                 however, since we have optional_sync (which creates 
+                 a new ioloop) we have to manage how the pools/connections 
+                 are created.  
             '''
             self._clean_up_io_dict() 
             conn = None 
@@ -263,9 +267,10 @@ class PostgresDB(tornado.web.RequestHandler):
 
             def _get_momoko_db(): 
                 current_io_loop = tornado.ioloop.IOLoop.current()
-                conn = momoko.Connection(dsn=self._build_dsn(),
-                                         ioloop=current_io_loop,
-                                         cursor_factory=psycopg2.extras.RealDictCursor)
+                conn = momoko.Connection(
+                           dsn=self._build_dsn(),
+                           ioloop=current_io_loop,
+                           cursor_factory=psycopg2.extras.RealDictCursor)
                 return conn
 
             if self.db_info is None: 
@@ -287,7 +292,8 @@ class PostgresDB(tornado.web.RequestHandler):
                     dict_item['pool'] = yield self._connect_a_pool()
                 pool = dict_item['pool']
                 try: 
-                    conn = yield self._get_momoko_connection(pool, 
+                    conn = yield self._get_momoko_connection(
+                               pool, 
                                True, 
                                dict_item)
                 except Exception as e: 
@@ -317,22 +323,23 @@ class PostgresDB(tornado.web.RequestHandler):
                     try: 
                         pool.putconn(conn) 
                     except AssertionError: 
-                        # probably a release of a already released conn
+                        # probably a release of an already released conn
                         pass 
             except Exception as e: 
                 _log.exception('Unknown Error : on close connection %s' % e) 
       
         @tornado.gen.coroutine 
         def _connect_a_pool(self): 
-            def _get_momoko_pool(size=1,
-                                 auto_shrink=True):
+            def _get_momoko_pool():
                 current_io_loop = tornado.ioloop.IOLoop.current()
-                pool = momoko.Pool(dsn=self._build_dsn(),  
-                                   ioloop=current_io_loop, 
-                                   size=size, 
-                                   max_size=options.pool_size,
-                                   auto_shrink=auto_shrink,  
-                                   cursor_factory=psycopg2.extras.RealDictCursor)
+                pool = momoko.Pool(
+                           dsn=self._build_dsn(),  
+                           ioloop=current_io_loop, 
+                           size=self.pool_start_size, 
+                           max_size=options.max_pool_size,
+                           auto_shrink=True, 
+                           reconnect_interval=self.reconnect_dead,  
+                           cursor_factory=psycopg2.extras.RealDictCursor)
                 return pool
 
             pool = _get_momoko_pool() 
@@ -365,7 +372,13 @@ class PostgresDB(tornado.web.RequestHandler):
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
             for i in range(int(num_of_tries)):
                 try:
-                    if is_pool: 
+                    if is_pool:
+                        # momoko has a reconnect_interval on dead 
+                        # connections, it will hang and not reconnect 
+                        # if we don't wait long enough 
+                        if len(db.conns.dead) > 0:
+                            yield tornado.gen.sleep(
+                                self.reconnect_dead / 1000.0) 
                         conn = yield db.getconn()
                     else: 
                         conn = yield db.connect()
@@ -5700,8 +5713,9 @@ class VideoMetadata(StoredObject):
     @tornado.gen.coroutine
     def image_available_in_isp(self):
         try:
-            neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
-                                                       self.get_account_id())
+            neon_user_account = yield NeonUserAccount.get(
+                                          self.get_account_id(), 
+                                          async=True)
             if neon_user_account is None:
                 msg = ('Cannot find the neon user account %s for video %s. '
                        'This should never happen' % 
