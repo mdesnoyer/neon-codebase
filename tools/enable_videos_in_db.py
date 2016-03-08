@@ -107,7 +107,7 @@ class Enabler(object):
                 image_available = yield video.image_available_in_isp(
                     async=True)
                 while not image_available:
-                    if (time.time() - start_time) > 500.0:
+                    if (time.time() - start_time) > 900.0:
                         _log.error(
                             'Timed out waiting for ISP for video %s' %
                              video.key)
