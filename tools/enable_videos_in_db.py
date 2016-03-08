@@ -13,7 +13,7 @@ import functools
 import logging
 import random 
 import signal
-import multiprocessing 
+import threading 
 import time
 import tornado.gen
 import tornado.ioloop
@@ -26,7 +26,7 @@ from utils.options import define, options
 '''
 define('api_key', default=None, help='api key of the account to backfill')
 '''
-statemon.define('time_taken', float)
+statemon.state.define('time_taken', float)
 
 class Enabler(object):
     def __init__(self): 
@@ -182,13 +182,13 @@ def main():
                 time.time() - start_time)
 
      enabler = Enabler()
-     p = multiprocessing.Process(
+     t = threading.Thread(
            target=update_timer)
-     p.start() 
+     t.daemon = True 
+     t.start() 
 
      ioloop = tornado.ioloop.IOLoop.current()
      yield enabler.enable_videos_in_database()
-     p.terminate()
 
 if __name__ == "__main__": 
     utils.neon.InitNeon()
