@@ -9,7 +9,9 @@ if sys.path[0] != __base_path__:
 import atexit
 from cmsdb import neondata
 import dateutil.parser
+import functools
 import logging
+import random
 import signal
 import time
 import tornado.gen
@@ -39,11 +41,14 @@ class Enabler(object):
 
         db = neondata.PostgresDB()
         conn = yield db.get_connection()
-        query = "SELECT _data \
-                 FROM request \
-                 WHERE _data->>'state' = 'finished' \
-                   AND created_time > NOW() - INTERVAL '1 DAY'"
-
+        query = "SELECT r._data \
+                 FROM request r \
+                  JOIN neonuseraccount n \
+                   ON n._data->>'serving_enabled' = 'true' \
+                  AND \
+                   replace(n._data->>'key', 'neonuseraccount_', '') = r._data->>'api_key' \
+                  WHERE r._data->>'state' = 'finished'" 
+               
         cursor = yield conn.execute(query)
         rows = cursor.fetchall()
         db.return_connection(conn)
