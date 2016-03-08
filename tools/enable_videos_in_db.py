@@ -11,34 +11,32 @@ from cmsdb import neondata
 import dateutil.parser
 import functools
 import logging
-import random
+import random 
 import signal
+import multiprocessing 
 import time
 import tornado.gen
 import tornado.ioloop
 import utils.http
 import utils.neon
+from utils import statemon
 
 _log = logging.getLogger(__name__)
 from utils.options import define, options
 '''
 define('api_key', default=None, help='api key of the account to backfill')
 '''
+statemon.define('time_taken', float)
 
 class Enabler(object):
     def __init__(self): 
         self.waiting_on_isp_videos = set([]) 
 
-    def start(self):
-        tornado.ioloop.IOLoop.current().add_callback(
-            self.enable_videos_in_database) 
-    
     @tornado.gen.coroutine
     def enable_videos_in_database(self):
         '''Flags a video as being updated in the database and sends a
         callback if necessary.
         '''
-
         db = neondata.PostgresDB()
         conn = yield db.get_connection()
         query = "SELECT r._data \
@@ -70,26 +68,26 @@ class Enabler(object):
             videos = yield neondata.VideoMetadata.get_many(
                          video_ids, 
                          async=True) 
-            videos = [x for x in videos if x]
+            videos = [x for x in videos if x and x.job_id]
             job_ids = [(v.job_id, v.get_account_id())  
                           for v in videos]
             requests = yield neondata.NeonApiRequest.get_many(
                            job_ids,
                            async=True)
  
+            funcs = [] 
             for video, request in zip(videos, requests):
                 if video is None or \
                    request is None or \
                    request.state != neondata.RequestState.FINISHED: 
-                    continue 
-                tornado.ioloop.IOLoop.current().spawn_callback( 
-                    functools.partial(self._enable_video_and_request, 
-                        video, request))
-                        
+                    continue
+                funcs.append(self._enable_video_and_request(video, request))
+ 
+            yield funcs 
             # Throttle the callback spawning
             yield tornado.gen.sleep(5.0)
 
-        _log.info('Finished Enable')  
+        _log.info('Finished Enable') 
   
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
@@ -109,7 +107,7 @@ class Enabler(object):
                 image_available = yield video.image_available_in_isp(
                     async=True)
                 while not image_available:
-                    if (time.time() - start_time) > 1800.0:
+                    if (time.time() - start_time) > 500.0:
                         _log.error(
                             'Timed out waiting for ISP for video %s' %
                              video.key)
@@ -124,7 +122,7 @@ class Enabler(object):
                     return
 
             self.waiting_on_isp_videos.discard(video_id) 
-            _log.info('Discarde and currently waiting on %d videos for ISP' % 
+            _log.info('Discarded and currently waiting on %d videos for ISP' % 
                 len(self.waiting_on_isp_videos))  
 
             # Wait a bit so that it gets to all the ISPs
@@ -175,15 +173,24 @@ class Enabler(object):
                       % e)
               
 
+@tornado.gen.coroutine
 def main(): 
+     def update_timer():
+        start_time = time.time()
+        while True: 
+            statemon.state.time_taken = (
+                time.time() - start_time)
+
+     enabler = Enabler()
+     p = multiprocessing.Process(
+           target=update_timer)
+     p.start() 
+
      ioloop = tornado.ioloop.IOLoop.current()
-     enabler = Enabler() 
-     enabler.start() 
-     atexit.register(ioloop.stop)
-     ioloop.start()
+     yield enabler.enable_videos_in_database()
+     p.terminate()
 
 if __name__ == "__main__": 
     utils.neon.InitNeon()
-    signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-    signal.signal(signal.SIGINT, lambda sig, y: sys.exit(-sig))
-    main()
+    ioloop = tornado.ioloop.IOLoop.current()
+    ioloop.run_sync(main)
