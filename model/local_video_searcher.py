@@ -1234,9 +1234,9 @@ class LocalSearcher(object):
 
     def choose_thumbnails(self, video, video_name='', n=None):
         self._reset()
-        _log.info('Beginning thumbnail selection for video %s' % video_name)
         rand_seed = int(1000*time()) % 2 ** 32
-        _log.info('Random seed for this run is: %i' % rand_seed)
+        _log.info('Beginning thumbnail selection for video %s, random seed '
+                  'for this run is %i', video_name, rand_seed)
         np.random.seed(rand_seed)
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
@@ -1529,8 +1529,7 @@ class LocalSearcher(object):
             try:
                 self._take_sample(meta)
             except Exception as e:
-                _log.exception(('Problem obtaining sample of %s! '
-                                'Error: %s') % (str(meta), e))
+                _log.exception('Problem obtaining sample of %s!' % str(meta))
                 self.search_algo.update(meta, 0, bad=True)
         else:
             try:
