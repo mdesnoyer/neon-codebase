@@ -1329,8 +1329,14 @@ class LocalSearcher(object):
                 break
             mean_score, (start_frame, end_frame, start_score,
                          end_score) = heapq.heappop(self._queue)
-            self._conduct_local_search(start_frame, end_frame, start_score,
-                                       end_score, from_queue=True)
+            try:
+                self._conduct_local_search(start_frame, end_frame, 
+                                           start_score, end_score, 
+                                           from_queue=True)
+            except Exception as e:
+                _log.debug('Problem conducting local search of %i <---> %i'
+                           ' (from queue) Error: %s', start_frame, 
+                           end_frame, e)
         raw_results = self.results.get_results()
         # format it into the expected format
         results = []
@@ -1529,14 +1535,15 @@ class LocalSearcher(object):
             try:
                 self._take_sample(meta)
             except Exception as e:
-                _log.exception('Problem obtaining sample of %s!' % str(meta))
+                _log.error('Problem obtaining sample of %s! '
+                           'Error: %s', str(meta), e.message)
                 self.search_algo.update(meta, 0, bad=True)
         else:
             try:
                 self._conduct_local_search(*meta)
             except Exception as e:
-                _log.exception(('Problem conducting local search of %s! '
-                                'Error: %s') % (str(meta), e))
+                _log.debug('Problem conducting local search of %i <---> %i'
+                           ' Error: %s', meta[0], meta[1], e)
         return True
 
     def _update_color_stats(self, images):
