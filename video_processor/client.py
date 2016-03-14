@@ -283,13 +283,12 @@ class VideoProcessor(object):
 
             ytmatch = ytre.search(self.video_url) 
             if ytmatch:
-                import pdb; pdb.set_trace() 
                 watch_portion = ytmatch.group(1) 
                 video_portion = ytmatch.group(2) 
                 youtube = pytube.YouTube('%s%s' % 
                     (watch_portion, video_portion))
                 videos = youtube.filter('mp4')
-                found_video = None 
+                found_video = None
                 for v in videos:
                     # they are ordered by resolution ASC, keep
                     # and replace as we find a better reso up 
@@ -311,7 +310,7 @@ class VideoProcessor(object):
                         statemon.state.increment('youtube_video_not_found') 
                 except Exception as e:
                     _log.error('Unexpected Error downloading \
-                                YouTube content : %s' % e) 
+                                YouTube content : %s' % e)
                     statemon.state.increment('youtube_video_download_error')
                 finally: 
                     return
