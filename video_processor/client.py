@@ -304,13 +304,13 @@ class VideoProcessor(object):
                         found_video.download(os.path.dirname(
                             self.tempfile.name), on_finish=_move_file) 
                         self.tempfile.flush()  
-                    else: 
-                        _log.warning('Could not find a \
-                                      downloadable YouTube video') 
+                    else:
+                        msg = 'Could not find a downloadable YouTube video' 
+                        _log.warning(msg)
                         statemon.state.increment('youtube_video_not_found') 
                 except Exception as e:
-                    _log.error('Unexpected Error downloading \
-                                YouTube content : %s' % e)
+                    msg = 'Unexpected Error getting YouTube content : %s' % e
+                    _log.error(msg)
                     statemon.state.increment('youtube_video_download_error')
                 finally: 
                     return

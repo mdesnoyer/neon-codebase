@@ -308,11 +308,11 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         youtube_mock.YouTube = MagicMock() 
         youtube_mock.YouTube().filter = MagicMock(
             return_value=([video_one]))
-        vprocessor.download_video_file()
-        self.assertLogExists(logging.ERROR, "Unexpected Error downloading")
-        self.assertEquals(
-            statemon.state.get('video_processor.client.youtube_video_download_error'),
-            1)
+        with self.assertLogExists(logging.ERROR, "Unexpected Error getting"): 
+            vprocessor.download_video_file()
+            self.assertEquals(
+                statemon.state.get('video_processor.client.youtube_video_download_error'),
+                1)
 
     def test_download_youtube_video_not_found(self):
         vprocessor = self.setup_video_processor(
@@ -341,12 +341,12 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         youtube_mock.YouTube = MagicMock() 
         youtube_mock.YouTube().filter = MagicMock(
             return_value=([video_one, video_two, video_three]))
-        vprocessor.download_video_file()
 
-        self.assertLogExists(logging.WARNING, "Could not find a")
-        self.assertEquals(
-            statemon.state.get('video_processor.client.youtube_video_not_found'),
-            1)
+        with self.assertLogExists(logging.WARNING, "Could not find a"):
+            vprocessor.download_video_file()
+            self.assertEquals(
+                statemon.state.get('video_processor.client.youtube_video_not_found'),
+                1)
      
     def test_process_video(self):
        
