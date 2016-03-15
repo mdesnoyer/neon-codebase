@@ -3466,6 +3466,43 @@ class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def _get_object_type(cls): 
         return User
+
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_single(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        new_account = NeonUserAccount('test_account')      
+        new_account.users.append('test_user') 
+        yield new_account.save(async=True)
+        
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(1, len(a_ids)) 
+        a_id = a_ids[0] 
+        self.assertEquals(a_id, new_account.neon_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_multiple(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        new_account_one = NeonUserAccount('test_account1')      
+        new_account_one.users.append('test_user') 
+        yield new_account_one.save(async=True)
+
+        new_account_two = NeonUserAccount('test_account2')      
+        new_account_two.users.append('test_user') 
+        yield new_account_two.save(async=True)
+        
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(2, len(a_ids)) 
+        self.assertTrue(new_account_one.neon_api_key in a_ids) 
+        self.assertTrue(new_account_two.neon_api_key in a_ids) 
+
+    @tornado.testing.gen_test 
+    def test_get_associated_account_ids_empty(self):
+        new_user = User(username='test_user') 
+        yield new_user.save(async=True)
+        a_ids = yield new_user.get_associated_account_ids(async=True)
+        self.assertEquals(0, len(a_ids)) 
     
 class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
@@ -3511,7 +3548,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         so = neondata.NeonUserAccount('key', api_key='key')
         yield so.save(async=True)
         yield so.get_videos_and_statuses(async=True)
-
 
     @tornado.testing.gen_test 
     def test_mm_neon_user_account(self):

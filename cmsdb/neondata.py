@@ -2793,7 +2793,27 @@ class User(NamespacedStoredObject):
 
         # access level granted to this user, uses class AccessLevels 
         self.access_level = access_level 
- 
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_associated_account_ids(self):
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        video_to_status_dict = {}
+        query = "SELECT _data->>'neon_api_key' \
+                  FROM neonuseraccount \
+                  WHERE _data->'users' ? %s" 
+        params = [self.username]
+        cursor = yield conn.execute(
+                    query, 
+                    params, 
+                    cursor_factory=psycopg2.extensions.cursor)
+                
+        rv = [i[0] for i in cursor.fetchall()]
+        db.return_connection(conn)
+
+        raise tornado.gen.Return(rv) 
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
