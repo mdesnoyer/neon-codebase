@@ -23,13 +23,14 @@ import cmsdb.cdnhosting
 from cmsdb import neondata
 import json
 import logging
-from mock import MagicMock, patch
+from mock import MagicMock, patch, ANY
 import model.errors
 import multiprocessing
 import numpy as np
 import os
 import pickle
 from PIL import Image
+import pytube
 import re
 import redis
 import random
@@ -65,12 +66,12 @@ import video_processor.client
 
 _log = logging.getLogger(__name__)
 
-class TestVideoClient(test_utils.neontest.TestCase):
+class TestVideoClientPG(test_utils.neontest.TestCase):
     ''' 
     Test Video Processing client
     '''
     def setUp(self):
-        super(TestVideoClient, self).setUp()
+        super(TestVideoClientPG, self).setUp()
         
         #setup properties,model
         self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
@@ -85,10 +86,6 @@ class TestVideoClient(test_utils.neontest.TestCase):
                                 "test.mp4") 
         self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
                                 "test2.mp4") 
-        #Redis
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
-       
         #setup process video object
         self.api_request = None
         
@@ -99,10 +96,21 @@ class TestVideoClient(test_utils.neontest.TestCase):
         random.seed(984695198)
         
     def tearDown(self):
-        self.utils_patch.stop()
-        self.redis.stop()
-        super(TestVideoClient, self).tearDown()
-        
+        #self.utils_patch.stop()
+        self.postgresql.clear_all_tables()
+        super(TestVideoClientPG, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
     def setup_video_processor(self, request_type, url='http://url.com'):
         '''
         Setup the api request for the video processor
@@ -252,7 +260,94 @@ class TestVideoClient(test_utils.neontest.TestCase):
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 vprocessor.download_video_file()
+    
+    def test_download_youtube_video(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        vdata = '%030x' % random.randrange(16**(10*1024*1024))
+        video_one = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='360p'
+        ) 
+        video_two = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='720p'
+        ) 
+        video_three = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='1080p'
+        ) 
+        video_two.download = MagicMock(return_value='blah blah')
+        youtube_mock = video_processor.client.pytube
+        youtube_mock.YouTube = MagicMock() 
+        youtube_mock.YouTube().filter = MagicMock(
+            return_value=([video_one, video_two, video_three]))
+        vprocessor.download_video_file()
+        # this assures us that we found the 720p video in the list 
+        # and called download on it 
+        video_two.download.assert_called_with('/tmp', on_finish=ANY)
+ 
+    def test_download_youtube_video_error(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        vdata = '%030x' % random.randrange(16**(10*1024*1024))
+        video_one = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='720p'
+        ) 
+        video_one.download = MagicMock(side_effect=Exception('blah'))
+        youtube_mock = video_processor.client.pytube
+        youtube_mock.YouTube = MagicMock() 
+        youtube_mock.YouTube().filter = MagicMock(
+            return_value=([video_one]))
+        with self.assertLogExists(logging.ERROR, "Unexpected Error getting"): 
+            vprocessor.download_video_file()
+            self.assertEquals(
+                statemon.state.get('video_processor.client.youtube_video_download_error'),
+                1)
 
+    def test_download_youtube_video_not_found(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        vdata = '%030x' % random.randrange(16**(10*1024*1024))
+        video_one = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='9231p'
+        ) 
+        video_two = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='1080p'
+        ) 
+        video_three = video_processor.client.pytube.models.Video(
+                'test.invalid', 
+                'test_filename', 
+                'mp4', 
+                resolution='1080p'
+        ) 
+        video_two.download = MagicMock(return_value='blah blah')
+        youtube_mock = video_processor.client.pytube
+        youtube_mock.YouTube = MagicMock() 
+        youtube_mock.YouTube().filter = MagicMock(
+            return_value=([video_one, video_two, video_three]))
+
+        with self.assertLogExists(logging.WARNING, "Could not find a"):
+            vprocessor.download_video_file()
+            self.assertEquals(
+                statemon.state.get('video_processor.client.youtube_video_not_found'),
+                1)
+     
     def test_process_video(self):
        
         '''
@@ -399,52 +494,6 @@ class TestVideoClient(test_utils.neontest.TestCase):
         vprocessor._get_random_frame(self.test_video_file)
         meta2, img2 = vprocessor.thumbnails[1]
         self.assertNotEqual(meta2.frameno, meta1.frameno)
-
-# TODO delete/replace other class after postgres hot swap 
-class TestVideoClientPG(TestVideoClient):
-    ''' 
-    Test Video Processing client
-    '''
-    def setUp(self):
-        super(TestVideoClient, self).setUp()
-        
-        #setup properties,model
-        self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
-        self.model_version = "test" 
-        self.model = MagicMock()
-
-        #Mock Model methods, use pkl to load captured outputs
-        ct_output, ft_output = pickle.load(open(self.model_file)) 
-        self.model.choose_thumbnails.return_value = ct_output
-        self.model.score.return_value = 1, 2 
-        self.test_video_file = os.path.join(os.path.dirname(__file__), 
-                                "test.mp4") 
-        self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
-                                "test2.mp4") 
-        #setup process video object
-        self.api_request = None
-        
-        #patch for download_and_add_thumb
-        self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
-        self.uc = self.utils_patch.start()
-
-        random.seed(984695198)
-        
-    def tearDown(self):
-        #self.utils_patch.stop()
-        self.postgresql.clear_all_tables()
-        super(TestVideoClient, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
 
 class TestFinalizeResponse(test_utils.neontest.TestCase):
     ''' 
