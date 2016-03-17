@@ -97,7 +97,7 @@ def connect():
                                 port=options.stats_port,
                                 timeout=10000)
 
-def find_cluster_ip(self):
+def find_cluster_ip():
         '''Finds the private ip of the stats cluster.'''
         _log.info('Looking for cluster of type: %s' % 
                   options.stats_cluster_type)
