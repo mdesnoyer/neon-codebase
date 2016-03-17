@@ -84,3 +84,56 @@ def get_page_clause(page, impression_metric):
         else:
             return (" and %s = '%s' " % (col_map[impression_metric], page))
     return ''
+
+def get_groupby_clause(page_regex=None,
+                       desktop_mobile_split=False):
+    '''Return a group by clause to split the data up.
+
+    Inputs:
+    page_regex - A regex with a group that will extract a page type of interest
+    desktop_mobile_split - If true, groups by desktop vs. mobile
+
+    Returns:
+    The string for the group by clause (including "GROUP BY")
+    '''
+    clauses = []
+    if page_regex:
+        clauses.append('pg_type')
+    if desktop_mobile_split:
+        clauses.append('is_mobile')
+
+    if clauses:
+        return ' GROUP BY %s' % ','.join(clauses)
+    return ''
+
+def get_groupby_select(page_regex=None, impression_metric=None,
+                       desktop_mobile_split=False):
+    
+    '''Return a string in the select part of the statement to support group by.
+
+    Inputs:
+    page_regex - A regex with a group that will extract a page type of interest
+    impression_metric - The metric to be used for finding the page of
+    desktop_mobile_split - If true, groups by desktop vs. mobile
+
+    Returns:
+    The string for the group by clause (including "GROUP BY")
+    '''
+    clauses = ''
+    if page_regex and impression_metric:
+        _log.info('Grouping by page %s' % page_regex)
+        col_map = {
+            'loads' : 'imloadpageurl',
+            'views' : 'imloadpageurl',
+            'clicks' : 'imclickpageurl',
+            'plays' : 'videopageurl'
+            }
+        clauses += (', regexp_extract(%s, %s, 1) as pg_type' %
+                       col_map[impression_metric],
+                       page_regex)
+    if desktop_mobile_split:
+        _log.info('Grouping by mobile vs. desktop')
+        clauses += (", agentinfo_os_name in "
+                    "('iPhone', 'Android', 'IPad', 'BlackBerry') "
+                    "as is_mobile")
+    return clauses

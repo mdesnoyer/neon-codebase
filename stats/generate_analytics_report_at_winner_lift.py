@@ -24,6 +24,7 @@ import impala.error
 import logging
 import pandas
 import re
+import stats.cluster
 import stats.metrics
 from stats import statutils
 import struct
@@ -31,8 +32,10 @@ import utils.neon
 from utils.options import options, define
 import utils.prod
 
-define("stats_host", default="127.0.0.1",
-        type=str, help="Host to connect to the stats db on.")
+define("stats_host", default=None, type=str,
+       help="Host to talk to for the stats db")
+define('stats_cluster_type', default='video_click_stats',
+       help='cluster-type tag on the stats cluster to use')
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
 define("pub_id", default=None, type=str,
@@ -90,9 +93,21 @@ impala_col_map = {
     }
 
 def connect():
-    return impala.dbapi.connect(host=options.stats_host,
+    return impala.dbapi.connect(host=options.stats_host or find_cluster_ip(),
                                 port=options.stats_port,
                                 timeout=10000)
+
+def find_cluster_ip(self):
+        '''Finds the private ip of the stats cluster.'''
+        _log.info('Looking for cluster of type: %s' % 
+                  options.stats_cluster_type)
+        cluster = stats.cluster.Cluster(options.stats_cluster_type)
+        try:
+            cluster.find_cluster()
+        except stats.cluster.ClusterInfoError as e:
+            _log.error('Could not find the cluster.')
+            raise
+        return cluster.master_ip
 
 def filter_video_objects(videos):
     _log.info('Loading video info')
