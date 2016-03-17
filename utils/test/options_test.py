@@ -264,11 +264,11 @@ class TestCommandLineParsing(unittest.TestCase):
 
         self.parser.parse_options(['--a_float', '10.8',
                                    '--an_implied_string', 'there',
-                                   '--a_string', 'everywhere'])
+                                   '--a_string', 'everywhere to go'])
 
         self.assertEqual(self.parser.a_float, 10.8)
         self.assertEqual(self.parser.an_implied_string, 'there')
-        self.assertEqual(self.parser.a_string, 'everywhere')
+        self.assertEqual(self.parser.a_string, 'everywhere to go')
 
     def test_incorrect_type_definition(self):
         self.assertRaises(TypeError, self.parser.define, 'an_int',
