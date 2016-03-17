@@ -1,7 +1,7 @@
-#!/bin/sh
+#!/bin/bash
 
 cd /opt/neon/neon-codebase/core/
-. enable_env
+source enable_env
 
 TODAY=`date -I -u`
 YESTERDAY=`date -I -u -d "yesterday"`
