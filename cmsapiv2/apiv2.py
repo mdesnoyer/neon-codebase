@@ -165,7 +165,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if access_level_required is neondata.AccessLevels.NONE: 
             raise tornado.gen.Return(True)
         request.set_account_id() 
-        account = yield tornado.gen.Task(neondata.NeonUserAccount.get, request.account_id)
+        account = yield neondata.NeonUserAccount.get(
+                      request.account_id, 
+                      async=True)
         access_token = request.access_token
         if account_required and not account:
             raise NotAuthorizedError('account does not exist')
@@ -178,6 +180,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
             user = yield tornado.gen.Task(neondata.User.get, username)
             if user:
+                request.user = user 
                 if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN:
                     raise tornado.gen.Return(True)
                 elif account and username in account.users:
@@ -185,7 +188,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                         raise tornado.gen.Return(True)
 
                 raise NotAuthorizedError('you can not access this resource')
- 
+                
             raise NotAuthorizedError('user does not exist') 
 
         except jwt.ExpiredSignatureError:
@@ -195,8 +198,25 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
  
         raise tornado.gen.Return(True)
     
-    def get_access_levels(self): 
-        raise NotImplementedError('access levels are not defined') 
+    def get_access_levels(self):
+        ''' 
+            to be specified in each of the handlers 
+            this is a dictionary that maps http_verb to access_level 
+
+            eg 
+            { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT] 
+            }
+            
+            this means that GET requires READ, PUT requires UPDATE 
+             and an account is required on both endpoints  
+        ''' 
+        raise NotImplementedError('access levels are not defined')
+
+    def get_special_functions(self): 
+        return []   
  
     @tornado.gen.coroutine 
     def prepare(self):

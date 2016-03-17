@@ -1398,8 +1398,8 @@ class AccessLevels(object):
     CREATE = 4 
     DELETE = 8
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
-    ADMIN = 16 
-    GLOBAL_ADMIN = 32
+    ADMIN = ALL_NORMAL_RIGHTS | 16 
+    GLOBAL_ADMIN = ADMIN | 32
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 

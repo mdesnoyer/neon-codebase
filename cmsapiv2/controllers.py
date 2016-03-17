@@ -15,7 +15,6 @@ define("video_server", default="50.19.216.114", help="thumbnails.neon api", type
 define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
 
-statemon.define('post_account_oks', int) 
 statemon.define('put_account_oks', int) 
 statemon.define('get_account_oks', int) 
 
@@ -36,61 +35,6 @@ statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
    
-'''****************************************************************
-NewAccountHandler
-****************************************************************'''
-class NewAccountHandler(APIV2Handler):
-    """Handles post requests to the account endpoint."""
-    @tornado.gen.coroutine 
-    def post(self):
-        """handles account endpoint post request""" 
-
-        schema = Schema({ 
-          Required('customer_name') : Any(str, unicode,
-                                          Length(min=1, max=1024)),
-          'default_width': All(Coerce(int), Range(min=1, max=8192)), 
-          'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)) 
-        })
-        args = self.parse_args()
-        schema(args) 
-        user = neondata.NeonUserAccount(uuid.uuid1().hex, name=args['customer_name'])
-        user.default_size = list(user.default_size) 
-        user.default_size[0] = args.get('default_width', neondata.DefaultSizes.WIDTH)
-        user.default_size[1] = args.get('default_height', neondata.DefaultSizes.HEIGHT)
-        user.default_size = tuple(user.default_size)
-        user.default_thumbnail_id = args.get('default_thumbnail_id', None)
-
-        output = yield tornado.gen.Task(neondata.NeonUserAccount.save, user)
-        user = yield tornado.gen.Task(neondata.NeonUserAccount.get, user.neon_api_key)
-
-        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
-                                 user.tracker_account_id, 
-                                 user.neon_api_key, 
-                                 neondata.TrackerAccountIDMapper.PRODUCTION)
-
-        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
-                                 user.staging_tracker_account_id, 
-                                 user.neon_api_key, 
-                                 neondata.TrackerAccountIDMapper.STAGING)
-
-        yield tornado.gen.Task(tracker_p_aid_mapper.save) 
-        yield tornado.gen.Task(tracker_s_aid_mapper.save) 
-
-        user = yield AccountHandler.db2api(user)
-        
-        _log.debug(('New Account has been added : name = %s id = %s') 
-                   % (user['customer_name'], user['account_id']))
-        statemon.state.increment('post_account_oks')
- 
-        self.success(user)
-
-    @classmethod
-    def get_access_levels(self):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE 
-               }  
-
 '''*****************************************************************
 AccountHandler 
 *****************************************************************'''
@@ -762,7 +706,8 @@ class VideoHandler(APIV2Handler):
           Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
           Optional('url'): Any(str, unicode, Length(min=1, max=512)),
           Optional('reprocess'): Boolean(),
-          'integration_id' : Any(str, unicode, Length(min=1, max=256)),          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
+          'integration_id' : Any(str, unicode, Length(min=1, max=256)),          
+          'callback_url': Any(str, unicode, Length(min=1, max=512)), 
           'title': Any(str, unicode, Length(min=1, max=256)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
@@ -1196,12 +1141,79 @@ class VideoSearchHandler(tornado.web.RequestHandler):
     def __init__(self): 
         super(VideoSearchHandler, self).__init__() 
 
+'''*****************************************************************
+UserHandler 
+*****************************************************************'''
+class UserHandler(APIV2Handler):
+    """Handles get,put requests to the user endpoint. 
+       Gets and updates existing users
+    """
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        
+        user = yield neondata.User.get(args.get('username'), async=True)
+
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        schema = Schema({
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('access_level') : All(Coerce(int), Range(min=1, max=63))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        new_access_level = args.get('access_level') 
+
+        if new_access_level > self.user.access_level:
+            raise Invalid('Can not set access_level above\
+                           requesting users access level')
+
+        user_internal = yield neondata.User.get(args.get('username'),
+                            async=True)
+
+        if not user_internal: 
+            raise NotFoundError()
+
+        def _update_user(u): 
+            u.access_level = new_access_level 
+
+        yield user_internal.modify(_update_user, async=True)
+        
+        # grab the user again after the modify 
+        user_internal = yield neondata.User.get(args.get('username'),
+                            async=True)
+
+        result = yield self.db2api(user_internal)
+
+        self.success(result) 
+ 
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT] 
+               }
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['username', 'access_level', 'created', 'updated' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['username', 'access_level', 'created', 'updated' ]
+
 '''*********************************************************************
 Endpoints 
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/accounts/?$', NewAccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),
@@ -1213,6 +1225,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 

@@ -160,7 +160,7 @@ class TestControllersBase(TestBase):
     def get_app(self): 
         return controllers.application
 
-class TestNewAccountHandler(TestControllersBase):
+class TestNewAccountHandler(TestAuthenticationBase):
     def setUp(self):
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
@@ -170,25 +170,27 @@ class TestNewAccountHandler(TestControllersBase):
         super(TestNewAccountHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        super(TestNewAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
-        url = '/api/v2/accounts?customer_name=meisnew'
+        url = '/api/v2/accounts?customer_name=meisnew\
+              &admin_user_username=abcd1234\
+              &admin_user_password=b1234567'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -240,14 +242,6 @@ class TestNewAccountHandler(TestControllersBase):
                                                 method='POST', 
                                                 headers=header) 
         self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        account_id = rjson['account_id'] 
-        url = '/api/v2/%s?default_height=1200' % (account_id) 
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='PUT', 
-                                                headers=header)
-        self.assertEquals(response.code, 200)
  
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -257,38 +251,11 @@ class TestNewAccountHandler(TestControllersBase):
                                                     method="GET")
 
     def test_post_acct_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.NewAccountHandler.post')
+        exception_mocker = patch('cmsapiv2.authentication.NewAccountHandler.post')
         params = json.dumps({'name': '123123abc'})
 	url = '/api/v2/accounts'
         self.post_exceptions(url, params, exception_mocker)
 
-#TODO KF replace once hot swap is done 
-class TestNewAccountHandlerPG(TestNewAccountHandler): 
-    def setUp(self):
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestNewAccountHandler, self).setUp()
-
-    def tearDown(self): 
-        self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
-        super(TestNewAccountHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestNewAccountHandler, cls).tearDownClass() 
-    
 class TestAccountHandler(TestControllersBase):
     def setUp(self):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
@@ -301,21 +268,20 @@ class TestAccountHandler(TestControllersBase):
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestAccountHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
         super(TestAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test
@@ -356,20 +322,13 @@ class TestAccountHandler(TestControllersBase):
     
     @tornado.testing.gen_test 
     def test_get_acct_does_exist(self):
-        url = '/api/v2/accounts?customer_name=123abc'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body='',
-                                                method='POST', 
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], '123abc') 
-        url = '/api/v2/%s' % (rjson['account_id']) 
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method="GET")
-        rjson2 = json.loads(response.body) 
-        self.assertEquals(rjson['account_id'], rjson2['account_id']) 
+        rjson = json.loads(response.body) 
+        self.assertEquals(self.user.neon_api_key, rjson['account_id']) 
 
+    @unittest.skip('covered in newaccount')
     @tornado.testing.gen_test 
     def test_basic_post_account(self):
         url = '/api/v2/accounts?customer_name=123abc'
@@ -480,22 +439,19 @@ class TestAccountHandler(TestControllersBase):
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
 
-# TODO KF here until hot swap is done
-class TestAccountHandlerPG(TestAccountHandler): 
+class TestNewUserHandler(TestAuthenticationBase):
     def setUp(self):
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
-        self.user.save() 
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
-        super(TestAccountHandler, self).setUp()
+        super(TestNewUserHandler, self).setUp()
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
-        super(TestAccountHandler, self).tearDown()
+        super(TestNewUserHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -507,8 +463,91 @@ class TestAccountHandlerPG(TestAccountHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-        super(TestAccountHandlerPG, cls).tearDownClass() 
+        super(TestNewUserHandler, cls).tearDownClass()
  
+    @tornado.testing.gen_test 
+    def test_create_new_user_query(self):
+        url = '/api/v2/users?username=abcd1234&password=b1234567&access_level=63'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
+        self.assertIn('application/json', response.headers['Content-Type'])
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'abcd1234')
+
+    @tornado.testing.gen_test 
+    def test_create_new_user_json(self):
+        params = json.dumps({'username': 'abcd1234', 
+                             'password': 'b1234567', 
+                             'access_level': 63})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'abcd1234')
+
+    def test_post_user_exceptions(self):
+        exception_mocker = patch('cmsapiv2.authentication.NewUserHandler.post')
+        params = json.dumps({'username': '123123abc'})
+	url = '/api/v2/users'
+        self.post_exceptions(url, params, exception_mocker)
+
+class TestUserHandler(TestControllersBase):
+    def setUp(self):
+        #self.verify_account_mocker = patch(
+        #    'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        #self.verify_account_mock = self._future_wrap_mock(
+        #    self.verify_account_mocker.start())
+        #self.verify_account_mock.sife_effect = True
+        self.neon_user = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            name='testingaccount')
+        self.neon_user.save() 
+        super(TestUserHandler, self).setUp()
+
+    def tearDown(self): 
+        #self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+        super(TestUserHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        super(TestUserHandler, cls).tearDownClass()
+
+    @tornado.testing.gen_test 
+    def test_get_user_does_exist(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='PUT', 
+                                                headers=header)
+        self.assertEquals(response.code, 200)
+
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -2407,20 +2446,20 @@ class TestAPIKeyRequired(TestControllersBase):
         self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
 
-    def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(TestAPIKeyRequired, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     def make_calls_and_assert_401(self, 
                                   url, 
@@ -2695,6 +2734,27 @@ class TestAPIKeyRequired(TestControllersBase):
                                                 headers=header)
         self.assertEquals(response.code, 200) 
 
+class TestAPIKeyRequiredAuth(TestAuthenticationBase):
+    def setUp(self):
+        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
+        self.neon_user.save() 
+        super(TestAPIKeyRequiredAuth, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(TestAPIKeyRequiredAuth, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
     @tornado.testing.gen_test 
     def test_create_new_account_god_mode(self): 
         user = neondata.User(username='testuser', 
@@ -2783,27 +2843,6 @@ class TestAPIKeyRequired(TestControllersBase):
         self.assertRegexpMatches(rjson['error']['message'],
                                  'you can not access') 
 
-class TestAPIKeyRequiredPG(TestAPIKeyRequired): 
-    def setUp(self):
-        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
-        self.neon_user.save() 
-        super(TestAPIKeyRequired, self).setUp()
-
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequired, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-       
 class TestAuthenticationHandler(TestAuthenticationBase): 
     def setUp(self): 
         super(TestAuthenticationHandler, self).setUp()

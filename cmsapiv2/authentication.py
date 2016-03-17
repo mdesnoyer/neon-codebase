@@ -10,6 +10,8 @@ from apiv2 import *
 from datetime import datetime, timedelta
 from passlib.hash import sha256_crypt
 
+_log = logging.getLogger(__name__)
+
 define("port", default=8084, help="run on the given port", type=int)
 
 statemon.define('successful_authenticates', int)
@@ -23,6 +25,8 @@ _token_expiration_logouts_ref = statemon.state.get_ref('token_expiration_logout'
 
 statemon.define('successful_logouts', int)
 _successful_logouts_ref = statemon.state.get_ref('successful_logouts')
+
+statemon.define('post_account_oks', int) 
 
 '''*****************************************************************
 AuthenticateHandler 
@@ -197,6 +201,148 @@ class RefreshTokenHandler(APIV2Handler):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.NONE 
                }  
+
+'''****************************************************************
+NewAccountHandler
+****************************************************************'''
+class NewAccountHandler(APIV2Handler):
+    """Handles post requests to the account endpoint."""
+    @tornado.gen.coroutine 
+    def post(self):
+        """handles account endpoint post request""" 
+
+        schema = Schema({ 
+          Required('customer_name') : Any(str, unicode,
+                                          Length(min=1, max=1024)),
+          'default_width': All(Coerce(int), Range(min=1, max=8192)), 
+          'default_height': All(Coerce(int), Range(min=1, max=8192)),
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
+          'admin_user_username' : All(str, Length(min=8, max=64)), 
+          'admin_user_password' : All(str, Length(min=8, max=64))
+        })
+        args = self.parse_args()
+        schema(args) 
+        account = neondata.NeonUserAccount(uuid.uuid1().hex, 
+                      name=args['customer_name'])
+        account.default_size = list(account.default_size) 
+        account.default_size[0] = args.get('default_width', 
+                                      neondata.DefaultSizes.WIDTH)
+        account.default_size[1] = args.get('default_height', 
+                                      neondata.DefaultSizes.HEIGHT)
+        account.default_size = tuple(account.default_size)
+        account.default_thumbnail_id = args.get('default_thumbnail_id', None)
+        
+        username = args.get('admin_username', None) 
+        password = args.get('admin_user_password', None) 
+        if username is not None and password is not None:
+            new_user = neondata.User(username=username, password=password)
+            yield new_user.save(async=True) 
+            account.users.append(username) 
+        
+        yield account.save(async=True)
+        account = yield neondata.NeonUserAccount.get(
+                      account.neon_api_key, 
+                      async=True)
+
+        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 account.tracker_account_id, 
+                                 account.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.PRODUCTION)
+
+        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
+                                 account.staging_tracker_account_id, 
+                                 account.neon_api_key, 
+                                 neondata.TrackerAccountIDMapper.STAGING)
+
+        yield tracker_p_aid_mapper.save(async=True)
+        yield tracker_s_aid_mapper.save(async=True) 
+
+        account = yield self.db2api(account)
+        
+        _log.debug(('New Account has been added : name = %s id = %s') 
+                   % (account['customer_name'], account['account_id']))
+        statemon.state.increment('post_account_oks')
+ 
+        self.success(account)
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.GLOBAL_ADMIN 
+               } 
+ 
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['account_id', 'default_size', 'customer_name',
+                'default_thumbnail_id', 'tracker_account_id',
+                'staging_tracker_account_id',
+                'integration_ids', 'created', 'updated', 'users']
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['default_size',
+                'default_thumbnail_id', 'tracker_account_id',
+                'staging_tracker_account_id',
+                 'created', 'updated', 'users']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'account_id':
+            # this is weird, but neon_api_key is actually the
+            # "id" on this table, it's what we use to get information
+            # about the account, so send back api_key (as account_id)
+            retval = obj.neon_api_key
+        elif field == 'customer_name':
+            retval = obj.name
+        elif field == 'integration_ids':
+            retval = obj.integrations.keys()
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+
+'''****************************************************************
+NewUserHandler
+****************************************************************'''
+class NewUserHandler(APIV2Handler):
+    """Handles post requests to the user endpoint."""
+    @tornado.gen.coroutine 
+    def post(self):
+        """handles user endpoint post request""" 
+
+        schema = Schema({ 
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('password') : All(Coerce(str), Length(min=8, max=64)),
+          Required('access_level') : All(Coerce(int), Range(min=1, max=63))
+        })
+
+        args = self.parse_args()
+        schema(args)
+
+        new_user = neondata.User(username=args.get('username'), 
+                       password=args.get('password'),
+                       access_level=args.get('access_level'))
+
+        yield new_user.save(async=True)
+ 
+        user = yield self.db2api(new_user)
+
+        self.success(user)
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.GLOBAL_ADMIN 
+               } 
+ 
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['username', 'created', 'updated' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['username', 'created', 'updated' ]
          
 '''*********************************************************************
 Endpoints 
@@ -205,6 +351,8 @@ application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/authenticate/?$', AuthenticateHandler),
     (r'/api/v2/refresh_token/?$', RefreshTokenHandler),
+    (r'/api/v2/accounts/?$', NewAccountHandler),
+    (r'/api/v2/users/?$', NewUserHandler),
     (r'/api/v2/logout/?$', LogoutHandler)
 ], gzip=True)
 
