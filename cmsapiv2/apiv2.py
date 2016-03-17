@@ -31,7 +31,7 @@ import utils.http
 import utils.sync
 from utils.options import define, options
 import uuid
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean
 
 _log = logging.getLogger(__name__)
 
@@ -74,8 +74,8 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
 
 class APIV2Sender(object): 
-    def success(self, data, code=ResponseCode.HTTP_OK):
-        self.set_status(code) 
+    def success(self, data, code=ResponseCode.HTTP_OK):            
+        self.set_status(code)
         self.write(data) 
         self.finish()
 
@@ -86,7 +86,7 @@ class APIV2Sender(object):
             error_json['code'] = code 
         if extra_data: 
             error_json['data'] = extra_data 
-        self.write(error_json)
+        self.write({'error' : error_json})
         self.finish() 
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
@@ -114,14 +114,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 pass
         elif len(self.request.body) > 0: 
             content_type = self.request.headers.get('Content-Type', None)
-            if content_type and 'application/json' in content_type: 
+            if content_type is None or 'application/json' not in content_type:
+                raise BadRequestError('Content-Type must be JSON')
+            else:
                 bjson = json.loads(self.request.body) 
                 try:
                     self.access_token = str(bjson['token'])
                 except KeyError: 
                     pass
-            else:
-                raise BadRequestError('Content-Type Not Supported')
         
     def set_account_id(request):
         parsed_url = urlparse(request.uri) 
@@ -136,10 +136,14 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     args[key] = value[0]
         # otherwise let's use what we find in the body, json only
         elif len(self.request.body) > 0: 
-            bjson = json.loads(self.request.body) 
-            for key, value in bjson.items():
-                if key != 'token' or keep_token: 
-                    args[key] = value
+            content_type = self.request.headers.get('Content-Type', None)
+            if content_type is None or 'application/json' not in content_type:
+                raise BadRequestError('Content-Type must be JSON')
+            else:
+                bjson = json.loads(self.request.body) 
+                for key, value in bjson.items():
+                    if key != 'token' or keep_token: 
+                        args[key] = value
 
         return args
     
@@ -286,6 +290,64 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         raise NotImplementedError('delete not implemented')  
 
     __delete = delete
+
+    @classmethod
+    @tornado.gen.coroutine 
+    def db2api(cls, obj, fields=None):
+        """Converts a database object to a response dictionary
+         
+        Keyword arguments: 
+        obj - The database object to convert
+        fields - List of fields to return
+        """
+        if fields is None:
+            fields = cls._get_default_returned_fields()
+        
+        retval = {}
+        passthrough_fields = set(cls._get_passthrough_fields())
+        
+        for field in fields:
+            if field in passthrough_fields:
+                retval[field] = getattr(obj, field)
+            else:
+                retval[field] = yield cls._convert_special_field(obj, field)
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        '''Return a list of fields that should be returned in this API call.'''
+        raise NotImplementedError(
+            'List of default fields must be specified for this object. %s'
+            % cls.__name__)
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        '''Return a list of fields in a database object that should be 
+           returned by the api without change.
+        '''
+        raise NotImplementedError(
+            'List of passthrough fields must be specified for this object. %s'
+            % cls.__name__)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        '''Converts a field on a database object that requires special 
+        processing.
+
+        Inputs:
+        obj - The database object
+        field - The name of the field to process
+
+        Returns:
+        The value to place in a dictionay to represent this field.
+
+        Raises:
+        BadRequestError if the field not handled
+        '''
+        raise NotImplementedError(
+            'Must specify how to convert %s for object %s' % 
+            (field, cls.__name__))
 
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place 

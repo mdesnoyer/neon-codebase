@@ -388,10 +388,10 @@ class Mastermind(object):
                     frac_sum = frac_sum + directive[1]
                     directive_list.append(directive)
                 if not has_error:
-                    if abs(frac_sum - 1.0) >= 0.001:
+                    if abs(frac_sum - 1.0) >= 0.01:
                         has_error = True
-                        _log.error('ThumbnailStatus of video id %s does not'
-                                   ' sum to 1.0' % video_id)
+                        _log.error_n('ThumbnailStatus of video id %s does not'
+                                   ' sum to 1.0' % video_id, 50)
                     # Validate the summation.
 
                 if has_error:

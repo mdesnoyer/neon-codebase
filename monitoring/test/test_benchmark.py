@@ -39,7 +39,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
             self.create_job_patcher.start().Client().send_request)
         self.create_job_mock.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
-              x, 200, buffer='{"job_id": "myjobid"}')
+              x, 200, buffer=StringIO('{"job_id": "myjobid"}'))
 
         # Mock out the isp request
         self.isp_call_mock = MagicMock()
@@ -68,26 +68,20 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.redis.start()
 
         self.api_key = 'apikey'
-        self.old_api_key = options.get(
-            'monitoring.benchmark_neon_pipeline.api_key')
-        options._set('monitoring.benchmark_neon_pipeline.api_key',
+        options._set('monitoring.benchmark_neon_pipeline.account',
                      self.api_key)
         options._set('monitoring.benchmark_neon_pipeline.serving_timeout', 0)
         options._set('monitoring.benchmark_neon_pipeline.isp_timeout', 0)
 
         acct = neondata.NeonUserAccount('a1', self.api_key)
-        plat = neondata.NeonPlatform.modify(
-            self.api_key, '0',
-            lambda x: x.add_video('vid1', 'myjobid'),
-            create_missing=True)
-        acct.add_platform(plat)
         acct.save()
 
         self.request = neondata.NeonApiRequest('myjobid', self.api_key, 'vid1')
         self.request.save()
 
         video = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate(self.api_key, 'vid1'))
+            neondata.InternalVideoID.generate(self.api_key, 'vid1'),
+            request_id=self.request.job_id)
         video.save()
         video.get_serving_url()
 
@@ -100,16 +94,12 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.send_request_patcher.stop()
         self.create_job_patcher.stop()
         statemon.state._reset_values()
-        options._set('monitoring.benchmark_neon_pipeline.api_key',
-                     self.old_api_key)
         self.redis.stop()
         super(BenchmarkTest, self).tearDown()
 
     def _check_request_cleanup(self):
         '''Checks that the request object is cleaned up in the database.'''
         self.assertIsNone(neondata.NeonApiRequest.get('myjobid', self.api_key))
-        self.assertNotIn('vid1', 
-                         neondata.NeonPlatform.get(self.api_key, '0').videos)
 
         
     @tornado.gen.coroutine
@@ -254,6 +244,7 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
     def test_job_failed(self):
         self.request.state = neondata.RequestState.FAILED
         self.request.response = {'error' : 'some_error'}
+        self.request.fail_count = 3
         self.request.save()
 
         # The callback should be received and handled correctly
