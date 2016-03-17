@@ -11,7 +11,7 @@ COMMON_PARAMS="--start_time ${YESTERDAY} --end_time ${TODAY} --cmsdb.neondata.wa
 echo ${COMMON_PARAMS}
 
 # IGN
-stats/generate_analytics_report_at_winner_lift.py --pub_id 2089095449 --baseline_types default,customupload ${COMMON_PARAMS} --min_impressions 500 --output ~/reports/ign_${YESTERDAY}_${TODAY}.xls 
+echo stats/generate_analytics_report_at_winner_lift.py --pub_id 2089095449 --baseline_types default,customupload ${COMMON_PARAMS} --min_impressions 500 --output ~/reports/ign_${YESTERDAY}_${TODAY}.xls 
 
 # CNN
 #stats/generate_analytics_report_at_winner_lift.py --pub_id 1657678658 --baseline_types default ${COMMON_PARAMS} --min_impressions 500 --output ~/reports/cnn_${YESTERDAY}_${TODAY}.xls 
