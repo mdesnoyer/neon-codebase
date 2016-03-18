@@ -28,6 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import code
 import collections
+from collections import OrderedDict 
 import concurrent.futures
 import contextlib
 import copy
@@ -38,18 +39,23 @@ import hashlib
 import itertools
 import simplejson as json
 import logging
+import momoko
 import multiprocessing
+import psycopg2
 from passlib.hash import sha256_crypt
 from PIL import Image
+import queries 
 import random
 import re
 import redis as blockingRedis
 import redis.exceptions
+import select
 import socket
 import string
 from StringIO import StringIO
 import tornado.ioloop
 import tornado.gen
+import tornado.web
 import tornado.httpclient
 import threading
 import time
@@ -90,6 +96,18 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
+define("db_address", default="localhost", type=str, help="postgresql database address")
+define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_password", default="", type=str, help="postgresql database user")
+define("db_port", default=5432, type=int, help="postgresql port")
+define("db_name", default="cmsdb", type=str, help="postgresql database name")
+define("wants_postgres", default=0, type=int, help="should we use postgres")
+define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
+# this basically means how many open pubsubs we can have at once, most other pools will be relatively 
+# small, and not get to this size. see momoko pool for more info. 
+define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
+define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
+
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
        help="Type of perceptual hash function to use. ahash, phash or dhash")
@@ -109,8 +127,12 @@ statemon.define('sucessful_callbacks', int)
 statemon.define('callback_error', int)
 statemon.define('invalid_callback_url', int)
 
-#constants 
-BCOVE_STILL_WIDTH = 480
+statemon.define('postgres_pubsub_connections', int) 
+statemon.define('postgres_unknown_errors', int) 
+statemon.define('postgres_connection_failed', int) 
+statemon.define('postgres_listeners', int) 
+statemon.define('postgres_successful_pubsub_callbacks', int) 
+statemon.define('postgres_pools', int) 
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -140,6 +162,22 @@ def _get_db_address(class_name, is_writeable=True):
             host = options.get('cmsdb.neondata.thumbnailDB')
     return (host, port)
 
+def _get_db_information(): 
+    '''Function that returns the address to the database for an object.
+
+    Inputs:
+    Returns: { host:, port:, dbname:, user:, password:, }  
+    '''
+    # This function can get called a lot, so all the options lookups
+    # are done without introspection.
+    db_info = {} 
+    db_info['host'] = options.get('cmsdb.neondata.db_address') 
+    db_info['port'] = options.get('cmsdb.neondata.db_port') 
+    db_info['dbname'] = options.get('cmsdb.neondata.db_name') 
+    db_info['user'] = options.get('cmsdb.neondata.db_user') 
+    db_info['password'] = options.get('cmsdb.neondata.db_password')
+    return db_info  
+
 def _object_to_classname(otype=None):
     '''Returns the class name of an object.
 
@@ -155,8 +193,270 @@ def _object_to_classname(otype=None):
             cname = otype.__class__.__name__ \
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
-    
 
+class PostgresDB(tornado.web.RequestHandler): 
+    '''A DB singleton class for postgres. Manages 
+       connections and pools that are currently 
+       connected to the postgres db. 
+    ''' 
+    class _PostgresDB: 
+        def __init__(self):
+            # where the db is located 
+            self.db_info = None 
+            # keeps track of the io_loops we have seen, mapped from 
+            # io_loop_obj -> pool
+            self.io_loop_dict = {}
+            # amount of time to wait until we will reconnect a dead conn
+            # this comes from momoko reconnect_interval 
+            self.reconnect_dead = 250.0  
+            # the starting size of the pool 
+            self.pool_start_size = 3 
+        
+        def _set_current_host(self): 
+            self.old_host = self.host 
+            self.host = options.db_address
+ 
+        def _build_dsn(self): 
+            return 'dbname=%s user=%s host=%s port=%s password=%s' % (self.db_info['dbname'], 
+                        self.db_info['user'], 
+                        self.db_info['host'], 
+                        self.db_info['port'], 
+                        self.db_info['password'])
+
+        def _clean_up_io_dict(self):
+            '''since we allow optional_sync on many of these calls 
+                  and it creates a ton of io_loops, walk through this 
+                  dict and cleanup any io_loops that have been killed 
+                  recently 
+            '''  
+            if len(self.io_loop_dict) > options.max_io_loop_dict_size:
+                for key in self.io_loop_dict.keys():
+                    if key._running is False:
+                        try: 
+                            pool = self.io_loop_dict[key]['pool']
+                            if not pool.closed: 
+                                pool.close() 
+                        except (KeyError, TypeError, AttributeError): 
+                            pass
+                        try: 
+                            del self.io_loop_dict[key]
+                        except Exception as e: 
+                            pass 
+            statemon.state.postgres_pools = len(self.io_loop_dict)
+
+        def _get_momoko_db(self): 
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            conn = momoko.Connection(dsn=self._build_dsn(),
+                                     ioloop=current_io_loop,
+                                     cursor_factory=psycopg2.extras.RealDictCursor)
+            return conn
+                        
+        @tornado.gen.coroutine
+        def get_connection(self): 
+            '''gets a connection to postgres, this is ioloop based 
+                 we want to be able to share pools across ioloops 
+                 however, since we have optional_sync (which creates 
+                 a new ioloop) we have to manage how the pools/connections 
+                 are created.  
+            '''
+            self._clean_up_io_dict() 
+            conn = None 
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            io_loop_id = current_io_loop
+            dict_item = self.io_loop_dict.get(io_loop_id)
+
+            def _get_momoko_db(): 
+                current_io_loop = tornado.ioloop.IOLoop.current()
+                conn = momoko.Connection(
+                           dsn=self._build_dsn(),
+                           ioloop=current_io_loop,
+                           cursor_factory=psycopg2.extras.RealDictCursor)
+                return conn
+
+            if self.db_info is None: 
+                self.db_info = current_db_info = _get_db_information()
+            else:
+                current_db_info = _get_db_information()
+  
+            if dict_item is None: 
+                # this is the first time we've seen this io_loop just 
+                # get them set up for a pool, and return the connection 
+                item = {}
+                item['pool'] = None 
+                self.io_loop_dict[io_loop_id] = item 
+                db = _get_momoko_db()
+                conn = yield self._get_momoko_connection(db) 
+            else:
+                # we have seen this ioloop before, it has a pool use it
+                if dict_item['pool'] is None:
+                    dict_item['pool'] = yield self._connect_a_pool()
+                pool = dict_item['pool']
+                try: 
+                    conn = yield self._get_momoko_connection(
+                               pool, 
+                               True, 
+                               dict_item)
+                except Exception as e: 
+                    pool.close() 
+                    dict_item['pool'] = None 
+                    raise
+ 
+            raise tornado.gen.Return(conn)
+
+        def return_connection(self, conn): 
+            '''
+            call this to return connections you are done with 
+
+            this should always be called to ensure the 
+            connections are properly returned to the pool, or 
+            closed entirely assuming the connection was made 
+            without a pool 
+            '''  
+            current_io_loop = tornado.ioloop.IOLoop.current()
+            io_loop_id = current_io_loop
+            dict_item = self.io_loop_dict.get(io_loop_id)
+            pool = dict_item['pool']
+            try: 
+                if pool is None:
+                    conn.close()
+                else:
+                    try: 
+                        pool.putconn(conn) 
+                    except AssertionError: 
+                        # probably a release of an already released conn
+                        pass 
+            except Exception as e: 
+                _log.exception('Unknown Error : on close connection %s' % e) 
+      
+        @tornado.gen.coroutine 
+        def _connect_a_pool(self): 
+            def _get_momoko_pool():
+                current_io_loop = tornado.ioloop.IOLoop.current()
+                pool = momoko.Pool(
+                           dsn=self._build_dsn(),  
+                           ioloop=current_io_loop, 
+                           size=self.pool_start_size, 
+                           max_size=options.max_pool_size,
+                           auto_shrink=True, 
+                           reconnect_interval=self.reconnect_dead,  
+                           cursor_factory=psycopg2.extras.RealDictCursor)
+                return pool
+
+            pool = _get_momoko_pool() 
+            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            pool_connection = None
+            for i in range(int(num_of_tries)):
+                try: 
+                    pool_connection = yield pool.connect()
+                    break 
+                except Exception as e: 
+                    current_db_info = _get_db_information() 
+                    if current_db_info != self.db_info: 
+                        self.db_info = current_db_info 
+                        pool = _get_momoko_pool() 
+                    _log.error('Retrying PG Pool connection : attempt=%d : %s' % 
+                               (int(i+1), e))
+                    sleepy_time = (1 << (i+1)) * 0.2 * random.random()
+                    yield tornado.gen.sleep(sleepy_time)
+
+            if pool_connection: 
+                raise tornado.gen.Return(pool_connection)
+            else: 
+                _log.error('Unable to create a pool for Postgres Database')
+                statemon.state.increment('postgres_connection_failed')
+                raise Exception('Unable to get a pool of connections')
+ 
+        @tornado.gen.coroutine 
+        def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
+            conn = None 
+            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            for i in range(int(num_of_tries)):
+                try:
+                    if is_pool:
+                        # momoko has a reconnect_interval on dead 
+                        # connections, it will hang and not reconnect 
+                        # if we don't wait long enough 
+                        if len(db.conns.dead) > 0:
+                            yield tornado.gen.sleep(
+                                self.reconnect_dead / 1000.0) 
+                        conn = yield db.getconn()
+                    else: 
+                        conn = yield db.connect()
+                    break
+                except Exception as e: 
+                    current_db_info = _get_db_information()  
+                    if current_db_info != self.db_info: 
+                        self.db_info = current_db_info
+                        if is_pool:
+                            db = yield self._connect_a_pool()
+                            dict_item['pool'] = db  
+                        else: 
+                            db = self._get_momoko_db()
+ 
+                    _log.error('Retrying PG connection : attempt=%d : %s' % 
+                               (int(i+1), e))
+                    sleepy_time = (1 << (i+1)) * 0.1 
+                    yield tornado.gen.sleep(sleepy_time)
+ 
+            if conn: 
+                raise tornado.gen.Return(conn)
+            else: 
+                _log.error('Unable to get a connection to Postgres Database')
+                statemon.state.increment('postgres_connection_failed')
+                raise Exception('Unable to get a connection')
+
+        def get_insert_json_query_tuple(self, obj):
+            query = "INSERT INTO " + obj._baseclass_name().lower() + \
+                     " (_data, _type) " \
+                     " VALUES(%s, %s)"  
+            params = (obj.get_json_data(), obj.__class__.__name__)
+            return (query, params)
+
+        def get_update_json_query_tuple(self, obj):
+            query = "UPDATE " + obj._baseclass_name().lower() + \
+                    " SET _data = %s " \
+                    " WHERE _data->>'key' = %s" 
+            params = (obj.get_json_data(), obj.key)   
+            return (query, params)
+ 
+        def get_update_many_query_tuple(self, objects): 
+            ''' helper function to build up an update multiple 
+                   query  
+                builds queries of the form 
+                UPDATE table AS t SET t._data = changes.data
+                FROM (values (obj.key, obj.get_json_data())) 
+                  AS changes(key, data)
+                WHERE changes.key = t._data->>'key' 
+            '''
+            try: 
+                param_list = []
+                table = objects[0]._baseclass_name().lower()
+                query = "UPDATE %s AS t SET _data = changes.data "\
+                        " FROM (VALUES " % table 
+                for obj in objects: 
+                    query += '(%s, %s::jsonb),' 
+                    param_list.append(obj.key)
+                    param_list.append(obj.get_json_data()) 
+                query = query[:-1] 
+                query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
+                return (query, tuple(param_list))  
+            except KeyError: 
+                return 
+            
+    
+    instance = None 
+    
+    def __new__(cls): 
+        if not PostgresDB.instance: 
+            PostgresDB.instance = PostgresDB._PostgresDB() 
+        return PostgresDB.instance 
+
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+
+    def __setattr__(self, name):
+        return setattr(self.instance, name)
+ 
 class DBConnection(object):
     '''Connection to the database.
 
@@ -356,7 +656,6 @@ class RedisRetryWrapper(object):
 
     def __getattr__(self, attr):
         '''Allows us to wrap all of the redis-py functions.'''
-        
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
@@ -517,6 +816,164 @@ def _erase_all_data():
     ThumbnailURLMapper._erase_all_data()
     VideoMetadata._erase_all_data()
 
+class PostgresPubSub(object):
+    class _PostgresPubSub: 
+        def __init__(self): 
+            self.channels = {} 
+        
+        @tornado.gen.coroutine    
+        def _connect(self):
+            '''connect function for pubsub
+               
+               just use the PostgresDB class to get a connection
+               to the database 
+            '''
+            self.db = PostgresDB() 
+            conn = yield self.db.get_connection()
+            raise tornado.gen.Return(conn)
+        
+        @tornado.gen.coroutine 
+        def _receive_notification(self, 
+                                  fd, 
+                                  events, 
+                                  channel_name):
+ 
+            '''_receive_notification, callback for add_handler that monitors an open 
+               pg file handler 
+
+               will use the current io_loop to add a future to the expecting callbacks
+ 
+               sends a future with a list of json strings  
+            '''
+            try:  
+                channel = self.channels[channel_name]
+                notifications = [] 
+                connection = channel['connection'].connection 
+                connection.poll()
+                _log.info_n('Notifying listeners of db changes - %s' % 
+                    (connection.notifies),25)
+                while connection.notifies:
+                    notification = connection.notifies.pop() 
+                    payload = notification.payload
+                    notifications.append(payload) 
+
+                future = concurrent.futures.Future()
+                future.set_result(notifications)
+                channel = self.channels[channel_name]
+                callback_functions = channel['callback_functions']
+                for func in callback_functions:
+                    tornado.ioloop.IOLoop.current().add_future(future, func) 
+            except Exception as e: 
+                statemon.state.increment('postgres_unknown_errors')
+                _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
+                self._reconnect(channel_name) 
+        
+        def _reconnect(self, channel_name):
+            '''reconnects to postgres in the case of a database mishap, or 
+               a possible io_loop mishap 
+
+               grabs the current channel that is listening 
+               closes the connection (in case it's still open) 
+               deletes it from the singleton list
+               readds it and relistens on the callback functions that
+                   currently exist
+
+               TODO - make it so previous notifications that may have 
+                      been lost get retried
+            '''
+            channel = self.channels[channel_name] 
+            callback_functions = channel['callback_functions']
+            self.unlisten(channel_name)  
+ 
+            for cb in callback_functions: 
+                self.listen(channel_name, cb)  
+
+        @tornado.gen.coroutine
+        def listen(self, channel_name, func):
+            '''publicly accessible function that starts listening on a channel 
+               
+               handles the postgres connection as well, no need to connect before 
+               calling me 
+  
+               channel - baseclassname of the object, will call PG LISTEN on this 
+               func - the function to callback to if we receive notifications 
+ 
+               simply is added to the io_loop via add_handler 
+            ''' 
+            if channel_name in self.channels:
+                self.channels[channel_name]['callback_functions'].append(func) 
+            else: 
+                try: 
+                    momoko_conn = yield self._connect()
+                    yield momoko_conn.execute('LISTEN %s' % channel_name)
+                    io_loop = tornado.ioloop.IOLoop.current()
+                    self.channels[channel_name] = { 
+                                                    'connection' : momoko_conn, 
+                                                    'callback_functions' : [func] 
+                                                  }
+                    io_loop.add_handler(momoko_conn.connection.fileno(), 
+                                        lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                                        io_loop.READ) 
+                    _log.info(
+                        'Opening a new listener on postgres at %s for channel %s' %
+                        (self.db.db_info['host'], channel_name))
+                    statemon.state.increment('postgres_listeners')
+                except psycopg2.Error as e: 
+                    _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
+                                   % (channel_name, e)) 
+                except Exception as e: 
+                    _log.exception('an unknown error occurred when listening to %s on postgres %s' \
+                                   % (channel_name, e)) 
+                    statemon.state.increment('postgres_unknown_errors')
+                    
+        @tornado.gen.coroutine
+        def unlisten(self, channel_name):
+            '''unlisten from a subscribed channel 
+
+               WARN : this is a clear all command, any callback functions 
+                      that have open listeners to this will be cleared out
+
+               TODO : have function_id passed in as well, to only clear 
+                      the callback we care about  
+            '''
+            _log.info(
+                'Unlistening on postgres at %s for channel %s' %
+                (self.db.db_info['host'], channel_name))
+            try: 
+                channel = self.channels[channel_name] 
+                connection = channel['connection']
+                try: 
+                    yield connection.execute('UNLISTEN %s' % channel_name)
+                    connection.close()
+                except psycopg2.InterfaceError as e:
+                    # this means we already lost connection, and can not close a 
+                    # closed connection  
+                    _log.exception('psycopg error when unlistening to %s on postgres %s' \
+                                   % (channel, e))
+                    pass  
+                self.channels.pop(channel_name, None)
+                statemon.state.decrement('postgres_listeners')
+            except psycopg2.Error as e: 
+                _log.exception('a psycopg error occurred when UNlistening to %s on postgres %s' \
+                                % (channel_name, e)) 
+            except Exception as e: 
+                _log.exception('an unknown error occurred when UNlistening to %s on postgres %s' \
+                               % (channel_name, e)) 
+                statemon.state.increment('postgres_unknown_errors')
+
+    instance = None 
+    
+    def __new__(cls): 
+        if not PostgresPubSub.instance: 
+            PostgresPubSub.instance = PostgresPubSub._PostgresPubSub() 
+        return PostgresPubSub.instance 
+
+    def __getattr__(self, name):
+        return getattr(self.instance, name)
+
+    def __setattr__(self, name):
+        return setattr(self.instance, name) 
+        
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
 
@@ -887,7 +1344,6 @@ class PubSubConnection(threading.Thread):
 def id_generator(size=32, 
             chars=string.ascii_lowercase + string.digits):
     ''' Generate a random alpha numeric string to be used as 
-        unique ids
     '''
     retval = ''.join(random.choice(chars) for x in range(size))
 
@@ -944,6 +1400,11 @@ class AccessLevels(object):
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
     ADMIN = 16 
     GLOBAL_ADMIN = 32
+
+class PythonNaNStrings(object): 
+    INF = 'Infinite' 
+    NEGINF = '-Infinite' 
+    NAN = 'NaN' 
 
 ##############################################################################
 class StoredObject(object):
@@ -1007,35 +1468,71 @@ class StoredObject(object):
     def to_json(self):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.to_dict())
+    
+    def get_json_data(self):
+         
+        '''
+            for postgres we only want the _data field, since we 
+            have a column that is named _data we do not want _data->_data
 
-    def save(self, callback=None):
+            override this if you need something custom to get _data
+        '''
+        def _json_fixer(obj): 
+            for key, value in obj.items(): 
+                if value == float('-inf'):
+                    obj[key] = PythonNaNStrings.NEGINF
+                if value == float('inf'):
+                    obj[key] = PythonNaNStrings.INF
+                if value == float('nan'):
+                    obj[key] = PythonNaNStrings.NAN
+            return obj
+        obj = _json_fixer(self.to_dict()['_data']) 
+        return json.dumps(obj)
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
-        db_connection = DBConnection.get(self)
         if not hasattr(self, 'created'): 
             self.created = str(datetime.datetime.utcnow())
         self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
-         
-        def _save_and_add2set(pipe):
-            pipe.sadd(self._set_keyname(), self.key)
-            pipe.set(self.key, value)
-            return True
-            
         if self.key is None:
-            raise Exception("key not set")
-        if callback:
-            db_connection.conn.transaction(_save_and_add2set,
-                                           self._set_keyname(),
-                                           self.key,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _save_and_add2set,
-                self._set_keyname(),
-                self.key,
-                value_from_callable=True)
+            raise ValueError("key not set")
 
+        if options.wants_postgres:
+            rv = True  
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            query_tuple = db.get_insert_json_query_tuple(self)
+            try:  
+                result = yield conn.execute(query_tuple[0], query_tuple[1])
+            except psycopg2.IntegrityError as e:  
+                # since upsert is not available until postgres 9.5 
+                # we need to do an update here
+                if overwrite_existing_object: 
+                    query_tuple = db.get_update_json_query_tuple(self)
+                    result = yield conn.execute(query_tuple[0], query_tuple[1]) 
+            except Exception as e: 
+                rv = False
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
+                statemon.state.increment('postgres_unknown_errors')
+
+            db.return_connection(conn)
+            raise tornado.gen.Return(rv)
+        else: 
+            db_connection = DBConnection.get(self)
+             
+            def _save_and_add2set(pipe):
+                pipe.sadd(self._set_keyname(), self.key)
+                pipe.set(self.key, value)
+                return True
+                
+            result = yield tornado.gen.Task(db_connection.conn.transaction, _save_and_add2set,
+                                                                            self._set_keyname(),
+                                                                            self.key,
+                                                                            value_from_callable=True)
+            raise tornado.gen.Return(result)
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -1066,12 +1563,17 @@ class StoredObject(object):
             #populate the object dictionary
             try:
                 for k, value in data_dict.iteritems():
+                    if value == PythonNaNStrings.NEGINF:
+                        value = float('-inf') 
+                    if value == PythonNaNStrings.INF:
+                        value = float('inf')
+                    if value == PythonNaNStrings.NAN:
+                        value = float('nan') 
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None
         
             return obj
-
 
     @classmethod
     def _deserialize_field(cls, key, value):
@@ -1099,8 +1601,9 @@ class StoredObject(object):
         return self.key
 
     @classmethod
-    def get(cls, key, create_default=False, log_missing=True,
-            callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, key, create_default=False, log_missing=True):
         '''Retrieve this object from the database.
 
         Inputs:
@@ -1111,36 +1614,43 @@ class StoredObject(object):
 
         Returns the object
         '''
-        db_connection = DBConnection.get(cls)
+        if options.wants_postgres: 
+            db = PostgresDB()
+            conn = yield db.get_connection()
 
-        def cb(result):
+            obj = None 
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
+
+            cursor = yield conn.execute(query)
+            result = cursor.fetchone()
             if result:
-                obj = cls._create(key, json.loads(result))
-                callback(obj)
+                obj = cls._create(key, result)
             else:
                 if log_missing:
                     _log.warn('No %s for id %s in db' % (cls.__name__, key))
                 if create_default:
-                    callback(cls(key))
-                else:
-                    callback(None)
+                    obj = cls(key)
 
-        if callback:
-            db_connection.conn.get(key, cb)
-        else:
-            jdata = db_connection.blocking_conn.get(key)
+            db.return_connection(conn)
+            raise tornado.gen.Return(obj)
+        else: 
+            db_connection = DBConnection.get(cls)
+            jdata = yield tornado.gen.Task(db_connection.conn.get, key) 
             if jdata is None:
                 if log_missing:
                     _log.warn('No %s for %s' % (cls.__name__, key))
                 if create_default:
-                    return cls(key)
+                    raise tornado.gen.Return(cls(key))
                 else:
-                    return None
-            return cls._create(key, json.loads(jdata))
+                    raise tornado.gen.Return(None)
+            raise tornado.gen.Return(cls._create(key, json.loads(jdata)))
 
     @classmethod
-    def get_many(cls, keys, create_default=False, log_missing=True,
-                 callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
@@ -1155,11 +1665,12 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
-        return cls._get_many_with_raw_keys(keys, create_default, log_missing,
-                                           callback=callback)
+        return cls._get_many_with_raw_keys(keys, create_default, log_missing, func_level_wpg)
 
     @classmethod
-    def get_many_with_pattern(cls, pattern, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many_with_pattern(cls, pattern):
         '''Returns many objects that match a pattern.
 
         Note, this can be a slow call because getting the keys is slow
@@ -1171,65 +1682,143 @@ class StoredObject(object):
         A list of cls objects
         '''
         retval = []
-        db_connection = DBConnection.get(cls)
+        if options.wants_postgres:
+            results = [] 
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
-        def filtered_callback(data_list):
-            callback([x for x in data_list if x is not None])
-
-        def process_keylist(keys):
-            cls._get_many_with_raw_keys(keys, callback=filtered_callback)
-            
-        if callback:
-            db_connection.fetch_keys_from_db(pattern, keys_per_call=10000,
-                                             callback=process_keylist)
-        else:
-            keys = db_connection.fetch_keys_from_db(pattern,
-                                                    keys_per_call=10000)
-            return  [x for x in 
-                     cls._get_many_with_raw_keys(keys)
-                     if x is not None]
+            cursor = yield conn.execute(query)
+            for result in cursor:
+                obj = cls._create(result['_data']['key'], result)
+                results.append(obj) 
+            db.return_connection(conn)
+            raise tornado.gen.Return(results)
+        else: 
+            db_connection = DBConnection.get(cls)
+            keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db, pattern, keys_per_call=10000)
+            raise tornado.gen.Return([x for x in 
+                                     cls._get_many_with_raw_keys(keys)
+                                     if x is not None])
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many_with_key_like(cls, key_portion):
+        ''' Returns many rows that have a key that matches 
+              in a query LIKE 'key_portion%' 
+
+            In Postgres this is much faster(4x) than the pattern 
+            matching ~ and makes this the much better choice if 
+            you are trying to match on accountid_blah 
+        ''' 
+        if options.wants_postgres:
+            results = [] 
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            baseclass_name = cls._baseclass_name().lower()
+            query = "SELECT _data, _type FROM " + baseclass_name + \
+                    " WHERE _data->>'key' LIKE %s"
+
+            params = ['%'+key_portion+'%']
+            cursor = yield conn.execute(query, params)
+            for result in cursor:
+                obj = cls._create(result['_data']['key'], result)
+                results.append(obj) 
+            db.return_connection(conn)
+            raise tornado.gen.Return(results)
+        else:
+            raise NotImplementedError('not implemented for redis')  
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
-                                log_missing=True, callback=None):
+                                log_missing=True, func_level_wpg=True):
         '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
         if len(keys) == 0:
-            if callback:
-                callback([])
-                return
-            else:
-                return []
+            raise tornado.gen.Return([])
 
-        db_connection = DBConnection.get(cls)
+        if options.wants_postgres and func_level_wpg:
+            chunk_size = 1000
+            rv = []
+            obj_map = OrderedDict() 
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            # let's use a server-side cursor here 
+            # since momoko won't let me declare a cursor by name, I need to 
+            # do this manually 
+            yield conn.execute("BEGIN")
+ 
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
+                                                    ",".join("'{0}'".format(k) for k in keys))
+            
+            yield conn.execute(query)
+            for key in keys: 
+                obj_map[key] = None 
 
-        def _process(results):
-            mappings = [] 
-            for key, item in zip(keys, results):
-                if item:
-                    obj = cls._create(key, json.loads(item))
-                else:
-                    if log_missing:
-                        _log.warn('No %s for %s' % (cls.__name__, key))
-                    if create_default:
-                        obj = cls(key)
+            def _map_new_results(results):
+                for result in results:
+                    obj_key = result['_data']['key'] 
+                    obj_map[obj_key] = result
+ 
+            def _build_return_items(): 
+                rv = [] 
+                for key, item in obj_map.iteritems():
+                    if item: 
+                        obj = cls._create(key, item) 
                     else:
-                        obj = None
-                mappings.append(obj)
-            return mappings
+                        if log_missing:
+                            _log.warn('No %s for %s' % (cls.__name__, key))
+                        if create_default:
+                            obj = cls(key)
+                        else:
+                            obj = None
+                    rv.append(obj)
+                return rv
+ 
+            rows = True
+            while rows:
+                cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
+                rows = cursor.fetchmany(chunk_size) 
+                _map_new_results(rows)
 
-        if callback:
-            db_connection.conn.mget(
-                keys,
-                callback=lambda items:callback(_process(items)))
-        else:
-            items = db_connection.blocking_conn.mget(keys)
-            return _process(items)
-
+            yield conn.execute("CLOSE get_many")  
+            yield conn.execute("COMMIT")
+ 
+            db.return_connection(conn)
+            raise tornado.gen.Return(_build_return_items())
+        else: 
+            db_connection = DBConnection.get(cls)
+    
+            def _process(results):
+                mappings = []
+                for key, item in zip(keys, results):
+                    if item:
+                        obj = cls._create(key, json.loads(item))
+                    else:
+                        if log_missing:
+                            _log.warn('No %s for %s' % (cls.__name__, key))
+                        if create_default:
+                            obj = cls(key)
+                        else:
+                            obj = None
+                    mappings.append(obj)
+                return mappings
+    
+            items = yield tornado.gen.Task(db_connection.conn.mget, keys)
+            raise tornado.gen.Return(_process(items))
     
     @classmethod
-    def modify(cls, key, func, create_missing=False, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify(cls, key, func, create_missing=False):
         '''Allows you to modify the object in the database atomically.
 
         While in func, you have a lock on the object so you are
@@ -1248,26 +1837,21 @@ class StoredObject(object):
         StoredObject.modify('thumb_a', lambda thumb: thumb.update_phash())
         '''
         def _process_one(d):
-            
             val = d[key]
             if val is not None:
                 func(val)
 
-        if callback:
-            return StoredObject.modify_many(
-                [key], _process_one, create_missing=create_missing,
-                create_class=cls,
-                callback=lambda d: callback(d[key]))
-        else:
-            updated_d = StoredObject.modify_many(
-                [key], _process_one,
-                create_missing=create_missing,
-                create_class=cls)
-            return updated_d[key]
+        updated_d = yield StoredObject.modify_many(
+                 [key], _process_one,
+                 create_missing=create_missing,
+                 create_class=cls, 
+                 async=True)
+        raise tornado.gen.Return(updated_d[key])
 
     @classmethod
-    def modify_many(cls, keys, func, create_missing=False, create_class=None, 
-                    callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify_many(cls, keys, func, create_missing=False, create_class=None):
         '''Allows you to modify objects in the database atomically.
 
         While in func, you have a lock on the objects so you are
@@ -1291,85 +1875,177 @@ class StoredObject(object):
         '''
         if create_class is None:
             create_class = cls
-            
-        def _getandset(pipe):
-            # mget can't handle an empty list 
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
             if len(keys) == 0:
-                return {}
-
-            items = pipe.mget(keys)
-            pipe.multi()
-
+                raise tornado.gen.Return({})
+                
             mappings = {}
-            orig_objects = {}
-            key_sets = collections.defaultdict(list)
-            for key, item in zip(keys, items):
-                if item is None:
+            key_to_object = {}  
+            for key in keys: 
+                key_to_object[key] = None
+ 
+            query = "SELECT _data, _type \
+                     FROM %s \
+                     WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
+                                                    ",".join("'{0}'".format(k) for k in keys))
+
+            cursor = yield conn.execute(query)
+            items = cursor.fetchall()
+            for item in items:
+                current_key = item['_data']['key']
+                key_to_object[current_key] = item
+            
+            for key, item in key_to_object.iteritems(): 
+                if item is None:  
                     if create_missing:
                         cur_obj = create_class(key)
-                        if cur_obj is not None:
-                            key_sets[cur_obj._set_keyname()].append(key)
                     else:
-                        _log.warn_n('Could not get redis object: %s' % key)
+                        _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
-                    cur_obj = create_class._create(key, json.loads(item))
-                    orig_objects[key] = create_class._create(key,
-                                                             json.loads(item))
-                mappings[key] = cur_obj
+                    # hack we need two copies of the object, copy won't work here
+                    item_one = json.loads(json.dumps(item))
+                    cur_obj = create_class._create(key, item_one)
+
+                mappings[key] = cur_obj 
             try:
                 func(mappings)
             finally:
-                to_set = {}
+                insert_statements = []
+                update_objs = [] 
                 for key, obj in mappings.iteritems():
-                    if obj is not None and obj != orig_objects.get(key, None):
-                        to_set[key] = obj.to_json()
+                   original_object = key_to_object.get(key, None)
+                   if obj is not None and original_object is None: 
+                       query_tuple = db.get_insert_json_query_tuple(obj)
+                       insert_statements.append(query_tuple) 
+                   elif obj is not None and obj != original_object:
+                       update_objs.append(obj)
 
-                to_set['updated'] = str(datetime.datetime.utcnow()) 
+            if update_objs:  
+                try: 
+                    update_query = db.get_update_many_query_tuple(
+                        update_objs)
+                    yield conn.execute(update_query[0], 
+                                       update_query[1]) 
+                except Exception as e: 
+                    _log.error('unknown error when running \
+                                update_query %s : %s' % 
+                                (update_query, e))
 
-                if len(to_set) > 0:
-                    pipe.mset(to_set)
-                for set_key, cur_keys in key_sets.iteritems():
-                    pipe.sadd(set_key, *cur_keys)
-            return mappings
+            if insert_statements: 
+                try: 
+                    for it in insert_statements:  
+                        yield conn.execute(it[0], it[1])
+                except psycopg2.IntegrityError:
+                    pass  
+                except Exception as e: 
+                    _log.error('unknown error when running \
+                                inserts %s : %s' % 
+                                (insert_statements, e))
+                
+            db.return_connection(conn)
+            raise tornado.gen.Return(mappings)
+        else:  
+            def _getandset(pipe):
+                # mget can't handle an empty list 
+                if len(keys) == 0:
+                    return {}
+    
+                items = pipe.mget(keys)
+                pipe.multi()
+    
+                mappings = {}
+                orig_objects = {}
+                key_sets = collections.defaultdict(list)
+                for key, item in zip(keys, items):
+                    if item is None:
+                        if create_missing:
+                            cur_obj = create_class(key)
+                            if cur_obj is not None:
+                                key_sets[cur_obj._set_keyname()].append(key)
+                        else:
+                            _log.error('Could not get redis object: %s' % key)
+                            cur_obj = None
+                    else:
+                        cur_obj = create_class._create(key, json.loads(item))
+                        orig_objects[key] = create_class._create(key,
+                                                                 json.loads(item))
+                    mappings[key] = cur_obj
+                try:
+                    func(mappings)
+                finally:
+                    to_set = {}
+                    for key, obj in mappings.iteritems():
+                        if obj is not None and obj != orig_objects.get(key, None):
+                            to_set[key] = obj.to_json()
+    
+                    to_set['updated'] = str(datetime.datetime.utcnow()) 
+    
+                    if len(to_set) > 0:
+                        pipe.mset(to_set)
+                    for set_key, cur_keys in key_sets.iteritems():
+                        pipe.sadd(set_key, *cur_keys)
+                return mappings
+    
+            db_connection = DBConnection.get(create_class)
 
-        db_connection = DBConnection.get(create_class)
-        if callback:
-            return db_connection.conn.transaction(_getandset, *keys,
-                                                  callback=callback,
-                                                  value_from_callable=True)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _getandset, *keys, value_from_callable=True)
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
+                                            _getandset, *keys, value_from_callable=True)
+
+            raise tornado.gen.Return(result)
             
     @classmethod
-    def save_all(cls, objects, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def save_all(cls, objects):
         '''Save many objects simultaneously'''
-        db_connection = DBConnection.get(cls)
         data = {}
-        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-        for obj in objects:
-            obj.updated = str(datetime.datetime.utcnow())
-            data[obj.key] = obj.to_json()
-            key_sets[obj._set_keyname()].append(obj.key)
+        rv = True 
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            sql_statements = [] 
+            for obj in objects:
+                query_tuple = db.get_insert_json_query_tuple(obj)
+                sql_statements.append(query_tuple)
+            try:  
+                cursor = yield conn.transaction(sql_statements)
+            except psycopg2.IntegrityError as e: 
+                '''we rollback the transaction, but we still need to 
+                   save all the objects that were in the transaction
+                   we also do not know what object caused the integrityerror, 
+                   so just save on all of them'''
+                for obj in objects: 
+                    obj.save() 
+            except Exception as e: 
+                rv = False
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
+                statemon.state.increment('postgres_unknown_errors')
 
-        def _save_and_add2set(pipe):
-            for set_key, keys in key_sets.iteritems():
-                pipe.sadd(set_key, *keys)
-            pipe.mset(data)
-            return True            
-
-        lock_keys = key_sets.keys() + data.keys()
-        if callback:
-            db_connection.conn.transaction(_save_and_add2set,
-                                           *lock_keys,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _save_and_add2set,
-                value_from_callable=True,
-                *lock_keys)
+            db.return_connection(conn)
+            raise tornado.gen.Return(rv) 
+        else: 
+            db_connection = DBConnection.get(cls)
+            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+            for obj in objects:
+                obj.updated = str(datetime.datetime.utcnow())
+                data[obj.key] = obj.to_json()
+                key_sets[obj._set_keyname()].append(obj.key)
+    
+            def _save_and_add2set(pipe):
+                for set_key, keys in key_sets.iteritems():
+                    pipe.sadd(set_key, *keys)
+                pipe.mset(data)
+                return True
+    
+            lock_keys = key_sets.keys() + data.keys()
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
+                                            _save_and_add2set,
+                                            *lock_keys,
+                                            value_from_callable=True)
+            raise tornado.gen.Return(result)                                 
 
     @classmethod
     def _erase_all_data(cls):
@@ -1378,15 +2054,20 @@ class StoredObject(object):
         db_connection.clear_db()
 
     @classmethod
-    def delete(cls, key, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(cls, key):
         '''Delete an object from the database.
 
         Returns True if the object was successfully deleted
         '''
-        return cls._delete_many_raw_keys([key], callback)
+        rv = yield cls._delete_many_raw_keys([key], async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
-    def delete_many(cls, keys, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete_many(cls, keys):
         '''Deletes many objects simultaneously
 
         Inputs:
@@ -1395,34 +2076,74 @@ class StoredObject(object):
         Returns:
         True if it was delete sucessfully
         '''
-        return cls._delete_many_raw_keys(keys, callback)
+        rv = yield cls._delete_many_raw_keys(keys, async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
-    def _delete_many_raw_keys(cls, keys, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def _delete_many_raw_keys(cls, keys):
         '''Deletes many objects by their raw keys'''
-        db_connection = DBConnection.get(cls)
-        key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-        for key in keys:
-            obj = cls(key)
-            obj.key = key
-            key_sets[obj._set_keyname()].append(key)
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            sql_statements = []
+            for key in keys:
+                query = "DELETE FROM %s \
+                         WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
+                                              key)
+                sql_statements.append(query) 
+            #TODO figure out rv
+            cursor = yield conn.transaction(sql_statements)
+            db.return_connection(conn) 
+            raise tornado.gen.Return(True)  
+        else:  
+            db_connection = DBConnection.get(cls)
+            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
+            for key in keys:
+                obj = cls(key)
+                obj.key = key
+                key_sets[obj._set_keyname()].append(key)
 
-        def _del_and_remfromset(pipe):
-            for set_key, ks in key_sets.iteritems():
-                pipe.srem(set_key, *ks)
-                pipe.delete(*ks)
-            return True
+            def _del_and_remfromset(pipe):
+                for set_key, keys in key_sets.iteritems():
+                    pipe.srem(set_key, *keys)
+                    pipe.delete(*keys)
+                return True
             
-        if callback:
-            db_connection.conn.transaction(_del_and_remfromset,
-                                           *keys,
-                                           value_from_callable=True,
-                                           callback=callback)
-        else:
-            return db_connection.blocking_conn.transaction(
-                _del_and_remfromset,
-                *keys,
-                value_from_callable=True)
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
+                                            _del_and_remfromset,
+                                            *keys,
+                                            value_from_callable=True)
+            raise tornado.gen.Return(result)
+    
+    @classmethod
+    @tornado.gen.coroutine 
+    def _handle_all_changes_pg(cls, future, func): 
+        '''Callback to handle all changes occurring on postgres objects 
+           
+           the singleton connection that stores a map from classname -> func 
+
+           it will take this list and call all the expecting cbs with a format 
+           of : 
+               func(key, object, operation) 
+
+           these come in off a postgres trigger, see migrations/cmsdb.sql for 
+             the definition of the this trigger. 
+        '''
+        results = future.result()
+        for r in results: 
+            r = json.loads(r)
+            key = r['_key'] 
+            op = r['tg_op']
+            obj = yield cls.get(key, async=True)
+            try:
+                statemon.state.increment('postgres_successful_pubsub_callbacks')
+                yield tornado.gen.maybe_future(func(obj.get_id() if obj else key, obj, op))
+            except Exception as e:
+                _log.error('Unexpected exception on PG db change when calling'
+                           ' %s with arguments %s: %s' % 
+                           (func, (key, obj, op), e))
 
     @classmethod
     @utils.sync.optional_sync
@@ -1463,21 +2184,25 @@ class StoredObject(object):
             if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
                 keys.append(cls.key2id(response[2].partition(':')[2]))
-
+    
             response = conn.get_parsed_message()
-
+    
         # Filter out the invalid keys
         filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
-                                zip(*(keys, ops))))
+                               zip(*(keys, ops))))
         if len(filtered) == 0:
             return
         keys, ops = filtered
-
+    
         if get_object:
-            objs = cls.get_many(keys)
+            # this is a dirty hack, to prevent a race condition 
+            # when we subscribe to changes in redis, but want to 
+            # push to postgres -- i don't want to lock get_many for this 
+            # case, adding the extra parameter instead to force redis here
+            objs = cls.get_many(keys, func_level_wpg=False)
         else:
             objs = [None for x in range(len(keys))]
-
+    
         for key, obj, op in zip(*(keys, objs, ops)):
             if obj is None or isinstance(obj, cls):
                 try:
@@ -1503,22 +2228,32 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
-        conn = PubSubConnection.get(cls)
+        if options.wants_postgres:
+            pubsub = PostgresPubSub();
+            pattern = cls._baseclass_name().lower()
+            yield pubsub.listen(pattern, 
+                                lambda x: cls._handle_all_changes_pg(x, func))
+        else: 
+            conn = PubSubConnection.get(cls)
         
-        yield conn.subscribe(
-            lambda x: cls._handle_all_changes(x, func, conn, get_object),
-            '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
-            async=True)
+            yield conn.subscribe(
+                lambda x: cls._handle_all_changes(x, func, conn, get_object),
+                '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
+                async=True)
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
-        conn = PubSubConnection.get(cls)
+        if options.wants_postgres:
+            pubsub = PostgresPubSub();
+            yield pubsub.unlisten(cls._baseclass_name().lower()) 
+        else: 
+            conn = PubSubConnection.get(cls)
         
-        yield conn.unsubscribe(
-            '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
-            async=True)
+            yield conn.unsubscribe(
+                '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
+                async=True)
 
     @classmethod
     def format_subscribe_pattern(cls, pattern):
@@ -1632,26 +2367,32 @@ class NamespacedStoredObject(StoredObject):
             return '%s_%s' % (cls._baseclass_name().lower(), key)
 
     @classmethod
-    def get(cls, key, create_default=False, log_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, key, create_default=False, log_missing=True):
         '''Return the object for a given key.'''
-        return super(NamespacedStoredObject, cls).get(
-            cls.format_key(key),
-            create_default=create_default,
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NamespacedStoredObject, cls).get(
+                         cls.format_key(key),
+                         create_default=create_default,
+                         log_missing=log_missing, 
+                         async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
-    def get_many(cls, keys, create_default=False, log_missing=True,
-                 callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple
         '''
-        return super(NamespacedStoredObject, cls).get_many(
-            [cls.format_key(x) for x in keys],
-            create_default=create_default,
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NamespacedStoredObject, cls).get_many(
+                         [cls.format_key(x) for x in keys],
+                         create_default=create_default,
+                         log_missing=log_missing, 
+                         func_level_wpg=func_level_wpg, 
+                         async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -1683,7 +2424,6 @@ class NamespacedStoredObject(StoredObject):
 
         The set of keys to grab happens once so if the db changes while
         the iteration is going, so neither new or deleted objects will
-        be returned.
 
         You can use it asynchronously like:
         iter = cls.get_iterator()
@@ -1704,46 +2444,66 @@ class NamespacedStoredObject(StoredObject):
     @tornado.gen.coroutine
     def get_all_keys(cls):
         '''Return all the keys in the database for this object type.'''
-        db_connection = DBConnection.get(cls)
-        raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-            set_name=cls._set_keyname())
+        if options.wants_postgres: 
+            rv = True  
+            db = PostgresDB()
+            conn = yield db.get_connection()
 
-        raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
-                                  x is not None])
+            query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
+            cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+            keys_list = [i[0] for i in cursor.fetchall()]
+            db.return_connection(conn)
+            rv = [x.partition('_')[2] for x in keys_list if
+                                      x is not None]
+            raise tornado.gen.Return(rv) 
+        else: 
+            db_connection = DBConnection.get(cls)
+            raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                              set_name=cls._set_keyname())
+            raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
+                                      x is not None])
 
     @classmethod
-    def modify(cls, key, func, create_missing=False, callback=None):
-        return super(NamespacedStoredObject, cls).modify(
-            cls.format_key(key),
-            func,
-            create_missing=create_missing,
-            callback=callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify(cls, key, func, create_missing=False):
+        rv = yield super(NamespacedStoredObject, cls).modify(
+                                 cls.format_key(key),
+                                 func,
+                                 create_missing=create_missing, async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
-    def modify_many(cls, keys, func, create_missing=False, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify_many(cls, keys, func, create_missing=False):
         def _do_modify(raw_mappings):
             # Need to convert the keys in the mapping to the ids of the objects
             mod_mappings = dict(((v.get_id(), v) for v in 
                                  raw_mappings.itervalues()))
             return func(mod_mappings)
-        
-        return super(NamespacedStoredObject, cls).modify_many(
-            [cls.format_key(x) for x in keys],
-            _do_modify,
-            create_missing=create_missing,
-            callback=callback)
+
+        rv = yield super(NamespacedStoredObject, cls).modify_many(
+                                 [cls.format_key(x) for x in keys],
+                                 _do_modify,
+                                 create_missing=create_missing, async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete(cls, key, callback=None):
-        return super(NamespacedStoredObject, cls).delete(
-            cls.format_key(key),
-            callback=callback)
+        rv = yield super(NamespacedStoredObject, cls).delete(
+                                 cls.format_key(key), async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
-        return super(NamespacedStoredObject, cls).delete_many(
-            [cls.format_key(k) for k in keys],
-            callback=callback)
+        rv = yield super(NamespacedStoredObject, cls).delete_many(
+                               [cls.format_key(k) for k in keys], async=True)
+        raise tornado.gen.Return(rv) 
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
@@ -1755,25 +2515,41 @@ class DefaultedStoredObject(NamespacedStoredObject):
         super(DefaultedStoredObject, self).__init__(key)
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, key, log_missing=True, callback=None):
-        return super(DefaultedStoredObject, cls).get(
-            key,
-            create_default=True,
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(DefaultedStoredObject, cls).get(
+                    key,
+                    create_default=True,
+                    log_missing=log_missing,
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
-    def get_many(cls, keys, log_missing=True, callback=None):
-        return super(DefaultedStoredObject, cls).get_many(
-            keys,
-            create_default=True,
-            log_missing=log_missing,
-            callback=callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, keys, log_missing=True, callback=None, func_level_wpg=True):
+        rv = yield super(DefaultedStoredObject, cls).get_many(
+                    keys,
+                    create_default=True,
+                    log_missing=log_missing,
+                    callback=callback, 
+                    func_level_wpg=func_level_wpg,
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=None, callback=None):
-        return super(DefaultedStoredObject, cls).modify_many(
-            keys, func, create_missing=True, callback=callback)
+        rv = yield super(DefaultedStoredObject, cls).modify_many(
+                    keys, 
+                    func, 
+                    create_missing=True, 
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -1804,12 +2580,13 @@ class NeonApiKey(NamespacedStoredObject):
 
         
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def generate(cls, a_id):
         ''' generate api key hash
             if present in DB, then return it
         
         #NOTE: Generate method directly saves the key
-        TODO(mdesnoyer): Make this asynchronous
         '''
         api_key = NeonApiKey.id_generator()
         obj = NeonApiKey(a_id, api_key)
@@ -1817,17 +2594,20 @@ class NeonApiKey(NamespacedStoredObject):
         # Check if the api_key for the account id exists in the DB
         _api_key = cls.get_api_key(a_id)
         if _api_key is not None:
-            return _api_key 
+            raise tornado.gen.Return(_api_key)
         else:
-            if obj.save():
-                return api_key
+            result = yield obj.save(async=True) 
+            if result:
+                raise tornado.gen.Return(api_key)
 
     def to_json(self):
         #NOTE: This is a misnomer. It is being overriden here since the save()
         # function uses to_json() and the NeonApiKey is saved as a plain string
         # in the database
-        
-        return self.api_key
+        if options.wants_postgres:
+            return json.dumps(self.__dict__) 
+        else:  
+            return self.api_key
     
     @classmethod
     def _create(cls, key, obj_dict):
@@ -1844,14 +2624,32 @@ class NeonApiKey(NamespacedStoredObject):
         return api_key
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def get(cls, a_id, callback=None):
-        #NOTE: parent get() method uses json.loads() hence overriden here 
-        db_connection = DBConnection.get(cls)
+        #NOTE: parent get() method uses json.loads() hence overriden here
         key = cls.format_key(a_id)
-        if callback:
-            db_connection.conn.get(key, callback) 
-        else:
-            return db_connection.blocking_conn.get(key) 
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            
+            query = "SELECT _data \
+                     FROM %s \
+                     WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+
+            cursor = yield conn.execute(query)
+            result = cursor.fetchone()
+            db.return_connection(conn)
+            if result:  
+                raise tornado.gen.Return(result['_data']['api_key']) 
+            else: 
+                raise tornado.gen.Return(None) 
+        else:  
+            db_connection = DBConnection.get(cls)
+            if callback:
+                db_connection.conn.get(key, callback) 
+            else:
+                raise tornado.gen.Return(db_connection.blocking_conn.get(key))
    
     @classmethod
     def get_many(cls, keys, callback=None):
@@ -2000,7 +2798,10 @@ class User(NamespacedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return User.__name__
+        if options.wants_postgres:
+            return 'users' 
+        else: 
+            return User.__name__  
         
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
@@ -2231,10 +3032,28 @@ class NeonUserAccount(NamespacedStoredObject):
     @tornado.gen.coroutine
     def get_internal_video_ids(self):
         '''Return the list of internal videos ids for this account.'''
-        db_connection = DBConnection.get(self)
-        vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                      set_name='objset:%s' % self.neon_api_key)
-        raise tornado.gen.Return(list(vids))
+        if options.wants_postgres:
+            rv = True  
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            # right now, we are gonna do this with a LIKE query on the 
+            # indexed key field, however, as data grows it may become 
+            # necessary to store account_id/api_key on the object or table : 
+            # index that, and query based on that
+            query = "SELECT _data->>'key' FROM " + VideoMetadata._baseclass_name().lower() + \
+                    " WHERE _data->>'key' LIKE %s" 
+            # what a mess...escaping 'hack' 
+            params = [self.neon_api_key+'%']
+            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+            rv = [i[0] for i in cursor.fetchall()]
+
+            db.return_connection(conn)
+            raise tornado.gen.Return(rv) 
+        else: 
+            db_connection = DBConnection.get(self)
+            vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                          set_name='objset:%s' % self.neon_api_key)
+            raise tornado.gen.Return(list(vids))
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2263,12 +3082,27 @@ class NeonUserAccount(NamespacedStoredObject):
     def get_all_job_keys(self):
         '''Return a list of (job_id, api_key) of all the jobs for this account.
         '''
-        db_connection = DBConnection.get(self)
-        base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                           set_name='objset:request:%s' % 
-                                           self.neon_api_key)
+        if options.wants_postgres:
+            db = PostgresDB()
+            conn = yield db.get_connection()
+            base_class_name = NeonApiRequest._baseclass_name().lower()
 
-        raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
+            query = "SELECT _data->>'key' FROM " + base_class_name + \
+                    " WHERE _data->>'key' LIKE %s"
+ 
+            params = [base_class_name+'_'+self.neon_api_key+'_%']
+            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+            tuple_to_list = [i[0] for i in cursor.fetchall()]
+            db.return_connection(conn)
+
+            raise tornado.gen.Return([x.split('_')[:0:-1] for x in tuple_to_list])
+        else:  
+            db_connection = DBConnection.get(self)
+            base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
+                                               set_name='objset:request:%s' % 
+                                               self.neon_api_key)
+
+            raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2292,6 +3126,67 @@ class NeonUserAccount(NamespacedStoredObject):
                                  page_size=max_request_size,
                                  skip_missing=True))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_videos_and_statuses(self):
+        ''' 
+            the join on this is slow in the database 
+              perform via two separate queries 
+        '''  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        video_to_status_dict = {}
+        query = "SELECT video_id, serving_enabled, video_status_data, video_status_type FROM (" \
+                "  SELECT v._data->>'key' AS video_id, v._data->>'serving_enabled' AS serving_enabled" \
+                "   FROM videometadata v" \
+                "   WHERE v._data->>'key'  LIKE %s" \
+                "  ) q1 LEFT JOIN LATERAL ( " \
+                "    SELECT vs._data AS video_status_data, vs._type AS video_status_type " \
+                "      FROM videostatus vs " \
+                "      WHERE replace(vs._data->>'key', 'videostatus_', '') = q1.video_id " \
+                "  ) q2 ON TRUE"
+        params = [self.neon_api_key+'_%']
+        cursor = yield conn.execute(
+                    query, 
+                    params, 
+                    cursor_factory=psycopg2.extensions.cursor)
+        for res in cursor.fetchall():
+            try: 
+                obj_dict = {} 
+                obj_dict['_data'] = res[2]
+                key = obj_dict['_data']['key']  
+                obj_dict['_type'] = res[3] 
+                video_to_status_dict[res[0]] = {
+                    'serving_enabled' : res[1], 
+                    'video_status_obj' : self._create(key, obj_dict), 
+                    'thumbnail_status_list' : [] 
+                }
+            except (TypeError, KeyError): 
+                pass  
+        
+        query = "SELECT _data, _type FROM thumbnailstatus " \
+                " WHERE replace(_data->>'key', 'thumbnailstatus_', '') IN( "\
+                "  SELECT jsonb_array_elements_text(v._data->'thumbnail_ids') " \
+                "   FROM videometadata v " \
+                "   WHERE v._data->>'key' LIKE %s)"
+ 
+        params = [self.neon_api_key+'_%']
+        cursor = yield conn.execute(
+                    query, 
+                    params) 
+
+        for res in cursor.fetchall():
+            ts = self._create(res['_data']['key'], res) 
+            video_id = ts.get_video_id()
+            try:  
+                video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
+            except KeyError as e: 
+                _log.error('video_id %s was not in the dictionary : %s' % (video_id, e))
+                continue 
+            
+        db.return_connection(conn)
+        raise tornado.gen.Return(video_to_status_dict)
+        
 # define a ProcessingStrategy, that will dictate the behavior of the model.
 class ProcessingStrategy(DefaultedStoredObject):
     '''
@@ -2513,7 +3408,9 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return CDNHostingMetadataList.__name__
-
+    
+    def get_json_data(self):
+        return json.dumps(json.loads(self.to_json())['_data'])
 
 class CDNHostingMetadata(NamespacedStoredObject):
     '''
@@ -2824,10 +3721,11 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, enabled=True, 
+    def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
         
-        integration_id = uuid.uuid1().hex
+        if integration_id is None: 
+            integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -2927,6 +3825,8 @@ class AbstractPlatform(NamespacedStoredObject):
             return super(AbstractPlatform, cls)._create(cls.format_key(key),
                                                         obj_dict)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def save(self, callback=None):
         raise NotImplementedError("To save this object use modify()")
         # since we need a default constructor with empty strings for the 
@@ -2939,27 +3839,33 @@ class AbstractPlatform(NamespacedStoredObject):
         super(AbstractPlatform, self).save(callback)
 
     @classmethod
-    def get(cls, api_key, i_id, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, api_key, i_id):
         ''' get instance '''
-        return super(AbstractPlatform, cls).get(
-            (None, api_key, i_id), callback=callback)
+        rv = yield super(AbstractPlatform, cls).get((None, api_key, i_id), async=True)
+        raise tornado.gen.Return(rv) 
     
     @classmethod
-    def modify(cls, api_key, i_id, func, create_missing=False, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify(cls, api_key, i_id, func, create_missing=False):
         def _set_parameters(x):
             typ, api_key, i_id = x.get_id()
             x.neon_api_key = api_key
             x.integration_id = i_id
             func(x)
-            
-        return super(AbstractPlatform, cls).modify(
-            (None, api_key, i_id),
-            _set_parameters,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(AbstractPlatform, cls).modify(
+                (None, api_key, i_id),
+                _set_parameters,
+                create_missing=create_missing, 
+                async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
-    def modify_many(cls, keys, func, create_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def modify_many(cls, keys, func, create_missing=False):
         def _set_parameters(objs):
             for x in objs.itervalues():
                 typ, api_key, i_id = x.get_id()
@@ -2967,17 +3873,29 @@ class AbstractPlatform(NamespacedStoredObject):
                 x.integration_id = i_id
             func(objs)
 
-        return super(AbstractPlatform, cls).modify_many(
-            keys,
-            _set_parameters,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(AbstractPlatform, cls).modify_many(
+              keys, 
+              _set_parameters,
+              create_missing=create_missing, 
+              async=True)
+        raise tornado.gen.Return(rv)
 
     @classmethod
-    def delete(cls, api_key, i_id, callback=None):
-        return super(AbstractPlatform, cls).delete(
-            (None, api_key, i_id),
-            callback=callback)
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def delete(cls, api_key, i_id):
+        rv = yield super(AbstractPlatform, cls).delete(
+                         (None, api_key, i_id), async=True)
+        raise tornado.gen.Return(rv)
+        
+    #@classmethod
+    #@utils.sync.optional_sync
+    #@tornado.gen.coroutine
+    #def delete_many(cls, keys):
+    #    rv = yield super(AbstractPlatform, cls).delete_many(
+    #                     [cls._generate_subkey(api_key, i_id) for 
+    #                     api_key, i_id in keys], async=True)
+    #    raise tornado.gen.Return(rv)
 
     def to_json(self):
         ''' to json '''
@@ -3023,7 +3941,6 @@ class AbstractPlatform(NamespacedStoredObject):
     @tornado.gen.coroutine
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
-
         raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_') 
                                   for x in keys])
 
@@ -3103,9 +4020,7 @@ class AbstractPlatform(NamespacedStoredObject):
                                          platform_vid)
         vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
-        yield tornado.gen.Task(self.modify,
-                               self.neon_api_key, '0',
-                               _del_video)
+        yield self.modify(self.neon_api_key, '0', _del_video, async=True)
 
         yield VideoMetadata.delete_related_data(i_vid, async=True)
         
@@ -3145,6 +4060,13 @@ class NeonPlatform(AbstractPlatform):
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
 
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return NeonPlatform.__name__
+
 class BrightcoveIntegration(AbstractIntegration):
     ''' Brightcove Integration class '''
 
@@ -3163,7 +4085,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(enabled)
+        super(BrightcoveIntegration, self).__init__(i_id, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -3227,7 +4149,7 @@ class CNNIntegration(AbstractIntegration):
 
         ''' On every successful processing, the last video processed date is saved '''
 
-        super(CNNIntegration, self).__init__(enabled)
+        super(CNNIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
         # user.neon_api_key this integration belongs to 
@@ -3246,7 +4168,7 @@ class FoxIntegration(AbstractIntegration):
 
         ''' On every successful processing, the last video processed date is saved '''
 
-        super(FoxIntegration, self).__init__(enabled)
+        super(FoxIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
         self.last_process_date = last_process_date 
         # user.account_id this integration belongs to 
@@ -3345,6 +4267,13 @@ class BrightcovePlatform(AbstractPlatform):
     def get_all_keys(cls):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
+
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return BrightcovePlatform.__name__
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -3458,6 +4387,13 @@ class YoutubePlatform(AbstractPlatform):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
 
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return YoutubePlatform.__name__
+
 class OoyalaIntegration(AbstractIntegration):
     '''
     OOYALA Integration
@@ -3475,7 +4411,7 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-        super(OoyalaIntegration, self).__init__()
+        super(OoyalaIntegration, self).__init__(i_id)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
@@ -3554,6 +4490,13 @@ class OoyalaPlatform(AbstractPlatform):
     def get_all_keys(cls):
         keys = yield cls._get_all_keys_impl(async=True)
         raise tornado.gen.Return(keys)
+
+    @classmethod
+    def _baseclass_name(cls):
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
+            return OoyalaPlatform.__name__
 
 #######################
 # Request Blobs 
@@ -3734,61 +4677,83 @@ class NeonApiRequest(NamespacedStoredObject):
         #TODO:validate supported methods
 
     @classmethod
-    def get(cls, job_id, api_key, log_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get(cls, job_id, api_key, log_missing=True):
         ''' get instance '''
-        return super(NeonApiRequest, cls).get(
-            cls._generate_subkey(job_id, api_key),
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).get(cls._generate_subkey(job_id, api_key),
+                                                  log_missing=log_missing,
+                                                  async=True) 
+        raise tornado.gen.Return(rv) 
 
     @classmethod
-    def get_many(cls, keys, log_missing=True, callback=None):
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_many(cls, keys, log_missing=True, func_level_wpg=True):
         '''Returns the list of objects from a list of keys.
 
         Each key must be a tuple of (job_id, api_key)
         '''
-        return super(NeonApiRequest, cls).get_many(
-            [cls._generate_subkey(*k) for k in keys],
-            log_missing=log_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).get_many(
+                          [cls._generate_subkey(*k) for k in keys],
+                          log_missing=log_missing,
+                          func_level_wpg=func_level_wpg, 
+                          async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_all(cls):
         raise NotImplementedError()
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify(cls, job_id, api_key, func, create_missing=False, 
                callback=None):
-        return super(NeonApiRequest, cls).modify(
-            cls._generate_subkey(job_id, api_key),
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).modify(
+                cls._generate_subkey(job_id, api_key),
+                func,
+                create_missing=create_missing,
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=False, callback=None):
         '''Modify many keys.
 
         Each key must be a tuple of (job_id, api_key)
         '''
-        return super(NeonApiRequest, cls).modify_many(
-            [cls._generate_subkey(*k) for k in keys],
-            func,
-            create_missing=create_missing,
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).modify_many(
+                    [cls._generate_subkey(*k) for k in keys],
+                    func,
+                    create_missing=create_missing,
+                    callback=callback, 
+                    async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete(cls, job_id, api_key, callback=None):
-        return super(NeonApiRequest, cls).delete(
-            cls._generate_subkey(job_id, api_key),
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).delete(
+                cls._generate_subkey(job_id, api_key),
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
-        return super(NeonApiRequest, cls).delete_many(
-            [cls._generate_subkey(job_id, api_key) for 
-             job_id, api_key in keys],
-            callback=callback)
+        rv = yield super(NeonApiRequest, cls).delete_many(
+                [cls._generate_subkey(job_id, api_key) for 
+                job_id, api_key in keys],
+                callback=callback, 
+                async=True)
+        raise tornado.gen.Return(rv) 
     
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4279,6 +5244,12 @@ class ThumbnailMetadata(StoredObject):
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return ThumbnailMetadata.__name__
+
     def _set_keyname(self):
         '''Key the set by the video id'''
         return 'objset:%s' % self.key.rpartition('_')[0]
@@ -4421,9 +5392,12 @@ class ThumbnailMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_related_data(cls, key):
-        yield tornado.gen.Task(ThumbnailStatus.delete, key)
-        yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
-        yield tornado.gen.Task(ThumbnailMetadata.delete, key)
+        #yield tornado.gen.Task(ThumbnailStatus.delete, key)
+        #yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
+        #yield tornado.gen.Task(ThumbnailMetadata.delete, key)
+        yield ThumbnailStatus.delete(key, async=True) 
+        yield ThumbnailServingURLs.delete(key, async=True)
+        yield ThumbnailMetadata.delete(key, async=True) 
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
@@ -4458,6 +5432,9 @@ class ThumbnailStatus(DefaultedStoredObject):
             return True
         return False
             
+    def get_video_id(self): 
+        splits = self.key.split('_')
+        return '_'.join([splits[1], splits[2]])
 
     @classmethod
     def _baseclass_name(cls):
@@ -4516,6 +5493,12 @@ class VideoMetadata(StoredObject):
     def _set_keyname(self):
         '''Key by the account id'''
         return 'objset:%s' % self.get_account_id()
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return VideoMetadata.__name__
 
     @classmethod
     def is_valid_key(cls, key):
@@ -4683,7 +5666,8 @@ class VideoMetadata(StoredObject):
                 request_idx.append(cur_idx)
             cur_idx += 1
           
-        requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        #requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        requests = yield NeonApiRequest.get_many(request_keys, async=True)  
         for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
         raise tornado.gen.Return(retval)
@@ -4731,8 +5715,9 @@ class VideoMetadata(StoredObject):
     @tornado.gen.coroutine
     def image_available_in_isp(self):
         try:
-            neon_user_account = yield tornado.gen.Task(NeonUserAccount.get,
-                                                       self.get_account_id())
+            neon_user_account = yield NeonUserAccount.get(
+                                          self.get_account_id(), 
+                                          async=True)
             if neon_user_account is None:
                 msg = ('Cannot find the neon user account %s for video %s. '
                        'This should never happen' % 
@@ -4769,23 +5754,21 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_related_data(cls, key):
-        vmeta = yield tornado.gen.Task(VideoMetadata.get, key)
-
+        vmeta = yield VideoMetadata.get(key, async=True) 
         if vmeta is None:
             # Nothing to delete
             return
         
-        yield tornado.gen.Task(VideoStatus.delete, key)
+        yield VideoStatus.delete(key, async=True)
 
-        yield tornado.gen.Task(NeonApiRequest.delete,
-                               vmeta.job_id,
-                               vmeta.get_account_id())
+        yield NeonApiRequest.delete(vmeta.job_id,
+                                    vmeta.get_account_id(), 
+                                    async=True)
 
         for tid in vmeta.thumbnail_ids:
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
-        yield tornado.gen.Task(VideoMetadata.delete, key)
-    
+        yield VideoMetadata.delete(key, async=True) 
 
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.

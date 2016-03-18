@@ -18,10 +18,12 @@ import random
 import string 
 import test_utils.redis
 import test_utils.neontest
+import test_utils.postgresql
 import time
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
+from utils.options import define, options
 import unittest
 
 class TestParseFeed(test_utils.neontest.TestCase): 
@@ -55,8 +57,6 @@ class TestParseFeed(test_utils.neontest.TestCase):
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestSubmitVideo, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.submit_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
 
@@ -74,10 +74,22 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start()) 
          
     def tearDown(self):
-        self.redis.stop()
         self.submit_mocker.stop() 
         self.cnn_api_mocker.stop() 
+        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn.clear_db() 
+        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn.clear_db()
         super(TestSubmitVideo, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        cls.redis = test_utils.redis.RedisServer()
+        cls.redis.start()
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.redis.stop()
 
     @tornado.testing.gen_test
     def test_submit_success(self):
@@ -190,3 +202,39 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         response['results'] = num_of_results
         response['docs'] = _generate_docs()
         return response
+
+class TestSubmitVideoPG(TestSubmitVideo):
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+        self.submit_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
+        self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
+
+        user_id = '134234adfs' 
+        self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
+        self.user.save()
+        self.integration = neondata.CNNIntegration(self.user.neon_api_key,  
+                                                   last_process_date='2015-10-29T23:59:59Z', 
+                                                   api_key_ref='c2vfn5fb8gubhrmd67x7bmv9')
+        self.integration.save()
+
+        self.external_integration = integrations.cnn.CNNIntegration(
+            self.user.neon_api_key, self.integration)
+        self.cnn_api_mocker = patch('api.cnn_api.CNNApi.search')
+        self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start()) 
+         
+    def tearDown(self):
+        self.submit_mocker.stop() 
+        self.cnn_api_mocker.stop()
+        self.postgresql.clear_all_tables() 
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()

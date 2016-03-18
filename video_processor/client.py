@@ -34,9 +34,11 @@ import multiprocessing
 import numpy as np 
 from PIL import Image
 import psutil
+import pytube
 import Queue
 import random
 import re
+import shutil 
 import signal
 import socket
 import tempfile
@@ -86,6 +88,7 @@ statemon.define('other_worker_completed', int)
 statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
+statemon.define('youtube_video_not_found', int) 
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -291,9 +294,13 @@ class VideoProcessor(object):
         Download the video file 
         '''
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
+        ytre = re.compile('(https?:\/\/[A-Za-z]*\.youtu.*be\..+\/watch\?).*(v=.+)') 
 
         # Get the duration of the video
         video_duration = self.job_queue.get_duration(self.job_message)
+
+        video_url = self.video_url
+        video_bitrate = None
 
         # Find out if we should throttle
         do_throttle = False
@@ -309,7 +316,7 @@ class VideoProcessor(object):
                   (self.video_url, do_throttle))
 
         try:
-            s3match = s3re.search(self.video_url)
+            s3match = s3re.search(video_url)
             if s3match:
                 # Get the video from s3 directly
                 try:
@@ -329,9 +336,35 @@ class VideoProcessor(object):
                     _log.warn('Error getting video url %s via boto. '
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
-            
+
+            ytmatch = ytre.search(video_url) 
+            if ytmatch:
+                watch_portion = ytmatch.group(1) 
+                video_portion = ytmatch.group(2) 
+                youtube = yield self.executor.submit(
+                    pytube.YouTube,
+                    '%s%s' % (watch_portion, video_portion))
+                videos = youtube.filter('mp4')
+                found_videos = []
+                for v in videos:
+                    # they are ordered by resolution ASC, keep
+                    # and replace as we find a better reso up 
+                    # to 720p 
+                    if (v.resolution == '720p' or
+                       v.resolution == '480p' or 
+                       v.resolution == '360p'): 
+                        found_videos.append((int(v.resolution[:-1]), v))
+                found_videos = sorted(found_videos)
+                if found_videos:
+                    video_url = found_videos[-1][1].url
+                else:
+                    msg = 'Could not find a downloadable YouTube video' 
+                    _log.warning(msg)
+                    statemon.state.increment('youtube_video_not_found') 
+                    raise VideoDownloadError(msg)
+ 
             # Use urllib2
-            url_parse = urlparse.urlparse(self.video_url)
+            url_parse = urlparse.urlparse(video_url)
             url_parse = list(url_parse)
             url_parse[2] = urllib.quote(url_parse[2])
             req = urllib2.Request(urlparse.urlunparse(url_parse),
@@ -753,7 +786,7 @@ class VideoProcessor(object):
 
         '''
 
-        frames = [x[0].frameno for x in self.thumbnails 
+        frames = [x[0].frameno for x in self.thumbnails
             if x[0].type == neondata.ThumbnailType.NEON]
         fnos = frames[:self.n_thumbs]
         thumbs = [x[0].key for x in self.thumbnails 
@@ -910,8 +943,7 @@ class VideoClient(multiprocessing.Process):
                 
                 _log.info("key=worker [%s] msg=processing request %s for "
                           "%s." % (self.pid, job_id, api_key))
-            if(job_params):
-                
+            if job_params is not None:
                 _log.debug("Dequeue Successful")
                 raise tornado.gen.Return(job_params)
 

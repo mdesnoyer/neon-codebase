@@ -142,12 +142,23 @@ class TestCase(unittest.TestCase):
                 
             future = concurrent.futures.Future()
             io_loop = tornado.ioloop.IOLoop.current()
-            def _set_result():
+            def _set_result(future):
                 try:
-                    future.set_result(inner_mock(*args, **kwargs))
+                    result = inner_mock(*args, **kwargs)
+                    if (isinstance(result, concurrent.futures.Future) or
+                        isinstance(result, tornado.concurrent.Future)):
+                        def _set_result_from_future(fut):
+                            try:
+                                future.set_result(fut.result())
+                            except Exception as e:
+                                future.set_exception(e)
+                        io_loop.add_future(result,
+                                           _set_result_from_future)
+                    else:
+                        future.set_result(result)
                 except Exception as e:
                     future.set_exception(e)
-            io_loop.add_callback(_set_result)
+            io_loop.add_callback(_set_result, future)
             return future
         outer_mock.side_effect = _build_future
         return inner_mock

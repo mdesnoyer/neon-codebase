@@ -723,6 +723,7 @@ class Cluster():
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection()
+	ec2conn = EC2Connection()
         
         self.master_ip = None
 
@@ -737,12 +738,13 @@ class Cluster():
                                      
         for instance in emr_iterator(conn, 'instances', self.cluster_id,
                                      instance_group_id=master_group.id):
-            if (instance.status.state == 'RUNNING'):
+            instance_info = ec2conn.get_only_instances([instance.ec2instanceid])
+            if (instance_info and instance_info[0].state == 'running'):
                 self.master_id = instance.ec2instanceid
-                if options.use_public_ip and instance.publicipaddress:
-                    self.master_ip = instance.publicipaddress
+                if options.use_public_ip and instance_info[0].ip_address:
+                    self.master_ip = instance_info[0].ip_address
                 else:
-                    self.master_ip = instance.privateipaddress
+                    self.master_ip = instance_info[0].private_ip_address
                 break
 
         if self.master_ip is None:
@@ -823,7 +825,7 @@ class Cluster():
             
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'r3.large', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'm4.large', 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
@@ -891,9 +893,11 @@ class Cluster():
 
     def _get_subnet_id_and_core_instance_group(self):   
         # Calculate the expected costs for each of the instance type options
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
-            'us-east-1d' : 'subnet-53fa1901' 
-        } 
+        #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
+        #    'us-east-1d' : 'subnet-53fa1901' 
+        #}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
+                                    'us-east-1d' : 'subnet-abf214f2'} 
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
