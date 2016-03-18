@@ -2120,7 +2120,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
             self.publisher.last_published_videos, 
             True, async=True)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=20.0)
     def test_error_then_success(self):
         request = neondata.NeonApiRequest.get('job1', 'acct1')
         request.state = neondata.RequestState.INT_ERROR
