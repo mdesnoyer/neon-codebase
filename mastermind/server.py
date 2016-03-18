@@ -534,6 +534,72 @@ class VideoDBWatcher(threading.Thread):
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
     
+    def _handle_video_updates(self, video_ids): 
+        '''Pull videometadata, thumbnailmetadata, and 
+           thumbnailservingurls, move through each of 
+           them, and update accordingly.
+        ''' 
+        obj_dict = neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
+            video_ids)
+
+        for video_id, info in obj_dict.iteritems():
+            thumb_ids = [] 
+            video = info['video'] 
+            thumbnails = info['thumbnails'] 
+            thumbnail_serving_urls = info['thumbnail_serving_urls'] 
+            
+            if video is None:
+                statemon.state.increment('no_videometadata')
+                _log.error('Could not find information about video %s' % video_id)
+                continue
+
+            acct_abtest, acct_serving_enabled = self._accounts_options[
+                video.get_account_id()]
+
+            account_id = video_id.split('_')[0]
+            in_sub_list = account_id in self._account_subscribers 
+            abtest = video.testing_enabled and acct_abtest 
+            serving_enabled = video.serving_enabled and \
+                               acct_serving_enabled and \
+                               in_sub_list
+
+            if serving_enabled: 
+                thumbs_for_update = []
+                thumb_ids = []  
+                thumb_missing = False 
+                for thumb in thumbnails:
+                    if thumb is None:  
+                        statemon.state.increment('no_thumbnailmetadata')
+                        _log.error('Could not find metadata for thumb \
+                                    on video %s in set %s' % (video, thumbnails))
+                        thumb_missing = True 
+                    else:
+                        thumbs_for_update.append(thumb)
+                        thumb_ids.append(thumb.key)
+
+                if thumb_missing is True: 
+                    continue 
+
+                for url_obj in thumbnail_serving_urls: 
+                    if url_obj is not None:
+                        self.directive_pusher.add_serving_urls(
+                            url_obj.get_thumbnail_id(),
+                            url_obj)
+
+                self.mastermind.update_video_info(video,
+                                                  thumbs_for_update,
+                                                  abtest)
+    
+                # Remove it from the list of entries the publisher has
+                # updated so that the next round, we might send a new
+                # callback and put it in serving state.
+                self.directive_pusher.set_video_updated(video_id)
+            else:
+                self.mastermind.remove_video_info(video_id)
+                for thumb_id in thumb_ids:
+                    self.directive_pusher.del_serving_urls(thumb_id)
+
+ 
     def _handle_video_update(self, video_id, video_metadata):
         '''Processes a new video state for a single video.'''
         if video_metadata is None:
@@ -595,16 +661,16 @@ class VideoDBWatcher(threading.Thread):
                 return
 
             _log.debug('Processing %d video updates' % len(video_ids))
-
-            for video_id, video_metadata in zip(*(
-                    video_ids,
-                    neondata.VideoMetadata.get_many(video_ids))):
-                try:
-                    self._handle_video_update(video_id, video_metadata)
-                except Exception as e:
-                    _log.error('Error when updating video %s: %s'
-                               % (video_id, e))
-                    statemon.state.increment('unexpected_video_handle_error')
+            self._handle_video_updates(video_ids) 
+            #for video_id, video_metadata in zip(*(
+            #        video_ids,
+            #        neondata.VideoMetadata.get_many(video_ids))):
+            #    try:
+            #        self._handle_video_update(video_id, video_metadata)
+            #    except Exception as e:
+            #        _log.error('Error when updating video %s: %s'
+            #                   % (video_id, e))
+            #        statemon.state.increment('unexpected_video_handle_error')
         finally:
             with self._vid_lock:
                 if len(self._vids_to_update) == 0:
@@ -1532,7 +1598,6 @@ class DirectivePublisher(threading.Thread):
                        xrange(0, len(video_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
-            self._incr_pending_modify(len(video_ids))
             videos = yield neondata.VideoMetadata.get_many(
                          video_ids, 
                          async=True) 
@@ -1544,6 +1609,7 @@ class DirectivePublisher(threading.Thread):
                            async=True)
  
             for video, request in zip(videos, requests):
+                self._incr_pending_modify(1)
                 if video is None or \
                    request is None or \
                    request.state != neondata.RequestState.FINISHED: 
@@ -1630,7 +1696,7 @@ class DirectivePublisher(threading.Thread):
                            'in database %s' % e)
 
             self.last_published_videos.discard(video_id)
-            self.waiting_on_isp_videos.add(video_id)
+            self.waiting_on_isp_videos.discard(video_id)
 
         finally:  
             self._incr_pending_modify(-1)

@@ -3410,6 +3410,19 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     def _get_object_type(cls): 
         return VideoMetadata
 
+    @tornado.testing.gen_test 
+    def test_get_videos_and_statuses(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        #ThumbnailMetadata(tid, i_vid).save()
+        #ThumbnailMetadata(tid, i_vid).save()
+        VideoMetadata(i_vid, [tid],'job1').save()
+        #neondata.ThumbnailServingURLs(tid).save()
+
+        testa = yield VideoMetadata.get_videos_thumbnails_serving_urls([i_vid], async=True)
+        #for k, v in testa.iteritems(): 
+
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
@@ -3511,7 +3524,6 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         so = neondata.NeonUserAccount('key', api_key='key')
         yield so.save(async=True)
         yield so.get_videos_and_statuses(async=True)
-
 
     @tornado.testing.gen_test 
     def test_mm_neon_user_account(self):

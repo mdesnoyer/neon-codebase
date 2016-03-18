@@ -115,51 +115,67 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                      ] 
 
         # Define the video meta data
-        vid_meta = {
-            'apikey1' + '_0': neondata.VideoMetadata(
+        vid_meta = {}
+        for key in ('apikey1'+'_0', 'apikey1'+'_10', 
+                    'apikey2'+'_1', 'apikey2'+'_2', 
+                    'apikey3'+'_4'):
+            vid_meta[key] = {}  
+            vid_meta[key]['video'] = None 
+            vid_meta[key]['thumbnails'] = [] 
+            vid_meta[key]['thumbnail_serving_urls'] = []   
+        vid_meta['apikey1'+'_0']['video'] = neondata.VideoMetadata(
                 'apikey1' + '_0',
                 ['apikey1'+'_0_t01','apikey1'+'_0_t02','apikey1'+'_0_t03'],
-                i_id='i1'),
-            'apikey1' + '_10': neondata.VideoMetadata('apikey1' + '_10', [],
-                                                    i_id='i1'),
-            'apikey2' + '_1': neondata.VideoMetadata('apikey2' + '_1',
+                i_id='i1')
+        vid_meta['apikey1'+'_10']['video'] = neondata.VideoMetadata('apikey1' + '_10', [],
+                                                    i_id='i1')
+        vid_meta['apikey2'+'_1']['video'] = neondata.VideoMetadata('apikey2' + '_1',
                                                    ['apikey2'+'_1_t11'],
-                                                   i_id='i2'),
-            'apikey2' + '_2': neondata.VideoMetadata(
+                                                   i_id='i2')
+        vid_meta['apikey2'+'_2']['video'] = neondata.VideoMetadata(
                 'apikey2' + '_2',
                 ['apikey2'+'_2_t21', 'apikey2'+'_2_t22'],
-                i_id='i2'),
-            'apikey3' + '_4': neondata.VideoMetadata(
+                i_id='i2')
+
+        vid_meta['apikey3'+'_4']['video'] = neondata.VideoMetadata(
                 'apikey3' + '_4',
                 ['apikey3'+'_4_t41', 'apikey3'+'_4_t42'],
                 i_id='0')
-            }
-        datamock.VideoMetadata.get_many.side_effect = \
-                        lambda vids: [vid_meta[vid] for vid in vids]
-
-        # Define the thumbnail meta data
         TMD = neondata.ThumbnailMetadata
-        tid_meta = {
-            'apikey1'+'_0_t01': TMD('apikey1'+'_0_t01','apikey1'+'_0',
-                                  ttype='brightcove'),
-            'apikey1'+'_0_t02': TMD('apikey1'+'_0_t02','apikey1'+'_0',ttype='neon', 
-                                  rank=0, chosen=True),
-            'apikey1'+'_0_t03': TMD('apikey1'+'_0_t03','apikey1'+'_0',ttype='neon', 
-                                  rank=1),
-            'apikey2'+'_1_t11': TMD('apikey2'+'_1_t11','apikey2'+'_1',
-                                  ttype='brightcove'),
-            'apikey2'+'_2_t21': TMD('apikey2'+'_2_t21','apikey2'+'_2',
-                                  ttype='random'),
-            'apikey2'+'_2_t22': TMD('apikey2'+'_2_t22','apikey2'+'_2',ttype='neon', 
-                                  chosen=True),
-            'apikey3'+'_4_t41': TMD('apikey3'+'_4_t41','apikey3'+'_4',ttype='neon', 
-                                  rank=0),
-            'apikey3'+'_4_t42': TMD('apikey3'+'_4_t42','apikey3'+'_4',ttype='neon', 
-                                  rank=1),
-            }
-        datamock.ThumbnailMetadata.get_many.side_effect = \
-                lambda tids: [tid_meta[tid] for tid in tids]
+        vid_meta['apikey1'+'_0']['thumbnails'] = [
+             TMD('apikey1'+'_0_t01','apikey1'+'_0',
+                                  ttype='brightcove'), 
+             TMD('apikey1'+'_0_t02','apikey1'+'_0',ttype='neon',
+                                  rank=0, chosen=True), 
+             TMD('apikey1'+'_0_t03','apikey1'+'_0',ttype='neon',
+                                  rank=1)
+            ]
 
+        vid_meta['apikey2'+'_1']['thumbnails'] = [ 
+             TMD('apikey2'+'_1_t11','apikey2'+'_1',
+                                  ttype='brightcove')
+            ] 
+        vid_meta['apikey2'+'_2']['thumbnails'] = [
+             TMD('apikey2'+'_2_t21','apikey2'+'_2',
+                                  ttype='random'),
+             TMD('apikey2'+'_2_t22','apikey2'+'_2',ttype='neon', 
+                                  chosen=True)
+            ]
+        vid_meta['apikey3'+'_4']['thumbnails'] = [
+             TMD('apikey3'+'_4_t41','apikey3'+'_4',ttype='neon',
+                                  rank=0),
+             TMD('apikey3'+'_4_t42','apikey3'+'_4',ttype='neon',
+                                  rank=1)
+            ]
+
+        datamock.VideoMetadata.get_videos_thumbnails_serving_urls.side_effect = [ 
+            {'apikey1_0': vid_meta['apikey1_0'], 
+            'apikey1_10': vid_meta['apikey1_10']}, 
+            {'apikey2_1': vid_meta['apikey2_1'], 
+             'apikey2_2': vid_meta['apikey2_2']}, 
+            {'apikey3_4': vid_meta['apikey3_4']}  
+        ]
+ 
         # Define the serving strategy
         datamock.ExperimentStrategy.get.side_effect = \
           [neondata.ExperimentStrategy('apikey1', exp_frac=0.0),
@@ -313,7 +329,14 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
         
         get_internal_vids_mock.return_value = ['apikey_0', 'apikey_10'] 
-        datamock.VideoMetadata.get_many.return_value = [None, None] 
+        vid_meta = {}  
+        for key in (api_key+'_0', api_key+'_10'): 
+            vid_meta[key] = {}  
+            vid_meta[key]['video'] = None 
+            vid_meta[key]['thumbnails'] = [] 
+            vid_meta[key]['thumbnail_serving_urls'] = []
+
+        datamock.VideoMetadata.get_videos_thumbnails_serving_urls.return_value = vid_meta
 
         with self.assertLogExists(
                 logging.ERROR,
@@ -332,36 +355,44 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 1)
         acct = neondata.NeonUserAccount('acct1', api_key)
-        datamock.NeonUserAccount.iterate_all.return_value = [acct] 
-        
-        vid_meta = {
-            api_key + '_0': neondata.VideoMetadata(
-                api_key+ '_0',
-                [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03'],
-                i_id='i1'),
-            api_key + '_1': neondata.VideoMetadata(api_key + '_1',
-                                                   [api_key+'_1_t11'],
-                                                   i_id='i1'),
-            }
-        datamock.VideoMetadata.get_many.side_effect = \
-                        lambda vids: [vid_meta[vid] for vid in vids]
+        datamock.NeonUserAccount.iterate_all.return_value = [acct]
+ 
         get_ivids_mock.return_value = [api_key+'_0', api_key+'_1'] 
+        vid_meta = {}
+         
+        for key in (api_key+'_0', api_key+'_1'): 
+            vid_meta[key] = {}  
+            vid_meta[key]['video'] = None 
+            vid_meta[key]['thumbnails'] = [] 
+            vid_meta[key]['thumbnail_serving_urls'] = []  
+ 
+        vid_meta[api_key+'_0']['video'] = neondata.VideoMetadata(
+            api_key+ '_0',
+            [api_key+'_0_t01',api_key+'_0_t02',api_key+'_0_t03'],
+            i_id='i1')
 
+        vid_meta[api_key+'_1']['video'] = neondata.VideoMetadata(
+            api_key + '_1',
+            [api_key+'_1_t11'],
+            i_id='i1')
+        
+        
         TMD = neondata.ThumbnailMetadata
-        tid_meta = {
-            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',
+        vid_meta[api_key+'_0']['thumbnails'] = [
+                TMD(api_key+'_0_t01',api_key+'_0',
                                   ttype='brightcove'),
-            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
+                TMD(api_key+'_0_t02',api_key+'_0',ttype='neon',
                                   rank=0, chosen=True),
-            api_key+'_0_t03': None,
-            api_key+'_1_t11': TMD(api_key+'_1_t11',api_key+'_1',
-                                  ttype='brightcove'),
-            }
+                None
+            ]
+        vid_meta[api_key+'_1']['thumbnails'] = [
+                TMD(api_key+'_1_t11',api_key+'_1',
+                                  ttype='brightcove')
+            ]
 
-        datamock.ThumbnailMetadata.get_many.side_effect = \
-                lambda tids: [tid_meta[tid] for tid in tids]
+        datamock.VideoMetadata.get_videos_thumbnails_serving_urls.return_value = vid_meta
         with self.assertLogExists(logging.ERROR,
-                                  'Could not find metadata for thumb .+t03'):
+                                  'Could not find metadata for thumb'):
             self.watcher._process_db_data(True)
 
         # Make sure that there is a directive about the other
@@ -384,34 +415,36 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                         't', 't', 'r', 'h')
         job12 = neondata.NeonApiRequest('job11', api_key, '1')
         acct = neondata.NeonUserAccount('acct1', api_key)
-        datamock.NeonUserAccount.iterate_all.return_value = [acct] 
+        datamock.NeonUserAccount.iterate_all.return_value = [acct]
+ 
+        get_ivids_mock.return_value = [api_key+'_0', api_key+'_1']
+        vid_meta = {}  
+        for key in (api_key+'_0', api_key+'_1'): 
+            vid_meta[key] = {}  
+            vid_meta[key]['video'] = None 
+            vid_meta[key]['thumbnails'] = [] 
+            vid_meta[key]['thumbnail_serving_urls'] = []
 
-        vid_meta = {
-            api_key + '_0': neondata.VideoMetadata(api_key + '_0',
+        vid_meta[api_key+'_0']['video'] = neondata.VideoMetadata(api_key + '_0',
                                                    [api_key+'_0_t01',
                                                     api_key+'_0_t02'],
-                                                    i_id='i1'),
-            api_key + '_1': neondata.VideoMetadata(api_key + '_1', 
+                                                    i_id='i1')
+        vid_meta[api_key+'_1']['video'] = neondata.VideoMetadata(api_key + '_1',
                                                    [api_key+'_1_t11'],
-                                                   i_id='i1'),
-            }
-        datamock.VideoMetadata.get_many.side_effect = \
-                        lambda vids: [vid_meta[vid] for vid in vids]
-        get_ivids_mock.return_value = [api_key+'_0', api_key+'_1'] 
-
+                                                   i_id='i1')
         TMD = neondata.ThumbnailMetadata
-        tid_meta = {
-            api_key+'_0_t01': TMD(api_key+'_0_t01',api_key+'_0',
+        vid_meta[api_key+'_0']['thumbnails'] = [
+              TMD(api_key+'_0_t01',api_key+'_0',
                                   ttype='brightcove'),
-            api_key+'_0_t02': TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
-                                  rank=0, chosen=True),
-            api_key+'_1_t11': TMD(api_key+'_1_t11',api_key+'_1',
-                                  ttype='brightcove'),
-            }
+              TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
+                                  rank=0, chosen=True)
+            ] 
+        vid_meta[api_key+'_1']['thumbnails'] = [ 
+              TMD(api_key+'_1_t11',api_key+'_1',
+                                  ttype='brightcove')
+            ]
 
-        datamock.ThumbnailMetadata.get_many.side_effect = \
-                lambda tids: [tid_meta[tid] for tid in tids]
-
+        datamock.VideoMetadata.get_videos_thumbnails_serving_urls.return_value = vid_meta
         self.watcher._process_db_data(False)
 
         # Make sure that there is a directive for both videos
@@ -424,7 +457,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           {api_key+'_1_t11': 1.0})
 
         # Now disable one of the videos
-        vid_meta[api_key+'_0'].serving_enabled = False
+        vid_meta[api_key+'_0']['video'].serving_enabled = False
         self.watcher._process_db_data(True)
 
         # Make sure that only one directive is left
@@ -649,7 +682,7 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
             lambda: len([x for x in self.mastermind.get_directives()]),
             0, async=True)
 
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test(timeout=15.0) 
     def test_add_new_video(self):
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
@@ -663,6 +696,7 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
                                      i_id='i1')
         yield vid.save(async=True)
 
+        yield tornado.gen.sleep(1.0) 
         yield neondata.BrightcovePlatform.modify(
             'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), 
             async=True)
@@ -2472,17 +2506,12 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         self._add_hbase_entry(1405372146, 'key1_vid1_t2', iv=1, ic=1)
 
         # Start all the threads
-        #import pdb; pdb.set_trace()
         self.video_watcher.start()
-        #import pdb; pdb.set_trace()
         self.video_watcher.wait_until_loaded(10.0)
-        #tornado.ioloop.IOLoop.current().add_callback(lambda: 
-        #    self.video_watcher._change_subscriber.subscribe_to_db_changes())
         while not self.video_watcher._change_subscriber._is_subscribed: 
             yield tornado.gen.sleep(0.1)
         self.stats_watcher.start()
         self.stats_watcher.wait_until_loaded(5.0)
-        #import pdb; pdb.set_trace()
         self.directive_publisher.start()
         time.sleep(1) # Make sure that the directive publisher gets busy
         self.activity_watcher.wait_for_idle()
