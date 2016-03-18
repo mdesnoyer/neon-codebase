@@ -545,66 +545,67 @@ class VideoDBWatcher(threading.Thread):
                        xrange(0, len(video_id_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
-            statemon.state.increment('video_updates_handled', diff=CHUNK_SIZE) 
+            statemon.state.increment('video_updates_handled', 
+                diff=len(video_ids)) 
             obj_dict = neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
                 video_ids)
 
-        for video_id, info in obj_dict.iteritems():
-            thumb_ids = [] 
-            video = info['video'] 
-            thumbnails = info['thumbnails'] 
-            thumbnail_serving_urls = info['thumbnail_serving_urls'] 
-            
-            if video is None:
-                statemon.state.increment('no_videometadata')
-                _log.error('Could not find information about video %s' % video_id)
-                continue
-
-            acct_abtest, acct_serving_enabled = self._accounts_options[
-                video.get_account_id()]
-
-            account_id = video_id.split('_')[0]
-            in_sub_list = account_id in self._account_subscribers 
-            abtest = video.testing_enabled and acct_abtest 
-            serving_enabled = video.serving_enabled and \
-                               acct_serving_enabled and \
-                               in_sub_list
-
-            if serving_enabled: 
-                thumbs_for_update = []
-                thumb_ids = []  
-                thumb_missing = False 
-                for thumb in thumbnails:
-                    if thumb is None:  
-                        statemon.state.increment('no_thumbnailmetadata')
-                        _log.error('Could not find metadata for thumb \
-                                    on video %s in set %s' % (video, thumbnails))
-                        thumb_missing = True 
-                    else:
-                        thumbs_for_update.append(thumb)
-                        thumb_ids.append(thumb.key)
-
-                if thumb_missing is True: 
-                    continue 
-
-                for url_obj in thumbnail_serving_urls: 
-                    if url_obj is not None:
-                        self.directive_pusher.add_serving_urls(
-                            url_obj.get_thumbnail_id(),
-                            url_obj)
-
-                self.mastermind.update_video_info(video,
-                                                  thumbs_for_update,
-                                                  abtest)
+            for video_id, info in obj_dict.iteritems():
+                thumb_ids = [] 
+                video = info['video'] 
+                thumbnails = info['thumbnails'] 
+                thumbnail_serving_urls = info['thumbnail_serving_urls'] 
+                
+                if video is None:
+                    statemon.state.increment('no_videometadata')
+                    _log.error('Could not find information about video %s' % video_id)
+                    continue
     
-                # Remove it from the list of entries the publisher has
-                # updated so that the next round, we might send a new
-                # callback and put it in serving state.
-                self.directive_pusher.set_video_updated(video_id)
-            else:
-                self.mastermind.remove_video_info(video_id)
-                for thumb_id in thumb_ids:
-                    self.directive_pusher.del_serving_urls(thumb_id)
+                acct_abtest, acct_serving_enabled = self._accounts_options[
+                    video.get_account_id()]
+    
+                account_id = video_id.split('_')[0]
+                in_sub_list = account_id in self._account_subscribers 
+                abtest = video.testing_enabled and acct_abtest 
+                serving_enabled = video.serving_enabled and \
+                                   acct_serving_enabled and \
+                                   in_sub_list
+    
+                if serving_enabled: 
+                    thumbs_for_update = []
+                    thumb_ids = []  
+                    thumb_missing = False 
+                    for thumb in thumbnails:
+                        if thumb is None:  
+                            statemon.state.increment('no_thumbnailmetadata')
+                            _log.error('Could not find metadata for thumb \
+                                        on video %s in set %s' % (video, thumbnails))
+                            thumb_missing = True 
+                        else:
+                            thumbs_for_update.append(thumb)
+                            thumb_ids.append(thumb.key)
+    
+                    if thumb_missing is True: 
+                        continue 
+    
+                    for url_obj in thumbnail_serving_urls: 
+                        if url_obj is not None:
+                            self.directive_pusher.add_serving_urls(
+                                url_obj.get_thumbnail_id(),
+                                url_obj)
+    
+                    self.mastermind.update_video_info(video,
+                                                      thumbs_for_update,
+                                                      abtest)
+        
+                    # Remove it from the list of entries the publisher has
+                    # updated so that the next round, we might send a new
+                    # callback and put it in serving state.
+                    self.directive_pusher.set_video_updated(video_id)
+                else:
+                    self.mastermind.remove_video_info(video_id)
+                    for thumb_id in thumb_ids:
+                        self.directive_pusher.del_serving_urls(thumb_id)
 
  
     def _handle_video_update(self, video_id, video_metadata):
