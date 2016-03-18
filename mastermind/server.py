@@ -119,6 +119,7 @@ statemon.define('isp_ready_delay', float)
 statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
 statemon.define('thumbnails_serving', int)
+statemon.define('video_updates_handled', int)
 
 statemon.define('videos_waiting_on_isp', int)
 
@@ -534,13 +535,19 @@ class VideoDBWatcher(threading.Thread):
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
     
-    def _handle_video_updates(self, video_ids): 
+    def _handle_video_updates(self, video_id_list): 
         '''Pull videometadata, thumbnailmetadata, and 
            thumbnailservingurls, move through each of 
            them, and update accordingly.
         ''' 
-        obj_dict = neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
-            video_ids)
+        CHUNK_SIZE=7500
+        list_chunks = [video_id_list[i:i+CHUNK_SIZE] for i in
+                       xrange(0, len(video_id_list), CHUNK_SIZE)]
+
+        for video_ids in list_chunks:
+            statemon.state.increment('video_updates_handled', diff=CHUNK_SIZE) 
+            obj_dict = neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
+                video_ids)
 
         for video_id, info in obj_dict.iteritems():
             thumb_ids = [] 
@@ -660,7 +667,7 @@ class VideoDBWatcher(threading.Thread):
             if len(video_ids) == 0:
                 return
 
-            _log.debug('Processing %d video updates' % len(video_ids))
+            _log.info('Processing %d video updates' % len(video_ids))
             self._handle_video_updates(video_ids) 
             #for video_id, video_metadata in zip(*(
             #        video_ids,
