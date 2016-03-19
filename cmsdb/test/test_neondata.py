@@ -3411,17 +3411,64 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         return VideoMetadata
 
     @tornado.testing.gen_test 
-    def test_get_videos_and_statuses(self):
+    def test_get_videos_and_statuses_normal_video(self):
         api_key = 'key'
         i_vid = InternalVideoID.generate(api_key, 'vid1')
         tid = i_vid + "_t1"
-        #ThumbnailMetadata(tid, i_vid).save()
-        #ThumbnailMetadata(tid, i_vid).save()
-        VideoMetadata(i_vid, [tid],'job1').save()
-        #neondata.ThumbnailServingURLs(tid).save()
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        yield neondata.ThumbnailServingURLs(tid,
+               {(160, 90) : 't_default.jpg'}).save(async=True)
 
-        testa = yield VideoMetadata.get_videos_thumbnails_serving_urls([i_vid], async=True)
-        #for k, v in testa.iteritems(): 
+        vid_dict = yield VideoMetadata.get_videos_thumbnails_serving_urls(
+                       [i_vid], 
+                       async=True)
+
+        self.assertEquals(vid_dict[i_vid]['video'].key, i_vid) 
+        self.assertEquals(vid_dict[i_vid]['thumbnails'][0].key, tid) 
+        self.assertEquals(len(vid_dict[i_vid]['thumbnail_serving_urls']),1)
+ 
+    @tornado.testing.gen_test 
+    def test_get_videos_and_statuses_no_thumbnails(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        yield VideoMetadata(i_vid, [],'job1').save(async=True)
+
+        vid_dict = yield VideoMetadata.get_videos_thumbnails_serving_urls(
+                       [i_vid], 
+                       async=True)
+
+        self.assertEquals(vid_dict[i_vid]['video'].key, i_vid) 
+        self.assertEquals(len(vid_dict[i_vid]['thumbnails']), 0) 
+        self.assertEquals(len(vid_dict[i_vid]['thumbnail_serving_urls']),0)
+
+    @tornado.testing.gen_test 
+    def test_get_videos_and_statuses_multiple_thumbnails(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid1 = i_vid + "_t1"
+        tid2 = i_vid + "_t2"
+        tid3 = i_vid + "_t3"
+        tid4 = i_vid + "_t4"
+        yield ThumbnailMetadata(tid1, i_vid).save(async=True)
+        yield ThumbnailMetadata(tid2, i_vid).save(async=True)
+        yield ThumbnailMetadata(tid3, i_vid).save(async=True)
+        yield ThumbnailMetadata(tid4, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid1,
+                                    tid2,
+                                    tid3,
+                                    tid4],
+            'job1').save(async=True)
+
+        vid_dict = yield VideoMetadata.get_videos_thumbnails_serving_urls(
+                       [i_vid], 
+                       async=True)
+
+        self.assertEquals(vid_dict[i_vid]['video'].key, i_vid) 
+        self.assertEquals(len(vid_dict[i_vid]['thumbnails']), 4) 
+        self.assertEquals(len(vid_dict[i_vid]['thumbnail_serving_urls']),0)
+ 
 
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
