@@ -682,7 +682,7 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
             lambda: len([x for x in self.mastermind.get_directives()]),
             0, async=True)
 
-    @tornado.testing.gen_test(timeout=15.0) 
+    @tornado.testing.gen_test 
     def test_add_new_video(self):
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
@@ -2120,6 +2120,7 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
             self.publisher.last_published_videos, 
             True, async=True)
 
+    # additional timeout as it takes a little longer 
     @tornado.testing.gen_test(timeout=20.0)
     def test_error_then_success(self):
         request = neondata.NeonApiRequest.get('job1', 'acct1')

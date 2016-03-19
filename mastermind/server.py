@@ -670,15 +670,6 @@ class VideoDBWatcher(threading.Thread):
 
             _log.info('Processing %d video updates' % len(video_ids))
             self._handle_video_updates(video_ids) 
-            #for video_id, video_metadata in zip(*(
-            #        video_ids,
-            #        neondata.VideoMetadata.get_many(video_ids))):
-            #    try:
-            #        self._handle_video_update(video_id, video_metadata)
-            #    except Exception as e:
-            #        _log.error('Error when updating video %s: %s'
-            #                   % (video_id, e))
-            #        statemon.state.increment('unexpected_video_handle_error')
         finally:
             with self._vid_lock:
                 if len(self._vids_to_update) == 0:
