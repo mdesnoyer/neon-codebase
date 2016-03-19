@@ -676,7 +676,7 @@ class VideoHelper(object):
                 publish_date=args.get('publish_date', None),
                 duration=float(args.get('duration', 0.0)) or None, 
                 custom_data=args.get('custom_data', None), 
-                i_id=api_request.integration_id,
+                i_id=args.get('integration_id', '0'),
                 serving_enabled=False)
             
             default_thumbnail_url = args.get('default_thumbnail_url', None)
@@ -806,8 +806,7 @@ class VideoHandler(APIV2Handler):
             self.success(job_info,
                          code=ResponseCode.HTTP_ACCEPTED) 
         else:
-            raise Exception('Unable to submit job to queue', 
-                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+            raise SubmissionError('Unable to submit job to queue')
         
     @tornado.gen.coroutine
     def get(self, account_id):  

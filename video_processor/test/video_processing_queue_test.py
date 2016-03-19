@@ -47,27 +47,28 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
 
         self.sqs_patcher.start().return_value = self.mock_sqs
 
+        self.q = video_processor.video_processing_queue.VideoProcessingQueue()
+
     def tearDown(self):
         self.sqs_patcher.stop()
         super(TestVideoProcessingQueue, self).tearDown()
      
     @tornado.testing.gen_test
     def test_full_class(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
         for i in range(1, 11):
             priority = i % self.num_queues
 
-            message_body = yield sqs.write_message(priority, str(i),
+            message_body = yield self.q.write_message(priority, str(i),
                                                    i*12.3)
             self.assertTrue(message_body)
 
-        size = yield sqs.size()
+        size = yield self.q.size()
         self.assertEquals(size, 10)
 
         count = 10
         while count > 0:
-            mes = yield sqs.read_message()
+            mes = yield self.q.read_message()
 
             if mes != None:
                 # Look for the message attributes
@@ -78,48 +79,43 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
                     mes.message_attributes['duration']['string_value']),
                     0.0)
                 
-                deleted = yield sqs.delete_message(mes)
+                deleted = yield self.q.delete_message(mes)
                 self.assertTrue(deleted)
                 count = count - 1
 
-        size = yield sqs.size()
+        size = yield self.q.size()
         self.assertEquals(size, 0)
 
     @tornado.testing.gen_test
     def test_invalid_priority(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
 
         with self.assertRaises(ValueError) as cm:
-            message_body = yield sqs.write_message(5, 'Test')
+            message_body = yield self.q.write_message(5, 'Test')
 
     @tornado.testing.gen_test
     def test_read_from_empty_server(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
         
-        message = yield sqs.read_message()
+        message = yield self.q.read_message()
         self.assertIsNone(message)
 
     @tornado.testing.gen_test
     def test_invalid_message_body(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
         
         test_tuple = (0, 'test')
         test_dict = [0,3,2]
 
         with self.assertRaises(ValueError) as cm:
-            yield sqs.write_message(0, 13)
+            yield self.q.write_message(0, 13)
 
         with self.assertRaises(ValueError) as cm:
-            yield sqs.write_message(0, test_tuple)
+            yield self.q.write_message(0, test_tuple)
 
         with self.assertRaises(ValueError) as cm:
-            yield sqs.write_message(0, test_dict)
+            yield self.q.write_message(0, test_dict)
 
     @tornado.testing.gen_test
-    def test_no_duration(self):
-        sqs = video_processor.video_processing_queue.VideoProcessingQueue()
-        
-        message = yield sqs.write_message(0, "test", None)
+    def test_no_duration(self):        
+        message = yield self.q.write_message(0, "test", None)
 
         self.assertEqual(message, "test")
 

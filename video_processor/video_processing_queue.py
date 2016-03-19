@@ -63,7 +63,7 @@ class VideoProcessingQueue(object):
         self.conn = None
 
     def __del__(self):
-        self.exectuor.shutdown(False)
+        self.executor.shutdown(False)
         
     @tornado.gen.coroutine
     def _connect_to_server(self, timeout=options.default_timeout):

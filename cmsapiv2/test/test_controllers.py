@@ -1000,7 +1000,10 @@ class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler):
 
 class TestVideoHandler(TestControllersBase): 
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            name='testingme',
+            processing_priority=2)
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
@@ -1030,51 +1033,42 @@ class TestVideoHandler(TestControllersBase):
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
         self.maxDiff = 5000
-        
-        # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
-                                 'VideoProcessingQueue.connect_to_server')
-        
-        self.mock_sqs_future = self._future_wrap_mock(
-            self.sqs_patcher.start(),
-            require_async_kw=False)
 
-        self.mock_sqs_future.return_value = sqsmock.SQSConnectionMock()
-        self.write_patcher = patch('video_processor.video_processing_queue.'\
-                                  'VideoProcessingQueue.write_message')
-        self.mock_write_future = self._future_wrap_mock(
-            self.write_patcher.start(),
-            require_async_kw=False)
-        self.mock_write_future.return_value = "test_message"
+        # Mock the video queue
+        self.job_queue_patcher = patch(
+            'video_processor.video_processing_queue.' \
+            'VideoProcessingQueue')
+        self.job_queue_mock = self.job_queue_patcher.start()()
+        self.job_write_mock = self._future_wrap_mock(
+            self.job_queue_mock.write_message)
+        self.job_write_mock.side_effect = ['message']
+        
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
-        self.sqs_patcher.stop()
-        self.write_patcher.stop()
-        super(TestVideoHandler, self).tearDown()
+        self.job_queue_patcher.stop()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
-    
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @patch('cmsdb.neondata.VideoMetadata.download_image_from_url')
     @tornado.testing.gen_test
-    def test_post_video(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+    def test_post_video(self, cmsdb_download_image_mock):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1&duration=16' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mock)
         cmsdb_download_image_mock.side_effect = [self.random_image]
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
@@ -1084,7 +1078,15 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
-        cmsdb_download_image_mocker.stop()
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertEquals(cargs[1], job.to_json())
+        self.assertEquals(cargs[2], 16)
 
     @tornado.testing.gen_test
     def test_post_video_video_exists_in_db(self):
@@ -1335,70 +1337,77 @@ class TestVideoHandler(TestControllersBase):
         data = rjson['error']['data'] 
         self.assertTrue(first_job_id in data)
 
+    @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess(self):
-        # use self.stop/wait to make sure we get the response back and 
-        # not an exception, we don't want no exception
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        self.job_write_mock.side_effect = [True, True]
+        
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url&duration=31' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertEquals(cargs[2], 31)
+        self.job_write_mock.reset_mock()
         
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=true' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               body='',
-                               method='POST',
-                              allow_nonstandard_methods=True)
-        response = self.wait()
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body)
         self.assertEquals(first_job_id, rjson['job_id'])
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertEquals(cargs[2], 31)
 
+    @tornado.testing.gen_test
     def test_post_video_with_vserver_fail(self):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.mock_sqs_future.side_effect = False
+        self.job_write_mock.side_effect = [False]
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(self.get_url(url), 
+                                         body='',
+                                         method='POST',
+                                         allow_nonstandard_methods=True)
+        response = e.exception.response
         self.assertEquals(response.code, 500) 
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Internal Server') 
 
+    @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess_fail(self):
+        self.job_write_mock.side_effect = ['message', None]
+        
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
         self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
         
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=1' % (self.account_id_api_key, self.test_i_id)
-        self.mock_sqs_future.side_effect = False
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        with self.assertLogExists(logging.ERROR, 'Unable to submit job'):
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                yield self.http_client.fetch(self.get_url(url),
+                                             body='',
+                                             method='POST',
+                                             allow_nonstandard_methods=True)
+        response = e.exception.response
         self.assertEquals(response.code, 500) 
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -1683,60 +1692,6 @@ class TestVideoHandler(TestControllersBase):
 	url = '/api/v2/%s/videos' % '1234234'
         self.post_exceptions(url, params, exception_mocker) 
 
-# TODO KF here until hot swap is done
-class TestVideoHandlerPG(TestVideoHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testvideohiid'
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500,
-                                   urls=['s']).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500,
-                                   urls=['d']).save()
-        neondata.NeonApiRequest('job1', self.account_id_api_key).save()
-        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
-        user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image]
-        self.http_mocker = patch('utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(
-              self.http_mocker.start()) 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        self.maxDiff = 5000
-        super(TestVideoHandler, self).setUp()
-
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.http_mocker.stop()
-        self.verify_account_mocker.stop()
-        super(TestVideoHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -1964,22 +1919,6 @@ class TestHealthCheckHandler(TestControllersBase):
         self.http_mocker = patch('utils.http.send_request')
         self.http_mock = self._future_wrap_mock(
               self.http_mocker.start()) 
-
-        # Mock the SQS implementation
-        self.sqs_patcher = patch('video_processor.video_processing_queue.' \
-                                 'VideoProcessingQueue.connect_to_server')
-        
-        self.mock_sqs_future = self._future_wrap_mock(
-            self.sqs_patcher.start(),
-            require_async_kw=False)
-
-        self.mock_sqs_future.return_value = sqsmock.SQSConnectionMock()
-        self.write_patcher = patch('video_processor.video_processing_queue.'\
-                                  'VideoProcessingQueue.write_message')
-        self.mock_write_future = self._future_wrap_mock(
-            self.write_patcher.start(),
-            require_async_kw=False)
-        self.mock_write_future.return_value = "test_message"
         super(TestHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
@@ -1988,8 +1927,6 @@ class TestHealthCheckHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.http_mocker.stop()
-        self.sqs_patcher.stop()
-        self.write_patcher.stop()
 
     @classmethod
     def setUpClass(cls):
