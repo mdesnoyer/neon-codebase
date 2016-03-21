@@ -130,7 +130,7 @@ class ISP:
 
         #get build path
         self.nginx_path = \
-                base_path + "/imageservingplatform/nginx-1.6.2/objs/nginx"
+                base_path + "/imageservingplatform/nginx-1.8.1/objs/nginx"
 
     def start(self):
         self.proc = subprocess.Popen([
