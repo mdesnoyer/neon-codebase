@@ -411,16 +411,33 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
+        # io_loop for this thread, responsible for doing watcher stuff
+        self.io_loop = tornado.ioloop.IOLoop(make_current=False)
+
+        # the timer that will fire the watcherer every few minutes
+        self.timer = utils.sync.PeriodicCoroutineTimer(
+             self._initialize_directives, 
+             #options.publishing_period*1000.0, 
+             1.0, 
+             io_loop=self.io_loop)
+
+        # have we ran the initial intialization on this thing 
+        self.is_initialized = False 
+
     def __del__(self):
         self.stop()
         del self._video_updater
 
     def run(self):
-        is_initialized = False
+        self.io_loop.make_current()
+        self.timer.start() 
+        self.io_loop.start()  
+        '''
+        self.is_initialized = False
         while not self._stopped.is_set():
             try:
                 with self.activity_watcher.activate():
-                    if not is_initialized:
+                    if not self.is_initialized:
                         self._initialize_serving_directives()
 
                     if not self._video_updater.is_alive():
@@ -429,9 +446,9 @@ class VideoDBWatcher(threading.Thread):
                     if not self._change_subscriber.is_alive(): 
                         self._change_subscriber.start()
 
-                    self._process_db_data(is_initialized)
+                    self._process_db_data(self.is_initialized)
                     
-                    is_initialized = True
+                    self.is_initialized = True
                     statemon.state.initialized_directives = 1
 
             except Exception as e:
@@ -440,6 +457,7 @@ class VideoDBWatcher(threading.Thread):
 
             # Now we wait so that we don't hit the database too much.
             self._stopped.wait(options.video_db_polling_delay)
+         '''
 
     def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
@@ -452,6 +470,27 @@ class VideoDBWatcher(threading.Thread):
         self._video_updater.stop()
         self._change_subscriber.stop() 
 
+    @tornado.gen.coroutine
+    def _initialize_directives(self): 
+        try: 
+            if not self.is_initialized: 
+                yield self._initialize_serving_directives()
+            if not self._video_updater.is_alive():
+                self._video_updater.start()
+            if not self._change_subscriber.is_alive():
+                self._change_subscriber.start()
+
+            yield self._process_db_data(self.is_initialized)
+            is_initialized = True
+            statemon.state.initialized_directives = 1
+        except Exception as e:
+            _log.exception('Uncaught video DB Error: %s' % e)
+            statemon.state.increment('videodb_error')
+
+        # Now we wait so that we don't hit the database too much.
+        yield tornado.gen.sleep(options.video_db_polling_delay) 
+
+    @tornado.gen.coroutine
     def _initialize_serving_directives(self):
         '''Save current experiment state and serving fracs to mastermind
          
@@ -461,14 +500,16 @@ class VideoDBWatcher(threading.Thread):
         changing its serving directives.
         '''
         _log.info('Loading current experiment info and updating in mastermind')
-        for account in neondata.NeonUserAccount.iterate_all():
+        accounts = yield neondata.NeonUserAccount.get_all(async=True)
+        for account in accounts:
             if not account.serving_enabled:
                 continue
 
             self._accounts_options[account.neon_api_key] = (account.abtest, 
                  account.serving_enabled)
             
-            videos_and_statuses = account.get_videos_and_statuses() 
+            videos_and_statuses = yield account.get_videos_and_statuses(
+                async=True) 
             
             for video_id, obj in videos_and_statuses.iteritems(): 
                 if not obj['serving_enabled']:  
@@ -482,6 +523,7 @@ class VideoDBWatcher(threading.Thread):
                     video_status,
                     thumbnail_status_list)
                 
+    @tornado.gen.coroutine
     def _process_db_data(self, is_initialized):
         _log.info('Polling the video database for a full batch update')
 
@@ -501,22 +543,31 @@ class VideoDBWatcher(threading.Thread):
 
         # Update the serving urls for the default account thumbs
         default_thumb_ids = [x[2] for x in account_tups if x[2]]
-        for url_obj in neondata.ThumbnailServingURLs.get_many(
-                default_thumb_ids):
+        url_objs = yield neondata.ThumbnailServingURLs.get_many(
+                default_thumb_ids, 
+                async=True)
+        for url_obj in url_objs:
             if url_obj is not None:
                 self.directive_pusher.add_serving_urls(
                     url_obj.get_thumbnail_id(),
                     url_obj)
-
-        for account in neondata.NeonUserAccount.iterate_all():
+        
+        accounts = yield neondata.NeonUserAccount.get_all(async=True) 
+        for account in accounts:
             self._change_subscriber._handle_account_change(account.neon_api_key, account, 'set', 
                                         update_videos=False, 
-                                        force_subscribe=(not is_initialized)) 
+                                        force_subscribe=(not is_initialized))
+
+            exp_strat = yield neondata.ExperimentStrategy.get(
+                account.neon_api_key, 
+                async=True) 
+
             self.mastermind.update_experiment_strategy(
                 account.neon_api_key,
-                neondata.ExperimentStrategy.get(account.neon_api_key))
+                exp_strat)
 
-            for video_id in account.get_internal_video_ids():
+            video_ids = yield account.get_internal_video_ids(async=True) 
+            for video_id in video_ids:
                 self._schedule_video_update(video_id)
  
             self.process_queued_video_updates() 

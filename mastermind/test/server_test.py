@@ -50,8 +50,8 @@ from utils import statemon
 STAGING = neondata.TrackerAccountIDMapper.STAGING
 PROD = neondata.TrackerAccountIDMapper.PRODUCTION
 
-@patch('mastermind.server.neondata')
-class TestVideoDBWatcher(test_utils.neontest.TestCase):
+#@patch('mastermind.server.neondata')
+class TestVideoDBWatcher(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         # Mock out the redis connection so that it doesn't throw an error
         self.redis_patcher = patch(
@@ -71,14 +71,32 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         logging.getLogger('mastermind.server').reset_sample_counters()
         acct = neondata.NeonUserAccount('acct1', 'apikey')
         acct.save()
+        super(TestVideoDBWatcher, self).setUp()
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.redis_patcher.stop()
+        self.postgresql.clear_all_tables()
         self.callback_patcher.stop()
+        super(TestVideoDBWatcher, self).tearDown()
 
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
+    @tornado.testing.gen_test
     def test_good_db_data(self, get_ivids_mock, datamock):
+        datamock = self._future_wrap_mock(datamock)
+        get_ivids_mock = self._future_wrap_mock(get_ivids_mock)  
         datamock.InternalVideoID = neondata.InternalVideoID
 
         self.directive_publisher.last_published_videos.add('apikey1' + '_0')
@@ -184,7 +202,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
            neondata.ExperimentStrategy('apikey4')]
 
         # Process the data
-        self.watcher._process_db_data(True)
+        yield self.watcher._process_db_data(True)
 
         # Check the resulting directives
         directives = dict((x[0], dict(x[1]))
@@ -210,6 +228,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertNotIn('apikey1' + '_0', 
                          self.directive_publisher.last_published_videos)
 
+    @patch('mastermind.server.neondata')
     def test_serving_url_update(self, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = "neonapikey"
@@ -255,6 +274,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                                for x in serving_urls]),
             self.directive_publisher.serving_urls)
 
+    @patch('mastermind.server.neondata')
     def test_tracker_id_update(self, datamock):
         datamock.TrackerAccountIDMapper.iterate_all.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
@@ -271,6 +291,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                           'tai2': 'acct1',
                           'tai11': 'acct2'})
 
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_account_default_thumb_update(self, get_ivids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -294,6 +315,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.watcher._process_db_data(True)
         self.assertNotIn('acct1', self.directive_publisher.default_thumbs)
 
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_default_size_update(self, get_ivids_mock, datamock):
         datamock.NeonUserAccount.iterate_all.return_value = [
@@ -312,6 +334,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEqual(self.directive_publisher.default_sizes['acct3'],
                          (640, 480))
 
+    @patch('mastermind.server.neondata')
     def test_connection_error(self, datamock):
         datamock.NeonUserAccount.iterate_all.side_effect = \
           [redis.ConnectionError]
@@ -319,6 +342,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         with self.assertRaises(redis.ConnectionError):
             self.watcher._process_db_data(True)
 
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_video_metadata_missing(self, get_internal_vids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -348,6 +372,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         
         self.assertTrue(self.watcher.is_loaded.is_set())
 
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_thumb_metadata_missing(self, get_ivids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -406,6 +431,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Make sure that the processing gets flagged as done
         self.assertTrue(self.watcher.is_loaded.is_set())
 
+    @patch('mastermind.server.neondata')
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_serving_disabled(self, get_ivids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
@@ -474,87 +500,43 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),
                           0)
 
-    @patch('cmsdb.neondata.NeonUserAccount.get_videos_and_statuses')
-    @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
-    def test_initialize_serving_directives(self, 
-         get_ivids_mock, 
-         iter_all_vids_mock, 
-         datamock):
-
-        datamock.InternalVideoID = neondata.InternalVideoID
+    @tornado.testing.gen_test
+    def test_initialize_serving_directives(self): 
         acct1 = neondata.NeonUserAccount('a1', 'a1')
         acct2 = neondata.NeonUserAccount('a2', 'a2')
-
-        datamock.NeonUserAccount.iterate_all.return_value = [acct1,acct2] 
+        yield acct1.save(async=True)
+        yield acct2.save(async=True) 
 
         # Define the video meta data
-        vid_meta = {
-            'a1_vid1': neondata.VideoMetadata(
+        yield neondata.VideoMetadata(
                 'a1_vid1',
                 ['a1_vid1_t01'],
-                i_id='i1'),
-            'a2_vid1': neondata.VideoMetadata(
+                i_id='i1').save(async=True)
+        yield neondata.VideoMetadata(
                 'a2_vid1',
                 ['a2_vid1_t01',
                  'a2_vid1_t02'],
-                i_id='i2'),
-            'a2_vid2': neondata.VideoMetadata(
+                i_id='i2').save(async=True)
+        yield neondata.VideoMetadata(
                 'a2_vid2',
                 ['a2_vid2_t01'],
-                i_id='i2', serving_enabled=False)
-        }
-        datamock.VideoMetadata.get.side_effect = \
-          lambda vid: vid_meta[vid]
+                i_id='i2', serving_enabled=False).save(async=True) 
 
         # Define the video status
-        vid_status = {
-            'a1_vid1': neondata.VideoStatus('a1_vid1',
-                                            neondata.ExperimentState.COMPLETE),
-            'a2_vid1': neondata.VideoStatus('a2_vid1',
-                                            neondata.ExperimentState.COMPLETE),
-            'a2_vid2': neondata.VideoStatus('a2_vid2',
-                                            neondata.ExperimentState.COMPLETE),
-        }
-        datamock.VideoStatus.get.side_effect = \
-          lambda vid, **kw: vid_status[vid]
+        yield neondata.VideoStatus('a1_vid1',
+                             neondata.ExperimentState.COMPLETE).save(async=True)
+        yield neondata.VideoStatus('a2_vid1',
+                             neondata.ExperimentState.COMPLETE).save(async=True)
+        yield neondata.VideoStatus('a2_vid2',
+                             neondata.ExperimentState.COMPLETE).save(async=True) 
 
         # Define the thumbnail status
-        tid_status = {
-            'a1_vid1_t01' : neondata.ThumbnailStatus('a1_vid1_t01', '0.3'),
-            'a2_vid1_t01' : neondata.ThumbnailStatus('a2_vid1_t01', '0.3'),
-            'a2_vid1_t02' : neondata.ThumbnailStatus('a2_vid1_t02', '0.7')
-            }
-        datamock.ThumbnailStatus.get_many.side_effect = \
-          lambda tids, **kw: [tid_status[x] for x in tids]
+        yield neondata.ThumbnailStatus('a1_vid1_t01', '0.3').save(async=True)
+        yield neondata.ThumbnailStatus('a2_vid1_t01', '0.3').save(async=True) 
+        yield neondata.ThumbnailStatus('a2_vid1_t02', '0.7').save(async=True) 
 
         # Do the initialization
-        get_ivids_mock.side_effect = [ ['a1_vid1'],   
-            ['a2_vid1','a2_vid2'] 
-        ] 
-        def _bigger_object():  
-            obj = {} 
-            obj['a2_vid1'] = { 'serving_enabled' : True, 
-                               'video_status_obj' : vid_status['a2_vid1'], 
-                               'thumbnail_status_list' : [ tid_status['a2_vid1_t01'], 
-                                  tid_status['a2_vid1_t02']       
-                               ] 
-                             }
-            obj['a2_vid2'] = { 'serving_enabled' : True, 
-                               'video_status_obj' : vid_status['a2_vid2'], 
-                               'thumbnail_status_list' : [] 
-                             }
-            return obj 
-              
-        iter_all_vids_mock.side_effect = [ 
-              { 'a1_vid1' : 
-                { 'serving_enabled' : True, 
-                  'video_status_obj' : vid_status['a1_vid1'], 
-                  'thumbnail_status_list' : [ tid_status['a1_vid1_t01'] ]
-                } 
-              }, 
-              _bigger_object() 
-            ] 
-        self.watcher._initialize_serving_directives()
+        yield self.watcher._initialize_serving_directives()
 
         # Make sure one video was updated
         directives = dict((x[0], dict(x[1]))
@@ -603,9 +585,6 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
         self.watcher = mastermind.server.VideoDBWatcher(
             self.mastermind,
             self.directive_publisher)
-        self.watcher._process_db_data(False)
-        if not self.watcher._change_subscriber.is_alive():
-            self.watcher._change_subscriber.start()
         super(TestVideoDBPushUpdatesPG, self).setUp()
      
     def tearDown(self):
@@ -633,6 +612,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
     
     @tornado.testing.gen_test 
     def test_add_default_thumb_to_account(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
@@ -668,6 +651,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_turn_off_serving(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
@@ -684,6 +671,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_add_new_video(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
@@ -711,6 +702,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_change_experiment_strategy(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
@@ -727,6 +722,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_add_tracker_id(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
@@ -741,6 +740,10 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test 
     def test_change_serving_urls(self):
+        yield self.watcher._process_db_data(False)
+        if not self.watcher._change_subscriber.is_alive():
+            self.watcher._change_subscriber.start()
+
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
         while not self.watcher._change_subscriber._is_subscribed: 
