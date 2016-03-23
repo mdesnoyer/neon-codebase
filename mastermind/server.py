@@ -374,6 +374,7 @@ class VideoDBWatcher(threading.Thread):
         self._vids_to_update = set()
         self._vids_waiting = tornado.locks.Event()
         self._vid_processing_done = tornado.locks.Event()
+        self._big_update_done = tornado.locks.Event()
         self._change_subscriber = ChangeSubscriber(self)
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
@@ -388,7 +389,10 @@ class VideoDBWatcher(threading.Thread):
              io_loop=self.io_loop)
 
         # have we ran the initial intialization on this thing 
-        self.is_initialized = False 
+        self.is_initialized = False
+
+        # how many accounts we have remaining on the big update
+        self.accounts_remaining = 0   
 
     def __del__(self):
         self.stop()
@@ -415,7 +419,7 @@ class VideoDBWatcher(threading.Thread):
     def run_updater(self): 
         while True:
             yield [ self.wait_for_queued_videos(),
-                    self.process_queued_video_updates()]
+                    self.process_queued_video_updates(False)]
 
     @tornado.gen.coroutine
     def _initialize_directives(self): 
@@ -496,6 +500,9 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
         
         accounts = yield neondata.NeonUserAccount.get_all(async=True)
+        self.accounts_remaining = len(accounts) 
+	self._big_update_done.clear()
+ 
         for account in accounts:
             self._change_subscriber._handle_account_change(
                 account.neon_api_key, account, 'set', 
@@ -514,8 +521,10 @@ class VideoDBWatcher(threading.Thread):
             for video_id in video_ids:
                 self._schedule_video_update(video_id)
  
-            yield self.process_queued_video_updates() 
+            tornado.ioloop.IOLoop.current().spawn_callback(
+               self.process_queued_video_updates)
 
+        yield self._big_update_done.wait()
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
 
@@ -575,8 +584,11 @@ class VideoDBWatcher(threading.Thread):
 
                     if len(video.thumbnail_ids) is not len(thumbnails): 
                         statemon.state.increment('no_thumbnailmetadata')
-                        _log.error('Could not find metadata for thumb \
-                                    on video %s in set %s' % (video, thumbnails))
+                        msg = 'Could not find metadata for thumb (length diff)' \
+                              ' on video %s in set %s' % (video.key, 
+                              video.thumbnail_ids)
+
+                        _log.error(msg) 
                         continue 
 
                     for thumb in thumbnails:
@@ -613,13 +625,12 @@ class VideoDBWatcher(threading.Thread):
 
  
     @tornado.gen.coroutine
-    def process_queued_video_updates(self):
+    def process_queued_video_updates(self, decrement_counter=True):
         try:
             # Get the list of video ids to process now
             video_ids = list(self._vids_to_update)
             self._vids_to_update = set()
             self._vids_waiting.clear()
-
             if len(video_ids) == 0:
                 return
             _log.info('Processing %d video updates' % len(video_ids))
@@ -628,6 +639,11 @@ class VideoDBWatcher(threading.Thread):
         finally:
             if len(self._vids_to_update) == 0:
                 self._vid_processing_done.set()
+
+            if decrement_counter:
+                self.accounts_remaining -= 1
+                if self.accounts_remaining <= 0: 
+                    self._big_update_done.set() 
 
     @tornado.gen.coroutine 
     def wait_for_queued_videos(self, timeout=None):

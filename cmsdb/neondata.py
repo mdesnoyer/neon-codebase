@@ -5789,7 +5789,8 @@ class VideoMetadata(StoredObject):
                          'thumbnailservingurls_', '') = t._data->>'key'\
                    WHERE v._data->>'key' IN (%s)" % csl_videos
         '''
-        # use lateral so we get the nones  
+        # use lateral so we get the nones 
+        # join by key - this will pull WHERE t._data->>'video_id' = q1.video_data->>'key' 
         query = "SELECT video_data, thumbnail_data, thumbnail_serving_urls_data FROM(\
                    SELECT v._data AS video_data \
                     FROM videometadata v \
@@ -5797,7 +5798,7 @@ class VideoMetadata(StoredObject):
                    ) q1 LEFT JOIN LATERAL ( \
                      SELECT t._data AS thumbnail_data \
                        FROM thumbnailmetadata t \
-                       WHERE t._data->>'video_id' = q1.video_data->>'key' \
+                       WHERE q1.video_data->'thumbnail_ids' ? (t._data->>'key')::text \
                    ) q2 ON true LEFT JOIN LATERAL ( \
                      SELECT ts._data AS thumbnail_serving_urls_data \
                       FROM thumbnailservingurls ts \
