@@ -115,6 +115,7 @@ statemon.define('unexpected_callback_error', int)
 statemon.define('unexpected_db_update_error', int)
 statemon.define('timeout_waiting_for_isp', int)
 statemon.define('isp_ready_delay', float)
+statemon.define('process_video_chunk_time', float)
 
 statemon.define('accounts_subscribed_to', int)
 statemon.define('video_push_updates_received', int)
@@ -374,7 +375,7 @@ class VideoDBWatcher(threading.Thread):
         self._vids_to_update = set()
         self._vids_waiting = tornado.locks.Event()
         self._vid_processing_done = tornado.locks.Event()
-        self._big_update_done = tornado.locks.Event()
+        #self._big_update_done = tornado.locks.Event()
         self._change_subscriber = ChangeSubscriber(self)
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
@@ -392,7 +393,7 @@ class VideoDBWatcher(threading.Thread):
         self.is_initialized = False
 
         # how many accounts we have remaining on the big update
-        self.accounts_remaining = 0   
+        # self.accounts_remaining = 0   
 
     def __del__(self):
         self.stop()
@@ -419,7 +420,7 @@ class VideoDBWatcher(threading.Thread):
     def run_updater(self): 
         while True:
             yield [ self.wait_for_queued_videos(),
-                    self.process_queued_video_updates(False)]
+                    self.process_queued_video_updates()]
 
     @tornado.gen.coroutine
     def _initialize_directives(self): 
@@ -500,8 +501,8 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
         
         accounts = yield neondata.NeonUserAccount.get_all(async=True)
-        self.accounts_remaining = len(accounts) 
-	self._big_update_done.clear()
+        #self.accounts_remaining = len(accounts) 
+	#self._big_update_done.clear()
  
         for account in accounts:
             self._change_subscriber._handle_account_change(
@@ -520,11 +521,12 @@ class VideoDBWatcher(threading.Thread):
             video_ids = yield account.get_internal_video_ids(async=True)
             for video_id in video_ids:
                 self._schedule_video_update(video_id)
- 
-            tornado.ioloop.IOLoop.current().spawn_callback(
-               self.process_queued_video_updates)
+            
+            yield self.process_queued_video_updates()
+            #tornado.ioloop.IOLoop.current().spawn_callback(
+            #   self.process_queued_video_updates)
 
-        yield self._big_update_done.wait()
+        #yield self._big_update_done.wait()
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
 
@@ -547,13 +549,12 @@ class VideoDBWatcher(threading.Thread):
            them, and update accordingly.
         '''
          
-        CHUNK_SIZE=500
+        CHUNK_SIZE=7500
         list_chunks = [video_id_list[i:i+CHUNK_SIZE] for i in
                        xrange(0, len(video_id_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
-            statemon.state.increment('video_updates_handled', 
-                diff=len(video_ids)) 
+            chunk_start_time = time.time() 
             obj_dict = yield neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
                 video_ids, 
                 async=True)
@@ -623,9 +624,12 @@ class VideoDBWatcher(threading.Thread):
                     for thumb_id in thumb_ids:
                         self.directive_pusher.del_serving_urls(thumb_id)
 
+            statemon.state.increment('video_updates_handled', 
+                diff=len(video_ids)) 
+            statemon.state.process_video_chunk_time = time.time() - chunk_start_time 
  
     @tornado.gen.coroutine
-    def process_queued_video_updates(self, decrement_counter=True):
+    def process_queued_video_updates(self):
         try:
             # Get the list of video ids to process now
             video_ids = list(self._vids_to_update)
@@ -640,10 +644,10 @@ class VideoDBWatcher(threading.Thread):
             if len(self._vids_to_update) == 0:
                 self._vid_processing_done.set()
 
-            if decrement_counter:
-                self.accounts_remaining -= 1
-                if self.accounts_remaining <= 0: 
-                    self._big_update_done.set() 
+            #if decrement_counter:
+            #    self.accounts_remaining -= 1
+            #    if self.accounts_remaining <= 0: 
+            #        self._big_update_done.set() 
 
     @tornado.gen.coroutine 
     def wait_for_queued_videos(self, timeout=None):
