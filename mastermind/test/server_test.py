@@ -421,17 +421,23 @@ class TestVideoDBWatcher(test_utils.neontest.AsyncTestCase):
                                                    i_id='i1')
 
         TMD = neondata.ThumbnailMetadata
-        vid_meta[api_key+'_0']['thumbnails'] = [
-              TMD(api_key+'_0_t01',api_key+'_0',
-                                  ttype='brightcove'),
-              TMD(api_key+'_0_t02',api_key+'_0',ttype='neon', 
-                                  rank=0, chosen=True)
-            ] 
-        vid_meta[api_key+'_1']['thumbnails'] = [ 
-              TMD(api_key+'_1_t11',api_key+'_1',
-                                  ttype='brightcove')
-            ]
-        
+        vid_meta[api_key+'_0']['thumbnails'] = {} 
+        vid_meta[api_key+'_0']['thumbnails'][api_key+'_0_t01'] = TMD(
+            api_key+'_0_t01',
+            api_key+'_0',
+            ttype='brightcove')
+        vid_meta[api_key+'_0']['thumbnails'][api_key+'_0_t02'] = TMD(
+            api_key+'_0_t02',
+            api_key+'_0',
+            ttype='neon', 
+            rank=0, 
+            chosen=True)
+         
+        vid_meta[api_key+'_1']['thumbnails'] = {}  
+        vid_meta[api_key+'_1']['thumbnails'][api_key+'_1_t11'] = TMD(
+            api_key+'_1_t11',
+            api_key+'_1',
+            ttype='brightcove')
 
         vmeta_mocker = patch('mastermind.server.neondata.VideoMetadata.get_videos_thumbnails_serving_urls')
         vmeta_mock = self._future_wrap_mock(vmeta_mocker.start())

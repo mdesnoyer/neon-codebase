@@ -5798,7 +5798,7 @@ class VideoMetadata(StoredObject):
                    ) q1 LEFT JOIN LATERAL ( \
                      SELECT t._data AS thumbnail_data \
                        FROM thumbnailmetadata t \
-                       WHERE q1.video_data->'thumbnail_ids' ? (t._data->>'key')::text \
+                       WHERE t._data->>'video_id' = q1.video_data->>'key' \
                    ) q2 ON true LEFT JOIN LATERAL ( \
                      SELECT ts._data AS thumbnail_serving_urls_data \
                       FROM thumbnailservingurls ts \
@@ -5810,7 +5810,7 @@ class VideoMetadata(StoredObject):
         for v in video_ids:
             obj_dict[v] = {} 
             obj_dict[v]['video'] = None
-            obj_dict[v]['thumbnails'] = [] 
+            obj_dict[v]['thumbnails'] = {} 
             obj_dict[v]['thumbnail_serving_urls'] = [] 
          
         cursor = yield conn.execute(
@@ -5827,6 +5827,8 @@ class VideoMetadata(StoredObject):
                             video_id,
                             video)
                         obj_dict[video_id]['video'] = video_obj
+                        for tid in video_obj.thumbnail_ids: 
+                            obj_dict[video_id]['thumbnails'][tid] = None 
 
                 thumbnail = res[1]
                 if thumbnail is not None: 
@@ -5834,7 +5836,8 @@ class VideoMetadata(StoredObject):
                     thumbnail_obj = ThumbnailMetadata._create(
                         thumbnail_id, 
                         thumbnail)
-                    obj_dict[video_id]['thumbnails'].append(thumbnail_obj)
+                    #obj_dict[video_id]['thumbnails'].append(thumbnail_obj)
+                    obj_dict[video_id]['thumbnails'][thumbnail_id] = thumbnail_obj 
                  
                 
                 thumbnail_serving_url = res[2]

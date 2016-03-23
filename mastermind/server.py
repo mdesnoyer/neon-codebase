@@ -583,6 +583,7 @@ class VideoDBWatcher(threading.Thread):
                     thumb_ids = []  
                     thumb_missing = False
 
+                    '''
                     if len(video.thumbnail_ids) is not len(thumbnails): 
                         statemon.state.increment('no_thumbnailmetadata')
                         msg = 'Could not find metadata for thumb (length diff)' \
@@ -591,16 +592,16 @@ class VideoDBWatcher(threading.Thread):
 
                         _log.error(msg) 
                         continue 
-
-                    for thumb in thumbnails:
+                    ''' 
+                    for thumb_id, thumb in thumbnails.iteritems():
                         if thumb is None:  
                             statemon.state.increment('no_thumbnailmetadata')
-                            _log.error('Could not find metadata for thumb \
-                                        on video %s in set %s' % (video, thumbnails))
+                            _log.error('Could not find metadata for thumb %s\
+                                        on video %s in set %s' % (thumb_id, video, thumbnails))
                             thumb_missing = True 
                         else:
                             thumbs_for_update.append(thumb)
-                            thumb_ids.append(thumb.key)
+                            thumb_ids.append(thumb_id)
     
                     if thumb_missing is True: 
                         continue 

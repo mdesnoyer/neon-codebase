@@ -3425,7 +3425,7 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
                        async=True)
 
         self.assertEquals(vid_dict[i_vid]['video'].key, i_vid) 
-        self.assertEquals(vid_dict[i_vid]['thumbnails'][0].key, tid) 
+        self.assertEquals(vid_dict[i_vid]['thumbnails'][tid].key, tid) 
         self.assertEquals(len(vid_dict[i_vid]['thumbnail_serving_urls']),1)
  
     @tornado.testing.gen_test 
