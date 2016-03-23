@@ -5822,9 +5822,10 @@ class VideoMetadata(StoredObject):
                 if video is not None: 
                     video_id = video['key']  
                     if obj_dict[video_id]['video'] is None:               
-                        obj_dict[video_id]['video'] = VideoMetadata._create(
-                            video_id, 
+                        video_obj = VideoMetadata._create(
+                            video_id,
                             video)
+                        obj_dict[video_id]['video'] = video_obj
 
                 thumbnail = res[1]
                 if thumbnail is not None: 
@@ -5834,6 +5835,7 @@ class VideoMetadata(StoredObject):
                         thumbnail)
                     obj_dict[video_id]['thumbnails'].append(thumbnail_obj)
                  
+                
                 thumbnail_serving_url = res[2]
                 if thumbnail_serving_url is not None: 
                     thumbnail_serving_url_key = thumbnail_serving_url['key']

@@ -184,33 +184,6 @@ class ExperimentStrategyCache(object):
         thumb = neondata.ThumbnailMetadata(thumb_id)
         return self.get(thumb.get_account_id())
 
-class VideoUpdater(threading.Thread):
-    '''This thread processes queued video changes.
-
-    We use this so that a number of changes can get merged into a
-    single update.
-    
-    '''
-    def __init__(self, video_db_watcher):
-        super(VideoUpdater, self).__init__(name='VideoUpdater')
-        self.video_db_watcher = video_db_watcher
-        self.daemon = True
-        self._stopped = threading.Event()
-
-    def run(self):
-        while not self._stopped.is_set():
-            try:
-                self.video_db_watcher.wait_for_queued_videos()
-                self.video_db_watcher.process_queued_video_updates()
-            except Exception as e:
-                _log.error('Unexpected error when processing queued video '
-                           'updates %s' % e)
-                statemon.state.increment('unexpected_video_handle_error')
-
-    def stop(self):
-        '''Stop this thread safely and allow it to finish what is is doing.'''
-        self._stopped.set()
-
 class ChangeSubscriber(threading.Thread): 
     def __init__(self, video_db_watcher):
         super(ChangeSubscriber, self).__init__(name='ChangeSubscriber')
@@ -291,9 +264,6 @@ class ChangeSubscriber(threading.Thread):
                     async=True)
             self.video_db_watcher._table_subscribers.append(sub) 
             self._thumbnails_subscribed_pg = True
-
-        if not self.video_db_watcher._video_updater.is_alive():
-            self.video_db_watcher._video_updater.start()
 
         self._is_subscribed = True 
 
@@ -399,14 +369,11 @@ class VideoDBWatcher(threading.Thread):
         # Objects to subscribe to changes in the database
         self._table_subscribers = []
         self._account_subscribers = {}
-        self._subscribe_lock = threading.RLock()
 
-        self._vid_lock = threading.RLock()
         # Set of videos to update
         self._vids_to_update = set()
-        self._vids_waiting = threading.Event()
-        self._vid_processing_done = threading.Event()
-        self._video_updater = VideoUpdater(self)
+        self._vids_waiting = tornado.locks.Event()
+        self._vid_processing_done = tornado.locks.Event()
         self._change_subscriber = ChangeSubscriber(self)
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
@@ -414,11 +381,10 @@ class VideoDBWatcher(threading.Thread):
         # io_loop for this thread, responsible for doing watcher stuff
         self.io_loop = tornado.ioloop.IOLoop(make_current=False)
 
-        # the timer that will fire the watcherer every few minutes
+        # the timer that will fire the watcher every polling delay
         self.timer = utils.sync.PeriodicCoroutineTimer(
              self._initialize_directives, 
-             #options.publishing_period*1000.0, 
-             1.0, 
+             options.video_db_polling_delay*1000.0, 
              io_loop=self.io_loop)
 
         # have we ran the initial intialization on this thing 
@@ -426,38 +392,12 @@ class VideoDBWatcher(threading.Thread):
 
     def __del__(self):
         self.stop()
-        del self._video_updater
 
     def run(self):
         self.io_loop.make_current()
-        self.timer.start() 
+        self.timer.start()
+        self.run_updater()  
         self.io_loop.start()  
-        '''
-        self.is_initialized = False
-        while not self._stopped.is_set():
-            try:
-                with self.activity_watcher.activate():
-                    if not self.is_initialized:
-                        self._initialize_serving_directives()
-
-                    if not self._video_updater.is_alive():
-                        self._video_updater.start()
-
-                    if not self._change_subscriber.is_alive(): 
-                        self._change_subscriber.start()
-
-                    self._process_db_data(self.is_initialized)
-                    
-                    self.is_initialized = True
-                    statemon.state.initialized_directives = 1
-
-            except Exception as e:
-                _log.exception('Uncaught video DB Error: %s' % e)
-                statemon.state.increment('videodb_error')
-
-            # Now we wait so that we don't hit the database too much.
-            self._stopped.wait(options.video_db_polling_delay)
-         '''
 
     def wait_until_loaded(self, timeout=None):
         '''Blocks until the data is loaded.'''
@@ -467,28 +407,30 @@ class VideoDBWatcher(threading.Thread):
     def stop(self):
         '''Stop this thread safely and allow it to finish what is is doing.'''
         self._stopped.set()
-        self._video_updater.stop()
-        self._change_subscriber.stop() 
+        self._change_subscriber.stop()
+        self.timer.stop()
+        self.io_loop.stop()  
+
+    @tornado.gen.coroutine 
+    def run_updater(self): 
+        while True:
+            yield [ self.wait_for_queued_videos(),
+                    self.process_queued_video_updates()]
 
     @tornado.gen.coroutine
     def _initialize_directives(self): 
         try: 
             if not self.is_initialized: 
                 yield self._initialize_serving_directives()
-            if not self._video_updater.is_alive():
-                self._video_updater.start()
             if not self._change_subscriber.is_alive():
                 self._change_subscriber.start()
 
             yield self._process_db_data(self.is_initialized)
-            is_initialized = True
+            self.is_initialized = True
             statemon.state.initialized_directives = 1
         except Exception as e:
             _log.exception('Uncaught video DB Error: %s' % e)
             statemon.state.increment('videodb_error')
-
-        # Now we wait so that we don't hit the database too much.
-        yield tornado.gen.sleep(options.video_db_polling_delay) 
 
     @tornado.gen.coroutine
     def _initialize_serving_directives(self):
@@ -533,9 +475,10 @@ class VideoDBWatcher(threading.Thread):
                   neondata.TrackerAccountIDMapper.iterate_all())))
 
         # Get an update for the default widths and thumbnail ids
+        accounts = yield neondata.NeonUserAccount.get_all(async=True)
         account_tups = [(str(x.neon_api_key), x.default_size,
                          x.default_thumbnail_id) for x in
-                         neondata.NeonUserAccount.iterate_all()]
+                         accounts]
         self.directive_pusher.update_default_sizes(
             dict((x[0], x[1]) for x in account_tups))
         self.directive_pusher.update_default_thumbs(
@@ -552,11 +495,12 @@ class VideoDBWatcher(threading.Thread):
                     url_obj.get_thumbnail_id(),
                     url_obj)
         
-        accounts = yield neondata.NeonUserAccount.get_all(async=True) 
+        accounts = yield neondata.NeonUserAccount.get_all(async=True)
         for account in accounts:
-            self._change_subscriber._handle_account_change(account.neon_api_key, account, 'set', 
-                                        update_videos=False, 
-                                        force_subscribe=(not is_initialized))
+            self._change_subscriber._handle_account_change(
+                account.neon_api_key, account, 'set', 
+                update_videos=False, 
+                force_subscribe=(not is_initialized))
 
             exp_strat = yield neondata.ExperimentStrategy.get(
                 account.neon_api_key, 
@@ -566,11 +510,11 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 exp_strat)
 
-            video_ids = yield account.get_internal_video_ids(async=True) 
+            video_ids = yield account.get_internal_video_ids(async=True)
             for video_id in video_ids:
                 self._schedule_video_update(video_id)
  
-            self.process_queued_video_updates() 
+            yield self.process_queued_video_updates() 
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -579,34 +523,36 @@ class VideoDBWatcher(threading.Thread):
         '''Add a video to the queue to update in the mastermind core.'''
         if neondata.InternalVideoID.is_no_video(video_id):
             return
-        with self._vid_lock:
-            self._vids_to_update.add(video_id)
-            self._vid_processing_done.clear()
-            self._vids_waiting.set()
+
+        self._vids_to_update.add(video_id)
+        self._vid_processing_done.clear()
+        self._vids_waiting.set()
+
         if is_push_update:
             statemon.state.increment('video_push_updates_received')
-    
+
+    @tornado.gen.coroutine     
     def _handle_video_updates(self, video_id_list): 
         '''Pull videometadata, thumbnailmetadata, and 
            thumbnailservingurls, move through each of 
            them, and update accordingly.
-        ''' 
-        CHUNK_SIZE=7500
+        '''
+         
+        CHUNK_SIZE=500
         list_chunks = [video_id_list[i:i+CHUNK_SIZE] for i in
                        xrange(0, len(video_id_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
             statemon.state.increment('video_updates_handled', 
                 diff=len(video_ids)) 
-            obj_dict = neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
-                video_ids)
-
+            obj_dict = yield neondata.VideoMetadata.get_videos_thumbnails_serving_urls(
+                video_ids, 
+                async=True)
             for video_id, info in obj_dict.iteritems():
                 thumb_ids = [] 
                 video = info['video'] 
                 thumbnails = info['thumbnails'] 
                 thumbnail_serving_urls = info['thumbnail_serving_urls'] 
-                
                 if video is None:
                     statemon.state.increment('no_videometadata')
                     _log.error('Could not find information about video %s' % video_id)
@@ -625,7 +571,14 @@ class VideoDBWatcher(threading.Thread):
                 if serving_enabled: 
                     thumbs_for_update = []
                     thumb_ids = []  
-                    thumb_missing = False 
+                    thumb_missing = False
+
+                    if len(video.thumbnail_ids) is not len(thumbnails): 
+                        statemon.state.increment('no_thumbnailmetadata')
+                        _log.error('Could not find metadata for thumb \
+                                    on video %s in set %s' % (video, thumbnails))
+                        continue 
+
                     for thumb in thumbnails:
                         if thumb is None:  
                             statemon.state.increment('no_thumbnailmetadata')
@@ -659,80 +612,31 @@ class VideoDBWatcher(threading.Thread):
                         self.directive_pusher.del_serving_urls(thumb_id)
 
  
-    def _handle_video_update(self, video_id, video_metadata):
-        '''Processes a new video state for a single video.'''
-        if video_metadata is None:
-            statemon.state.increment('no_videometadata')
-            _log.error('Could not find information about video %s' % video_id)
-            return
-        
-        thumb_ids = sorted(set(video_metadata.thumbnail_ids))
-        
-        acct_abtest, acct_serving_enabled = self._accounts_options[
-                video_metadata.get_account_id()] 
- 
-        account_id = video_id.split('_')[0]
-        in_sub_list = account_id in self._account_subscribers 
-        abtest = video_metadata.testing_enabled and acct_abtest 
-        serving_enabled = video_metadata.serving_enabled and acct_serving_enabled and in_sub_list
-
-        if serving_enabled:
-            thumbnails = []
-            thumbs = neondata.ThumbnailMetadata.get_many(thumb_ids)
-            for thumb_id, meta in zip(thumb_ids, thumbs):
-                if meta is None:
-                    statemon.state.increment('no_thumbnailmetadata')
-                    _log.error('Could not find metadata for thumb %s' %
-                               thumb_id)
-                    return
-                else:
-                    thumbnails.append(meta)
-
-            serving_urls = neondata.ThumbnailServingURLs.get_many(thumb_ids)
-            for url_obj in serving_urls:
-                if url_obj is not None:
-                    self.directive_pusher.add_serving_urls(
-                        url_obj.get_thumbnail_id(),
-                        url_obj)
-
-            self.mastermind.update_video_info(video_metadata,
-                                              thumbnails,
-                                              abtest)
-
-            # Remove it from the list of entries the publisher has
-            # updated so that the next round, we might send a new
-            # callback and put it in serving state.
-            self.directive_pusher.set_video_updated(video_id)
-        else:
-            self.mastermind.remove_video_info(video_id)
-            for thumb_id in thumb_ids:
-                self.directive_pusher.del_serving_urls(thumb_id)
-
+    @tornado.gen.coroutine
     def process_queued_video_updates(self):
         try:
             # Get the list of video ids to process now
-            with self._vid_lock:
-                video_ids = list(self._vids_to_update)
-                self._vids_to_update = set()
-                self._vids_waiting.clear()
+            video_ids = list(self._vids_to_update)
+            self._vids_to_update = set()
+            self._vids_waiting.clear()
 
             if len(video_ids) == 0:
                 return
-
             _log.info('Processing %d video updates' % len(video_ids))
-            self._handle_video_updates(video_ids) 
+            yield self._handle_video_updates(video_ids)
+ 
         finally:
-            with self._vid_lock:
-                if len(self._vids_to_update) == 0:
-                    self._vid_processing_done.set()
+            if len(self._vids_to_update) == 0:
+                self._vid_processing_done.set()
 
+    @tornado.gen.coroutine 
     def wait_for_queued_videos(self, timeout=None):
-        return self._vids_waiting.wait(timeout)
+        yield self._vids_waiting.wait(timeout)
 
+    @tornado.gen.coroutine 
     def wait_for_video_processing(self, timeout=None):
-        return self._vid_processing_done.wait(timeout)
+        yield self._vid_processing_done.wait(timeout)
         
-
 def hourtimestamp(dt):
     'Converts a datetime to a timestamp and rounds down to the nearest hour'
     return (dt.replace(minute=0, second=0, microsecond=0) - 
