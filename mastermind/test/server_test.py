@@ -241,22 +241,28 @@ class TestVideoDBWatcher(test_utils.neontest.AsyncTestCase):
         # Make sure that the serving urls were sent to the directive pusher
         self.assertEquals(len(self.directive_publisher.serving_urls), 2)
 
-    @patch('mastermind.server.neondata')
-    def test_tracker_id_update(self, datamock):
-        datamock.TrackerAccountIDMapper.iterate_all.return_value = [
+    #@patch('mastermind.server.neondata')
+    @tornado.testing.gen_test
+    def test_tracker_id_update(self):
+        get_all_mocker = patch( 
+            'mastermind.server.neondata.TrackerAccountIDMapper.get_all') 
+        get_all_mock = self._future_wrap_mock(get_all_mocker.start())
+        
+        get_all_mock.return_value = [
             neondata.TrackerAccountIDMapper('tai1', 'acct1', STAGING),
             neondata.TrackerAccountIDMapper('tai11', 'acct2', PROD),
             neondata.TrackerAccountIDMapper('tai2', 'acct1', PROD)
             ]
         
         # Process the data
-        self.watcher._process_db_data(True)
+        yield self.watcher._process_db_data(True)
 
         # Make sure we have the tracker account id mapping
         self.assertEqual(self.directive_publisher.tracker_id_map,
                          {'tai1': 'acct1',
                           'tai2': 'acct1',
                           'tai11': 'acct2'})
+        get_all_mocker.stop() 
 
     @tornado.testing.gen_test
     def test_account_default_thumb_update(self):
@@ -316,7 +322,7 @@ class TestVideoDBWatcher(test_utils.neontest.AsyncTestCase):
     @patch('mastermind.server.neondata')
     @tornado.testing.gen_test
     def test_connection_error(self, datamock):
-        datamock.NeonUserAccount.get_all.side_effect = \
+        datamock.TrackerAccountIDMapper.get_all.side_effect = \
           [redis.ConnectionError]
 
         with self.assertRaises(redis.ConnectionError):
