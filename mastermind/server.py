@@ -475,9 +475,9 @@ class VideoDBWatcher(threading.Thread):
         _log.info('Polling the video database for a full batch update')
 
         # Get an update for the tracker id map
+        taims = yield neondata.TrackerAccountIDMapper.get_all(async=True)
         self.directive_pusher.update_tracker_id_map(
-            dict(((str(x.get_tai()), str(x.value)) for x in
-                  neondata.TrackerAccountIDMapper.iterate_all())))
+            dict(((str(x.get_tai()), str(x.value)) for x in taims)))
 
         # Get an update for the default widths and thumbnail ids
         accounts = yield neondata.NeonUserAccount.get_all(async=True)
@@ -501,8 +501,6 @@ class VideoDBWatcher(threading.Thread):
                     url_obj)
         
         accounts = yield neondata.NeonUserAccount.get_all(async=True)
-        #self.accounts_remaining = len(accounts) 
-	#self._big_update_done.clear()
  
         for account in accounts:
             self._change_subscriber._handle_account_change(
@@ -523,10 +521,7 @@ class VideoDBWatcher(threading.Thread):
                 self._schedule_video_update(video_id)
             
             yield self.process_queued_video_updates()
-            #tornado.ioloop.IOLoop.current().spawn_callback(
-            #   self.process_queued_video_updates)
 
-        #yield self._big_update_done.wait()
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
 
@@ -549,7 +544,7 @@ class VideoDBWatcher(threading.Thread):
            them, and update accordingly.
         '''
          
-        CHUNK_SIZE=7500
+        CHUNK_SIZE=500
         list_chunks = [video_id_list[i:i+CHUNK_SIZE] for i in
                        xrange(0, len(video_id_list), CHUNK_SIZE)]
 
@@ -583,21 +578,14 @@ class VideoDBWatcher(threading.Thread):
                     thumb_ids = []  
                     thumb_missing = False
 
-                    '''
-                    if len(video.thumbnail_ids) is not len(thumbnails): 
-                        statemon.state.increment('no_thumbnailmetadata')
-                        msg = 'Could not find metadata for thumb (length diff)' \
-                              ' on video %s in set %s' % (video.key, 
-                              video.thumbnail_ids)
-
-                        _log.error(msg) 
-                        continue 
-                    ''' 
                     for thumb_id, thumb in thumbnails.iteritems():
                         if thumb is None:  
                             statemon.state.increment('no_thumbnailmetadata')
                             _log.error('Could not find metadata for thumb %s\
-                                        on video %s in set %s' % (thumb_id, video, thumbnails))
+                                        on video %s in set %s' % (
+                                            thumb_id, 
+                                            video, 
+                                            thumbnails))
                             thumb_missing = True 
                         else:
                             thumbs_for_update.append(thumb)
