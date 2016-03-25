@@ -655,7 +655,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                   video_title, topn, callback_url, 
                                   default_thumbnail, integration_id=None,
                                   external_thumbnail_id=None,
-                                  publish_date=None):
+                                  publish_date=None, duration=None,
+                                  custom_data=None):
 
         '''
         Create the call in to the Video Server
@@ -671,6 +672,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'
         request_body["publish_date"] = publish_date
+        request_body['duration'] = duration
+        request_body['custom_data'] = custom_data
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})
@@ -769,7 +772,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             default_thumbnail,
             integration_id,
             external_thumb_id,
-            publish_date)
+            publish_date,
+            duration,
+            custom_data)
 
     @tornado.gen.coroutine
     def create_neon_video_request_from_ui(self, i_id):
