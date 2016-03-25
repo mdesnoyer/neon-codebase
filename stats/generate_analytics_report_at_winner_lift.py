@@ -489,7 +489,10 @@ def get_video_titles(video_ids):
             _log.error('Could not find job for video id %s' % video_id)
             retval.append('')
             continue
-        retval.append(api_request.video_title.encode('utf-8'))
+        if api_request.video_title is None:
+            retval.append(None)
+        else:
+            retval.append(api_request.video_title.encode('utf-8'))
     return retval
 
 def calculate_aggregate_stats(video_stats):
