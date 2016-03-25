@@ -3493,9 +3493,10 @@ class TestPGUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
         yield new_account_two.save(async=True)
         
         a_ids = yield new_user.get_associated_account_ids(async=True)
-        self.assertEquals(2, len(a_ids)) 
-        self.assertTrue(new_account_one.neon_api_key in a_ids) 
-        self.assertTrue(new_account_two.neon_api_key in a_ids) 
+        self.assertEquals(2, len(a_ids))
+        self.assertItemsEqual([new_account_one.neon_api_key, 
+                                new_account_two.neon_api_key], 
+                              a_ids)  
 
     @tornado.testing.gen_test 
     def test_get_associated_account_ids_empty(self):

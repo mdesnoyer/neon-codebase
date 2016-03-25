@@ -441,9 +441,8 @@ class PostgresDB(tornado.web.RequestHandler):
                 query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
                 return (query, tuple(param_list))  
             except KeyError: 
-                return 
-            
-    
+                return
+ 
     instance = None 
     
     def __new__(cls): 
@@ -2259,6 +2258,55 @@ class StoredObject(object):
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
 
+    @classmethod 
+    @tornado.gen.coroutine
+    def get_and_execute_select_query(cls, 
+                                     fields, 
+                                     where_clause,
+                                     table_name=None,  
+                                     wc_params=[]): 
+        ''' helper function to build up a select query
+
+               fields : an array of the fields you want 
+               where_clause : the portion of the query following WHERE 
+               table_name : defaults to _baseclass_name, but this populates 
+                            the from portion of the query 
+               wc_params : any params you need in the where clause
+
+ 
+               eg fields = ["_data->>'neon_api_key'", 
+                            "_data->>'key'"] 
+                  object_type = neonuseraccount 
+                  where_clause = "_data->'users' ? %s" 
+                  params = [user1] 
+               would execute 
+                  SELECT _data->>'neon_api_key', _data->>'key' 
+                   FROM neonuseraccount 
+                  WHERE _data->'users' ? user1 
+            returns the result array from the query 
+
+            be nice, this will do a fetchall, which can be 
+            memory intensive -- TODO make an option that 
+            operates like get_many does currently 
+        '''
+        
+        db = PostgresDB() 
+        conn = yield db.get_connection()
+        if table_name is None: 
+            table_name = cls._baseclass_name().lower()
+
+        csl_fields = ",".join("{0}".format(f) for f in fields) 
+        query = "SELECT " + csl_fields + \
+                " FROM " + table_name + \
+                " WHERE " + where_clause 
+ 
+        cursor = yield conn.execute(query, 
+                                    wc_params,
+                                    cursor_factory=psycopg2.extensions.cursor)
+        rv = cursor.fetchall()
+        db.return_connection(conn) 
+        raise tornado.gen.Return(rv) 
+
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
 
@@ -2797,21 +2845,13 @@ class User(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_associated_account_ids(self):
-        db = PostgresDB()
-        conn = yield db.get_connection()
-        video_to_status_dict = {}
-        query = "SELECT _data->>'neon_api_key' \
-                  FROM neonuseraccount \
-                  WHERE _data->'users' ? %s" 
-        params = [self.username]
-        cursor = yield conn.execute(
-                    query, 
-                    params, 
-                    cursor_factory=psycopg2.extensions.cursor)
-                
-        rv = [i[0] for i in cursor.fetchall()]
-        db.return_connection(conn)
-
+        results = yield self.get_and_execute_select_query(
+                    [ "_data->>'neon_api_key'" ], 
+                    "_data->'users' ? %s", 
+                    table_name='neonuseraccount', 
+                    wc_params=[self.username])
+ 
+        rv = [i[0] for i in results]
         raise tornado.gen.Return(rv) 
         
     @classmethod
