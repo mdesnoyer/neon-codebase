@@ -328,18 +328,6 @@ class TestAccountHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertEquals(self.user.neon_api_key, rjson['account_id']) 
 
-    @unittest.skip('covered in newaccount')
-    @tornado.testing.gen_test 
-    def test_basic_post_account(self):
-        url = '/api/v2/accounts?customer_name=123abc'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body='', 
-                                                method='POST', 
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], '123abc') 
-
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
         url = '/api/v2/%s?default_height=1200&default_width=1500' % (
@@ -476,6 +464,8 @@ class TestNewUserHandler(TestAuthenticationBase):
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'abcd1234')
+        user = yield neondata.User.get('abcd1234', async=True) 
+        self.assertEquals(user.username, 'abcd1234') 
 
     @tornado.testing.gen_test 
     def test_create_new_user_json(self):
@@ -491,6 +481,8 @@ class TestNewUserHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'abcd1234')
+        user = yield neondata.User.get('abcd1234', async=True) 
+        self.assertEquals(user.username, 'abcd1234') 
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.NewUserHandler.post')
@@ -543,6 +535,9 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'testuser')
+
+        user = yield neondata.User.get('testuser', async=True) 
+        self.assertEquals(user.username, 'testuser') 
  
     @tornado.testing.gen_test(timeout=10.0) 
     def test_get_user_unauthorized(self):
@@ -643,7 +638,7 @@ class TestUserHandler(TestControllersBase):
                                                     body=params, 
                                                     method='PUT', 
                                                     headers=header)
-        self.assertEquals(e.exception.code, 400)  
+        self.assertEquals(e.exception.code, 401)  
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Can not set')
  
@@ -680,7 +675,7 @@ class TestUserHandler(TestControllersBase):
                                                     method='PUT', 
                                                     headers=header)
 
-        self.assertEquals(e.exception.code, 400)  
+        self.assertEquals(e.exception.code, 401)  
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Can not update')
 

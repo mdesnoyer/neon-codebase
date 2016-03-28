@@ -1189,28 +1189,24 @@ class UserHandler(APIV2Handler):
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username: 
-                raise Invalid('Can not update another\
+                raise NotAuthorizedError('Can not update another\
                                users account')
  
             if new_access_level > self.user.access_level:
-                raise Invalid('Can not set access_level above\
+                raise NotAuthorizedError('Can not set access_level above\
                                requesting users access level')
-
-        user_internal = yield neondata.User.get(args.get('username'),
-                            async=True)
-
-        if not user_internal: 
-            raise NotFoundError()
 
         def _update_user(u): 
             u.access_level = new_access_level 
 
-        yield user_internal.modify(username, _update_user, async=True)
+        user_internal = yield neondata.User.modify(
+            username, 
+            _update_user, 
+            async=True)
         
-        # grab the user again after the modify 
-        user_internal = yield neondata.User.get(args.get('username'),
-                            async=True)
-
+        if not user_internal: 
+            raise NotFoundError()
+        
         result = yield self.db2api(user_internal)
 
         self.success(result) 
