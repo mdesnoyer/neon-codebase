@@ -187,9 +187,10 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         given = 'http://jack.com/cap3.mp4'
         want = given
         self.assertEqual(want, VideoProcessor.percent_encode_url_path(given))
-
-        given = 'http://jack.com/Marvel\'s%20Cap%20Amer-%20-%20Trailer%202.mp4'
-        want = 'http://jack.com/Marvel%27s%20Cap%20Amer-%20-%20Trailer%202.mp4'
+        given = ('http://jackdrawsanything.com/temp/Marvel\'s%20'
+            'Captain%20America-%20Civil%20War%20-%20Trailer%202.mp4')
+        want = ('http://jackdrawsanything.com/temp/Marvel%27s%20'
+            'Captain%20America-%20Civil%20War%20-%20Trailer%202.mp4')
         self.assertEqual(want, VideoProcessor.percent_encode_url_path(given))
 
         given = 'http://jack.com/"%25%2- %20.mp4'
