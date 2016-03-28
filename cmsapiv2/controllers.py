@@ -1151,28 +1151,50 @@ class UserHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
+
+        username = args.get('username') 
         
-        user = yield neondata.User.get(args.get('username'), async=True)
+        user = yield neondata.User.get(
+                   username, 
+                   async=True)
+
+        if not user: 
+            raise NotFoundError()
+
+        if self.user.username != username: 
+            raise Invalid('Can not view another users account')
+
+        result = yield self.db2api(user)
+
+        self.success(result) 
 
     @tornado.gen.coroutine
     def put(self, account_id):
         schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=63))
+          Optional('access_level') : All(Coerce(int), Range(min=1, max=63))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        new_access_level = args.get('access_level') 
+        username = args.get('username') 
+        new_access_level = args.get('access_level')
 
-        if new_access_level > self.user.access_level:
-            raise Invalid('Can not set access_level above\
-                           requesting users access level')
+        if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
+            if self.user.username != username: 
+                raise Invalid('Can not update another\
+                               users account')
+ 
+            if new_access_level > self.user.access_level:
+                raise Invalid('Can not set access_level above\
+                               requesting users access level')
 
         user_internal = yield neondata.User.get(args.get('username'),
                             async=True)
@@ -1183,7 +1205,7 @@ class UserHandler(APIV2Handler):
         def _update_user(u): 
             u.access_level = new_access_level 
 
-        yield user_internal.modify(_update_user, async=True)
+        yield user_internal.modify(username, _update_user, async=True)
         
         # grab the user again after the modify 
         user_internal = yield neondata.User.get(args.get('username'),

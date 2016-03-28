@@ -178,13 +178,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             payload = JWTHelper.decode_token(access_token)  
             username = payload['username']
 
-            user = yield tornado.gen.Task(neondata.User.get, username)
+            user = yield neondata.User.get(username, async=True)
             if user:
                 request.user = user 
-                if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN:
+                if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
+                       neondata.AccessLevels.GLOBAL_ADMIN:
                     raise tornado.gen.Return(True)
                 elif account and username in account.users:
-                    if user.access_level & access_level_required:  
+                    if user.access_level & access_level_required is \
+                           access_level_required:  
                         raise tornado.gen.Return(True)
 
                 raise NotAuthorizedError('you can not access this resource')

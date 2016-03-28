@@ -1394,12 +1394,11 @@ class ServingControllerType(object):
 class AccessLevels(object):
     NONE = 0 
     READ = 1 
-    UPDATE = 2 
-    CREATE = 4 
-    DELETE = 8
-    ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE 
-    ADMIN = ALL_NORMAL_RIGHTS | 16 
-    GLOBAL_ADMIN = ADMIN | 32
+    UPDATE = 3 
+    CREATE = DELETE = 7 
+    ALL_NORMAL_RIGHTS = 15 
+    ADMIN = ALL_NORMAL_RIGHTS | 16  # 31  
+    GLOBAL_ADMIN = ADMIN | 32       # 63 
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 

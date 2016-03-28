@@ -188,9 +188,9 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
-        url = '/api/v2/accounts?customer_name=meisnew\
-              &admin_user_username=abcd1234\
-              &admin_user_password=b1234567'
+        url = '/api/v2/accounts?customer_name=meisnew'\
+              '&admin_user_username=abcd1234'\
+              '&admin_user_password=b1234567'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -500,11 +500,6 @@ class TestNewUserHandler(TestAuthenticationBase):
 
 class TestUserHandler(TestControllersBase):
     def setUp(self):
-        #self.verify_account_mocker = patch(
-        #    'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        #self.verify_account_mock = self._future_wrap_mock(
-        #    self.verify_account_mocker.start())
-        #self.verify_account_mock.sife_effect = True
         self.neon_user = neondata.NeonUserAccount(
             uuid.uuid1().hex,
             name='testingaccount')
@@ -512,7 +507,6 @@ class TestUserHandler(TestControllersBase):
         super(TestUserHandler, self).setUp()
 
     def tearDown(self): 
-        #self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
         super(TestUserHandler, self).tearDown()
 
@@ -528,7 +522,8 @@ class TestUserHandler(TestControllersBase):
         cls.postgresql.stop()
         super(TestUserHandler, cls).tearDownClass()
 
-    @tornado.testing.gen_test 
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
     def test_get_user_does_exist(self):
         user = neondata.User(username='testuser', 
                              password='testpassword', 
@@ -539,7 +534,85 @@ class TestUserHandler(TestControllersBase):
         user.save()
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
-        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'testuser', 
+                   token)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method='GET')
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'testuser')
+ 
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_get_user_unauthorized(self):
+        user1 = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user1.access_token = token 
+        yield user1.save(async=True)
+
+        user2 = neondata.User(username='testuser2', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        token = JWTHelper.generate_token({'username' : 'testuser2'})  
+        user2.access_token = token 
+        yield user2.save(async=True)
+
+        self.neon_user.users.append('testuser')
+        self.neon_user.users.append('testuser2')
+        self.neon_user.save()
+ 
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'testuser', 
+                   token)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    method='GET')
+        self.assertEquals(e.exception.code, 400)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not view')
+
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_get_user_does_not_exist(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'doesnotexist', 
+                   token)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    method='GET')
+        self.assertEquals(e.exception.code, 404)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'resource was not')
+
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_does_exist(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'username':'testuser', 
+                             'access_level': 1, 
+                             'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -547,6 +620,69 @@ class TestUserHandler(TestControllersBase):
                                                 method='PUT', 
                                                 headers=header)
         self.assertEquals(response.code, 200)
+        updated_user = yield neondata.User.get('testuser', async=True) 
+        self.assertEquals(updated_user.access_level, 1)
+ 
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_bad_access_level(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'username':'testuser', 'access_level': 63, 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
+        self.assertEquals(e.exception.code, 400)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not set')
+ 
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_wrong_username(self):
+        user1 = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user1.access_token = token 
+        yield user1.save(async=True)
+        self.neon_user.users.append('testuser')
+        self.neon_user.users.append('testuser2')
+        self.neon_user.save() 
+
+        user2 = neondata.User(username='testuser2', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser2'})  
+        user2.access_token = token 
+        yield user2.save(async=True)
+        params = json.dumps({'username':'testuser', 
+                             'access_level': 63, 
+                             'token' : token})
+        header = { 'Content-Type':'application/json' }
+        # testuser2 should not be able to update testuser 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
+
+        self.assertEquals(e.exception.code, 400)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not update')
 
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
@@ -2440,7 +2576,7 @@ class TestThumbnailStatsHandlerPG(TestControllersBase):
         self.assertRegexpMatches(rjson['error']['message'],
                                  'thumbnail_id or video_id is required') 
 
-class TestAPIKeyRequired(TestControllersBase):
+class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
