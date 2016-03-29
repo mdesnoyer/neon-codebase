@@ -182,6 +182,18 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+    @staticmethod
+    def percent_encode_url_path(url):
+        '''
+        Takes a url and re-encodes (i.e., decodes encodes) its path with
+        percent-sign encoding. TODO consider cases: unicode, double-decode
+        '''
+
+        parse = urlparse.urlparse(url)
+        parse = list(parse)
+        parse[2] = urllib.quote(urllib.unquote(parse[2]))
+        return urlparse.urlunparse(parse)
+
     def start(self):
         '''
         Actual work done here
@@ -314,13 +326,9 @@ class VideoProcessor(object):
                     statemon.state.increment('youtube_video_download_error')
                 finally: 
                     return
- 
-            # Use urllib2
-            url_parse = urlparse.urlparse(self.video_url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = urllib2.Request(urlparse.urlunparse(url_parse),
-                                  headers=self.headers)
+
+            parsed_url = VideoProcessor.percent_encode_url_path(self.video_url)
+            req = urllib2.Request(parsed_url, headers=self.headers)
             response = urllib2.urlopen(req, timeout=self.timeout)
             last_time = time.time()
             data = response.read(CHUNK_SIZE)
