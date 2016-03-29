@@ -2804,23 +2804,26 @@ class TestAPIKeyRequiredPG(TestAPIKeyRequired):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
        
-class TestAuthenticationHandler(TestAuthenticationBase): 
+class TestAuthenticationHandler(TestAuthenticationBase):
     def setUp(self): 
         super(TestAuthenticationHandler, self).setUp()
-
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+ 
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         TestAuthenticationHandler.username = 'kevin' 
         TestAuthenticationHandler.password = '12345678'
-        user = neondata.User(username=TestAuthenticationHandler.username, 
-                             password=TestAuthenticationHandler.password)
-        user.save()
+        cls.user = neondata.User(username=TestAuthenticationHandler.username, 
+                                  password=TestAuthenticationHandler.password)
+        cls.user.save()
 
-    @classmethod 
+    @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
 
     def test_no_username(self): 
         url = '/api/v2/authenticate' 
@@ -2923,26 +2926,64 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         token2 = rjson['access_token'] 
         self.assertNotEquals(token1, token2)
 
-class TestAuthenticationHandlerPG(TestAuthenticationHandler): 
-    def setUp(self):
-        super(TestAuthenticationHandler, self).setUp()
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_single(self): 
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
+ 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(1, len(account_ids)) 
+        a_id = account_ids[0] 
+        self.assertEquals(a_id, new_account_one.neon_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_multiple(self): 
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestAuthenticationHandler.username = 'kevin' 
-        TestAuthenticationHandler.password = '12345678'
-        user = neondata.User(username=TestAuthenticationHandler.username, 
-                             password=TestAuthenticationHandler.password)
-        user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
+        new_account_two = neondata.NeonUserAccount('test_account2')
+        new_account_two.users.append(self.user.username)
+        yield new_account_two.save(async=True)
+ 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(2, len(account_ids)) 
+        self.assertTrue(new_account_one.neon_api_key in account_ids) 
+        self.assertTrue(new_account_two.neon_api_key in account_ids)
+ 
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_empty(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(0, len(account_ids)) 
 
 class TestRefreshTokenHandler(TestAuthenticationBase): 
     def setUp(self): 
@@ -2952,20 +2993,24 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
     def tearDown(self): 
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
         super(TestRefreshTokenHandler, self).tearDown()
- 
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         TestRefreshTokenHandler.username = 'kevin' 
         TestRefreshTokenHandler.password = '12345678'
-        user = neondata.User(username=TestRefreshTokenHandler.username, 
+        cls.user = neondata.User(username=TestRefreshTokenHandler.username, 
                              password=TestRefreshTokenHandler.password)
-        user.save()
+        cls.user.save()
 
-    @classmethod 
-    def tearDownClass(cls):
-        cls.redis.stop()
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
+ 
 
     def test_no_token(self): 
         url = '/api/v2/refresh_token' 
@@ -3014,6 +3059,9 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test 
     def test_get_new_access_token(self):
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
@@ -3034,6 +3082,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         rjson2 = json.loads(response.body)
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2) 
+        account_ids = rjson2['account_ids'] 
+        self.assertEquals(1, len(account_ids)) 
         user = yield tornado.gen.Task(neondata.User.get, TestRefreshTokenHandler.username)
         # verify that the access_token was indeed updated 
         self.assertNotEquals(user.access_token, rjson1['access_token'])
@@ -3041,24 +3091,19 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         # verify refresh tokens stay the same 
         self.assertEquals(user.refresh_token, rjson1['refresh_token'])
 
-class TestRefreshTokenHandlerPG(TestRefreshTokenHandler): 
-    def setUp(self):
-        self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
-        super(TestRefreshTokenHandler, self).setUp()
-
-    def tearDown(self): 
-        options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
-        super(TestRefreshTokenHandler, self).tearDown()
-
+class TestLogoutHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        super(TestLogoutHandler, self).setUp()
+   
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestRefreshTokenHandler.username = 'kevin' 
-        TestRefreshTokenHandler.password = '12345678'
-        user = neondata.User(username=TestRefreshTokenHandler.username, 
-                             password=TestRefreshTokenHandler.password)
+        TestLogoutHandler.username = 'kevin' 
+        TestLogoutHandler.password = '12345678'
+        user = neondata.User(username=TestLogoutHandler.username, 
+                             password=TestLogoutHandler.password)
         user.save()
 
     @classmethod
@@ -3066,24 +3111,6 @@ class TestRefreshTokenHandlerPG(TestRefreshTokenHandler):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.clear_all_tables()
         cls.postgresql.stop()
-
-class TestLogoutHandler(TestAuthenticationBase): 
-    def setUp(self): 
-        super(TestLogoutHandler, self).setUp()
-   
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-        TestLogoutHandler.username = 'kevin' 
-        TestLogoutHandler.password = '12345678'
-        user = neondata.User(username=TestLogoutHandler.username, 
-                             password=TestLogoutHandler.password)
-        user.save()
-
-    @classmethod 
-    def tearDownClass(cls): 
-        cls.redis.stop()
 
     def test_no_token(self): 
         url = '/api/v2/logout' 
@@ -3120,27 +3147,6 @@ class TestLogoutHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-
-class TestLogoutHandlerPG(TestLogoutHandler): 
-    def setUp(self):
-        super(TestLogoutHandler, self).setUp()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestLogoutHandler.username = 'kevin' 
-        TestLogoutHandler.password = '12345678'
-        user = neondata.User(username=TestLogoutHandler.username, 
-                             password=TestLogoutHandler.password)
-        user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
 
 class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
     def setUp(self):

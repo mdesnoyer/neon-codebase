@@ -55,23 +55,32 @@ class AuthenticateHandler(APIV2Handler):
         username = args.get('username') 
         password = args.get('password')
  
-        api_accessor = yield tornado.gen.Task(neondata.User.get, username)
+        api_accessor = yield neondata.User.get(username, async=True) 
         result = None
-        access_token = JWTHelper.generate_token({ 'username' : username }, 
-                                                token_type=TokenTypes.ACCESS_TOKEN) 
+
+        access_token = JWTHelper.generate_token(
+            { 'username' : username }, 
+            token_type=TokenTypes.ACCESS_TOKEN) 
  
-        refresh_token = JWTHelper.generate_token({ 'username' : username }, 
-                                                 token_type=TokenTypes.REFRESH_TOKEN)  
+        refresh_token = JWTHelper.generate_token(
+            { 'username' : username }, 
+            token_type=TokenTypes.REFRESH_TOKEN)
+
         def _update_tokens(x): 
             x.access_token = access_token
             x.refresh_token = refresh_token 
  
         if api_accessor: 
             if sha256_crypt.verify(password, api_accessor.password_hash):
-                yield tornado.gen.Task(neondata.User.modify, username, _update_tokens)
+                yield neondata.User.modify(username, 
+                    _update_tokens, 
+                    async=True)
+                account_ids = yield api_accessor.get_associated_account_ids(
+                    async=True) 
                 result = {
                            'access_token' : access_token, 
-                           'refresh_token' : refresh_token 
+                           'refresh_token' : refresh_token, 
+                           'account_ids' : account_ids 
                          } 
         if result: 
             statemon.state.increment('successful_authenticates')
@@ -173,18 +182,24 @@ class RefreshTokenHandler(APIV2Handler):
             payload = JWTHelper.decode_token(refresh_token) 
     
             username = payload['username']
-            user = yield tornado.gen.Task(neondata.User.get, username)
+            user = yield neondata.User.get(username, async=True)
+            account_ids = yield user.get_associated_account_ids(async=True)
 
-            access_token = JWTHelper.generate_token({ 'username' : username }, 
-                                                    token_type=TokenTypes.ACCESS_TOKEN) 
+            access_token = JWTHelper.generate_token(
+                { 'username' : username }, 
+                token_type=TokenTypes.ACCESS_TOKEN) 
     
             def _update_user(u): 
                 u.access_token = access_token
 
-            yield tornado.gen.Task(neondata.User.modify, username, _update_user)
+            yield neondata.User.modify(username, 
+                _update_user, 
+                async=True)
+
             result = { 
                        'access_token' : access_token, 
-                       'refresh_token' : refresh_token 
+                       'refresh_token' : refresh_token, 
+                       'account_ids' : account_ids 
                      }
 
             self.success(json.dumps(result)) 
