@@ -188,8 +188,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
-        url = '/api/v2/accounts?customer_name=meisnew'\
-              '&admin_user_username=abcd1234'\
+        url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
+              '&admin_user_username=a@a.com'\
               '&admin_user_password=b1234567'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
@@ -199,10 +199,22 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com') 
  
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -212,10 +224,71 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com')
+ 
+    @tornado.testing.gen_test 
+    def test_create_new_account_duplicate_users(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        self.assertEquals(response.code, 200) 
+ 
+        params = json.dumps({'customer_name': 'meisnew2', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+        
+        # fails with a conflict
+        self.assertEquals(e.exception.code, 409) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['data'],
+                                 'user with that email already exists')
+
+
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_invalid_email(self):
+        url = '/api/v2/accounts?customer_name=meisnew&email=aa.bc'\
+              '&admin_user_username=abcd1234'\
+              '&admin_user_password=b1234567'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url), 
+                body='', 
+                method='POST', 
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test 
     def test_create_new_account_tracker_accounts(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -234,7 +307,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
  
     @tornado.testing.gen_test 
     def test_account_is_verified(self):
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -519,7 +595,8 @@ class TestUserHandler(TestControllersBase):
     def test_get_user_does_exist(self):
         user = neondata.User(username='testuser', 
                              password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user.access_token = token 
@@ -543,7 +620,7 @@ class TestUserHandler(TestControllersBase):
     def test_get_user_unauthorized(self):
         user1 = neondata.User(username='testuser', 
                              password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+                             access_level=neondata.AccessLevels.READ)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user1.access_token = token 
@@ -551,7 +628,7 @@ class TestUserHandler(TestControllersBase):
 
         user2 = neondata.User(username='testuser2', 
                              password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+                             access_level=neondata.AccessLevels.READ)
         token = JWTHelper.generate_token({'username' : 'testuser2'})  
         user2.access_token = token 
         yield user2.save(async=True)
@@ -567,15 +644,16 @@ class TestUserHandler(TestControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e: 
             response = yield self.http_client.fetch(self.get_url(url), 
                                                     method='GET')
-        self.assertEquals(e.exception.code, 400)  
+        self.assertEquals(e.exception.code, 401)  
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Can not view')
 
     @tornado.testing.gen_test(timeout=10.0) 
     def test_get_user_does_not_exist(self):
-        user = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user.access_token = token 
@@ -596,9 +674,10 @@ class TestUserHandler(TestControllersBase):
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
     def test_update_user_does_exist(self):
-        user = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user.access_token = token 
@@ -621,9 +700,10 @@ class TestUserHandler(TestControllersBase):
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
     def test_update_user_bad_access_level(self):
-        user = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user.access_token = token 
@@ -645,9 +725,10 @@ class TestUserHandler(TestControllersBase):
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
     def test_update_user_wrong_username(self):
-        user1 = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+        user1 = neondata.User(
+                    username='testuser', 
+                    password='testpassword', 
+                    access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
         
         token = JWTHelper.generate_token({'username' : 'testuser'})  
         user1.access_token = token 
@@ -656,9 +737,10 @@ class TestUserHandler(TestControllersBase):
         self.neon_user.users.append('testuser2')
         self.neon_user.save() 
 
-        user2 = neondata.User(username='testuser2', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
+        user2 = neondata.User(
+                    username='testuser2', 
+                    password='testpassword', 
+                    access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
         
         token = JWTHelper.generate_token({'username' : 'testuser2'})  
         user2.access_token = token 
@@ -2896,7 +2978,11 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'customer_name': 'meisnew', 'token': token})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas', 
+                             'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -2905,7 +2991,10 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
                                                 headers=header) 
         self.assertEquals(response.code, 200)
 
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'bb@a.com', 
+                             'admin_user_password':'testacpas'})
         header = { 
                    'Content-Type':'application/json', 
                    'Authorization': 'Bearer %s' % token 
@@ -2916,7 +3005,9 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
                                                 headers=header) 
         self.assertEquals(response.code, 200)
 
-        url = '/api/v2/accounts?customer_name=meisnew&token=%s' % token
+        url = '/api/v2/accounts?customer_name=meisnew&email=a@a.com'\
+              '&admin_user_username=a123@a.com'\
+              '&admin_user_password=abc123456&token=%s' % token
         response = yield self.http_client.fetch(self.get_url(url),
                                                 allow_nonstandard_methods=True,
                                                 body='', 

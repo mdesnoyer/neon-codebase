@@ -14,6 +14,7 @@ from functools import wraps
 import json 
 import jwt 
 import logging
+import re
 import signal
 import tornado.httpserver
 import tornado.ioloop
@@ -452,4 +453,13 @@ class CustomVoluptuousTypes():
                 return ast.literal_eval(v)
             else:
                 raise Invalid("not a dictionary") 
+        return f
+
+    @staticmethod 
+    def Email():
+        def f(v):
+            if re.match("[a-zA-Z0-9\.\+_-]*@[a-zA-Z0-9\.\+_-]*\.\w+", str(v)):
+                return str(v)
+            else:
+                raise Invalid("not a valid email address")
         return f 

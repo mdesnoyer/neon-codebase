@@ -117,14 +117,16 @@ class AccountHandler(APIV2Handler):
         return ['account_id', 'default_size', 'customer_name',
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
-                'integration_ids', 'created', 'updated']
+                'integration_ids', 'created', 'updated', 'users',
+                'email']
     
     @classmethod
     def _get_passthrough_fields(cls):
         return ['default_size',
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
-                 'created', 'updated']
+                'created', 'updated', 'users',
+                'email']
 
     @classmethod
     @tornado.gen.coroutine
@@ -1168,7 +1170,7 @@ class UserHandler(APIV2Handler):
             raise NotFoundError()
 
         if self.user.username != username: 
-            raise Invalid('Can not view another users account')
+            raise NotAuthorizedError('Can not view another users account')
 
         result = yield self.db2api(user)
 

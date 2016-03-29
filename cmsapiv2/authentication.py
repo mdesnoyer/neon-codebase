@@ -210,15 +210,19 @@ class NewAccountHandler(APIV2Handler):
     @tornado.gen.coroutine 
     def post(self):
         """handles account endpoint post request""" 
-
         schema = Schema({ 
-          Required('customer_name') : Any(str, unicode,
-                                          Length(min=1, max=1024)),
+          Required('customer_name') : Any(str, 
+              unicode,
+              Length(min=1, max=1024)),
+          Required('email') : Any(CustomVoluptuousTypes.Email(),
+              Length(min=6, max=1024)),
+          Required('admin_user_username') : All(CustomVoluptuousTypes.Email(), 
+              Length(min=6, max=512)), 
+          Required('admin_user_password') : All(Coerce(str), 
+              Length(min=8, max=64)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
-          'admin_user_username' : All(str, Length(min=8, max=64)), 
-          'admin_user_password' : All(str, Length(min=8, max=64))
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048))
         })
         args = self.parse_args()
         schema(args) 
@@ -231,14 +235,18 @@ class NewAccountHandler(APIV2Handler):
                                       neondata.DefaultSizes.HEIGHT)
         account.default_size = tuple(account.default_size)
         account.default_thumbnail_id = args.get('default_thumbnail_id', None)
+        account.email = args.get('email') 
         
-        username = args.get('admin_username', None) 
-        password = args.get('admin_user_password', None) 
-        if username is not None and password is not None:
+        username = args.get('admin_user_username') 
+        password = args.get('admin_user_password')
+ 
+        try: 
             new_user = neondata.User(username=username, password=password)
-            yield new_user.save(async=True) 
+            yield new_user.save(overwrite_existing_object=False, async=True)
             account.users.append(username) 
-        
+        except neondata.psycopg2.IntegrityError: 
+            raise AlreadyExists('user with that email already exists')
+ 
         yield account.save(async=True)
         account = yield neondata.NeonUserAccount.get(
                       account.neon_api_key, 
@@ -276,14 +284,16 @@ class NewAccountHandler(APIV2Handler):
         return ['account_id', 'default_size', 'customer_name',
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
-                'integration_ids', 'created', 'updated', 'users']
+                'integration_ids', 'created', 'updated', 'users', 
+                'email']
     
     @classmethod
     def _get_passthrough_fields(cls):
         return ['default_size',
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
-                 'created', 'updated', 'users']
+                 'created', 'updated', 'users', 
+                 'email']
 
     @classmethod
     @tornado.gen.coroutine
