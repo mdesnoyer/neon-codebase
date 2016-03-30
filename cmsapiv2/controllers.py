@@ -1135,13 +1135,54 @@ class LiveStreamHandler(tornado.web.RequestHandler):
         super(LiveStreamHandler, self).__init__()
  
 '''*********************************************************************
-VideoSearchHandler : class responsible for searching videos
+VideoSearchInternalHandler : class responsible for searching videos 
+                             from an internal source 
    HTTP Verbs     : get
-        Notes     : outside of scope of phase 1, future implementation
 *********************************************************************'''
-class VideoSearchHandler(tornado.web.RequestHandler): 
-    def __init__(self): 
-        super(VideoSearchHandler, self).__init__() 
+class VideoSearchInternalHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self):
+        schema = Schema({
+          Required('limit', default=25): All(int, Range(min=1, max=100)),
+          'account_id' : All(Coerce(str), Length(min=1, max=256)),
+          'query' : All(Coerce(str), Length(min=1, max=256)),
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          'since': All(Coerce(int))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        self.success({}) 
+
+'''*********************************************************************
+VideoSearchExternalHandler : class responsible for searching videos from 
+                             an external source 
+   HTTP Verbs     : get
+*********************************************************************'''
+class VideoSearchExternalHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        self.success({}) 
+
+'''*********************************************************************
+ThumbnailSearchInternalHandler : class responsible for searching thumbs
+                                 from an internal source 
+   HTTP Verbs     : get
+*********************************************************************'''
+class ThumbnailSearchInternalHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self):
+        self.success({}) 
+
+'''*********************************************************************
+ThumbnailSearchExternalHandler : class responsible for searching videos 
+                                 an external source 
+   HTTP Verbs     : get
+*********************************************************************'''
+class ThumbnailSearchExternalHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        self.success({}) 
 
 '''*****************************************************************
 UserHandler 
@@ -1234,12 +1275,19 @@ Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', OoyalaIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', BrightcoveIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$', 
+        OoyalaIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', 
+        BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', 
+        OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
+    (r'/api/v2/videos/search?$', VideoSearchInternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search?$', 
+        ThumbnailSearchExternalHandler),
+    (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
