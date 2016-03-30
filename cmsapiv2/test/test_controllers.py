@@ -160,110 +160,7 @@ class TestControllersBase(TestBase):
     def get_app(self): 
         return controllers.application
 
-class TestNewAccountHandler(TestControllersBase):
-    def setUp(self):
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestNewAccountHandler, self).setUp()
-
-    def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
-        self.verify_account_mocker.stop()
-        super(TestNewAccountHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-
-    @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
-
-    @tornado.testing.gen_test 
-    def test_create_new_account_query(self):
-        url = '/api/v2/accounts?customer_name=meisnew'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body='', 
-                                                method='POST', 
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200)
-        self.assertIn('application/json', response.headers['Content-Type'])
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
- 
-    @tornado.testing.gen_test 
-    def test_create_new_account_json(self):
-        params = json.dumps({'customer_name': 'meisnew'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header) 
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
-
-    @tornado.testing.gen_test 
-    def test_create_new_account_tracker_accounts(self):
-        params = json.dumps({'customer_name': 'meisnew'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header) 
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
-        prod_t_id = rjson['tracker_account_id'] 
-        staging_t_id = rjson['staging_tracker_account_id'] 
-        tai_p = neondata.TrackerAccountIDMapper.get_neon_account_id(prod_t_id) 
-        self.assertEquals(tai_p[0], rjson['account_id'])
-        tai_s = neondata.TrackerAccountIDMapper.get_neon_account_id(staging_t_id)
-        self.assertEquals(tai_s[0], rjson['account_id'])
- 
-    @tornado.testing.gen_test 
-    def test_account_is_verified(self):
-        params = json.dumps({'customer_name': 'meisnew'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header) 
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        account_id = rjson['account_id'] 
-        url = '/api/v2/%s?default_height=1200' % (account_id) 
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='PUT', 
-                                                headers=header)
-        self.assertEquals(response.code, 200)
- 
-    @tornado.testing.gen_test
-    def test_get_new_acct_not_implemented(self):
-        with self.assertRaises(tornado.httpclient.HTTPError):  
-            url = '/api/v2/accounts' 
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method="GET")
-
-    def test_post_acct_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.NewAccountHandler.post')
-        params = json.dumps({'name': '123123abc'})
-	url = '/api/v2/accounts'
-        self.post_exceptions(url, params, exception_mocker)
-
-#TODO KF replace once hot swap is done 
-class TestNewAccountHandlerPG(TestNewAccountHandler): 
+class TestNewAccountHandler(TestAuthenticationBase):
     def setUp(self):
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
@@ -288,7 +185,153 @@ class TestNewAccountHandlerPG(TestNewAccountHandler):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
         super(TestNewAccountHandler, cls).tearDownClass() 
-    
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_query(self):
+        url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
+              '&admin_user_username=a@a.com'\
+              '&admin_user_password=b1234567'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
+        self.assertIn('application/json', response.headers['Content-Type'])
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com') 
+ 
+    @tornado.testing.gen_test 
+    def test_create_new_account_json(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com')
+ 
+    @tornado.testing.gen_test 
+    def test_create_new_account_duplicate_users(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        self.assertEquals(response.code, 200) 
+ 
+        params = json.dumps({'customer_name': 'meisnew2', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+        
+        # fails with a conflict
+        self.assertEquals(e.exception.code, 409) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['data'],
+                                 'user with that email already exists')
+
+
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_invalid_email(self):
+        url = '/api/v2/accounts?customer_name=meisnew&email=aa.bc'\
+              '&admin_user_username=abcd1234'\
+              '&admin_user_password=b1234567'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url), 
+                body='', 
+                method='POST', 
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_tracker_accounts(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+        prod_t_id = rjson['tracker_account_id'] 
+        staging_t_id = rjson['staging_tracker_account_id'] 
+        tai_p = neondata.TrackerAccountIDMapper.get_neon_account_id(prod_t_id) 
+        self.assertEquals(tai_p[0], rjson['account_id'])
+        tai_s = neondata.TrackerAccountIDMapper.get_neon_account_id(staging_t_id)
+        self.assertEquals(tai_s[0], rjson['account_id'])
+ 
+    @tornado.testing.gen_test 
+    def test_account_is_verified(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+ 
+    @tornado.testing.gen_test
+    def test_get_new_acct_not_implemented(self):
+        with self.assertRaises(tornado.httpclient.HTTPError):  
+            url = '/api/v2/accounts' 
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    method="GET")
+
+    def test_post_acct_exceptions(self):
+        exception_mocker = patch('cmsapiv2.authentication.NewAccountHandler.post')
+        params = json.dumps({'name': '123123abc'})
+	url = '/api/v2/accounts'
+        self.post_exceptions(url, params, exception_mocker)
+
 class TestAccountHandler(TestControllersBase):
     def setUp(self):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
@@ -301,21 +344,20 @@ class TestAccountHandler(TestControllersBase):
         super(TestAccountHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestAccountHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
         super(TestAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test
@@ -356,30 +398,11 @@ class TestAccountHandler(TestControllersBase):
     
     @tornado.testing.gen_test 
     def test_get_acct_does_exist(self):
-        url = '/api/v2/accounts?customer_name=123abc'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body='',
-                                                method='POST', 
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], '123abc') 
-        url = '/api/v2/%s' % (rjson['account_id']) 
+        url = '/api/v2/%s' % (self.user.neon_api_key) 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method="GET")
-        rjson2 = json.loads(response.body) 
-        self.assertEquals(rjson['account_id'], rjson2['account_id']) 
-
-    @tornado.testing.gen_test 
-    def test_basic_post_account(self):
-        url = '/api/v2/accounts?customer_name=123abc'
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body='', 
-                                                method='POST', 
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code, 200)
-        rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], '123abc') 
+        rjson = json.loads(response.body) 
+        self.assertEquals(self.user.neon_api_key, rjson['account_id']) 
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
@@ -480,22 +503,19 @@ class TestAccountHandler(TestControllersBase):
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
 
-# TODO KF here until hot swap is done
-class TestAccountHandlerPG(TestAccountHandler): 
+class TestNewUserHandler(TestAuthenticationBase):
     def setUp(self):
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
-        self.user.save() 
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
-        super(TestAccountHandler, self).setUp()
+        super(TestNewUserHandler, self).setUp()
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
-        super(TestAccountHandler, self).tearDown()
+        super(TestNewUserHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -507,8 +527,240 @@ class TestAccountHandlerPG(TestAccountHandler):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-        super(TestAccountHandlerPG, cls).tearDownClass() 
+        super(TestNewUserHandler, cls).tearDownClass()
  
+    @tornado.testing.gen_test 
+    def test_create_new_user_query(self):
+        url = '/api/v2/users?username=abcd1234&password=b1234567&access_level=63'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 200)
+        self.assertIn('application/json', response.headers['Content-Type'])
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'abcd1234')
+        user = yield neondata.User.get('abcd1234', async=True) 
+        self.assertEquals(user.username, 'abcd1234') 
+
+    @tornado.testing.gen_test 
+    def test_create_new_user_json(self):
+        params = json.dumps({'username': 'abcd1234', 
+                             'password': 'b1234567', 
+                             'access_level': 63})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'abcd1234')
+        user = yield neondata.User.get('abcd1234', async=True) 
+        self.assertEquals(user.username, 'abcd1234') 
+
+    def test_post_user_exceptions(self):
+        exception_mocker = patch('cmsapiv2.authentication.NewUserHandler.post')
+        params = json.dumps({'username': '123123abc'})
+	url = '/api/v2/users'
+        self.post_exceptions(url, params, exception_mocker)
+
+class TestUserHandler(TestControllersBase):
+    def setUp(self):
+        self.neon_user = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            name='testingaccount')
+        self.neon_user.save() 
+        super(TestUserHandler, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(TestUserHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        super(TestUserHandler, cls).tearDownClass()
+
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_get_user_does_exist(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'testuser', 
+                   token)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method='GET')
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['username'], 'testuser')
+
+        user = yield neondata.User.get('testuser', async=True) 
+        self.assertEquals(user.username, 'testuser') 
+ 
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_get_user_unauthorized(self):
+        user1 = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user1.access_token = token 
+        yield user1.save(async=True)
+
+        user2 = neondata.User(username='testuser2', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.READ)
+        token = JWTHelper.generate_token({'username' : 'testuser2'})  
+        user2.access_token = token 
+        yield user2.save(async=True)
+
+        self.neon_user.users.append('testuser')
+        self.neon_user.users.append('testuser2')
+        self.neon_user.save()
+ 
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'testuser', 
+                   token)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    method='GET')
+        self.assertEquals(e.exception.code, 401)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not view')
+
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_get_user_does_not_exist(self):
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        url = '/api/v2/%s/users?username=%s&token=%s' % (
+                   self.neon_user.neon_api_key,
+                   'doesnotexist', 
+                   token)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    method='GET')
+        self.assertEquals(e.exception.code, 404)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'resource was not')
+
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_does_exist(self):
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'username':'testuser', 
+                             'access_level': 1, 
+                             'token' : token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='PUT', 
+                                                headers=header)
+        self.assertEquals(response.code, 200)
+        updated_user = yield neondata.User.get('testuser', async=True) 
+        self.assertEquals(updated_user.access_level, 1)
+ 
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_bad_access_level(self):
+        user = neondata.User(
+                   username='testuser', 
+                   password='testpassword', 
+                   access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        self.neon_user.users.append('testuser')
+        self.neon_user.save() 
+        params = json.dumps({'username':'testuser', 'access_level': 63, 'token' : token})
+        header = { 'Content-Type':'application/json' }
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
+        self.assertEquals(e.exception.code, 401)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not set')
+ 
+    # token creation can be slow give it some extra time just in case
+    @tornado.testing.gen_test(timeout=10.0) 
+    def test_update_user_wrong_username(self):
+        user1 = neondata.User(
+                    username='testuser', 
+                    password='testpassword', 
+                    access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user1.access_token = token 
+        yield user1.save(async=True)
+        self.neon_user.users.append('testuser')
+        self.neon_user.users.append('testuser2')
+        self.neon_user.save() 
+
+        user2 = neondata.User(
+                    username='testuser2', 
+                    password='testpassword', 
+                    access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser2'})  
+        user2.access_token = token 
+        yield user2.save(async=True)
+        params = json.dumps({'username':'testuser', 
+                             'access_level': 63, 
+                             'token' : token})
+        header = { 'Content-Type':'application/json' }
+        # testuser2 should not be able to update testuser 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
+            response = yield self.http_client.fetch(self.get_url(url), 
+                                                    body=params, 
+                                                    method='PUT', 
+                                                    headers=header)
+
+        self.assertEquals(e.exception.code, 401)  
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'], 'Can not update')
+
 class TestOoyalaIntegrationHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -2401,26 +2653,26 @@ class TestThumbnailStatsHandlerPG(TestControllersBase):
         self.assertRegexpMatches(rjson['error']['message'],
                                  'thumbnail_id or video_id is required') 
 
-class TestAPIKeyRequired(TestControllersBase):
+class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
 
-    def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(TestAPIKeyRequired, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     def make_calls_and_assert_401(self, 
                                   url, 
@@ -2695,6 +2947,27 @@ class TestAPIKeyRequired(TestControllersBase):
                                                 headers=header)
         self.assertEquals(response.code, 200) 
 
+class TestAPIKeyRequiredAuth(TestAuthenticationBase):
+    def setUp(self):
+        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
+        self.neon_user.save() 
+        super(TestAPIKeyRequiredAuth, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(TestAPIKeyRequiredAuth, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
     @tornado.testing.gen_test 
     def test_create_new_account_god_mode(self): 
         user = neondata.User(username='testuser', 
@@ -2705,7 +2978,11 @@ class TestAPIKeyRequired(TestControllersBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'customer_name': 'meisnew', 'token': token})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas', 
+                             'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -2714,7 +2991,10 @@ class TestAPIKeyRequired(TestControllersBase):
                                                 headers=header) 
         self.assertEquals(response.code, 200)
 
-        params = json.dumps({'customer_name': 'meisnew'})
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'bb@a.com', 
+                             'admin_user_password':'testacpas'})
         header = { 
                    'Content-Type':'application/json', 
                    'Authorization': 'Bearer %s' % token 
@@ -2725,7 +3005,9 @@ class TestAPIKeyRequired(TestControllersBase):
                                                 headers=header) 
         self.assertEquals(response.code, 200)
 
-        url = '/api/v2/accounts?customer_name=meisnew&token=%s' % token
+        url = '/api/v2/accounts?customer_name=meisnew&email=a@a.com'\
+              '&admin_user_username=a123@a.com'\
+              '&admin_user_password=abc123456&token=%s' % token
         response = yield self.http_client.fetch(self.get_url(url),
                                                 allow_nonstandard_methods=True,
                                                 body='', 
@@ -2783,16 +3065,19 @@ class TestAPIKeyRequired(TestControllersBase):
         self.assertRegexpMatches(rjson['error']['message'],
                                  'you can not access') 
 
-class TestAPIKeyRequiredPG(TestAPIKeyRequired): 
-    def setUp(self):
-        self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
-        self.neon_user.save() 
-        super(TestAPIKeyRequired, self).setUp()
+class TestAuthenticationHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        TestAuthenticationHandler.username = 'kevin' 
+        TestAuthenticationHandler.password = '12345678'
+        self.user = neondata.User(username=TestAuthenticationHandler.username, 
+                                  password=TestAuthenticationHandler.password)
+        self.user.save()
+        super(TestAuthenticationHandler, self).setUp()
 
-    def tearDown(self):
+    def tearDown(self): 
         self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequired, self).tearDown()
-
+        super(TestAuthenticationHandler, self).tearDown()
+ 
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
@@ -2803,24 +3088,6 @@ class TestAPIKeyRequiredPG(TestAPIKeyRequired):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-       
-class TestAuthenticationHandler(TestAuthenticationBase): 
-    def setUp(self): 
-        super(TestAuthenticationHandler, self).setUp()
-
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-        TestAuthenticationHandler.username = 'kevin' 
-        TestAuthenticationHandler.password = '12345678'
-        user = neondata.User(username=TestAuthenticationHandler.username, 
-                             password=TestAuthenticationHandler.password)
-        user.save()
-
-    @classmethod 
-    def tearDownClass(cls): 
-        cls.redis.stop()
 
     def test_no_username(self): 
         url = '/api/v2/authenticate' 
@@ -2923,26 +3190,64 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         token2 = rjson['access_token'] 
         self.assertNotEquals(token1, token2)
 
-class TestAuthenticationHandlerPG(TestAuthenticationHandler): 
-    def setUp(self):
-        super(TestAuthenticationHandler, self).setUp()
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_single(self): 
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
+ 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(1, len(account_ids)) 
+        a_id = account_ids[0] 
+        self.assertEquals(a_id, new_account_one.neon_api_key)
+ 
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_multiple(self): 
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestAuthenticationHandler.username = 'kevin' 
-        TestAuthenticationHandler.password = '12345678'
-        user = neondata.User(username=TestAuthenticationHandler.username, 
-                             password=TestAuthenticationHandler.password)
-        user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
+        new_account_two = neondata.NeonUserAccount('test_account2')
+        new_account_two.users.append(self.user.username)
+        yield new_account_two.save(async=True)
+ 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(2, len(account_ids)) 
+        self.assertTrue(new_account_one.neon_api_key in account_ids) 
+        self.assertTrue(new_account_two.neon_api_key in account_ids)
+ 
+    @tornado.testing.gen_test 
+    def test_account_ids_returned_empty(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestAuthenticationHandler.username, 
+                             'password': TestAuthenticationHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        account_ids = rjson['account_ids'] 
+        account_ids = rjson['account_ids'] 
+        self.assertEquals(0, len(account_ids)) 
 
 class TestRefreshTokenHandler(TestAuthenticationBase): 
     def setUp(self): 
@@ -2952,20 +3257,24 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
     def tearDown(self): 
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
         super(TestRefreshTokenHandler, self).tearDown()
- 
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         TestRefreshTokenHandler.username = 'kevin' 
         TestRefreshTokenHandler.password = '12345678'
-        user = neondata.User(username=TestRefreshTokenHandler.username, 
+        cls.user = neondata.User(username=TestRefreshTokenHandler.username, 
                              password=TestRefreshTokenHandler.password)
-        user.save()
+        cls.user.save()
 
-    @classmethod 
-    def tearDownClass(cls):
-        cls.redis.stop()
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.clear_all_tables()
+        cls.postgresql.stop()
+ 
 
     def test_no_token(self): 
         url = '/api/v2/refresh_token' 
@@ -3014,6 +3323,9 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test 
     def test_get_new_access_token(self):
+        new_account_one = neondata.NeonUserAccount('test_account1')
+        new_account_one.users.append(self.user.username)
+        yield new_account_one.save(async=True)
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
@@ -3034,6 +3346,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         rjson2 = json.loads(response.body)
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2) 
+        account_ids = rjson2['account_ids'] 
+        self.assertEquals(1, len(account_ids)) 
         user = yield tornado.gen.Task(neondata.User.get, TestRefreshTokenHandler.username)
         # verify that the access_token was indeed updated 
         self.assertNotEquals(user.access_token, rjson1['access_token'])
@@ -3041,24 +3355,19 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         # verify refresh tokens stay the same 
         self.assertEquals(user.refresh_token, rjson1['refresh_token'])
 
-class TestRefreshTokenHandlerPG(TestRefreshTokenHandler): 
-    def setUp(self):
-        self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
-        super(TestRefreshTokenHandler, self).setUp()
-
-    def tearDown(self): 
-        options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
-        super(TestRefreshTokenHandler, self).tearDown()
-
+class TestLogoutHandler(TestAuthenticationBase): 
+    def setUp(self): 
+        super(TestLogoutHandler, self).setUp()
+   
     @classmethod
     def setUpClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestRefreshTokenHandler.username = 'kevin' 
-        TestRefreshTokenHandler.password = '12345678'
-        user = neondata.User(username=TestRefreshTokenHandler.username, 
-                             password=TestRefreshTokenHandler.password)
+        TestLogoutHandler.username = 'kevin' 
+        TestLogoutHandler.password = '12345678'
+        user = neondata.User(username=TestLogoutHandler.username, 
+                             password=TestLogoutHandler.password)
         user.save()
 
     @classmethod
@@ -3066,24 +3375,6 @@ class TestRefreshTokenHandlerPG(TestRefreshTokenHandler):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.clear_all_tables()
         cls.postgresql.stop()
-
-class TestLogoutHandler(TestAuthenticationBase): 
-    def setUp(self): 
-        super(TestLogoutHandler, self).setUp()
-   
-    @classmethod 
-    def setUpClass(cls): 
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-        TestLogoutHandler.username = 'kevin' 
-        TestLogoutHandler.password = '12345678'
-        user = neondata.User(username=TestLogoutHandler.username, 
-                             password=TestLogoutHandler.password)
-        user.save()
-
-    @classmethod 
-    def tearDownClass(cls): 
-        cls.redis.stop()
 
     def test_no_token(self): 
         url = '/api/v2/logout' 
@@ -3120,27 +3411,6 @@ class TestLogoutHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-
-class TestLogoutHandlerPG(TestLogoutHandler): 
-    def setUp(self):
-        super(TestLogoutHandler, self).setUp()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestLogoutHandler.username = 'kevin' 
-        TestLogoutHandler.password = '12345678'
-        user = neondata.User(username=TestLogoutHandler.username, 
-                             password=TestLogoutHandler.password)
-        user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
 
 class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
     def setUp(self):

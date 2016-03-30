@@ -63,6 +63,7 @@ from utils.options import define, options
 import utils.ps
 from utils import statemon
 import video_processor.client
+from video_processor.client import VideoClient, VideoProcessor
 
 _log = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         self.api_request.api_method = 'topn'
         self.api_request.api_param = 1 
         self.api_request.save()
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = VideoProcessor(
             job, self.model,
             self.model_version,
             multiprocessing.BoundedSemaphore(1))
@@ -172,14 +173,29 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
     ##### Process video tests ####
     @patch('video_processor.client.urllib2.urlopen')
     def test_download_video_file(self, mock_client):
-        # Createa a 10MB random string
+        # Create a 10MB random string
         vdata = StringIO('%030x' % random.randrange(16**(10*1024*1024)))
         mock_client.return_value = vdata
-        
+
         vprocessor = self.setup_video_processor("neon")
         vprocessor.download_video_file()
-        vprocessor.tempfile.seek(0) 
-        self.assertEqual(vprocessor.tempfile.read(), vdata.getvalue()) 
+        vprocessor.tempfile.seek(0)
+        self.assertEqual(vprocessor.tempfile.read(), vdata.getvalue())
+
+    def test_percent_encode_url_path(self):
+
+        given = 'http://jack.com/cap3.mp4'
+        want = given
+        self.assertEqual(want, VideoProcessor.percent_encode_url_path(given))
+        given = ('http://jackdrawsanything.com/temp/Marvel\'s%20'
+            'Captain%20America-%20Civil%20War%20-%20Trailer%202.mp4')
+        want = ('http://jackdrawsanything.com/temp/Marvel%27s%20'
+            'Captain%20America-%20Civil%20War%20-%20Trailer%202.mp4')
+        self.assertEqual(want, VideoProcessor.percent_encode_url_path(given))
+
+        given = 'http://jack.com/"%25%2- %20.mp4'
+        want = 'http://jack.com/%22%25%252-%20%20.mp4'
+        self.assertEqual(want, VideoProcessor.percent_encode_url_path(given))
 
     @patch('video_processor.client.urllib2.urlopen')
     def test_download_video_errors(self, mock_client):
@@ -464,7 +480,7 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(job, self.model,
+        vprocessor = VideoProcessor(job, self.model,
                 self.model_version, multiprocessing.BoundedSemaphore(1))
         vprocessor._get_center_frame(self.test_video_file)
         meta, img = vprocessor.thumbnails[0]
@@ -482,7 +498,7 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         jparams = request_template.neon_api_request %(
                     "j_id", "vid", "api_key", "neon", "api_key", "j_id")
         job = json.loads(jparams)
-        vprocessor = video_processor.client.VideoProcessor(job, self.model,
+        vprocessor = VideoProcessor(job, self.model,
                 self.model_version, multiprocessing.BoundedSemaphore(1))
         vprocessor._get_random_frame(self.test_video_file)
         meta1, img1 = vprocessor.thumbnails[0]
@@ -1298,7 +1314,7 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.model.choose_thumbnails.return_value = ct_output
 
         # create the client object
-        self.video_client = video_processor.client.VideoClient(
+        self.video_client = VideoClient(
             'some/dir/my_model.model',
             multiprocessing.BoundedSemaphore(1))
         
@@ -1678,7 +1694,7 @@ class SmokeTestPG(test_utils.neontest.TestCase):
         self.model.choose_thumbnails.return_value = ct_output
 
         # create the client object
-        self.video_client = video_processor.client.VideoClient(
+        self.video_client = VideoClient(
             'some/dir/my_model.model',
             multiprocessing.BoundedSemaphore(1))
         
