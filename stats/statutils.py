@@ -236,7 +236,7 @@ def get_groupby_clause(page_regex=None,
     desktop_mobile_split - If true, groups by desktop vs. mobile
 
     Returns:
-    The string for the group by clause (including "GROUP BY")
+    The list of fields to group by
     '''
     clauses = []
     if page_regex:
@@ -244,11 +244,9 @@ def get_groupby_clause(page_regex=None,
     if desktop_mobile_split:
         clauses.append('is_mobile')
 
-    if clauses:
-        return ' GROUP BY %s' % ','.join(clauses)
-    return ''
+    return clauses
 
-def get_groupby_select(page_regex=None, impression_metric=None,
+def get_groupby_select(impression_metric=None, page_regex=None, 
                        desktop_mobile_split=False):
     
     '''Return a string in the select part of the statement to support group by.
@@ -261,21 +259,19 @@ def get_groupby_select(page_regex=None, impression_metric=None,
     Returns:
     The string for the group by clause (including "GROUP BY")
     '''
-    clauses = ''
+    clauses = []
     if page_regex and impression_metric:
-        _log.info('Grouping by page %s' % page_regex)
         col_map = {
             'loads' : 'imloadpageurl',
             'views' : 'imloadpageurl',
             'clicks' : 'imclickpageurl',
             'plays' : 'videopageurl'
             }
-        clauses += (', regexp_extract(%s, %s, 1) as pg_type' %
+        clauses.append('regexp_extract(%s, %s, 1) as pg_type' %
                        col_map[impression_metric],
                        page_regex)
     if desktop_mobile_split:
-        _log.info('Grouping by mobile vs. desktop')
-        clauses += (", agentinfo_os_name in "
+        clauses.append("agentinfo_os_name in "
                     "('iPhone', 'Android', 'IPad', 'BlackBerry') "
                     "as is_mobile")
     return clauses
