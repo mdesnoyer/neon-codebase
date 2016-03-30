@@ -27,6 +27,7 @@ _log = logging.getLogger(__name__)
 
 
 class CNNIntegration(integrations.ovp.OVPIntegration):
+
     def __init__(self, account_id, integration):
         super(CNNIntegration, self).__init__(account_id, integration)
 
@@ -37,10 +38,31 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         self.platform = integration
         self.neon_api_key = account_id
 
+    def _grab_new_thumb(self, video_data, external_video_id):
+        '''Grab a thumb from CNN's video data if a new one exists
+        and associate our video object to it.
+        '''
+        return
+
+        # Pull out the url, associated data for the thumbnail
+        thumb_url, thumb_data = self._get_best_image_info(video_data)
+
+        # Ask services.cnn.com/newsgraph/search for data for it
+        thumbnail_info = self.get_video_thumbnail_info(video)
+
+        # Find our object that corresponds to CNN's id
+        video_meta = yield neondata.VideoMetadata.get_by_external_id(
+            self.platform.neon_api_key, external_video_id)
+
+        # There's a ton of code in the BC version of this that looks factorable
+
+        pass
+
+
+
     @tornado.gen.coroutine
     def submit_new_videos(self):
-        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
-                                      self.account_id)
+        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, self.account_id)
         self.neon_api_key = acct.neon_api_key
         self.account_id = acct.account_id
         search_results = yield self.api.search(
@@ -49,7 +71,8 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         videos = search_results['docs']
         _log.info('Processing %d videos for cnn' % (len(videos)))
         self.set_video_iter(videos)
-        yield self.submit_ovp_videos(self.get_next_video_item, grab_new_thumb=False)
+
+        yield self.submit_ovp_videos(self.get_next_video_item, grab_new_thumb=True)
 
         raise tornado.gen.Return(self.platform)
 

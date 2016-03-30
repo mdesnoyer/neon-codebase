@@ -116,9 +116,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     def _get_video_url_to_download(self, b_json_item):
         '''
-        Return a video url to download from a brightcove json item
+        Return a video url to download from a brightcove json item.
 
-        if frame_width is specified, get the closest one
+        If frame_width is specified, get the closest one.
         '''
 
         video_urls = []  # (width, encoding_rate, url)
@@ -436,22 +436,34 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             job_id, self.platform.neon_api_key, _update_request)
 
     @tornado.gen.coroutine
-    def _grab_new_thumb(self, data, bc_video_id):
+    def _grab_new_thumb(self, data, external_video_id):
         '''Grab a new thumbnail from a video object if there is one.
+
+        overrides
 
         Inputs:
         data - A video object from Brightcove
         bc_video_id - The brightcove video id
         '''
-        thumb_url, thumb_data = \
-            BrightcoveIntegration._get_best_image_info(data)
+        thumb_url, thumb_data = self._get_best_image_info(data)
         if thumb_data is None:
             _log.warn_n('Could not find thumbnail in %s' % data)
             return
-        bc_urls = [_normalize_thumbnail_url(x) for
-                   x in _get_urls_from_bc_response(data)]
+        ext_thumb_urls = [_normalize_thumbnail_url(x)
+                          for x in _get_urls_from_bc_response(data)]
+
+        # Get our video and thumbnail metadata objects
+        video_meta = yield neondata.VideoMetadata.get_by_external_id(
+             self.platform.neon_api_key, external_video_id)
+        if not video_meta:
+            _log.error('Could not find video %s' % external_video_id)
+            statemon.state.increment('video_not_found')
+            return
+        thumbs_meta = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+                                             video_meta.thumbnail_ids)
 
         # Function that will set the external id in the ThumbnailMetadata
+        # Move to binding site
         external_id = thumb_data.get('id', None)
         if external_id is not None:
             external_id = unicode(external_id)
@@ -459,22 +471,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         def _set_external_id(obj):
             obj.external_id = external_id
 
-        # Get the video object from our database
-        video_id = neondata.InternalVideoID.generate(
-            self.platform.neon_api_key, bc_video_id)
-        vid_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                          video_id)
-        if not vid_meta:
-            _log.error('Could not find video %s' % video_id)
-            statemon.state.increment('video_not_found')
-            return
-
-        # Search for the thumbnail already in our database
-        thumbs = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
-                                        vid_meta.thumbnail_ids)
-        found_thumb = False
-        min_rank = 1
-        for thumb in thumbs:
+        found_thumb, min_rank = False, 1
+        for thumb in thumbs_meta:
             # Change the thumbnail type because the BRIGHTCOVE type is
             # deprecated
             if thumb.type == neondata.ThumbnailType.BRIGHTCOVE:
@@ -492,12 +490,13 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 min_rank = thumb.rank
 
             if thumb.external_id is not None:
-                # We know about this thumb was in Brightcove so see if it
-                # is still there.
+
+                # We know about this thumb was in BC so see if it is still there.
                 if (unicode(thumb.external_id) in
                         _extract_image_info_from_bc_response(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
+
                 # For legacy thumbs, we specified a reference id. Look for it
                 if thumb.refid in _extract_image_info_from_bc_response(
                         data, 'referenceId'):
@@ -511,7 +510,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 # can match the url.
                 norm_urls = set([_normalize_thumbnail_url(x)
                                  for x in thumb.urls])
-                if len(norm_urls.intersection(bc_urls)) > 0:
+                if len(norm_urls.intersection(ext_thumb_urls)) > 0:
                     found_thumb = True
 
                     # Now update the external id because we didn't
@@ -534,7 +533,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         external_id=external_id
                     )
 
-                    yield vid_meta.download_and_add_thumbnail(
+                    yield video_meta.download_and_add_thumbnail(
                         new_thumb,
                         url,
                         save_objects=False,
@@ -549,9 +548,9 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     # we will disgard the thumbnail.
                     is_exist = \
                         any([new_thumb.key == old_thum.key
-                            for old_thum in thumbs]) or \
+                            for old_thum in thumbs_meta]) or \
                         any([new_thumb.phash == old_thum.phash
-                            for old_thum in thumbs])
+                            for old_thum in thumbs_meta])
 
                     if is_exist:
                         continue
@@ -559,26 +558,26 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     sucess = yield tornado.gen.Task(new_thumb.save)
                     if not sucess:
                         raise IOError("Could not save thumbnail")
-                    # Even though the vid_meta already has the new_thumb
+                    # Even though the video_meta already has the new_thumb
                     # in thumbnail_ids, the database still doesn't have it yet.
                     # We will modify in database first. Also, modify is used
                     # first instead of using save directively, as other process
-                    # can modify the vid_meta as well.
+                    # can modify the video_meta as well.
                     updated_video = yield tornado.gen.Task(
-                        vid_meta.modify,
-                        vid_meta.key,
+                        video_meta.modify,
+                        video_meta.key,
                         lambda x: x.thumbnail_ids.append(new_thumb.key))
                     if updated_video is None:
                         # It wasn't in the database, so save this object
-                        sucess = yield tornado.gen.Task(vid_meta.save)
+                        sucess = yield tornado.gen.Task(video_meta.save)
                         if not sucess:
                             raise IOError("Could not save video data")
                     else:
-                        vid_meta.__dict__ = updated_video.__dict__
+                        video_meta.__dict__ = updated_video.__dict__
 
                     _log.info(
                         'Found new thumbnail %s for video %s at Brigthcove.' %
-                        (external_id, vid_meta.key))
+                        (external_id, video_meta.key))
                     statemon.state.increment('new_images_found')
                     added_image = True
                     break
@@ -587,5 +586,5 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     pass
             if not added_image and not is_exist:
                 _log.error('Could not find valid image to add to video %s. '
-                           'Tried urls %s' % (vid_meta.key, urls))
+                           'Tried urls %s' % (video_meta.key, urls))
                 statemon.state.increment('cant_get_image')
