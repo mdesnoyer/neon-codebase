@@ -9,18 +9,17 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
-
-from api import brightcove_api
-from cmsdb import neondata
 import datetime
 import dateutil.parser
-import integrations.ovp
 import logging
 import re
-import tornado.gen
 import urlparse
-from utils.options import define
+import integrations.ovp
+import tornado.gen
+from api import brightcove_api
+from cmsdb import neondata
 from utils import statemon
+from utils.options import define
 
 define('max_vids_for_new_account', default=100,
        help='Maximum videos to process for a new account')
@@ -31,7 +30,6 @@ define('max_submit_retries', default=3,
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
 statemon.define('unexpected_submition_error', int)
-statemon.define('new_images_found', int)
 statemon.define('cant_get_image', int)
 statemon.define('cant_get_refid', int)
 statemon.define('cant_get_custom_id', int)
@@ -123,22 +121,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             # return the max width rendition with the highest encoding rate
             video_urls = sorted(video_urls, key=lambda x: (-x[0], -x[1]))
         return video_urls[0][2]
-
-    @staticmethod
-    def _get_best_image_info(data):
-        '''Returns the (url, {image_struct}) of the best image in the
-        Brightcove video object
-        '''
-        url = data.get('videoStillURL', None)
-        if url is None:
-            url = data.get('thumbnailURL', None)
-            if url is None:
-                return (None, None)
-            obj = data['thumbnail']
-        else:
-            obj = data['videoStill']
-
-        return url, obj
 
     @tornado.gen.coroutine
     def lookup_and_submit_videos(self, ovp_video_ids, continue_on_error=False):
@@ -401,23 +383,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             neondata.NeonApiRequest.modify,
             job_id, self.platform.neon_api_key, _update_request)
 
-    @staticmethod
-    def _normalize_thumbnail_url(url):
-        '''Returns a thumb url without transport mechanism or query string,
-        with specific logic for brightcove's domain naming.
-        '''
-
-        if url is None:
-            return None
-
-        parse = urlparse.urlparse(url)
-        # Brightcove can move the image around, but its basename will
-        # remain the same, so if it is a brightcove url, only look at
-        # the basename.
-        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
-            return 'brightcove.com/%s' % (os.path.basename(parse.path))
-        return '%s%s' % (parse.netloc, parse.path)
-
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, external_video_id):
         '''Grab a new thumbnail from a video object if there is one.
@@ -445,11 +410,11 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         thumbs_meta = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
                                              video_meta.thumbnail_ids)
 
-        # Function that will set the external id in the ThumbnailMetadata
         external_id = thumb_data.get('id', None)
         if external_id is not None:
             external_id = unicode(external_id)
 
+        # Function that will set the external id in the ThumbnailMetadata
         def _set_external_id(obj):
             obj.external_id = external_id
 
@@ -473,7 +438,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
             if thumb.external_id is not None:
 
-                # We know about this thumb was in BC so see if it is still there.
+                # Check if our record's external id matches the response's
                 if (unicode(thumb.external_id) in
                         self._get_image_field_from_response(data, 'id')):
                     found_thumb = True
@@ -501,20 +466,20 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                                            thumb.key,
                                            _set_external_id)
 
-        is_exist = False
+        # The thumb is not found, so add it to our records
+        # (provided it doesn't have a duplicate hash).
         if not found_thumb:
-            # Add the thumbnail to our system
             urls = self._get_image_urls_from_response(data)
-            added_image = False
+            is_exist, added_image = False, False
             for url in urls[::-1]:
                 try:
+                    # New thumb object of type default, with min rank
                     new_thumb = neondata.ThumbnailMetadata(
                         None,
                         ttype=neondata.ThumbnailType.DEFAULT,
                         rank=min_rank - 1,
                         external_id=external_id
                     )
-
                     yield video_meta.download_and_add_thumbnail(
                         new_thumb,
                         url,
@@ -529,17 +494,17 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                     # the hash with existing thumbnail hashes, if find a match
                     # we will disgard the thumbnail.
                     is_exist = \
-                        any([new_thumb.key == old_thum.key
-                            for old_thum in thumbs_meta]) or \
-                        any([new_thumb.phash == old_thum.phash
-                            for old_thum in thumbs_meta])
+                        any([new_thumb.key == old_thumb.key
+                            for old_thumb in thumbs_meta]) or \
+                        any([new_thumb.phash == old_thumb.phash
+                            for old_thumb in thumbs_meta])
 
                     if is_exist:
                         continue
 
                     sucess = yield tornado.gen.Task(new_thumb.save)
                     if not sucess:
-                        raise IOError("Could not save thumbnail")
+                        raise IOError('Could not save thumbnail')
                     # Even though the video_meta already has the new_thumb
                     # in thumbnail_ids, the database still doesn't have it yet.
                     # We will modify in database first. Also, modify is used
@@ -553,12 +518,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                         # It wasn't in the database, so save this object
                         sucess = yield tornado.gen.Task(video_meta.save)
                         if not sucess:
-                            raise IOError("Could not save video data")
+                            raise IOError('Could not save video data')
                     else:
                         video_meta.__dict__ = updated_video.__dict__
 
                     _log.info(
-                        'Found new thumbnail %s for video %s at Brigthcove.' %
+                        'Found new thumbnail %s for video %s at Brightcove.' %
                         (external_id, video_meta.key))
                     statemon.state.increment('new_images_found')
                     added_image = True
@@ -566,10 +531,39 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 except IOError:
                     # Error getting the image, so keep going
                     pass
+            _log.info('add is %s, exist is %s' % (added_image, is_exist))
             if not added_image and not is_exist:
                 _log.error('Could not find valid image to add to video %s. '
                            'Tried urls %s' % (video_meta.key, urls))
                 statemon.state.increment('cant_get_image')
+
+
+    @staticmethod
+    def _get_best_image_info(data):
+        '''Returns the (url, {image_struct}) of the best image in the
+        Brightcove video object
+        '''
+        url = data.get('videoStillURL', None)
+        if url is None:
+            url = data.get('thumbnailURL', None)
+            if url is None:
+                return (None, None)
+            obj = data['thumbnail']
+        else:
+            obj = data['videoStill']
+
+        return url, obj
+
+    @staticmethod
+    def _get_image_field_from_response(response, field):
+        '''Extracts a list of fields from the images in the response.'''
+        vals = []
+        for image_type in ['thumbnail', 'videoStill']:
+            fields = response.get(image_type, None)
+            if fields is not None:
+                vals.append(fields.get(field, None))
+
+        return [unicode(x) for x in vals if x is not None]
 
     @staticmethod
     def _get_image_urls_from_response(response):
@@ -582,12 +576,18 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return [x for x in urls if x is not None]
 
     @staticmethod
-    def _get_image_field_from_response(response, field):
-        '''Extracts a list of fields from the images in the response.'''
-        vals = []
-        for image_type in ['thumbnail', 'videoStill']:
-            fields = response.get(image_type, None)
-            if fields is not None:
-                vals.append(fields.get(field, None))
+    def _normalize_thumbnail_url(url):
+        '''Returns a thumb url without transport mechanism or query string,
+        with specific logic for brightcove's domain naming.
+        '''
 
-        return [unicode(x) for x in vals if x is not None]
+        if url is None:
+            return None
+
+        parse = urlparse.urlparse(url)
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
+            return 'brightcove.com/%s' % (os.path.basename(parse.path))
+        return '%s%s' % (parse.netloc, parse.path)
