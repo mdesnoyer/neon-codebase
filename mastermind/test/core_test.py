@@ -1327,8 +1327,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(directive['ctr'], 0.05) # Not enough imp
 
     def test_min_conversion_effect(self):
-        # The min_conversion number will affect how quickly the experiment comes
-        # to conclusion.
+        # The min_conversion number will affect how quickly the
+        # experiment comes to conclusion.
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', exp_frac=1.0, min_conversion = 50))
@@ -1408,6 +1408,49 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
                                                base_impressions=2000)]))
         self.assertEquals(experiment_state, 'complete')
         self.assertLess(value_left, Mastermind.VALUE_THRESHOLD)
+
+    def test_min_impressions(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', exp_frac=1.0, min_impressions=500))
+
+        # Total impressions is lower than 500 for each thumb so the
+        # experiment shouldn't end
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=400),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon'),
+                                               base_conversions=1,
+                                               base_impressions=400)]))
+
+        self.assertEquals(experiment_state, 'running')
+        self.assertEquals(run_frac, {'n1' : 0.5, 'n2': 0.5 })
+
+        # Now the expermeriment should finish
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', exp_frac=1.0, min_impressions=100))
+
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=400),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon'),
+                                               base_conversions=1,
+                                               base_impressions=400)]))
+        self.assertEquals(experiment_state, neondata.ExperimentState.COMPLETE)
+        self.assertEquals(run_frac, {'n1' : 1.0, 'n2': 0.0 })
 
     def test_frac_adjust_rate(self):
         # We can progressively change how the fractions are distributed.

@@ -3371,6 +3371,7 @@ class ExperimentStrategy(DefaultedStoredObject):
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
                  min_conversion = 50,
+                 min_impressions = 500,
                  frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
@@ -3397,6 +3398,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         # minimum combined conversion numbers before calling an experiment
         # complete
         self.min_conversion = min_conversion
+
+        # minimum number of impressions on a single thumb to declare a winner
+        self.min_impressions = min_impressions
 
         # Fraction adjusting power rate. When this number is 0, it is
         # equivalent to all the serving fractions being the same,
