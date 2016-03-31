@@ -401,6 +401,7 @@ class OVPIntegration(object):
             neondata.NeonApiRequest.modify,
             job_id, self.neon_api_key, _update_request)
 
+
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, video_id):
         '''get a new thumbnail from your service.
