@@ -273,7 +273,7 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
                                    options.impressions)
         base_thumb_id = statutils.get_baseline_thumb(
             thumb_meta.loc[thumb_meta['video_id'] == video.key],
-            imp_data,
+            imp_data['all_time'].groupby('thumbnail_id').sum(),
             options.baseline_types.split(','))
 
         thumb_stats.append(get_video_stats(

@@ -277,7 +277,8 @@ def get_groupby_select(impression_metric=None, page_regex=None,
                     "as is_mobile")
     return clauses
 
-def get_baseline_thumb(thumb_info, impressions, baseline_types=['default']):
+def get_baseline_thumb(thumb_info, impressions, baseline_types=['default'],
+                       min_impressions=500):
     '''Returns the thumbnail id of the baseline type.
 
     Inputs:
@@ -291,7 +292,8 @@ def get_baseline_thumb(thumb_info, impressions, baseline_types=['default']):
     tinfo = thumb_info.join(impressions, how='outer', rsuffix='imp')
 
     for btype in baseline_types:
-        valid_bases = tinfo.loc(tinfo['type'] == btype).sort_values(
+        valid_bases = tinfo.loc((tinfo['type'] == btype) &
+                                (tinfo['imp'] > min_impressions)).sort_values(
             'rank', axis=1, ascending=True)
         if len(valid_bases) > 0:
             return valid_bases.index[0]

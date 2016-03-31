@@ -286,56 +286,34 @@ def collect_stats(thumb_info, video_info,
             cross_stats['revlift'])
 
         # Find the baseline thumb
-        baseline_types = options.baseline_types.split(',')
-        base_thumb = None
-        base_rank = None
         cum_impr_all = impressions.cumsum().fillna(method='ffill')
-        for baseline_type in baseline_types:
-            for thumb_id in video.thumbnail_ids:
-                cur_thumb = thumb_info[thumb_id]
-                impr_count = cum_impr_all.iloc[-1].get(thumb_id, None)
-                if (cur_thumb.type == baseline_type and impr_count is not None
-                    and impr_count > options.min_impressions):
-                    if base_rank is None or cur_thumb.rank < base_rank:
-                        base_thumb = cur_thumb
-                        base_rank = cur_thumb.rank
-            if base_thumb is not None:
-                break
-        found_neon = any([thumb_info[x].type == 'neon' 
-                          for x in video.thumbnail_ids])
-        if (not options.show_bad_experiment_vids and 
-            (base_thumb is None or 
-             (not found_neon) or
-             (not(extra_conv[base_thumb.key] != 0).any()))):
-            # We don't want to include videos without a baseline or an
-            # entry in the experiment
-            continue
+        base_thumb_id = statutils.get_baseline_thumb(
+            thumb_info,
+            cum_impr_all.iloc[-1],
+            options.baseline_types.split(','),
+            options.min_impressions)
+        found_neon = any(thumb_info['type'] == 'neon')
 
         thumb_stats = pandas.DataFrame({
             'impr' : cum_impr.iloc[-1],
             'conv' : cum_conv.iloc[-1],
             'ctr' : cum_conv.iloc[-1] / cum_impr.iloc[-1]})
         thumb_stats = thumb_stats[thumb_stats['impr'] > options.min_impressions]
-        thumb_meta_info = dict([
-            (x.key,
-             {
-                 'is_base': False if base_thumb is None else x.key == base_thumb.key,
-                 'type' : x.type,
-                 'rank': x.rank
-                 }) for tid in video.thumbnail_ids 
-                 for x in [thumb_info[tid]]])
+
+        thumb_meta_info = thumb_info[thumb_info['video_id'] == video_id]
+        thumb_info['is_base'] = thumb_meta_info.index == base_thumb_id
         thumb_stats = pandas.concat([
             thumb_stats,
-            pandas.DataFrame(thumb_meta_info).transpose()],
+            thumb_meta_info,
             axis=1,
             join='inner')
 
-        if base_thumb is not None and base_thumb.key in impressions.columns:
+        if base_thumb_id in impressions.columns:
             thumb_stats = pandas.concat([
                 thumb_stats,
-                cross_stats.minor_xs(base_thumb.key),
+                cross_stats.minor_xs(base_thumb_id),
                 pandas.DataFrame({'extra_conversions':
-                                  extra_conv[base_thumb.key]})],
+                                  extra_conv[base_thumb_id]})],
                 axis=1,
                 join='inner')
 
@@ -506,10 +484,11 @@ def main():
         reduce(lambda x, y: x | y,
                [set(x.thumbnail_ids) for x in video_info.itervalues()]))
 
-    urls = statutils.get_thumb_metadata(video_info.values())
-    urls = urls.set_index(['integration_id', 'video_id', 'type', 'rank',
-                           'thumbnail_id'])
-    urls.sortlevel()
+    thumbnail_info = statutils.get_thumb_metadata(video_info.values())
+    thumbnail_info = thumbnail_info.set_index(['integration_id', 'video_id',
+                                               'type',
+                                               'rank', 'thumbnail_id'])
+    thumbnail_info.sortlevel()
     
     # Collect the count data for the metrics we care about. This will
     # index by integration id, video_id, type and rank
@@ -538,7 +517,7 @@ def main():
                                keys=video_stats.keys(),
                                axis=1)
 
-    video_data = pandas.merge(video_data, urls, how='left',
+    video_data = pandas.merge(video_data, thumbnail_info, how='left',
                               left_index=True, right_index=True, sort=False)
     #video_data = video_data.sortlevel()
     
