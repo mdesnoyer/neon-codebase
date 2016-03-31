@@ -22,8 +22,10 @@ from utils.options import define, options
 from utils import statemon
 import utils.sync
 
+statemon.define('cant_get_image', int)
 statemon.define('job_submission_error', int)
 statemon.define('new_job_submitted', int)
+statemon.define('new_images_found', int)
 statemon.define('unexpected_submission_error', int)
 define('max_submit_retries', default=3,
        help='Maximum times we will retry a video submit before passing on it.')
@@ -37,11 +39,13 @@ define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
 
 _log = logging.getLogger(__name__)
 
+
 class OVPError(IntegrationError): pass
 class OVPRefIDError(OVPError): pass
 class OVPCustomRefIDError(OVPError): pass
 class OVPNoValidURL(OVPError): pass
 class CMSAPIError(IntegrationError): pass
+
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
@@ -73,7 +77,6 @@ class OVPIntegration(object):
         '''
         added_jobs = 0
         video_dict = {}
-        video_tuple_list = []
         last_processed_date = None
 
         if self.video_iter is None:
@@ -90,11 +93,11 @@ class OVPIntegration(object):
                 if isinstance(video, StopIteration):
                     break
                 try:
-                    job_id = yield self.submit_one_video_object(video,
-                                                                grab_new_thumb=grab_new_thumb)
+                    job_id = yield self.submit_one_video_object(
+                            video, grab_new_thumb=grab_new_thumb)
                 except TypeError as e:
                     _log.warning('Can not process video : %s due to : %s' %
-                        (video, e))
+                                 (video, e))
                     continue
 
                 if job_id:
@@ -108,7 +111,8 @@ class OVPIntegration(object):
             except OVPRefIDError:
                 pass
             except OVPNoValidURL:
-                _log.error('Unable to find a valid url for video_id : %s' % self.get_video_id(video))
+                _log.error('Unable to find a valid url for video_id : %s' %
+                           self.get_video_id(video))
                 pass
             except OVPError as e:
                 if continue_on_error:
@@ -142,23 +146,24 @@ class OVPIntegration(object):
                             self.platform.modify,
                             self.platform.integration_id,
                             _increase_retries)
-                    _log.info('Added or found %d jobs for account : %s integration : %s before failure.' % \
-                                (added_jobs, self.neon_api_key, self.platform.integration_id))
+                    _log.info('Added or found %d jobs for account: %s integration: %s before failure.' %
+                              (added_jobs, self.neon_api_key,
+                               self.platform.integration_id))
                     return
                 else:
                     _log.error('Unknown error, reached max retries on '
                                'video submit for account %s: item %s: %s' %
                                (self.account_id, video if video else None, e))
                     statemon.state.define_and_increment(
-                        'submit_video_bc_error.%s' % self.account_id)
+                        'submit_video_error.%s' % self.account_id)
                     pass
 
             last_processed_date = max(last_processed_date,
                                       self.get_video_last_modified_date(video))
 
         yield self.update_last_processed_date(last_processed_date)
-        _log.info('Added or found %d jobs for account : %s integration : %s' % \
-                   (added_jobs, self.neon_api_key, self.platform.integration_id))
+        _log.info('Added or found %d jobs for account: %s integration: %s' %
+                  (added_jobs, self.neon_api_key, self.platform.integration_id))
 
         raise tornado.gen.Return(video_dict)
 
@@ -167,15 +172,15 @@ class OVPIntegration(object):
                                 video,
                                 grab_new_thumb=True):
         try:
-            job_id = yield self._submit_one_video_object_impl(video,
-                                                              grab_new_thumb=grab_new_thumb)
-        except CMSAPIError as e:
+            job_id = yield self._submit_one_video_object_impl(
+                    video, grab_new_thumb=grab_new_thumb)
+        except CMSAPIError:
             raise
-        except OVPError as e:
+        except OVPError:
             raise
-        except TypeError as e:
+        except TypeError:
             raise
-        except Exception as e:
+        except Exception:
             _log.exception('Unexpected error submitting video %s' % video)
             statemon.state.increment('unexpected_submission_error')
             raise
@@ -196,8 +201,8 @@ class OVPIntegration(object):
             video_url.endswith('.m3u8') or
             video_url.startswith('rtmp://') or
             video_url.endswith('.csmil')):
-            _log.warn_n('Video ID %s for account %s is a live stream'
-                             % (video_id, self.account_id))
+            _log.warn_n('Video ID %s for account %s is a live stream' %
+                        (video_id, self.account_id))
 
             raise tornado.gen.Return(rv)
         callback_url = self.get_video_callback_url(video)
@@ -217,21 +222,24 @@ class OVPIntegration(object):
             except AttributeError as e:
                 # already a string, leave it alone
                 pass
-        existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                                neondata.InternalVideoID.generate(self.neon_api_key, video_id))
+        existing_video = yield tornado.gen.Task(
+                neondata.VideoMetadata.get,
+                neondata.InternalVideoID.generate(
+                    self.neon_api_key, video_id))
 
         # TODO this won't be necessary once videos are removed from platforms
         if not self.does_video_exist(existing_video, video_id):
             try:
-                response = yield self.submit_video(video_id=video_id,
-                                                   video_url=video_url,
-                                                   callback_url=callback_url,
-                                                   external_thumbnail_id=thumb_id,
-                                                   custom_data=custom_data,
-                                                   duration=duration,
-                                                   publish_date=publish_date,
-                                                   video_title=unicode(video_title),
-                                                   default_thumbnail=default_thumbnail)
+                response = yield self.submit_video(
+                        video_id=video_id,
+                        video_url=video_url,
+                        callback_url=callback_url,
+                        external_thumbnail_id=thumb_id,
+                        custom_data=custom_data,
+                        duration=duration,
+                        publish_date=publish_date,
+                        video_title=unicode(video_title),
+                        default_thumbnail=default_thumbnail)
 
                 if response['job_id']:
                     rv = response['job_id']
@@ -246,10 +254,11 @@ class OVPIntegration(object):
                 # will put it on the NeonPlatform object.
                 if self.needs_platform_videos:
                     if rv is not None:
-                        self.platform = yield tornado.gen.Task(self.platform.modify,
-                                                               self.platform.neon_api_key,
-                                                               self.platform.integration_id,
-                                                               lambda x: x.add_video(video_id, rv))
+                        self.platform = yield tornado.gen.Task(
+                                self.platform.modify,
+                                self.platform.neon_api_key,
+                                self.platform.integration_id,
+                                lambda x: x.add_video(video_id, rv))
         else:
             if existing_video:
                 rv = existing_video.job_id
@@ -288,8 +297,8 @@ class OVPIntegration(object):
                     _set_mod_date_and_retries)
 
             _log.debug(
-                'updated last process date for account %s integration %s'
-                 % (self.account_id, self.platform.integration_id))
+                'updated last process date for account %s integration %s' %
+                (self.account_id, self.platform.integration_id))
 
     @tornado.gen.coroutine
     def submit_video(self, video_id, video_url,
@@ -309,7 +318,7 @@ class OVPIntegration(object):
         json returned by the CMSAPI
         '''
         body = {
-            'video_id' : video_id,
+            'video_id': video_id,
             'video_url': video_url,
             'video_title': video_title,
             'default_thumbnail': default_thumbnail,
@@ -318,9 +327,9 @@ class OVPIntegration(object):
             'custom_data': custom_data,
             'duration': duration,
             'publish_date': publish_date
-            }
-        headers = {"X-Neon-API-Key" : self.neon_api_key,
-                   "Content-Type" : "application/json"}
+        }
+        headers = {"X-Neon-API-Key": self.neon_api_key,
+                   "Content-Type": "application/json"}
         url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
                'create_thumbnail_api_request') % (
                    options.cmsapi_host,
@@ -368,8 +377,9 @@ class OVPIntegration(object):
         publish_date = self.get_video_publish_date(data)
         if publish_date is not None:
             try:
-                publish_date = datetime.datetime.utcfromtimestamp(publish_date).isoformat()
-            except TypeError as e:
+                publish_date = datetime.datetime.utcfromtimestamp(
+                        publish_date).isoformat()
+            except TypeError:
                 # already a string just leave it be
                 pass
         video_title = self.get_video_title(data)
@@ -378,7 +388,7 @@ class OVPIntegration(object):
         def _update_publish_date(x):
             x.publish_date = publish_date
             x.job_id = job_id
-        video = yield tornado.gen.Task(
+        yield tornado.gen.Task(
             neondata.VideoMetadata.modify,
             video_id,
             _update_publish_date)
