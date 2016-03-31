@@ -27,22 +27,6 @@ statemon.define('unexpected_submission_error', int)
 _log = logging.getLogger(__name__)
 
 
-# TODO refactor
-# TODO write tests
-def _extract_image_info_from_bc_response(response, field):
-    '''Extract a list of fields from the images in the response.'''
-    media = response['relatedMedia']['media']
-    return [unicode(m.get(field)) for m in media if m.get(field) is not None]
-
-
-# TODO refactor
-# TODO write tests
-def _get_urls_from_bc_response(response):
-    '''Get a list of urls, one for each item in media'''
-    media = response['relatedMedia']['media']
-    return [m.cuts['exlarge16to9'] for m in media]
-
-
 class CNNIntegration(integrations.ovp.OVPIntegration):
 
     def __init__(self, account_id, integration):
@@ -66,7 +50,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             _log.warn_n('Could not find thumbnail in %s' % data)
             return
         ext_thumb_urls = [self.normalize_thumbnail_url(x)
-                          for x in _get_urls_from_bc_response(data)]
+                          for x in self._(data)]
         # has keys
         # thumb url, e.g.,
         # http://i2.cdn.turner.com/money/dam/assets/160301111110-donald-trump-campaigning-1100x619.jpg
@@ -101,14 +85,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 min_rank = thumb.rank
 
             # We know about this thumb was in BC so see if it is still there.
+            response_ids = self._get_media_field_from_response(data, 'id')
             if thumb.external_id is not None:
-                if (unicode(thumb.external_id) in
-                        _extract_image_info_from_bc_response(data, 'id')):
+                if unicode(thumb.external_id) in response_ids:
                     found_thumb = True
 
             # For legacy thumbs, we specified a reference id. Look for it
             elif thumb.refid is not None:
-                if thumb.refid in _extract_image_info_from_bc_response(
+                if thumb.refid in self._get_media_urls_from_response(
                         data, 'referenceId'):
                     found_thumb = True
                     yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
@@ -132,7 +116,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         is_exist = False
         if not found_thumb:
             # Add the thumbnail to our system
-            urls = _get_urls_from_bc_response(data)
+            urls = self._get_media_urls_from_response(data)
             added_image = False
             for url in urls[::-1]:
                 try:
@@ -334,6 +318,18 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         for t in topics:
             custom_data['topics'].append(t)
         return custom_data
+
+    @staticmethod
+    def _get_media_field_from_response(response, field):
+        '''Extract a list of fields from the images in the response.'''
+        media = response['relatedMedia']['media']
+        return [unicode(m.get(field)) for m in media if m.get(field) is not None]
+
+    @staticmethod
+    def _get_media_urls_from_response(response):
+        '''Get a list of urls, one for each item in media'''
+        media = response['relatedMedia']['media']
+        return [m.cuts['exlarge16to9'] for m in media]
 
     @tornado.gen.coroutine
     def process_publisher_stream(self):
