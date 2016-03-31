@@ -51,7 +51,7 @@ define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
 define("min_impressions", default=1000,
        help="Minimum number of impressions for a thumbnail for it to be included.")
-define("baseline_types", default="centerframe",
+define("baseline_types", default="default",
        help="Comma separated list of thumbnail type to treat as baseline")
 define("do_mobile", default=0, type=int,
        help="Only collect mobile data if 1")

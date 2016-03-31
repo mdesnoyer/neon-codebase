@@ -157,7 +157,8 @@ def get_thumb_metadata(video_objs):
           'rank': x.rank if x.type=='neon' else 0}
            for x in thumbnail_objs if x is not None])
 
-    return thumb_data.join(video_data, on='video_id')
+    retval = thumb_data.join(video_data, on='video_id')
+    return retval.set_index('thumbnail_id', inplace=True)
     
 
 def get_time_clause(start_time=None, end_time=None):
@@ -240,7 +241,7 @@ def get_groupby_clause(page_regex=None,
     '''
     clauses = []
     if page_regex:
-        clauses.append('pg_type')
+        clauses.append('page_type')
     if desktop_mobile_split:
         clauses.append('is_mobile')
 
@@ -267,7 +268,7 @@ def get_groupby_select(impression_metric=None, page_regex=None,
             'clicks' : 'imclickpageurl',
             'plays' : 'videopageurl'
             }
-        clauses.append('regexp_extract(%s, %s, 1) as pg_type' %
+        clauses.append('regexp_extract(%s, %s, 1) as page_type' %
                        col_map[impression_metric],
                        page_regex)
     if desktop_mobile_split:
@@ -275,3 +276,24 @@ def get_groupby_select(impression_metric=None, page_regex=None,
                     "('iPhone', 'Android', 'IPad', 'BlackBerry') "
                     "as is_mobile")
     return clauses
+
+def get_baseline_thumb(thumb_info, impressions, baseline_types=['default']):
+    '''Returns the thumbnail id of the baseline type.
+
+    Inputs:
+    thumb_info - pandas DataFrame indexed by thumbnail id with columns of 
+                 'rank' and 'type'
+    impressions - Object keyed by thumbnail id that can be used to lookup the
+                  number of impressions for that thumb.
+    baseline_types - List of types, in order of preference that can be a 
+                     baseline
+    '''
+    tinfo = thumb_info.join(impressions, how='outer', rsuffix='imp')
+
+    for btype in baseline_types:
+        valid_bases = tinfo.loc(tinfo['type'] == btype).sort_values(
+            'rank', axis=1, ascending=True)
+        if len(valid_bases) > 0:
+            return valid_bases.index[0]
+
+    return None

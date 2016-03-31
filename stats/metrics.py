@@ -142,7 +142,10 @@ def calc_extra_conversions(conversions, revlift):
     Returns:
     A DataFrame of extra conversions in the same shape as revlift
     '''
-    conv_totals = conversions.sum()
+    if len(conversions.axes) == 2:
+        conv_totals = conversions.sum()
+    else:
+        conv_totals = conversions
             
     retval = revlift.multiply(conv_totals, axis='index')
     retval = retval.replace(np.inf, 0).replace(-np.inf, 0)
@@ -211,46 +214,44 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
 
     return lift
 
-def calc_thumb_stats(baseCounts, thumbCounts):
+def calc_thumb_stats(base_impressions, base_conversions,
+                     thumb_impressions, thumb_conversions):
     '''Calculates statistics for a thumbnail relative to a baseline.
 
     Inputs:
-    baseCounts - (base_impressions, base_conversions)
-    thumbCounts - (thumb_impressions, thumb_conversions)
+    Objects, like Series that can be calculated with normal operations
 
     Outputs:
-    (CTR, Extra Conversions, Lift, P Value)
+    DataSeries indexed by groups and columns of stats
     '''
-    if baseCounts[0] == 0 or thumbCounts[0] == 0:
-        return (0.0, 0.0, 0.0, 0.0)
+    ctr_base = pandas.Series(base_conversions / base_impressions)
+    ctr_thumb = pandas.Series(thumb_conversions / thumb_impressions)
+
+    lift = pandas.Series((ctr_thumb - ctr_base) / ctr_base)
+    lift[np.logical_or(ctr_base < 1e-8, not np.isfinite(ctr_thumb))] = 0.0
+
+    stats = pandas.DataFrame({'lift': lift,
+                              'ctr' : ctr_thumb})
+    stats['revlift'] = 1 - (ctr_base / ctr_thumb)
+    stats['revlift'][np.logical_or(ctr_thumb < 1e-8, 
+                                   not np.isfinite(ctr_thumb))] = 0.0
     
-    ctr_base = float(baseCounts[1]) / baseCounts[0]
-    ctr_thumb = float(thumbCounts[1]) / thumbCounts[0]
-
-    if baseCounts[1] > 0 and ctr_base <= 1.0:
-        se_base = math.sqrt(ctr_base * (1-ctr_base) / baseCounts[0])
-    else:
-        se_base = 0.0
-
-    if thumbCounts[1] > 0 and ctr_thumb <= 1.0:
-        se_thumb = math.sqrt(ctr_thumb * (1-ctr_thumb) / thumbCounts[0])
-    else:
-        se_thumb = 0.0
-
-    if se_base == 0.0 and se_thumb == 0.0:
-        return (ctr_thumb, 0, 0.0, 0.0)
+    se_base = np.sqrt(ctr_base * (1-ctr_base) / base_impressions)
+    se_thumb = np.sqrt(ctr_thumb * (1-ctr_thumb) / thumb_impressions)
 
     zscore = (ctr_base - ctr_thumb) / \
-      math.sqrt(se_base*se_base + se_thumb*se_thumb)
+      np.sqrt(se_base*se_base + se_thumb*se_thumb)
 
-    p_value = scipy.stats.norm(0, 1).cdf(zscore)
-    if p_value < 0.5:
-        p_value = 1 - p_value
+    p_value = pandas.Series(
+        scipy.stats.norm(0, 1).cdf(zscore),
+        index=zscore.index)
+    p_value = p_value.where(p_value > 0.5, 1 - p_value)
+    stats['p_value'] = p_value
 
-    return (ctr_thumb, 
-            thumbCounts[1] - ctr_base * thumbCounts[0],
-            (ctr_thumb - ctr_base) / ctr_base if ctr_base > 0.0 else 0.0,
-            p_value)
+    stats['ctr'] = ctr_thumb
+    stats['extra_conversions'] = (thumb_conversions * stats['revlift']).replace(np.inf, 0).replace(-np.inf, 0)
+
+    return stats
 
 def calc_aggregate_ab_metrics(data):
     '''Calculates aggregate A/B metrics for multiple videos
