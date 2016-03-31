@@ -41,19 +41,6 @@ statemon.define('old_videos_skipped', int)
 _log = logging.getLogger(__name__)
 
 
-def _normalize_thumbnail_url(url):
-    '''Returns a thumb url without transport mechanism or query string.'''
-    if url is None:
-        return None
-    parse = urlparse.urlparse(url)
-    if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
-        # Brightcove can move the image around, but its basename will
-        # remain the same, so if it is a brightcove url, only look at
-        # the basename.
-        return 'brightcove.com/%s' % (os.path.basename(parse.path))
-    return '%s%s' % (parse.netloc, parse.path)
-
-
 def _get_urls_from_bc_response(response):
     urls = []
     for image_type in ['thumbnail', 'videoStill']:
@@ -328,7 +315,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''
-        thumb_url, thumb_data = BrightcoveIntegration._get_best_image_info(video)
+        thumb_url, thumb_data = self._get_best_image_info(video)
         thumb_ref = None
         if thumb_data is not None:
             thumb_ref = unicode(thumb_data['id'])
@@ -435,21 +422,38 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             neondata.NeonApiRequest.modify,
             job_id, self.platform.neon_api_key, _update_request)
 
+    @staticmethod
+    def _normalize_thumbnail_url(url):
+        '''Returns a thumb url without transport mechanism or query string,
+        with specific logic for brightcove's domain naming.
+        '''
+
+        if url is None:
+            return None
+
+        parse = urlparse.urlparse(url)
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
+            return 'brightcove.com/%s' % (os.path.basename(parse.path))
+        return '%s%s' % (parse.netloc, parse.path)
+
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, external_video_id):
         '''Grab a new thumbnail from a video object if there is one.
 
-        overrides
+        overrides ovp
 
         Inputs:
         data - A video object from Brightcove
-        bc_video_id - The brightcove video id
+        external_video_id - The brightcove video id
         '''
         thumb_url, thumb_data = self._get_best_image_info(data)
         if thumb_data is None:
             _log.warn_n('Could not find thumbnail in %s' % data)
             return
-        ext_thumb_urls = [_normalize_thumbnail_url(x)
+        ext_thumb_urls = [BrightcoveIntegration._normalize_thumbnail_url(x)
                           for x in _get_urls_from_bc_response(data)]
 
         # Get our video and thumbnail metadata objects
@@ -463,7 +467,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                                              video_meta.thumbnail_ids)
 
         # Function that will set the external id in the ThumbnailMetadata
-        # Move to binding site
         external_id = thumb_data.get('id', None)
         if external_id is not None:
             external_id = unicode(external_id)
@@ -508,7 +511,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             else:
                 # We do not have the id for this thumb, so see if we
                 # can match the url.
-                norm_urls = set([_normalize_thumbnail_url(x)
+                norm_urls = set([self._normalize_thumbnail_url(x)
                                  for x in thumb.urls])
                 if len(norm_urls.intersection(ext_thumb_urls)) > 0:
                     found_thumb = True
