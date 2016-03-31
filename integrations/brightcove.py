@@ -41,27 +41,6 @@ statemon.define('old_videos_skipped', int)
 _log = logging.getLogger(__name__)
 
 
-def _get_urls_from_bc_response(response):
-    urls = []
-    for image_type in ['thumbnail', 'videoStill']:
-        urls.append(response.get(image_type + 'URL', None))
-        if response.get(image_type, None) is not None:
-            urls.append(response[image_type].get('remoteUrl', None))
-
-    return [x for x in urls if x is not None]
-
-
-def _extract_image_info_from_bc_response(response, field):
-    '''Extracts a list of fields from the images in the response.'''
-    vals = []
-    for image_type in ['thumbnail', 'videoStill']:
-        fields = response.get(image_type, None)
-        if fields is not None:
-            vals.append(fields.get(field, None))
-
-    return [unicode(x) for x in vals if x is not None]
-
-
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, platform):
         super(BrightcoveIntegration, self).__init__(account_id, platform)
@@ -454,7 +433,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             _log.warn_n('Could not find thumbnail in %s' % data)
             return
         ext_thumb_urls = [BrightcoveIntegration._normalize_thumbnail_url(x)
-                          for x in _get_urls_from_bc_response(data)]
+                          for x in self._get_image_urls_from_response(data)]
 
         # Get our video and thumbnail metadata objects
         video_meta = yield neondata.VideoMetadata.get_by_external_id(
@@ -496,12 +475,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
                 # We know about this thumb was in BC so see if it is still there.
                 if (unicode(thumb.external_id) in
-                        _extract_image_info_from_bc_response(data, 'id')):
+                        self._get_image_field_from_response(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
 
                 # For legacy thumbs, we specified a reference id. Look for it
-                if thumb.refid in _extract_image_info_from_bc_response(
+                if thumb.refid in self._get_image_field_from_response(
                         data, 'referenceId'):
                     found_thumb = True
 
@@ -525,7 +504,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         is_exist = False
         if not found_thumb:
             # Add the thumbnail to our system
-            urls = _get_urls_from_bc_response(data)
+            urls = self._get_image_urls_from_response(data)
             added_image = False
             for url in urls[::-1]:
                 try:
@@ -591,3 +570,24 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 _log.error('Could not find valid image to add to video %s. '
                            'Tried urls %s' % (video_meta.key, urls))
                 statemon.state.increment('cant_get_image')
+
+    @staticmethod
+    def _get_image_urls_from_response(response):
+        urls = []
+        for image_type in ['thumbnail', 'videoStill']:
+            urls.append(response.get(image_type + 'URL', None))
+            if response.get(image_type, None) is not None:
+                urls.append(response[image_type].get('remoteUrl', None))
+
+        return [x for x in urls if x is not None]
+
+    @staticmethod
+    def _get_image_field_from_response(response, field):
+        '''Extracts a list of fields from the images in the response.'''
+        vals = []
+        for image_type in ['thumbnail', 'videoStill']:
+            fields = response.get(image_type, None)
+            if fields is not None:
+                vals.append(fields.get(field, None))
+
+        return [unicode(x) for x in vals if x is not None]
