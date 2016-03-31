@@ -125,42 +125,6 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         self.assertEquals(self.cdn_mock.call_count, 0)
 
     @tornado.testing.gen_test
-    def test_convert_bc_thumb_type(self):
-        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
-                          ['http://bc.com/vid_still.jpg'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
-                          rank=1).save()
-
-        yield self.integration.submit_one_video_object(
-            { 'id' : 'v1',
-              'length' : 100,
-              'FLVURL' : 'http://video.mp4',
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : None,
-                  'remoteUrl' : None
-              },
-              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
-              'thumbnail' : {
-                  'id' : 123456,
-                  'referenceId' : None,
-                  'remoteUrl' : None
-                  }
-                  }
-            )
-
-        # Make sure the type got updated
-        thumb = ThumbnailMetadata.get('acct1_v1_bc1')
-        self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
-        self.assertEquals(thumb.external_id, 'still_id')
-        self.assertEquals(thumb.rank, 1)
-
-        # Make sure no image was uploaded
-        self.assertEquals(self.im_download_mock.call_count, 0)
-        self.assertEquals(self.cdn_mock.call_count, 0)
-
-    @tornado.testing.gen_test
     def test_match_urls(self):
         ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
                           ['http://bc.com/vid_still.jpg'],

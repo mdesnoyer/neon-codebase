@@ -27,6 +27,7 @@ statemon.define('job_submission_error', int)
 statemon.define('new_job_submitted', int)
 statemon.define('new_images_found', int)
 statemon.define('unexpected_submission_error', int)
+statemon.define('video_not_found', int)
 define('max_submit_retries', default=3,
        help='Maximum times we will retry a video submit before passing on it.')
 
@@ -403,13 +404,151 @@ class OVPIntegration(object):
 
 
     @tornado.gen.coroutine
-    def _grab_new_thumb(self, data, video_id):
-        '''get a new thumbnail from your service.
+    def _grab_new_thumb(self, data, external_video_id):
+        '''Grab a new thumbnail from a video object if there is one.
 
-           implement if you need the functionality, and
-           pass in grab_new_thumb=True to submit_ovp_videos
+        overrides ovp
+
+        Inputs:
+        data - A video object
+        external_video_id - The brightcove video id
         '''
-        raise NotImplementedError()
+        thumb_url, thumb_data = self._get_best_image_info(data)
+        if thumb_data is None:
+            _log.warn_n('Could not find thumbnail in %s' % data)
+            return
+        ext_thumb_urls = [self._normalize_thumbnail_url(x)
+                          for x in self._get_image_urls_from_response(data)]
+
+        # Get our video and thumbnail metadata objects
+        video_meta = yield neondata.VideoMetadata.get_by_external_id(
+             self.platform.neon_api_key, external_video_id)
+        if not video_meta:
+            _log.error('Could not find video %s' % external_video_id)
+            statemon.state.increment('video_not_found')
+            return
+        thumbs_meta = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
+                                             video_meta.thumbnail_ids)
+
+        external_id = thumb_data.get('id', None)
+        if external_id is not None:
+            external_id = unicode(external_id)
+
+        # Function that will set the external id in the ThumbnailMetadata
+        def _set_external_id(obj):
+            obj.external_id = external_id
+
+        found_thumb, min_rank = False, 1
+        for thumb in thumbs_meta:
+
+            self._run_migration(thumb)
+
+            if (thumb is None or thumb.type != neondata.ThumbnailType.DEFAULT):
+                continue
+
+            if thumb.rank < min_rank:
+                min_rank = thumb.rank
+
+            if thumb.external_id is not None:
+
+                # Check if our record's external id matches the response's
+                if (unicode(thumb.external_id) in
+                        self._get_image_field_from_response(data, 'id')):
+                    found_thumb = True
+            elif thumb.refid is not None:
+
+                # For legacy thumbs, we specified a reference id. Look for it
+                if thumb.refid in self._get_image_field_from_response(
+                        data, 'referenceId'):
+                    found_thumb = True
+
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
+                                           thumb.key,
+                                           _set_external_id)
+            else:
+                # We do not have the id for this thumb, so see if we
+                # can match the url.
+                norm_urls = set([self._normalize_thumbnail_url(x)
+                                 for x in thumb.urls])
+                if len(norm_urls.intersection(ext_thumb_urls)) > 0:
+                    found_thumb = True
+
+                    # Now update the external id because we didn't
+                    # know about it before.
+                    yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
+                                           thumb.key,
+                                           _set_external_id)
+
+        # The thumb is not found, so add it to our records
+        # (provided it doesn't have a duplicate hash).
+        if not found_thumb:
+
+            urls = self._get_image_urls_from_response(data)
+            is_exist, added_image = False, False
+            for url in urls[::-1]:
+                try:
+                    # New thumb object of type default, with min rank
+                    new_thumb = neondata.ThumbnailMetadata(
+                        None,
+                        ttype=neondata.ThumbnailType.DEFAULT,
+                        rank=min_rank - 1,
+                        external_id=external_id
+                    )
+                    yield video_meta.download_and_add_thumbnail(
+                        new_thumb,
+                        url,
+                        save_objects=False,
+                        async=True)
+
+                    # Validate the new_thumb key exists or not. We noticed that
+                    # Brightcove can send the same thumbnail with different
+                    # external ids multiple times. This triggers the same
+                    # thumbnail as new and restart the experiment. Since the
+                    # thumbnail key is generated by md5 hashing, we will compare
+                    # the hash with existing thumbnail hashes, if find a match
+                    # we will disgard the thumbnail.
+                    is_exist = \
+                        any([new_thumb.key == old_thumb.key
+                            for old_thumb in thumbs_meta]) or \
+                        any([new_thumb.phash == old_thumb.phash
+                            for old_thumb in thumbs_meta])
+
+                    if is_exist:
+                        continue
+
+                    sucess = yield tornado.gen.Task(new_thumb.save)
+                    if not sucess:
+                        raise IOError('Could not save thumbnail')
+                    # Even though the video_meta already has the new_thumb
+                    # in thumbnail_ids, the database still doesn't have it yet.
+                    # We will modify in database first. Also, modify is used
+                    # first instead of using save directively, as other process
+                    # can modify the video_meta as well.
+                    updated_video = yield tornado.gen.Task(
+                        video_meta.modify,
+                        video_meta.key,
+                        lambda x: x.thumbnail_ids.append(new_thumb.key))
+                    if updated_video is None:
+                        # It wasn't in the database, so save this object
+                        sucess = yield tornado.gen.Task(video_meta.save)
+                        if not sucess:
+                            raise IOError('Could not save video data')
+                    else:
+                        video_meta.__dict__ = updated_video.__dict__
+
+                    _log.info(
+                        'Found new thumbnail %s for video %s at Brightcove.' %
+                        (external_id, video_meta.key))
+                    statemon.state.increment('new_images_found')
+                    added_image = True
+                    break
+                except IOError:
+                    # Error getting the image, so keep going
+                    pass
+            if not added_image and not is_exist:
+                _log.error('Could not find valid image to add to video %s. '
+                           'Tried urls %s' % (video_meta.key, urls))
+                statemon.state.increment('cant_get_image')
 
     @tornado.gen.coroutine
     def lookup_and_submit_videos(self, ovp_video_ids):
@@ -559,3 +698,6 @@ class OVPIntegration(object):
              to skip old videos
         '''
         return False
+
+    def _run_migration(self, thumb=None):
+        pass
