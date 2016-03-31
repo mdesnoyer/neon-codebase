@@ -160,7 +160,7 @@ def get_video_objects(impression_metric):
         cursor = conn.cursor()
         cursor.execute(
         """select distinct regexp_extract(thumbnail_id, 
-        '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_', 1) from eventsequences where 
+        '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1) from eventsequences where 
         thumbnail_id is not NULL and
         %s is not null and
         tai='%s' %s""" % (impala_col_map[impression_metric],
@@ -185,7 +185,7 @@ def get_time_range(video_ids):
         """select min(servertime), max(servertime) 
            from eventsequences where
            tai='%s' and 
-           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
+           regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
            1) in (%s)
         """ % (options.pub_id,
                ','.join(["'%s'" % x for x in video_ids])))
@@ -217,7 +217,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             from EventSequences where tai='%s' and 
             hr is not null and
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
             1) in (%s)
             %s
             %s
@@ -239,7 +239,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
             EventSequences
             where tai='%s' and 
             %s is not null and
-            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9\\.\\-\\~]+)_',
+            regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
             1) in (%s) 
             %s
             %s
@@ -489,7 +489,10 @@ def get_video_titles(video_ids):
             _log.error('Could not find job for video id %s' % video_id)
             retval.append('')
             continue
-        retval.append(api_request.video_title.encode('utf-8'))
+        if api_request.video_title is None:
+            retval.append(None)
+        else:
+            retval.append(api_request.video_title.encode('utf-8'))
     return retval
 
 def calculate_aggregate_stats(video_stats):
