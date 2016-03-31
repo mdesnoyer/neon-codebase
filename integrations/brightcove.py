@@ -29,10 +29,10 @@ define('max_submit_retries', default=3,
 
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
-statemon.define('unexpected_submition_error', int)
 statemon.define('cant_get_image', int)
 statemon.define('cant_get_refid', int)
 statemon.define('cant_get_custom_id', int)
+statemon.define('new_images_found', int)
 statemon.define('video_not_found', int)
 statemon.define('old_videos_skipped', int)
 
@@ -469,6 +469,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         # The thumb is not found, so add it to our records
         # (provided it doesn't have a duplicate hash).
         if not found_thumb:
+
             urls = self._get_image_urls_from_response(data)
             is_exist, added_image = False, False
             for url in urls[::-1]:
@@ -531,12 +532,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 except IOError:
                     # Error getting the image, so keep going
                     pass
-            _log.info('add is %s, exist is %s' % (added_image, is_exist))
             if not added_image and not is_exist:
                 _log.error('Could not find valid image to add to video %s. '
                            'Tried urls %s' % (video_meta.key, urls))
                 statemon.state.increment('cant_get_image')
-
 
     @staticmethod
     def _get_best_image_info(data):
