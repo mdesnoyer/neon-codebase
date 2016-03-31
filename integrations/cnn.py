@@ -21,8 +21,6 @@ import integrations.ovp
 from cmsdb import neondata
 from utils import statemon
 
-statemon.define('unexpected_submission_error', int)
-
 _log = logging.getLogger(__name__)
 
 
