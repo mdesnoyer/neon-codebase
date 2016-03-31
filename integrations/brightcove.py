@@ -29,11 +29,8 @@ define('max_submit_retries', default=3,
 
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
-statemon.define('cant_get_image', int)
 statemon.define('cant_get_refid', int)
 statemon.define('cant_get_custom_id', int)
-statemon.define('new_images_found', int)
-statemon.define('video_not_found', int)
 statemon.define('old_videos_skipped', int)
 
 _log = logging.getLogger(__name__)

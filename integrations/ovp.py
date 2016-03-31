@@ -28,6 +28,7 @@ statemon.define('new_job_submitted', int)
 statemon.define('new_images_found', int)
 statemon.define('unexpected_submission_error', int)
 statemon.define('video_not_found', int)
+
 define('max_submit_retries', default=3,
        help='Maximum times we will retry a video submit before passing on it.')
 
