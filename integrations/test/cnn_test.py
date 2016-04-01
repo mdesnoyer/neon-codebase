@@ -143,6 +143,13 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             video_two['firstPublishDate'],
             integration.last_process_date)
 
+    @tornado.testing.gen_test
+    def test_new_default_thumb(self):
+        ''' When a CNN video is processed and a new thumbnail
+            is found, the default thumbnail is made the new
+            thumbnail.'''
+        pass
+
     # TODO move this to a mock class
     def create_search_response(self, num_of_results=random.randint(5, 10)):
         def _string_generator():
