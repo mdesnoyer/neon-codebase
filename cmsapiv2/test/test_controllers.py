@@ -2945,7 +2945,47 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header)
-        self.assertEquals(response.code, 200) 
+        self.assertEquals(response.code, 200)
+ 
+    @tornado.testing.gen_test 
+    def test_internal_search_access_level_normal(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        url = '/api/v2/videos/search?token=%s' % (token)
+        # should get a 401 unauth, because this is an internal only 
+        # resource, and this is not an internal_only user  
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                                          method='GET')
+
+        self.assertEquals(e.exception.code, 401)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'internal only resource')
+
+    @tornado.testing.gen_test 
+    def test_internal_search_access_level_internal_only(self): 
+        user = neondata.User(
+            username='testuser', 
+            password='testpassword', 
+            access_level=neondata.AccessLevels.INTERNAL_ONLY_USER | 
+                         neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        url = '/api/v2/videos/search?token=%s' % (token)
+        # should get a 200 as this user has access to this resource 
+        # resource, and this is not an internal_only user  
+        response = yield self.http_client.fetch(self.get_url(url), 
+                       method='GET')
+
+        self.assertEquals(response.code, 200)
 
 class TestAPIKeyRequiredAuth(TestAuthenticationBase):
     def setUp(self):
@@ -3469,18 +3509,201 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         cls.postgresql.stop()
     
     @tornado.testing.gen_test 
-    def test_base_search(self):
+    def test_search_base(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
         yield video.save(async=True)   
-        yield neondata.NeonApiRequest('job1', 'kevin', title='kevins video').save(async=True)
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
         video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
         yield video.save(async=True)   
-        yield neondata.NeonApiRequest('job2', 'kevin', title='kevins best video yet').save(async=True)
-        url = '/api/v2/videos/search?account_id=kevin&fields=video_id,title,created,updated'
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
-        print response.body
-        
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test 
+    def test_search_next_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        # sleep just a bit to make sure since works
+        # we have precision to 5 places 
+        yield tornado.gen.sleep(0.0001) 
+        video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job3', 'kevin', 
+                  title='really kevins best video yet').save(async=True)
+        rjson1 = json.loads(response.body)
+        url = rjson1['next_page'] 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('really kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        # this should grab the most recently created video
+        self.assertEquals('kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_without_account_id(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin2_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin2', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        # should return all the videos despite no account
+        self.assertEquals(rjson['video_count'], 2)
+
+class TestVideoSearchExternalHandler(TestControllersBase): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestVideoSearchExternalHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestVideoSearchExternalHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @tornado.testing.gen_test 
+    def test_search_base(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test 
+    def test_search_next_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        # sleep just a bit to make sure since works
+        # we have precision to 5 places 
+        yield tornado.gen.sleep(0.0001) 
+        video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job3', 'kevin', 
+                  title='really kevins best video yet').save(async=True)
+        rjson1 = json.loads(response.body)
+        url = rjson1['next_page'] 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('really kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        # this should grab the most recently created video
+        self.assertEquals('kevins best video yet', video['title'])
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()

@@ -185,20 +185,33 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             user = yield neondata.User.get(username, async=True)
             if user:
                 request.user = user
+                def _check_internal_only(): 
+                    al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
+                    if internal_only: 
+                        if user.access_level & al_internal_only is \
+                            neondata.AccessLevels.INTERNAL_ONLY_USER: 
+                            return True
+                        return False 
+                    return True 
+ 
                 if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
                        neondata.AccessLevels.GLOBAL_ADMIN:
                     raise tornado.gen.Return(True)
                       
-                elif account and username in account.users:
-                    al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
-                    internal_use_verified = True 
-                    if internal_only: 
-                        if user.access_level & al_internal_only is \
-                            neondata.AccessLevels.INTERNAL_ONLY: 
-                            internal_use_verified = False 
+                elif account_required and account and username in account.users:
+                    if not _check_internal_only(): 
+                        raise NotAuthorizedError('internal only resource') 
                     if user.access_level & access_level_required is \
-                           access_level_required and internal_use_verified:  
+                           access_level_required:  
                         raise tornado.gen.Return(True)
+                else:
+                    if internal_only: 
+                        if not _check_internal_only():  
+                            raise NotAuthorizedError('internal only resource')
+                    if not account_required: 
+                        if user.access_level & access_level_required is \
+                               access_level_required:  
+                            raise tornado.gen.Return(True)
 
                 raise NotAuthorizedError('you can not access this resource')
                 

@@ -697,6 +697,38 @@ class VideoHelper(object):
         raise tornado.gen.Return(thumbnails)
 
     @staticmethod 
+    @tornado.gen.coroutine 
+    def get_search_results(account_id=None, 
+                           since=None,
+                           query=None,
+                           limit=None,
+                           fields=None, 
+                           base_url='/api/v2/videos/search'):
+ 
+        search_res = yield neondata.VideoMetadata.search_videos(
+                         account_id, 
+                         since, 
+                         limit=limit)
+
+        videos = search_res['videos'] 
+        next_since = search_res['since_time'] 
+        vid_dict = yield VideoHelper.build_video_dict(
+                       videos, 
+                       fields)
+
+        next_page_url = VideoHelper.build_next_page_url(
+            base_url,
+            next_since if next_since else 0.0,
+            limit=limit,  
+            query=query, 
+            fields=fields,
+            account_id=account_id)
+
+        vid_dict['next_page'] = next_page_url 
+
+        raise tornado.gen.Return(vid_dict) 
+
+    @staticmethod 
     @tornado.gen.coroutine
     def build_video_dict(videos, 
                          fields, 
@@ -732,6 +764,26 @@ class VideoHelper(object):
             vid_dict['video_count'] = vid_counter
 
         raise tornado.gen.Return(vid_dict) 
+
+
+    @staticmethod 
+    def build_next_page_url(base_url, 
+                            since, 
+                            limit, 
+                            query=None,
+                            fields=None,
+                            account_id=None):
+ 
+        next_page_url = '%s?since=%f&limit=%d' % (base_url,since,limit) 
+        if query:  
+            next_page_url += '&query=%s' % query 
+        if fields:
+            next_page_url += '&fields=%s' % \
+                ",".join("{0}".format(f) for f in fields)
+        if account_id:  
+            next_page_url += '&account_id=%s' % account_id
+        print next_page_url
+        return next_page_url 
 
     @staticmethod
     @tornado.gen.coroutine
@@ -1167,51 +1219,37 @@ class VideoSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-          Required('limit', default=25): All(int, Range(min=1, max=100)),
+          'limit' : All(Coerce(int), Range(min=1, max=100)),
           'account_id' : All(Coerce(str), Length(min=1, max=256)),
           'query' : All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(int))
+          'since': All(Coerce(float))
         })
         args = self.parse_args()
         schema(args)
         since = args.get('since', None) 
         query = args.get('query', None) 
-        account_id = args.get('account_id', None) 
+        account_id = args.get('account_id', None)
+        limit = int(args.get('limit', 25))
         fields = args.get('fields', None) 
         if fields:
             fields = set(fields.split(','))
 
-        search_res = yield neondata.VideoMetadata.search_videos(
-                         account_id, 
-                         since)
-
-        videos = search_res['videos'] 
-        next_since = search_res['since_time'] 
-        print fields 
-        vid_dict = yield VideoHelper.build_video_dict(
-                       videos, 
+        vid_dict = yield VideoHelper.get_search_results(
+                       account_id, 
+                       since, 
+                       query, 
+                       limit, 
                        fields)
-
-        next_page_url = '/api/v2/search?since=%d' % next_since 
-        
-        # TODO build this in the video helper 
-        if query:  
-            next_page_url += '&query=%s' % query 
-        if fields:
-            next_page_url += '&fields=%s' % \
-                ",".join("{0}".format(f) for f in fields)
-        if account_id:  
-            next_page_url += '&account_id=%s' % account_id
-        
-        vid_dict['next_page'] = next_page_url 
+ 
         self.success(vid_dict)
 
     @classmethod
     def get_access_levels(self):
         return { 
                  HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'internal_only' : True  
+                 'internal_only' : True, 
+                 'account_required' : [] 
                }
 
 '''*********************************************************************
@@ -1222,7 +1260,40 @@ VideoSearchExternalHandler : class responsible for searching videos from
 class VideoSearchExternalHandler(APIV2Handler): 
     @tornado.gen.coroutine
     def get(self, account_id):
-        self.success({}) 
+        schema = Schema({
+          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+          'limit' : All(Coerce(int), Range(min=1, max=100)),
+          'query' : All(Coerce(str), Length(min=1, max=256)),
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          'since': All(Coerce(float))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        since = args.get('since', None) 
+        query = args.get('query', None) 
+        limit = int(args.get('limit', 25))
+        fields = args.get('fields', None) 
+        if fields:
+            fields = set(fields.split(','))
+
+        base_url = '/api/v2/%s/videos/search' % account_id 
+        vid_dict = yield VideoHelper.get_search_results(
+                       account_id, 
+                       since, 
+                       query, 
+                       limit, 
+                       fields, 
+                       base_url=base_url)
+ 
+        self.success(vid_dict)
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required' : [HTTPVerbs.GET] 
+               }
 
 '''*********************************************************************
 ThumbnailSearchInternalHandler : class responsible for searching thumbs

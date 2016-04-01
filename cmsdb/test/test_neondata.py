@@ -3412,11 +3412,14 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
 
     @tornado.testing.gen_test 
     def test_base_search_videos(self):
+        # this function is tested more thoroughly 
+        # in the api tests, this is here as a sanity 
+        # check. not going to double up the tests at this point
         video_info = VideoMetadata('acct1_vid1')
         yield video_info.save(async=True)
 
-        blah = yield neondata.VideoMetadata.search_videos() 
- 
+        results = yield neondata.VideoMetadata.search_videos()
+        self.assertEquals(len(results['videos']), 1)
 
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 

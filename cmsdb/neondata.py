@@ -5875,43 +5875,46 @@ class VideoMetadata(StoredObject):
                videos - the videos that the search returned 
                since_time - this is the time of the most recent video that 
                             the search returned, it's mainly here to prevent 
-                            the API from having to do this 
+                            consumers from having to do this 
         """ 
         where_clause = "" 
         videos = []
         since_time = None  
         wc_params = []
         rv = {}  
-        
+         
         if since: 
             if where_clause: 
                 where_clause += " AND "
-            where_clause += " created_time > to_timestamp(%d)" 
+            where_clause += " created_time > to_timestamp(%s)::timestamp" 
             wc_params.append(since) 
         
         if account_id: 
             if where_clause: 
                 where_clause += " AND "
             where_clause += " _data->>'key' LIKE %s"
-            wc_params.append(account_id+'_%') 
-            
+            wc_params.append(account_id+'_%')
+ 
         results = yield cls.get_and_execute_select_query(
                     [ "_data", "_type", "created_time", "updated_time" ], 
                     where_clause, 
                     wc_params=wc_params, 
                     limit_clause="LIMIT %d" % limit, 
-     		    order_clause="ORDER BY created_time DESC", 
+     		    order_clause="ORDER BY created_time DESC",
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         for result in results:
-            if since_time is None: 
-                since_time = int(calendar.timegm(
-                    result['created_time'].timetuple()))
+            if since_time is None:
+                # need micros here 
+                created_time = result['created_time']
+                cc_tt = time.mktime(created_time.timetuple())
+                since_time = (cc_tt + created_time.microsecond / 1000000.0)
+
             obj = cls._create(result['_data']['key'], result)
             obj.created = result['created_time'].strftime(
-                              "%Y-%m-%d %H:%M:%S")
+                              "%Y-%m-%d %H:%M:%S.%f")
             obj.updated = result['updated_time'].strftime( 
-                              "%Y-%m-%d %H:%M:%S")
+                              "%Y-%m-%d %H:%M:%S.%f")
             videos.append(obj)
 
         rv['videos'] = videos 
