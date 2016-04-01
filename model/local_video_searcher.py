@@ -1054,8 +1054,7 @@ class ResultsList(object):
 
 
 class LocalSearcher(object):
-    def __init__(self, predictor, face_finder,
-                 eye_classifier,
+    def __init__(self, predictor,
                  processing_time_ratio=1.0,
                  local_search_width=32,
                  local_search_step=4,
@@ -1074,7 +1073,14 @@ class LocalSearcher(object):
                  use_all_data=False,
                  use_best_data=False,
                  testing=False,
-                 testing_dir=None):
+                 testing_dir=None,
+                 filter_text=True,
+                 text_filter_params=[os.path.join(__base_path__, 'cvutils', 'data', 
+                        'trained_classifierNM1.xml'),
+                     os.path.join(__base_path__, 'cvutils', 'data', 
+                        'trained_classifierNM2.xml'),
+                     16, 0.00015, 0.003, 0.8, True, 0.5, 0.9],
+                 filter_text_thresh=0.02):
         '''
         Inputs:
             predictor:
@@ -1159,6 +1165,13 @@ class LocalSearcher(object):
                 <number>_<frame>_<score>_<feat_score>_<comb_score>_<reason>
             testing_dir:
                 Specifies where to save the images, if testing is enabled.
+            filter_text:
+                Whether or not to remove text from the frames.
+            text_filter_params:
+                The filters used to instantiate the text filter.
+            filter_text_thresh:
+                The fraction of text that occupies the image in order to
+                filter it out.
 
         '''
         self.predictor = predictor
@@ -1177,6 +1190,7 @@ class LocalSearcher(object):
         self.max_variety = max_variety
         self.use_all_data = use_all_data
         self.use_best_data = use_best_data
+        self.filter_text_thresh = filter_text_thresh
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
@@ -1187,6 +1201,8 @@ class LocalSearcher(object):
             global TESTING_DIR
             TESTING_DIR = testing_dir
         self._reset()
+        self.filter_text = filter_text
+        self.text_filter_params = text_filter_params
         self.analysis_crop = None  # this, if necessary at all, will be set
         # by update_processing_strategy
 
@@ -1414,6 +1430,32 @@ class LocalSearcher(object):
             #                         if accepted[n]]
             # framenos = [x for n, x in enumerate(frames) if accepted[n]]
             # frames = [x for n, x in enumerate(frames) if accepted[n]]
+        # ---------- START OF TEXT PROCESSING
+        # filter text too
+        text_d = [cv2.text.textDetect(x, *self.text_filter_params) 
+                    for x in frames]
+        masks = [x[1] for x in text_d]
+        # accept only those where tet occupies a sufficiently small amount of
+        # the image.
+        accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
+                    for x in masks]
+        n_rej = np.sum(np.logical_not(accepted))
+        n_acc = np.sum(accepted)
+        _log.debug(('Filter for feature %s has '
+                    'has rejected %i frames, %i remain' % (
+                        'fancy text detect', n_rej, n_acc)))
+        if not np.any(accepted):
+            _log.debug('No frames accepted by filters')
+            return
+        # filter the current features across all feature
+        # dicts, as well as the framenos
+        acc_idxs = list(np.nonzero(accepted)[0])
+        for k in frame_feats.keys():
+            frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+        framenos = [framenos[x] for x in acc_idxs]
+        frames = [frames[x] for x in acc_idxs]
+        gold = [gold[x] for x in acc_idxs]
+        # ---------- END OF ADDITION
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue
