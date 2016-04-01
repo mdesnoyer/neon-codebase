@@ -6,14 +6,11 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import api.cnn_api
 from cmsdb import neondata
-from cStringIO import StringIO
 import datetime
 import integrations.cnn
-import json
 import logging
-from mock import patch, MagicMock
+from mock import patch
 import random
 import string
 import test_utils.redis
@@ -23,8 +20,7 @@ import time
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
-from utils.options import define, options
-import unittest
+from utils.options import options
 
 
 class TestParseFeed(test_utils.neontest.TestCase):
@@ -142,7 +138,6 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         integration = neondata.CNNIntegration.get(
             self.integration.integration_id)
         videos = response['docs']
-        video_one = videos[1]
         video_two = videos[1]
         self.assertEquals(
             video_two['firstPublishDate'],
