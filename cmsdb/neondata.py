@@ -5858,6 +5858,7 @@ class VideoMetadata(StoredObject):
     def search_videos(cls, 
                       account_id=None, 
                       since=None,
+                      until=None, 
                       limit=25):
 
         """Does a basic search over the videometadatas in the DB 
@@ -5879,7 +5880,8 @@ class VideoMetadata(StoredObject):
         """ 
         where_clause = "" 
         videos = []
-        since_time = None  
+        since_time = None 
+        until_time = None  
         wc_params = []
         rv = {}  
          
@@ -5888,6 +5890,12 @@ class VideoMetadata(StoredObject):
                 where_clause += " AND "
             where_clause += " created_time > to_timestamp(%s)::timestamp" 
             wc_params.append(since) 
+
+        if until: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time < to_timestamp(%s)::timestamp" 
+            wc_params.append(until) 
         
         if account_id: 
             if where_clause: 
@@ -5903,13 +5911,20 @@ class VideoMetadata(StoredObject):
      		    order_clause="ORDER BY created_time DESC",
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
+        def _get_time(result): 
+            # need micros here 
+            created_time = result['created_time']
+            cc_tt = time.mktime(created_time.timetuple())
+            _time = (cc_tt + created_time.microsecond / 1000000.0)
+            return _time 
+        
+        try:    
+            since_time = _get_time(results[0]) 
+            until_time = _get_time(results[-1]) 
+        except KeyError: 
+            pass 
+        
         for result in results:
-            if since_time is None:
-                # need micros here 
-                created_time = result['created_time']
-                cc_tt = time.mktime(created_time.timetuple())
-                since_time = (cc_tt + created_time.microsecond / 1000000.0)
-
             obj = cls._create(result['_data']['key'], result)
             obj.created = result['created_time'].strftime(
                               "%Y-%m-%d %H:%M:%S.%f")
@@ -5919,6 +5934,7 @@ class VideoMetadata(StoredObject):
 
         rv['videos'] = videos 
         rv['since_time'] = since_time
+        rv['until_time'] = since_time
         raise tornado.gen.Return(rv) 
          
 class VideoStatus(DefaultedStoredObject):

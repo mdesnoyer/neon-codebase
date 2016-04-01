@@ -700,6 +700,7 @@ class VideoHelper(object):
     @tornado.gen.coroutine 
     def get_search_results(account_id=None, 
                            since=None,
+                           until=None, 
                            query=None,
                            limit=None,
                            fields=None, 
@@ -707,25 +708,37 @@ class VideoHelper(object):
  
         search_res = yield neondata.VideoMetadata.search_videos(
                          account_id, 
-                         since, 
+                         since=since, 
+                         until=until, 
                          limit=limit)
 
         videos = search_res['videos'] 
         next_since = search_res['since_time'] 
+        prev_until = search_res['until_time'] 
         vid_dict = yield VideoHelper.build_video_dict(
                        videos, 
                        fields)
 
-        next_page_url = VideoHelper.build_next_page_url(
+        next_page_url = VideoHelper.build_page_url(
             base_url,
             next_since if next_since else 0.0,
-            limit=limit,  
+            limit=limit, 
+            page_type='since',  
+            query=query, 
+            fields=fields,
+            account_id=account_id)
+
+        until_page_url = VideoHelper.build_page_url(
+            base_url,
+            prev_until if prev_until else 0.0,
+            limit=limit, 
+            page_type='until',  
             query=query, 
             fields=fields,
             account_id=account_id)
 
         vid_dict['next_page'] = next_page_url 
-
+        vid_dict['prev_page'] = until_page_url 
         raise tornado.gen.Return(vid_dict) 
 
     @staticmethod 
@@ -767,14 +780,18 @@ class VideoHelper(object):
 
 
     @staticmethod 
-    def build_next_page_url(base_url, 
-                            since, 
-                            limit, 
-                            query=None,
-                            fields=None,
-                            account_id=None):
+    def build_page_url(base_url, 
+                       time_stamp, 
+                       limit, 
+                       page_type=None, 
+                       query=None,
+                       fields=None,
+                       account_id=None):
  
-        next_page_url = '%s?since=%f&limit=%d' % (base_url,since,limit) 
+        next_page_url = '%s?%s=%f&limit=%d' % (base_url, 
+                                               page_type,
+                                               time_stamp, 
+                                               limit) 
         if query:  
             next_page_url += '&query=%s' % query 
         if fields:
@@ -782,7 +799,7 @@ class VideoHelper(object):
                 ",".join("{0}".format(f) for f in fields)
         if account_id:  
             next_page_url += '&account_id=%s' % account_id
-        print next_page_url
+
         return next_page_url 
 
     @staticmethod
@@ -1223,11 +1240,13 @@ class VideoSearchInternalHandler(APIV2Handler):
           'account_id' : All(Coerce(str), Length(min=1, max=256)),
           'query' : All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(float))
+          'since': All(Coerce(float)),
+          'until': All(Coerce(float))
         })
         args = self.parse_args()
         schema(args)
         since = args.get('since', None) 
+        until = args.get('until', None) 
         query = args.get('query', None) 
         account_id = args.get('account_id', None)
         limit = int(args.get('limit', 25))
@@ -1237,7 +1256,8 @@ class VideoSearchInternalHandler(APIV2Handler):
 
         vid_dict = yield VideoHelper.get_search_results(
                        account_id, 
-                       since, 
+                       since,
+                       until, 
                        query, 
                        limit, 
                        fields)
@@ -1265,12 +1285,14 @@ class VideoSearchExternalHandler(APIV2Handler):
           'limit' : All(Coerce(int), Range(min=1, max=100)),
           'query' : All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(float))
+          'since': All(Coerce(float)),
+          'until': All(Coerce(float))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
         since = args.get('since', None) 
+        until = args.get('until', None) 
         query = args.get('query', None) 
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None) 
@@ -1280,7 +1302,8 @@ class VideoSearchExternalHandler(APIV2Handler):
         base_url = '/api/v2/%s/videos/search' % account_id 
         vid_dict = yield VideoHelper.get_search_results(
                        account_id, 
-                       since, 
+                       since,
+                       until,  
                        query, 
                        limit, 
                        fields, 
