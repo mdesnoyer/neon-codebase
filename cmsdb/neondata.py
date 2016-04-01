@@ -25,6 +25,7 @@ if sys.path[0] != __base_path__:
 from api import ooyala_api
 import base64
 import binascii
+import calendar
 import cmsdb.cdnhosting
 import code
 import collections
@@ -1396,9 +1397,16 @@ class AccessLevels(object):
     UPDATE = 2 
     CREATE = 4
     DELETE = 8 
+    ACCOUNT_EDITOR = 16 
+    INTERNAL_ONLY_USER = 32 
+    GLOBAL_ADMIN = 64
+    
+    # Helpers  
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
-    ADMIN = ALL_NORMAL_RIGHTS | 16  # 31  
-    GLOBAL_ADMIN = ADMIN | 32       # 63 
+    ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR
+    EVERYTHING = ALL_NORMAL_RIGHTS |\
+                 ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
+                 GLOBAL_ADMIN
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 
@@ -2264,9 +2272,12 @@ class StoredObject(object):
     @tornado.gen.coroutine
     def get_and_execute_select_query(cls, 
                                      fields, 
-                                     where_clause,
-                                     table_name=None,  
-                                     wc_params=[]): 
+                                     where_clause=None,
+                                     table_name=None, 
+                                     wc_params=[],
+                                     limit_clause=None,
+                                     order_clause=None,  
+                                     cursor_factory=psycopg2.extensions.cursor): 
         ''' helper function to build up a select query
 
                fields : an array of the fields you want 
@@ -2299,12 +2310,20 @@ class StoredObject(object):
 
         csl_fields = ",".join("{0}".format(f) for f in fields) 
         query = "SELECT " + csl_fields + \
-                " FROM " + table_name + \
-                " WHERE " + where_clause 
+                " FROM " + table_name
+        
+        if where_clause:
+            query += " WHERE " + where_clause
+
+        if order_clause: 
+            query += " " + order_clause
+   
+        if limit_clause: 
+            query += " " + limit_clause 
  
         cursor = yield conn.execute(query, 
                                     wc_params,
-                                    cursor_factory=psycopg2.extensions.cursor)
+                                    cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn) 
         raise tornado.gen.Return(rv) 
@@ -5832,8 +5851,73 @@ class VideoMetadata(StoredObject):
         for tid in vmeta.thumbnail_ids:
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
-        yield VideoMetadata.delete(key, async=True) 
+        yield VideoMetadata.delete(key, async=True)
 
+    @classmethod 
+    @tornado.gen.coroutine
+    def search_videos(cls, 
+                      account_id=None, 
+                      since=None,
+                      limit=25):
+
+        """Does a basic search over the videometadatas in the DB 
+
+           account_id : if specified will only search videos for that account, 
+                        defaults to None, meaning it will search all accounts 
+                        for videos 
+           since      : if specified will find videos since this date, 
+                        defaults to None, meaning it will grab the 25 most 
+                        recent videos 
+           limit      : if specified it limits the search to this many 
+                        videos, defaults to 25
+
+           Returns : a dictionary of the following 
+               videos - the videos that the search returned 
+               since_time - this is the time of the most recent video that 
+                            the search returned, it's mainly here to prevent 
+                            the API from having to do this 
+        """ 
+        where_clause = "" 
+        videos = []
+        since_time = None  
+        wc_params = []
+        rv = {}  
+        
+        if since: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time > to_timestamp(%d)" 
+            wc_params.append(since) 
+        
+        if account_id: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " _data->>'key' LIKE %s"
+            wc_params.append(account_id+'_%') 
+            
+        results = yield cls.get_and_execute_select_query(
+                    [ "_data", "_type", "created_time", "updated_time" ], 
+                    where_clause, 
+                    wc_params=wc_params, 
+                    limit_clause="LIMIT %d" % limit, 
+     		    order_clause="ORDER BY created_time DESC", 
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        for result in results:
+            if since_time is None: 
+                since_time = int(calendar.timegm(
+                    result['created_time'].timetuple()))
+            obj = cls._create(result['_data']['key'], result)
+            obj.created = result['created_time'].strftime(
+                              "%Y-%m-%d %H:%M:%S")
+            obj.updated = result['updated_time'].strftime( 
+                              "%Y-%m-%d %H:%M:%S")
+            videos.append(obj)
+
+        rv['videos'] = videos 
+        rv['since_time'] = since_time
+        raise tornado.gen.Return(rv) 
+         
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 

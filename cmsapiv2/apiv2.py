@@ -149,7 +149,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         return args
     
     @tornado.gen.coroutine
-    def is_authorized(request, access_level_required, account_required=True):
+    def is_authorized(request, 
+                      access_level_required, 
+                      account_required=True, 
+                      internal_only=False):
         """checks to see if a user is authorized to call a function 
            
            in order to gain access a user can be in one of two camps 
@@ -181,13 +184,20 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
             user = yield neondata.User.get(username, async=True)
             if user:
-                request.user = user 
+                request.user = user
                 if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
                        neondata.AccessLevels.GLOBAL_ADMIN:
                     raise tornado.gen.Return(True)
+                      
                 elif account and username in account.users:
+                    al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
+                    internal_use_verified = True 
+                    if internal_only: 
+                        if user.access_level & al_internal_only is \
+                            neondata.AccessLevels.INTERNAL_ONLY: 
+                            internal_use_verified = False 
                     if user.access_level & access_level_required is \
-                           access_level_required:  
+                           access_level_required and internal_use_verified:  
                         raise tornado.gen.Return(True)
 
                 raise NotAuthorizedError('you can not access this resource')
@@ -228,11 +238,17 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         try: 
             account_required_list = access_level_dict['account_required'] 
         except KeyError: 
-            account_required_list = [] 
+            account_required_list = []
 
+        try: 
+            internal_only = access_level_dict['internal_only'] 
+        except KeyError:  
+            internal_only = False
+ 
         try:
            yield self.is_authorized(access_level_dict[self.request.method],
-                                    self.request.method in account_required_list) 
+                                    self.request.method in account_required_list, 
+                                    internal_only) 
         except KeyError:
             raise NotImplementedError('access levels are not defined') 
 

@@ -3410,6 +3410,14 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     def _get_object_type(cls): 
         return VideoMetadata
 
+    @tornado.testing.gen_test 
+    def test_base_search_videos(self):
+        video_info = VideoMetadata('acct1_vid1')
+        yield video_info.save(async=True)
+
+        blah = yield neondata.VideoMetadata.search_videos() 
+ 
+
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()

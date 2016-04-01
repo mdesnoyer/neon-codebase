@@ -695,6 +695,103 @@ class VideoHelper(object):
                                 x in thumbnails] 
 
         raise tornado.gen.Return(thumbnails)
+
+    @staticmethod 
+    @tornado.gen.coroutine
+    def build_video_dict(videos, 
+                         fields, 
+                         video_ids=None):
+        vid_dict = {} 
+        vid_dict['videos'] = None 
+        vid_dict['video_count'] = 0  
+        new_videos = []
+        vid_counter = 0
+        index = 0 
+        if videos: 
+            videos = [x for x in videos if x and x.job_id]
+            job_ids = [(v.job_id, v.get_account_id())
+                          for v in videos]
+
+            requests = yield neondata.NeonApiRequest.get_many(
+                           job_ids, 
+                           async=True)
+            for video, request in zip(videos, requests):
+                if video is None or request is None and video_ids:
+                    new_videos.append({'error' : 'video does not exist', 
+                                       'video_id' : video_ids[index] }) 
+                    index += 1
+                    continue
+
+                new_video = yield VideoHelper.db2api(video,
+                                                     request,
+                                                     fields)
+                new_videos.append(new_video)
+                vid_counter += 1
+
+            vid_dict['videos'] = new_videos
+            vid_dict['video_count'] = vid_counter
+
+        raise tornado.gen.Return(vid_dict) 
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def db2api(video, request, fields=None):
+        """Converts a database video metadata object to a video
+        response dictionary
+
+        Overrite the base function because we have to do a join on the request
+         
+        Keyword arguments: 
+        video - The VideoMetadata object
+        request - The NeonApiRequest object
+        fields - List of fields to return
+        """
+        if fields is None:
+            fields = ['state', 'video_id', 'publish_date', 'title', 'url',
+                      'testing_enabled', 'job_id']
+
+        new_video = {}
+        for field in fields:
+            if field == 'thumbnails':
+                new_video['thumbnails'] = yield \
+                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
+            elif field == 'state':
+                new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
+            elif field == 'integration_id':
+                new_video[field] = video.integration_id
+            elif field == 'testing_enabled':
+                # TODO: maybe look at the account level abtest?
+                new_video[field] = video.testing_enabled
+            elif field == 'job_id':
+                new_video[field] = video.job_id
+            elif field == 'title':
+                new_video[field] = request.video_title
+            elif field == 'video_id':
+                new_video[field] = \
+                  neondata.InternalVideoID.to_external(video.key)
+            elif field == 'serving_url':
+                new_video[field] = video.serving_url
+            elif field == 'publish_date':
+                new_video[field] = request.publish_date
+            elif field == 'duration':
+                new_video[field] = video.duration
+            elif field == 'custom_data':
+                new_video[field] = video.custom_data
+            elif field == 'created':
+                new_video[field] = video.created
+            elif field == 'updated':
+                new_video[field] = video.updated
+            elif field == 'url':
+                new_video[field] = video.url
+            else:
+                raise BadRequestError('invalid field %s' % field)
+            
+            if request:
+                err = request.response.get('error', None)
+                if err:
+                    new_video['error'] = err
+
+        raise tornado.gen.Return(new_video)
      
 '''*********************************************************************
 VideoHandler 
@@ -793,32 +890,13 @@ class VideoHandler(APIV2Handler):
  
         videos = yield tornado.gen.Task(neondata.VideoMetadata.get_many, 
                                         internal_video_ids)
-        new_videos = []
-        empty = True 
-        index = 0 
-        if videos:  
-            requests = yield tornado.gen.Task(
-                neondata.NeonApiRequest.get_many,
-                [(x.job_id if x else '', account_id_api_key) for x in videos])
-            for video, request in zip(videos, requests):
-                if video is None or request is None:
-                    new_videos.append({'error' : 'video does not exist', 
-                                       'video_id' : video_ids[index] }) 
-                    index += 1
-                    continue
 
-                new_video = yield self.db2api(video,
-                                              request,
-                                              fields)
-                new_videos.append(new_video)
-                empty = False 
+        vid_dict = yield VideoHelper.build_video_dict(
+                       videos, 
+                       fields,  
+                       video_ids)
  
-                index += 1
-
-            vid_dict['videos'] = new_videos
-            vid_dict['video_count'] = len(new_videos)
-            
-        if vid_dict['video_count'] is 0 or empty: 
+        if vid_dict['video_count'] is 0: 
             raise NotFoundError('video(s) do not exist with id(s): %s' % 
                                 (args['video_id']))
 
@@ -870,62 +948,8 @@ class VideoHandler(APIV2Handler):
     @staticmethod
     @tornado.gen.coroutine
     def db2api(video, request, fields=None):
-        """Converts a database video metadata object to a video
-        response dictionary
-
-        Overrite the base function because we have to do a join on the request
-         
-        Keyword arguments: 
-        video - The VideoMetadata object
-        request - The NeonApiRequest object
-        fields - List of fields to return
-        """
-        if fields is None:
-            fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id']
-
-        new_video = {}
-        for field in fields:
-            if field == 'thumbnails':
-                new_video['thumbnails'] = yield \
-                  VideoHelper.get_thumbnails_from_ids(video.thumbnail_ids)
-            elif field == 'state':
-                new_video[field] = neondata.ExternalRequestState.from_internal_state(request.state)
-            elif field == 'integration_id':
-                new_video[field] = video.integration_id
-            elif field == 'testing_enabled':
-                # TODO: maybe look at the account level abtest?
-                new_video[field] = video.testing_enabled
-            elif field == 'job_id':
-                new_video[field] = video.job_id
-            elif field == 'title':
-                new_video[field] = request.video_title
-            elif field == 'video_id':
-                new_video[field] = \
-                  neondata.InternalVideoID.to_external(video.key)
-            elif field == 'serving_url':
-                new_video[field] = video.serving_url
-            elif field == 'publish_date':
-                new_video[field] = request.publish_date
-            elif field == 'duration':
-                new_video[field] = video.duration
-            elif field == 'custom_data':
-                new_video[field] = video.custom_data
-            elif field == 'created':
-                new_video[field] = video.created
-            elif field == 'updated':
-                new_video[field] = video.updated
-            elif field == 'url':
-                new_video[field] = video.url
-            else:
-                raise BadRequestError('invalid field %s' % field)
-            
-            if request:
-                err = request.response.get('error', None)
-                if err:
-                    new_video['error'] = err
-
-        raise tornado.gen.Return(new_video)
+        video_obj = yield VideoHelper.db2api(video, request, fields)
+        raise tornado.gen.Return(video_obj) 
 
 '''*********************************************************************
 VideoStatsHandler 
@@ -1150,9 +1174,45 @@ class VideoSearchInternalHandler(APIV2Handler):
           'since': All(Coerce(int))
         })
         args = self.parse_args()
-        args['account_id'] = str(account_id)
         schema(args)
-        self.success({}) 
+        since = args.get('since', None) 
+        query = args.get('query', None) 
+        account_id = args.get('account_id', None) 
+        fields = args.get('fields', None) 
+        if fields:
+            fields = set(fields.split(','))
+
+        search_res = yield neondata.VideoMetadata.search_videos(
+                         account_id, 
+                         since)
+
+        videos = search_res['videos'] 
+        next_since = search_res['since_time'] 
+        print fields 
+        vid_dict = yield VideoHelper.build_video_dict(
+                       videos, 
+                       fields)
+
+        next_page_url = '/api/v2/search?since=%d' % next_since 
+        
+        # TODO build this in the video helper 
+        if query:  
+            next_page_url += '&query=%s' % query 
+        if fields:
+            next_page_url += '&fields=%s' % \
+                ",".join("{0}".format(f) for f in fields)
+        if account_id:  
+            next_page_url += '&account_id=%s' % account_id
+        
+        vid_dict['next_page'] = next_page_url 
+        self.success(vid_dict)
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'internal_only' : True  
+               }
 
 '''*********************************************************************
 VideoSearchExternalHandler : class responsible for searching videos from 

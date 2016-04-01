@@ -1760,7 +1760,7 @@ class TestVideoHandler(TestControllersBase):
        
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['video_count'], 2)
+        self.assertEquals(rjson['video_count'], 1)
         videos = rjson['videos']
         self.assertEquals(videos[0]['video_id'], 'vid1') 
  
@@ -3455,7 +3455,7 @@ class TestVideoSearchInternalHandler(TestControllersBase):
     def tearDown(self):
         self.verify_account_mocker.stop()  
         self.postgresql.clear_all_tables()
-        super(TestVideoStatsHandler, self).tearDown()
+        super(TestVideoSearchInternalHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -3467,6 +3467,19 @@ class TestVideoSearchInternalHandler(TestControllersBase):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+    
+    @tornado.testing.gen_test 
+    def test_base_search(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 'kevin', title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 'kevin', title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields=video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        print response.body
         
 if __name__ == "__main__" :
     utils.neon.InitNeon()
