@@ -1248,13 +1248,13 @@ class LocalSearcher(object):
     def min_score(self):
         return self.results.min
 
-    def choose_thumbnails(self, video, video_name='', n=None):
+    def choose_thumbnails(self, video, n=None, video_name='',):
         self._reset()
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
                   'for this run is %i', video_name, rand_seed)
         np.random.seed(rand_seed)
-        thumbs = self.choose_thumbnails_impl(video, n, video_name)
+        thumbs = self.choose_thumbnails_impl(video, video_name, n)
         return thumbs
 
     def _set_up_testing(self):
@@ -1275,7 +1275,7 @@ class LocalSearcher(object):
         else:
             raise Exception("Could not create testing dir!")
 
-    def choose_thumbnails_impl(self, video, video_name='', n=None):
+    def choose_thumbnails_impl(self, video, n=None, video_name=''):
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
