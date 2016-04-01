@@ -145,10 +145,74 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_new_default_thumb(self):
-        ''' When a CNN video is processed and a new thumbnail
-            is found, the default thumbnail is made the new
-            thumbnail.'''
+        '''When a CNN video is processed and a new thumbnail
+           is found, the default thumbnail is made the new
+           thumbnail.
+        '''
         pass
+
+    @tornado.testing.gen_test
+    def test_grab_new_thumbnail(self):
+        '''A number of staticmethods of CNNIntegration need
+            to be exercised.
+        '''
+        pass
+
+    @tornado.testing.gen_test
+    def test_video_has_title(self):
+        '''CNN video's NeonApiRequest has a title field.'''
+        pass
+
+    @tornado.testing.gen_test
+    def test_submit_typical_cnn_video(self):
+        job_id = yield self.external_integration.submit_one_video_object(
+            { 'id' : 123456789,
+              'referenceId': None,
+              'name' : 'Some video',
+              'length' : 100,
+              'publishedDate' : "1439768747000",
+              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+              'videoStill' : {
+                  'id' : 'still_id',
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+              'thumbnail' : {
+                  'id' : 123456,
+                  'referenceId' : None,
+                  'remoteUrl' : None
+              },
+              'FLVURL' : 'http://video.mp4'
+            })
+
+        self.assertIsNotNone(job_id)
+
+        url, submission = self._get_video_submission()
+        self.assertEquals(
+            url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
+                  'neon_integrations/i1/create_thumbnail_api_request'))
+        self.assertEquals(
+            submission,
+            {'video_id': '123456789',
+             'video_url': 'http://video.mp4',
+             'video_title': 'Some video',
+             'callback_url': None,
+             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
+             'external_thumbnail_id': 'still_id',
+             'custom_data': { '_bc_int_data' :
+                              { 'bc_id' : 123456789, 'bc_refid': None }},
+             'duration' : 0.1,
+             'publish_date' : '2015-08-16T23:45:47'
+             })
+
+        # Make sure the video was added to the BrightcovePlatform object
+        self.assertEquals(
+            neondata.BrightcovePlatform.get('acct1', 'i1').videos['123456789'],
+            job_id)
+        self.assertEquals(self.integration.platform.videos['123456789'],
+                          job_id)
+
 
     # TODO move this to a mock class
     def create_search_response(self, num_of_results=random.randint(5, 10)):
