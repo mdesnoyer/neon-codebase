@@ -1254,7 +1254,7 @@ class LocalSearcher(object):
         _log.info('Beginning thumbnail selection for video %s, random seed '
                   'for this run is %i', video_name, rand_seed)
         np.random.seed(rand_seed)
-        thumbs = self.choose_thumbnails_impl(video, video_name, n)
+        thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
 
     def _set_up_testing(self):
