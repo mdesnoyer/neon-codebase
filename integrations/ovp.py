@@ -419,7 +419,7 @@ class OVPIntegration(object):
             _log.warn_n('Could not find thumbnail in %s' % data)
             return
         ext_thumb_urls = [self._normalize_thumbnail_url(x)
-                          for x in self._get_image_urls_from_response(data)]
+                          for x in self._extract_image_urls(data)]
 
         # Get our video and thumbnail metadata objects
         video_meta = yield neondata.VideoMetadata.get_by_external_id(
@@ -454,13 +454,12 @@ class OVPIntegration(object):
 
                 # Check if our record's external id matches the response's
                 if (unicode(thumb.external_id) in
-                        self._get_image_field_from_response(data, 'id')):
+                        self._extract_image_field(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
 
                 # For legacy thumbs, we specified a reference id. Look for it
-                if thumb.refid in self._get_image_field_from_response(
-                        data, 'referenceId'):
+                if thumb.refid in self._extract_image_field(data, 'referenceId'):
                     found_thumb = True
 
                     yield tornado.gen.Task(neondata.ThumbnailMetadata.modify,
@@ -484,7 +483,7 @@ class OVPIntegration(object):
         # (provided it doesn't have a duplicate hash).
         if not found_thumb:
 
-            urls = self._get_image_urls_from_response(data)
+            urls = self._extract_image_urls(data)
             is_exist, added_image = False, False
             for url in urls[::-1]:
                 try:

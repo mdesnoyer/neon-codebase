@@ -53,6 +53,80 @@ class TestParseFeed(test_utils.neontest.TestCase):
         with self.assertRaises(Exception):
             integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
 
+    _mock_video_response = {
+        'id': 'video_id',
+        'relatedMedia': {
+            'media': [
+                {
+                    'type': 'reference',
+                    'id': 'refid0'
+                }, {
+                    'type': 'image',
+                    'id': 'thumbid0',
+                    'cuts': {
+                        'large4to3': {
+                            'height': 480,
+                            'width': 640,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-large-0.jpg'
+                        },
+                        'medium4to3': {
+                            'height': 300,
+                            'width': 400,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-med-0.jpg'
+                        },
+                        'exlarge16to9': {
+                            'height': 619,
+                            'width': 1100,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-0.jpg'
+                        }
+                    }
+                }, {
+                    'type': 'image',
+                    'id': 'thumbid1',
+                    'cuts': {
+                        'large4to3': {
+                            'height': 480,
+                            'width': 640,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-large-1.jpg'
+                        },
+                        'medium4to3': {
+                            'height': 300,
+                            'width': 400,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-med-1.jpg'
+                        },
+                        'exlarge16to9': {
+                            'height': 619,
+                            'width': 1100,
+                            'url': 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-1.jpg'
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+    def test_extract_image_field(self):
+        id0 = u'thumbid0'
+        id1 = u'thumbid1'
+        ids = integrations.cnn.CNNIntegration._extract_image_field(
+                self._mock_video_response, 'id')
+        self.assertTrue(id0 in ids and id1 in ids)
+
+    def test_extract_image_urls(self):
+        url0 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-0.jpg'
+        url1 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-1.jpg'
+        extract = integrations.cnn.CNNIntegration._extract_image_urls(
+                self._mock_video_response)
+        self.assertTrue(url0 in extract and url1 in extract)
+
+    def test_normalize_thumbnail_url(self):
+        given = ('http://ht.cdn.turner.com/cnn/big/world/2016/03/01/'
+                 'child-china-orig-vstan-bpb.cnn_512x288_550k.mp4?param=0&param=1%20')
+        want = ('ht.cdn.turner.com/cnn/big/world/2016/03/01/'
+                'child-china-orig-vstan-bpb.cnn_512x288_550k.mp4')
+        self.assertEquals(
+                integrations.cnn.CNNIntegration._normalize_thumbnail_url(given), want)
+
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
 
@@ -152,67 +226,16 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         pass
 
     @tornado.testing.gen_test
-    def test_grab_new_thumbnail(self):
-        '''A number of staticmethods of CNNIntegration need
-            to be exercised.
-        '''
-        pass
-
-    @tornado.testing.gen_test
     def test_video_has_title(self):
-        '''CNN video's NeonApiRequest has a title field.'''
-        pass
+        '''CNN video's NeonApiRequest has a title field after submission.'''
 
-    @tornado.testing.gen_test
-    def test_submit_typical_cnn_video(self):
-        job_id = yield self.external_integration.submit_one_video_object(
-            { 'id' : 123456789,
-              'referenceId': None,
-              'name' : 'Some video',
-              'length' : 100,
-              'publishedDate' : "1439768747000",
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : None,
-                  'remoteUrl' : None
-              },
-              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
-              'thumbnail' : {
-                  'id' : 123456,
-                  'referenceId' : None,
-                  'remoteUrl' : None
-              },
-              'FLVURL' : 'http://video.mp4'
-            })
-
+        response = self.create_search_response(1)
+        self.cnn_api_mock.side_effect = [response]
+        submission = response['docs'][0]
+        self.submit_mock.side_effect = [{'job_id': 'job1'}]
+        job_id = yield self.external_integration.submit_one_video_object(submission)
         self.assertIsNotNone(job_id)
-
-        url, submission = self._get_video_submission()
-        self.assertEquals(
-            url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
-                  'neon_integrations/i1/create_thumbnail_api_request'))
-        self.assertEquals(
-            submission,
-            {'video_id': '123456789',
-             'video_url': 'http://video.mp4',
-             'video_title': 'Some video',
-             'callback_url': None,
-             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
-             'external_thumbnail_id': 'still_id',
-             'custom_data': { '_bc_int_data' :
-                              { 'bc_id' : 123456789, 'bc_refid': None }},
-             'duration' : 0.1,
-             'publish_date' : '2015-08-16T23:45:47'
-             })
-
-        # Make sure the video was added to the BrightcovePlatform object
-        self.assertEquals(
-            neondata.BrightcovePlatform.get('acct1', 'i1').videos['123456789'],
-            job_id)
-        self.assertEquals(self.integration.platform.videos['123456789'],
-                          job_id)
-
+        # @TODO
 
     # TODO move this to a mock class
     def create_search_response(self, num_of_results=random.randint(5, 10)):

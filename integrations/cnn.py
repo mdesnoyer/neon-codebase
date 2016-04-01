@@ -19,7 +19,6 @@ import tornado.gen
 import api.cnn_api
 import integrations.ovp
 from cmsdb import neondata
-from utils import statemon
 
 _log = logging.getLogger(__name__)
 
@@ -160,16 +159,24 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             )
 
     @staticmethod
-    def _get_image_field_from_response(response, field):
-        '''Extract a list of fields from the media in the response.'''
+    def _extract_image_field(response, field):
+        '''Extract values of a field in the images in the response from CNN
+
+           Return list of unicode strings
+        '''
         media = response['relatedMedia']['media']
-        return [unicode(m.get(field)) for m in media if m.get(field) is not None]
+        return [unicode(m.get(field)) for m in media
+                if m['type'] == 'image' and
+                m.get(field) is not None]
 
     @staticmethod
-    def _get_image_urls_from_response(response):
-        '''Get a list of urls, one for each item in media'''
+    def _extract_image_urls(response):
+        '''Extract the list of high-quality image urls in the response
+           from CNN'''
         media = response['relatedMedia']['media']
-        return [m.cuts['exlarge16to9'] for m in media]
+        return [m['cuts'].get('exlarge16to9')['url'] for m in media
+                if m['type'] == 'image' and
+                m['cuts'].get('exlarge16to9') is not None]
 
     @staticmethod
     def _normalize_thumbnail_url(url):

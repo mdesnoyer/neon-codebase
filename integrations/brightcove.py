@@ -380,7 +380,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             neondata.NeonApiRequest.modify,
             job_id, self.platform.neon_api_key, _update_request)
 
-
     @staticmethod
     def _get_best_image_info(data):
         '''Returns the (url, {image_struct}) of the best image in the
@@ -398,8 +397,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return url, obj
 
     @staticmethod
-    def _get_image_field_from_response(response, field):
-        '''Extracts a list of fields from the images in the response.'''
+    def _extract_image_field(response, field):
+        '''Extract values of a field in the images in the response
+           from Brightcove
+
+           Return list of unicode strings
+        '''
         vals = []
         for image_type in ['thumbnail', 'videoStill']:
             fields = response.get(image_type, None)
@@ -409,7 +412,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return [unicode(x) for x in vals if x is not None]
 
     @staticmethod
-    def _get_image_urls_from_response(response):
+    def _extract_image_urls(response):
+        '''Extract the list of image urls in the response from Brightcove'''
         urls = []
         for image_type in ['thumbnail', 'videoStill']:
             urls.append(response.get(image_type + 'URL', None))
