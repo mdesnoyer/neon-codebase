@@ -278,9 +278,9 @@ def get_groupby_select(impression_metric=None, page_regex=None,
             'clicks' : 'imclickpageurl',
             'plays' : 'videopageurl'
             }
-        clauses.append('regexp_extract(%s, %s, 1) as page_type' %
-                       col_map[impression_metric],
-                       page_regex)
+        clauses.append("regexp_extract(parse_url(%s, 'PATH'), '%s', 1) as page_type" %
+                       (col_map[impression_metric],
+                       page_regex))
     if desktop_mobile_split:
         clauses.append("agentinfo_os_name in "
                     "('iPhone', 'Android', 'IPad', 'BlackBerry') "

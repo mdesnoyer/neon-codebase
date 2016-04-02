@@ -168,7 +168,7 @@ def get_event_data(video_id, key_times, metric, null_metric):
 
     url_clause=''
     if options.page_regex:
-        url_clause = (" AND parse_url(imloadpageurl, 'PATH') rlike %s " % 
+        url_clause = (" AND parse_url(imloadpageurl, 'PATH') rlike '%s' " % 
                       options.page_regex)
     
     query = (
@@ -309,8 +309,8 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
         if cur_stats is not None:
             thumb_stats.append(cur_stats)
 
-        if len(thumb_stats) > 10:
-            break
+        #if len(thumb_stats) > 10:
+        #    break
 
     return pandas.concat(thumb_stats)
 
@@ -356,12 +356,11 @@ def main():
                               right_index=True)
 
     # Zero out the non-neon data
-    stat_table[['extra_conversions', 'xtra_conv_at_sig']][
-        stat_table['type'] != 'neon'] = float('nan')
+    stat_table.loc[stat_table['type'] != 'neon', ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
 
     # Set the indices
     groups = stat_table.index.names
-    stat_table.reset_index(inplace=True)
+    stat_table = stat_table.reset_index()
     stat_table.set_index(['integration_id', 'video_id', 'type', 'rank'] +
                          groups, inplace=True)
     stat_table = sort_stats(stat_table)
