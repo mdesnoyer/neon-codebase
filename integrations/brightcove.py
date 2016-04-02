@@ -239,7 +239,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''override from ovp'''
         return self.platform.callback_url
 
-    def get_video_title(self, video):
+    @staticmethod
+    def get_video_title(video):
         '''override from ovp'''
         video_title = video.get('name', '')
         return unicode(video_title)

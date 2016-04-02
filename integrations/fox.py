@@ -68,9 +68,10 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         '''override from ovp''' 
         return None 
 
-    def get_video_title(self, video):
+    @staticmethod
+    def get_video_title(video):
         '''override from ovp''' 
-        return video.get('title', 'no title')
+        return video.get('title', u'no title')
 
     def get_video_custom_data(self, video):
         '''override from ovp''' 

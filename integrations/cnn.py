@@ -67,9 +67,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         '''override from ovp'''
         return None
 
-    def get_video_title(self, video):
+    @staticmethod
+    def get_video_title(video):
         '''override from ovp'''
-        return video.get('title', 'no title')
+        if video.get('title') is not None:
+            return unicode(video['title'])
+        if video.get('headline') is not None:
+            return unicode(video['headline'])
+        return u'no title'
 
     def get_video_custom_data(self, video):
         '''override from ovp'''

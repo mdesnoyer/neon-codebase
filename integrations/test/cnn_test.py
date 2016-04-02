@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
@@ -126,6 +127,37 @@ class TestParseFeed(test_utils.neontest.TestCase):
                 'child-china-orig-vstan-bpb.cnn_512x288_550k.mp4')
         self.assertEquals(
                 integrations.cnn.CNNIntegration._normalize_thumbnail_url(given), want)
+
+    def test_get_video_title(self):
+        cnn_video_with_title_and_headline = {
+            'id': 'h_4f9ca8a64c2911905bd2196b8a246253',
+            'title': 'Sanders, Clinton spar over Wall Street ties',
+            'headline': 'Sanders, Clinton spar'
+        }
+        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
+            cnn_video_with_title_and_headline),
+            'Sanders, Clinton spar over Wall Street ties',
+            'prefer title over headline')
+
+        cnn_video_with_just_title = {
+            'id': 'h_4f9ca8a64c2911905bd2196b8a246254',
+            'title': 'Sanders and Clinton team up to fight the Nazi zombie horde',
+            'headline': None
+        }
+        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
+            cnn_video_with_just_title),
+            'Sanders and Clinton team up to fight the Nazi zombie horde',
+            'use a title if given one')
+
+        cnn_video_with_just_headline = {
+            'id': 'h_4f9ca8a64c2911905bd2196b8a246255',
+            'title': None,
+            'headline': 'Clinton and Sanders battle over auto industry bailout'
+        }
+        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
+            cnn_video_with_just_headline),
+            'Clinton and Sanders battle over auto industry bailout'
+        )
 
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
