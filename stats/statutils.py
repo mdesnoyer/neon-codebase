@@ -18,6 +18,8 @@ import dateutil.parser
 import impala.dbapi
 import impala.error
 import logging
+import pandas
+import re
 from utils.options import options, define
 
 _log = logging.getLogger(__name__)
@@ -29,6 +31,12 @@ define('stats_cluster_type', default='video_click_stats',
 define("stats_port", default=21050, type=int,
        help="Port to connect to the stats db on")
 
+class MetricTypes:
+    LOADS = 'loads'
+    VIEWS = 'views'
+    CLICKS = 'clicks'
+    PLAYS = 'plays'
+    
 impala_col_map = {
     MetricTypes.LOADS: 'imloadclienttime',
     MetricTypes.VIEWS: 'imvisclienttime',
@@ -131,7 +139,7 @@ def get_thumb_metadata(video_objs):
     '''Returns a pandas DataFrame for metadata about each thumbnail.'''
     _log.info('Extracting metadata about videos')
     video_data = pandas.DataFrame(
-        [{'video_id': x.video_id,
+        [{'video_id': x.key,
           'video_url': x.url,
           'integration_id':x.integration_id} for x in
           video_objs])
@@ -144,12 +152,13 @@ def get_thumb_metadata(video_objs):
           'title': x.video_title} 
           for x in requests if x is not None])
 
-    video_data = video_data.join(request_data, on='video_id', how='outer')
+    video_data = pandas.merge(video_data, request_data, how='outer',
+                              on='video_id')
 
     _log.info('Extracting metadata about thumbnails')
     thumbnail_objs = neondata.ThumbnailMetadata.get_many(
         reduce(lambda x, y: x | y,
-               [set(x.thumbnail_ids) for x in video_objs.itervalues()]))
+               [set(x.thumbnail_ids) for x in video_objs]))
     thumb_data = pandas.DataFrame(
         [{'thumbnail_id' : x.key,
           'video_id': x.video_id, 
@@ -157,8 +166,9 @@ def get_thumb_metadata(video_objs):
           'rank': x.rank if x.type=='neon' else 0}
            for x in thumbnail_objs if x is not None])
 
-    retval = thumb_data.join(video_data, on='video_id')
-    return retval.set_index('thumbnail_id', inplace=True)
+    retval = pandas.merge(thumb_data, video_data, on='video_id')
+    retval.set_index('thumbnail_id', inplace=True)
+    return retval
     
 
 def get_time_clause(start_time=None, end_time=None):
@@ -289,12 +299,13 @@ def get_baseline_thumb(thumb_info, impressions, baseline_types=['default'],
     baseline_types - List of types, in order of preference that can be a 
                      baseline
     '''
+    imp_name = impressions.name
     tinfo = thumb_info.join(impressions, how='outer', rsuffix='imp')
 
     for btype in baseline_types:
-        valid_bases = tinfo.loc((tinfo['type'] == btype) &
-                                (tinfo['imp'] > min_impressions)).sort_values(
-            'rank', axis=1, ascending=True)
+        valid_bases = tinfo.loc[(tinfo['type'] == btype) &
+                                (tinfo[imp_name] > min_impressions)
+                                ].sort('rank', ascending=True)
         if len(valid_bases) > 0:
             return valid_bases.index[0]
 

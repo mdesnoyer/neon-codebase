@@ -227,14 +227,22 @@ def calc_thumb_stats(base_impressions, base_conversions,
     ctr_base = pandas.Series(base_conversions / base_impressions)
     ctr_thumb = pandas.Series(thumb_conversions / thumb_impressions)
 
-    lift = pandas.Series((ctr_thumb - ctr_base) / ctr_base)
-    lift[np.logical_or(ctr_base < 1e-8, not np.isfinite(ctr_thumb))] = 0.0
+    idx_names = ctr_thumb.index.names
+    if len(idx_names) == 1:
+        idx_names = idx_names[0]
 
-    stats = pandas.DataFrame({'lift': lift,
-                              'ctr' : ctr_thumb})
-    stats['revlift'] = 1 - (ctr_base / ctr_thumb)
-    stats['revlift'][np.logical_or(ctr_thumb < 1e-8, 
-                                   not np.isfinite(ctr_thumb))] = 0.0
+    lift = pandas.Series((ctr_thumb - ctr_base) / ctr_base)
+    bad_idx = (ctr_base < 1e-8) | ~np.isfinite(ctr_thumb)
+    for i in bad_idx[bad_idx].index:
+        lift[i] = 0.0
+
+    tstats = pandas.concat([lift, ctr_thumb], keys=['lift', 'ctr_thumb'],
+                           axis=1, copy=False)
+    tstats.index.rename(idx_names, inplace=True)
+    tstats['revlift'] = 1 - (ctr_base / ctr_thumb)
+    bad_idx = (ctr_thumb < 1e-8) | ~np.isfinite(ctr_thumb)
+    for i in bad_idx[bad_idx].index:
+        tstats['revlift'][i] = 0.0
     
     se_base = np.sqrt(ctr_base * (1-ctr_base) / base_impressions)
     se_thumb = np.sqrt(ctr_thumb * (1-ctr_thumb) / thumb_impressions)
@@ -246,12 +254,12 @@ def calc_thumb_stats(base_impressions, base_conversions,
         scipy.stats.norm(0, 1).cdf(zscore),
         index=zscore.index)
     p_value = p_value.where(p_value > 0.5, 1 - p_value)
-    stats['p_value'] = p_value
+    tstats['p_value'] = p_value
 
-    stats['ctr'] = ctr_thumb
-    stats['extra_conversions'] = (thumb_conversions * stats['revlift']).replace(np.inf, 0).replace(-np.inf, 0)
+    tstats['ctr'] = ctr_thumb
+    tstats['extra_conversions'] = (thumb_conversions * tstats['revlift']).replace(np.inf, 0).replace(-np.inf, 0)
 
-    return stats
+    return tstats
 
 def calc_aggregate_ab_metrics(data):
     '''Calculates aggregate A/B metrics for multiple videos

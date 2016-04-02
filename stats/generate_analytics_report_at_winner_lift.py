@@ -76,12 +76,6 @@ define("show_bad_experiment_vids", default=0, type=int,
 
 _log = logging.getLogger(__name__)
 
-class MetricTypes:
-    LOADS = 'loads'
-    VIEWS = 'views'
-    CLICKS = 'clicks'
-    PLAYS = 'plays'
-
 
 def get_time_range(video_ids):
     '''For a list of video ids get the (min, max) time range in floats.'''
@@ -111,7 +105,7 @@ def get_hourly_stats_from_impala(video_info, impression_metric,
 
     _log.info('Getting all the %s and %s counts' % (impression_metric,
                                                     conversion_metric))
-    if conversion_metric == MetricTypes.PLAYS:
+    if conversion_metric == statutils.MetricTypes.PLAYS:
         query = (
             """select 
             cast(floor(servertime/3600)*3600 as timestamp) as hr,
@@ -175,10 +169,10 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
     Returns a pandas DataFrame with columns of hr, imp, conv and thumbnail_id
     '''
     col_map = {
-        MetricTypes.LOADS: 'il',
-        MetricTypes.VIEWS: 'iv',
-        MetricTypes.CLICKS: 'ic',
-        MetricTypes.PLAYS: 'vp'
+        statutils.MetricTypes.LOADS: 'il',
+        statutils.MetricTypes.VIEWS: 'iv',
+        statutils.MetricTypes.CLICKS: 'ic',
+        statutils.MetricTypes.PLAYS: 'vp'
         }
     start_time, end_time = get_time_range(video_info.keys())
         
@@ -219,8 +213,8 @@ def get_hourly_stats_from_hbase(video_info, thumbnail_info, impression_metric,
     return pandas.DataFrame(data)
 
 def collect_stats(thumb_info, video_info,
-                  impression_metric=MetricTypes.LOADS,
-                  conversion_metric=MetricTypes.CLICKS):
+                  impression_metric=statutils.MetricTypes.LOADS,
+                  conversion_metric=statutils.MetricTypes.CLICKS):
     '''Grabs the stats counts from the database and some calculations.
 
     Inputs:
@@ -469,7 +463,7 @@ def calculate_cmsdb_stats():
         
 def main():    
     _log.info('Getting metadata about the videos.')
-    video_info = statutils.get_video_objects(MetricTypes.VIEWS,
+    video_info = statutils.get_video_objects(statutils.MetricTypes.VIEWS,
                                              options.pub_id,
                                              options.start_time,
                                              options.end_time,
@@ -498,20 +492,20 @@ def main():
                               options.impressions,
                               options.conversions),
         #'CTR (Loads)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.LOADS,
-        #                              MetricTypes.CLICKS),
+        #                              statutils.MetricTypes.LOADS,
+        #                              statutils.MetricTypes.CLICKS),
         #'CTR (Views)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.VIEWS,
-        #                              MetricTypes.CLICKS),
+        #                              statutils.MetricTypes.VIEWS,
+        #                              statutils.MetricTypes.CLICKS),
         #'PTR (Loads)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.LOADS,
-        #                              MetricTypes.PLAYS),
+        #                              statutils.MetricTypes.LOADS,
+        #                              statutils.MetricTypes.PLAYS),
         #'PTR (Views)' : collect_stats(thumbnail_info, video_info,
-        #                              MetricTypes.VIEWS,
-        #                              MetricTypes.PLAYS),
+        #                              statutils.MetricTypes.VIEWS,
+        #                              statutils.MetricTypes.PLAYS),
         #'VTR' : collect_stats(thumbnail_info, video_info,
-        #                      MetricTypes.LOADS,
-        #                      MetricTypes.VIEWS),           
+        #                      statutils.MetricTypes.LOADS,
+        #                      statutils.MetricTypes.VIEWS),           
         }
     video_data = pandas.concat(video_stats.values(),
                                keys=video_stats.keys(),
