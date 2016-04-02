@@ -320,9 +320,12 @@ def sort_stats(stats):
     # First group by the index
     stats.sortlevel()
 
+    index_names = stats.index.names
+    stats.reset_index(inplace=True)
+
     # Sort so that the videos with the best lift are first
-    sortIdx = stats.groupby('video_id').transform(lambda x: x.max()).sort(
-        ['lift', 'thumbnail_id'], ascending=False).index
+    sortIdx = stats.groupby('video_id').transform(
+        lambda x: x.max()).sort(['lift'], ascending=False).index
     stats = stats.ix[sortIdx]
 
     # Now sort within each video first by type, then by lift
