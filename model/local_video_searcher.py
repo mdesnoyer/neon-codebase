@@ -1432,29 +1432,30 @@ class LocalSearcher(object):
             # frames = [x for n, x in enumerate(frames) if accepted[n]]
         # ---------- START OF TEXT PROCESSING
         # filter text too
-        text_d = [cv2.text.textDetect(x, *self.text_filter_params) 
-                    for x in frames]
-        masks = [x[1] for x in text_d]
-        # accept only those where tet occupies a sufficiently small amount of
-        # the image.
-        accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
-                    for x in masks]
-        n_rej = np.sum(np.logical_not(accepted))
-        n_acc = np.sum(accepted)
-        _log.debug(('Filter for feature %s has '
-                    'has rejected %i frames, %i remain' % (
-                        'fancy text detect', n_rej, n_acc)))
-        if not np.any(accepted):
-            _log.debug('No frames accepted by filters')
-            return
-        # filter the current features across all feature
-        # dicts, as well as the framenos
-        acc_idxs = list(np.nonzero(accepted)[0])
-        for k in frame_feats.keys():
-            frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
-        framenos = [framenos[x] for x in acc_idxs]
-        frames = [frames[x] for x in acc_idxs]
-        gold = [gold[x] for x in acc_idxs]
+        if self.filter_text:
+            text_d = [cv2.text.textDetect(x, *self.text_filter_params) 
+                        for x in frames]
+            masks = [x[1] for x in text_d]
+            # accept only those where tet occupies a sufficiently small amount of
+            # the image.
+            accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
+                        for x in masks]
+            n_rej = np.sum(np.logical_not(accepted))
+            n_acc = np.sum(accepted)
+            _log.debug(('Filter for feature %s has '
+                        'has rejected %i frames, %i remain' % (
+                            'fancy text detect', n_rej, n_acc)))
+            if not np.any(accepted):
+                _log.debug('No frames accepted by filters')
+                return
+            # filter the current features across all feature
+            # dicts, as well as the framenos
+            acc_idxs = list(np.nonzero(accepted)[0])
+            for k in frame_feats.keys():
+                frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+            framenos = [framenos[x] for x in acc_idxs]
+            frames = [frames[x] for x in acc_idxs]
+            gold = [gold[x] for x in acc_idxs]
         # ---------- END OF ADDITION
         for k, f in self.generators.iteritems():
             if k in frame_feats:
