@@ -7,20 +7,20 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from cmsdb import neondata
 import datetime
-import integrations.cnn
 import logging
 from mock import patch
 import random
 import string
-import test_utils.redis
-import test_utils.neontest
-import test_utils.postgresql
 import time
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
+from cmsdb import neondata
+import integrations.cnn
+import test_utils.redis
+import test_utils.neontest
+import test_utils.postgresql
 from utils.options import options
 
 
@@ -111,7 +111,8 @@ class TestParseFeed(test_utils.neontest.TestCase):
         id1 = u'thumbid1'
         ids = integrations.cnn.CNNIntegration._extract_image_field(
                 self._mock_video_response, 'id')
-        self.assertTrue(id0 in ids and id1 in ids)
+        self.assertIn(id0, ids)
+        self.assertIn(id1, ids)
 
     def test_extract_image_urls(self):
         url0 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-0.jpg'
@@ -250,11 +251,35 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             integration.last_process_date)
 
     @tornado.testing.gen_test
-    def test_new_default_thumb(self):
+    def test_when_default_thumb_changes(self):
         '''When a CNN video is processed and a new thumbnail
-           is found, the default thumbnail is made the new
+           is included, the new thumbnail is made the default
            thumbnail.
         '''
+
+        response = self.create_search_response(1)
+        api_video = response['docs'][0]
+        submit_thumb_url = api_video['relatedMedia']['media'][0]['cuts']['exlarge16to9']['url'] = 'http://cdn.cnn.com/thumbnail_orig.jpg'
+        self.cnn_api_mock.side_effect = [response]
+        yield self.external_integration.submit_one_video_object(api_video)
+
+        # Check the url of the default thumbnail
+        cargs_list = self.submit_mock.call_args_list
+        call_args = cargs_list[0][1]
+        self.assertEquals(submit_thumb_url, call_args['default_thumbnail'])
+
+        # Set the database record for the second call
+        ext_video_id = call_args['video_id']
+        video_id = neondata.InternalVideoID.generate(
+            self.external_integration.neon_api_key, ext_video_id)
+        neon_video = neondata.VideoMetadata(video_id)
+        neon_video.save()
+
+        # Alter the search api response so a new thumbnail url is present
+        new_thumb_url = api_video['relatedMedia']['media'][0]['cuts']['exlarge16to9']['url'] = 'http://cdn.cnn.com/thumbnail_new.jpg'
+        #yield self.external_integration.submit_one_video_object(api_video)
+
+    def test_when_default_thumb_has_no_change(self):
         pass
 
     @tornado.testing.gen_test

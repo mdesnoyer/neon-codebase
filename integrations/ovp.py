@@ -173,6 +173,7 @@ class OVPIntegration(object):
     def submit_one_video_object(self,
                                 video,
                                 grab_new_thumb=True):
+
         try:
             job_id = yield self._submit_one_video_object_impl(
                     video, grab_new_thumb=grab_new_thumb)
@@ -224,10 +225,9 @@ class OVPIntegration(object):
             except AttributeError as e:
                 # already a string, leave it alone
                 pass
-        existing_video = yield tornado.gen.Task(
-                neondata.VideoMetadata.get,
-                neondata.InternalVideoID.generate(
-                    self.neon_api_key, video_id))
+
+        existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get,
+            neondata.InternalVideoID.generate(self.neon_api_key, video_id))
 
         # TODO this won't be necessary once videos are removed from platforms
         if not self.does_video_exist(existing_video, video_id):
@@ -408,11 +408,9 @@ class OVPIntegration(object):
     def _grab_new_thumb(self, data, external_video_id):
         '''Grab a new thumbnail from a video object if there is one.
 
-        overrides ovp
-
         Inputs:
-        data - A video object
-        external_video_id - The brightcove video id
+        data - The video object in the partner's data structure format
+        external_video_id - The partner's video id
         '''
         thumb_url, thumb_data = self._get_best_image_info(data)
         if thumb_data is None:
@@ -422,8 +420,8 @@ class OVPIntegration(object):
                           for x in self._extract_image_urls(data)]
 
         # Get our video and thumbnail metadata objects
-        video_meta = yield neondata.VideoMetadata.get_by_external_id(
-             self.platform.neon_api_key, external_video_id)
+        video_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
+            neondata.InternalVideoID.generate(self.neon_api_key, external_video_id))
         if not video_meta:
             _log.error('Could not find video %s' % external_video_id)
             statemon.state.increment('video_not_found')
@@ -435,13 +433,16 @@ class OVPIntegration(object):
         if external_id is not None:
             external_id = unicode(external_id)
 
-        # Function that will set the external id in the ThumbnailMetadata
+        # Function that to update external id in the ThumbnailMetadata
+        # if the video matches a record in our database with no external id
         def _set_external_id(obj):
             obj.external_id = external_id
 
+        # Track the highest rank so a new thumbnail can be ranked above 
         found_thumb, min_rank = False, 1
         for thumb in thumbs_meta:
 
+            # Some videos have a legacy format and need migration
             self._run_migration(thumb)
 
             if (thumb is None or thumb.type != neondata.ThumbnailType.DEFAULT):
@@ -458,7 +459,7 @@ class OVPIntegration(object):
                     found_thumb = True
             elif thumb.refid is not None:
 
-                # For legacy thumbs, we specified a reference id. Look for it
+                # For legacy thumbs, we specified a reference id. Match on it
                 if thumb.refid in self._extract_image_field(data, 'referenceId'):
                     found_thumb = True
 
@@ -467,7 +468,7 @@ class OVPIntegration(object):
                                            _set_external_id)
             else:
                 # We do not have the id for this thumb, so see if we
-                # can match the url.
+                # can match on the url
                 norm_urls = set([self._normalize_thumbnail_url(x)
                                  for x in thumb.urls])
                 if len(norm_urls.intersection(ext_thumb_urls)) > 0:

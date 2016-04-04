@@ -5493,14 +5493,6 @@ class VideoMetadata(StoredObject):
         return 'objset:%s' % self.get_account_id()
 
     @classmethod
-    @tornado.gen.coroutine
-    def get_by_external_id(cls, neon_api_key, external_id):
-        '''Return the video metadata for a given external_id or None.'''
-        video_id = InternalVideoID.generate(neon_api_key, external_id)
-        video = yield tornado.gen.Task(VideoMetadata.get, video_id)
-        raise tornado.gen.Return(video)
-
-    @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.'''
         return VideoMetadata.__name__

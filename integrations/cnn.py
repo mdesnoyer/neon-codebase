@@ -101,7 +101,7 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''
-        thumb_url, thumb_ref = self._get_best_image_info(video['relatedMedia'])
+        thumb_url, thumb_ref = self._get_best_image_info(video)
         return {
             'thumb_url': thumb_url,
             'thumb_ref': thumb_ref
@@ -128,9 +128,9 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
         '''Returns the (url, {image_struct}) of the best image in the
            CNN related media object.
         '''
-        if 'media' in media_json:
+        if 'relatedMedia' in media_json and 'media' in media_json['relatedMedia']:
             # now we need to iter on the items as there could be multiple images here
-            for item in media_json['media']:
+            for item in media_json['relatedMedia']['media']:
                 try:
                     if item['type'] == 'image':
                         cuts = item['cuts']
