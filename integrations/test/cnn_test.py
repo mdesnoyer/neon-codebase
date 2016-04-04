@@ -261,13 +261,19 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def test_video_has_title(self):
         '''CNN video's NeonApiRequest has a title field after submission.'''
 
+        # Make a mock video with no title but a headline
         response = self.create_search_response(1)
+        response['docs'][0]['title'] = None
+        expect_title = response['docs'][0]['headline'] = 'Shocking headline'
         self.cnn_api_mock.side_effect = [response]
-        submission = response['docs'][0]
+
         self.submit_mock.side_effect = [{'job_id': 'job1'}]
-        job_id = yield self.external_integration.submit_one_video_object(submission)
-        self.assertIsNotNone(job_id)
-        # @TODO
+        yield self.external_integration.submit_new_videos()
+
+        cargs_list = self.submit_mock.call_args_list
+        call_one = cargs_list[0][1]
+        self.assertEquals(self.submit_mock.call_count, 1)
+        self.assertEquals(expect_title, call_one['video_title'])
 
     # TODO move this to a mock class
     def create_search_response(self, num_of_results=random.randint(5, 10)):
