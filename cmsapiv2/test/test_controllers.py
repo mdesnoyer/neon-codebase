@@ -1282,10 +1282,7 @@ class TestVideoHandler(TestControllersBase):
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
@@ -1294,12 +1291,14 @@ class TestVideoHandler(TestControllersBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -1913,60 +1912,6 @@ class TestVideoHandler(TestControllersBase):
 	url = '/api/v2/%s/videos' % '1234234'
         self.post_exceptions(url, params, exception_mocker) 
 
-# TODO KF here until hot swap is done
-class TestVideoHandlerPG(TestVideoHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testvideohiid'
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500,
-                                   urls=['s']).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500,
-                                   urls=['d']).save()
-        neondata.NeonApiRequest('job1', self.account_id_api_key).save()
-        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
-        user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image]
-        self.http_mocker = patch('utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(
-              self.http_mocker.start()) 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        self.maxDiff = 5000
-        super(TestVideoHandler, self).setUp()
-
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.http_mocker.stop()
-        self.verify_account_mocker.stop()
-        super(TestVideoHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -1996,10 +1941,7 @@ class TestThumbnailHandler(TestControllersBase):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
@@ -2007,13 +1949,14 @@ class TestThumbnailHandler(TestControllersBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
-        super(TestThumbnailHandler, cls).tearDownClass() 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -2142,53 +2085,6 @@ class TestThumbnailHandler(TestControllersBase):
 	url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker) 
  
-# TODO KF here until hot swap is done
-class TestThumbnailHandlerPG(TestThumbnailHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save() 
-        self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
-        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
-                             'tn_test_vid1')).save()
-        neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
-                             'tn_test_vid2')).save()
-
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image] 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestThumbnailHandler, self).setUp()
-
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.verify_account_mocker.stop()
-        super(TestThumbnailHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
         self.http_mocker = patch('utils.http.send_request')
@@ -3507,6 +3403,15 @@ class TestVideoSearchInternalHandler(TestControllersBase):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_search_no_videos(self):
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 0)
     
     @tornado.testing.gen_test 
     def test_search_base(self):
@@ -3528,7 +3433,7 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test 
-    def test_search_next_page(self):
+    def test_search_get_newer_prev_page(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
         yield video.save(async=True)   
         yield neondata.NeonApiRequest('job1', 
@@ -3544,15 +3449,12 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
 
-        # sleep just a bit to make sure since works
-        # we have precision to 5 places 
-        yield tornado.gen.sleep(0.0001) 
         video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
         yield video.save(async=True)   
         yield neondata.NeonApiRequest('job3', 'kevin', 
                   title='really kevins best video yet').save(async=True)
         rjson1 = json.loads(response.body)
-        url = rjson1['next_page'] 
+        url = rjson1['prev_page'] 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
@@ -3560,6 +3462,37 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         video = rjson['videos'][0]
         self.assertEquals('really kevins best video yet', video['title'])
 
+    @tornado.testing.gen_test 
+    def test_search_get_older_next_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('kevins best video yet', video['title'])
+
+        url = rjson['next_page']
+        url += '&limit=1'  
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('kevins video', video['title'])
+        
     @tornado.testing.gen_test 
     def test_search_with_limit(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
@@ -3650,7 +3583,7 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.assertEquals(rjson['video_count'], 2)
 
     @tornado.testing.gen_test 
-    def test_search_next_page(self):
+    def test_search_get_older_prev_page(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
         yield video.save(async=True)   
         yield neondata.NeonApiRequest('job1', 
@@ -3666,15 +3599,12 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
 
-        # sleep just a bit to make sure since works
-        # we have precision to 5 places 
-        yield tornado.gen.sleep(0.0001) 
         video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
         yield video.save(async=True)   
         yield neondata.NeonApiRequest('job3', 'kevin', 
                   title='really kevins best video yet').save(async=True)
         rjson1 = json.loads(response.body)
-        url = rjson1['next_page'] 
+        url = rjson1['prev_page'] 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)

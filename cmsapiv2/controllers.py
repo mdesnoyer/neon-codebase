@@ -467,6 +467,9 @@ class ThumbnailHandler(APIV2Handler):
 
         if new_video: 
             statemon.state.increment('post_thumbnail_oks')
+            new_thumbnail = yield neondata.ThumbnailMetadata.get(
+                new_thumbnail.key,
+                async=True)
             retobj = yield self.db2api(new_thumbnail)
             self.success(retobj, code=ResponseCode.HTTP_ACCEPTED)
         else:
@@ -713,32 +716,32 @@ class VideoHelper(object):
                          limit=limit)
 
         videos = search_res['videos'] 
-        next_since = search_res['since_time'] 
-        prev_until = search_res['until_time'] 
+        since_time = search_res['since_time'] 
+        until_time = search_res['until_time'] 
         vid_dict = yield VideoHelper.build_video_dict(
                        videos, 
                        fields)
 
         next_page_url = VideoHelper.build_page_url(
             base_url,
-            next_since if next_since else 0.0,
-            limit=limit, 
-            page_type='since',  
-            query=query, 
-            fields=fields,
-            account_id=account_id)
-
-        until_page_url = VideoHelper.build_page_url(
-            base_url,
-            prev_until if prev_until else 0.0,
+            until_time if until_time else 0.0,
             limit=limit, 
             page_type='until',  
             query=query, 
             fields=fields,
             account_id=account_id)
 
+        prev_page_url = VideoHelper.build_page_url(
+            base_url,
+            since_time if since_time else 0.0,
+            limit=limit, 
+            page_type='since',  
+            query=query, 
+            fields=fields,
+            account_id=account_id)
+
         vid_dict['next_page'] = next_page_url 
-        vid_dict['prev_page'] = until_page_url 
+        vid_dict['prev_page'] = prev_page_url 
         raise tornado.gen.Return(vid_dict) 
 
     @staticmethod 

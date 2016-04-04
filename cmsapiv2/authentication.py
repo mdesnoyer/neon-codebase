@@ -350,7 +350,7 @@ class NewUserHandler(APIV2Handler):
                        access_level=args.get('access_level'))
 
         yield new_user.save(async=True)
- 
+        new_user = yield neondata.User.get(args.get('username'), async=True)  
         user = yield self.db2api(new_user)
 
         self.success(user)

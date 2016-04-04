@@ -406,11 +406,16 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a connection')
 
-        def get_insert_json_query_tuple(self, obj):
+        def get_insert_json_query_tuple(self, 
+                                        obj, 
+                                        fields='(_data, _type)',
+                                        values='VALUES(%s, %s)',
+                                        extra_params=None):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                     " (_data, _type) " \
-                     " VALUES(%s, %s)"  
+                     fields + " " + values
             params = (obj.get_json_data(), obj.__class__.__name__)
+            if extra_params:
+                params = params + extra_params 
             return (query, params)
 
         def get_update_json_query_tuple(self, obj):
@@ -1424,7 +1429,6 @@ class StoredObject(object):
     ''' 
     def __init__(self, key):
         self.key = str(key)
-        self.created = self.updated = str(datetime.datetime.utcnow()) 
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -1494,15 +1498,16 @@ class StoredObject(object):
                     obj[key] = PythonNaNStrings.NAN
             return obj
         obj = _json_fixer(self.to_dict()['_data']) 
-        return json.dumps(obj)
+        def json_serial(obj):
+            if isinstance(obj, datetime.datetime):
+                serial = obj.isoformat()
+            return serial
+        return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
-        if not hasattr(self, 'created'): 
-            self.created = str(datetime.datetime.utcnow())
-        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
         if self.key is None:
             raise ValueError("key not set")
@@ -1565,7 +1570,20 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
-            
+
+            # throw created updated on the object if its there 
+            try:
+                for k in ['created_time_pg', 'updated_time_pg']: 
+                    if isinstance(obj_dict[k], datetime.datetime): 
+                        data_dict[k.split('_')[0]] = obj_dict[k].strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str): 
+                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
+                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
+                                "%Y-%m-%d %H:%M:%S.%f")
+            except KeyError: 
+                pass
+ 
             # create basic object using the "default" constructor
             obj = classtype(key)
 
@@ -1628,7 +1646,9 @@ class StoredObject(object):
             conn = yield db.get_connection()
 
             obj = None 
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
@@ -1695,7 +1715,9 @@ class StoredObject(object):
             results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                           created_time AS created_time_pg,\
+                           updated_time AS updated_time_pg\
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
@@ -1728,7 +1750,10 @@ class StoredObject(object):
             db = PostgresDB()
             conn = yield db.get_connection()
             baseclass_name = cls._baseclass_name().lower()
-            query = "SELECT _data, _type FROM " + baseclass_name + \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg FROM "\
+                        + baseclass_name + \
                     " WHERE _data->>'key' LIKE %s"
 
             params = ['%'+key_portion+'%']
@@ -1763,7 +1788,9 @@ class StoredObject(object):
             # do this manually 
             yield conn.execute("BEGIN")
  
-            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
+                         created_time AS created_time_pg, \
+                         updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1895,7 +1922,9 @@ class StoredObject(object):
             for key in keys: 
                 key_to_object[key] = None
  
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type,\
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1914,8 +1943,12 @@ class StoredObject(object):
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
+                    def json_serial(obj):
+                        if isinstance(obj, datetime.datetime):
+                            serial = obj.isoformat()
+                        return serial
                     # hack we need two copies of the object, copy won't work here
-                    item_one = json.loads(json.dumps(item))
+                    item_one = json.loads(json.dumps(item, default=json_serial))
                     cur_obj = create_class._create(key, item_one)
 
                 mappings[key] = cur_obj 
@@ -1927,7 +1960,17 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                    original_object = key_to_object.get(key, None)
                    if obj is not None and original_object is None: 
-                       query_tuple = db.get_insert_json_query_tuple(obj)
+                       created = datetime.datetime.utcnow()
+                       updated = datetime.datetime.utcnow()
+                       obj.__dict__['created'] = created.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       obj.__dict__['updated'] = updated.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       query_tuple = db.get_insert_json_query_tuple(
+                           obj, 
+                           fields='(_data, _type, created_time, updated_time)',
+                           values='VALUES(%s, %s, %s, %s)', 
+                           extra_params=(created, updated))  
                        insert_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
                        update_objs.append(obj)
@@ -2039,7 +2082,6 @@ class StoredObject(object):
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
             for obj in objects:
-                obj.updated = str(datetime.datetime.utcnow())
                 data[obj.key] = obj.to_json()
                 key_sets[obj._set_keyname()].append(obj.key)
     
@@ -5869,6 +5911,8 @@ class VideoMetadata(StoredObject):
            since      : if specified will find videos since this date, 
                         defaults to None, meaning it will grab the 25 most 
                         recent videos 
+           until      : if specified will find videos until this date, 
+                        defaults to None
            limit      : if specified it limits the search to this many 
                         videos, defaults to 25
 
@@ -5904,7 +5948,10 @@ class VideoMetadata(StoredObject):
             wc_params.append(account_id+'_%')
  
         results = yield cls.get_and_execute_select_query(
-                    [ "_data", "_type", "created_time", "updated_time" ], 
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg" ], 
                     where_clause, 
                     wc_params=wc_params, 
                     limit_clause="LIMIT %d" % limit, 
@@ -5913,7 +5960,7 @@ class VideoMetadata(StoredObject):
 
         def _get_time(result): 
             # need micros here 
-            created_time = result['created_time']
+            created_time = result['created_time_pg']
             cc_tt = time.mktime(created_time.timetuple())
             _time = (cc_tt + created_time.microsecond / 1000000.0)
             return _time 
@@ -5921,15 +5968,11 @@ class VideoMetadata(StoredObject):
         try:    
             since_time = _get_time(results[0]) 
             until_time = _get_time(results[-1]) 
-        except KeyError: 
-            pass 
+        except (KeyError,IndexError): 
+            pass
         
         for result in results:
             obj = cls._create(result['_data']['key'], result)
-            obj.created = result['created_time'].strftime(
-                              "%Y-%m-%d %H:%M:%S.%f")
-            obj.updated = result['updated_time'].strftime( 
-                              "%Y-%m-%d %H:%M:%S.%f")
             videos.append(obj)
 
         rv['videos'] = videos 
