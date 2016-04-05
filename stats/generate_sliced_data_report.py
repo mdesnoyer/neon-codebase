@@ -17,7 +17,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 from cmsdb import neondata
-from datetime import datetime
+from datetime import datetime, timedelta
 import dateutil.parser
 import logging
 import pandas
@@ -81,10 +81,14 @@ def get_thumbnail_statuses(thumb_ids):
                  for x in neondata.ThumbnailStatus.get_many(set(thumb_ids))])
 
 def get_key_timepoints(video, video_status, thumb_statuses):
-    '''Identifies the key times for each thumb turning having valid data.
+    '''Identifies the key times for each thumb turning having valid data
+
+    For calculating the lift.
 
     Returns: dict of thumb_id -> (on_timestamp, off_timestamp)
     '''
+    TIME_DELAY = timedelta(minutes=5)
+    
     retval = {}
     if video_status is None:
         _log.warning('Could not get status of video %s. Using all data'
@@ -98,14 +102,15 @@ def get_key_timepoints(video, video_status, thumb_statuses):
     # complete at the beginning.
     if (len(video_status.state_history) == 1 and 
         video_status.state_history[0][1] == neondata.ExperimentState.COMPLETE):
-        finish_time = dateutil.parser.parse(video_status.state_history[0][0]
-                                            ).strftime('%Y-%m-%d %H:%M:%S')
+        finish_time = dateutil.parser.parse(video_status.state_history[0][0])
     else:
         for change_time, new_status in video_status.state_history[1:]:
             if new_status == neondata.ExperimentState.COMPLETE:
-                finish_time = dateutil.parser.parse(change_time).strftime(
-                    '%Y-%m-%d %H:%M:%S')
+                finish_time = dateutil.parser.parse(change_time)
                 break
+
+    if finish_time:
+        finish_time = (finish_time + TIME_DELAY).strftime('%Y-%m-%d %H:%M:%S')
 
     # Now go through each thumbnail and get the latest time there is
     # valid data for it.
@@ -121,14 +126,14 @@ def get_key_timepoints(video, video_status, thumb_statuses):
         for change_time, serving_frac in thumb_status.serving_history:
             if serving_frac > 0 and on_time is None:
                 # The thumbnail was turned on at this time
-                on_time = dateutil.parser.parse(change_time).strftime(
-                    '%Y-%m-%d %H:%M:%S')
+                on_time = dateutil.parser.parse(change_time) + TIME_DELAY
+                on_time = on_time.strftime('%Y-%m-%d %H:%M:%S')
             if serving_frac == 0.0:
                 # The thumbnail was turned off at this time
-                off_time = dateutil.parser.parse(change_time).strftime(
-                    '%Y-%m-%d %H:%M:%S')
+                off_time = dateutil.parser.parse(change_time) + TIME_DELAY
+                off_time = off_time.strftime('%Y-%m-%d %H:%M:%S')
                 break
-
+            
         retval[thumb_id] = (on_time, off_time or finish_time)
 
     return retval
@@ -149,12 +154,23 @@ def get_event_data(video_id, key_times, metric, null_metric):
     than or equal to the key time. Also included is an "all_time"
     column for the counts over all time.
     '''
+    # Get the time window we need data for
+    min_time = min(key_times)
+    max_time = None
+    if options.end_time is not None:
+        max_time = max(key_times)
+        max_time = max([dateutil.parser.parse(x) for 
+                        x in [max_time, options.end_time]])
+        
+    
     groupby_cols = ['thumbnail_id']
     groupby_cols.extend(statutils.get_groupby_select(options.impressions,
                                                      options.page_regex,
                                                      options.split_mobile))
     
-    select_cols = ['count(%s) as all_time' % statutils.impala_col_map[metric]]
+    select_cols = ['count(%s) as all_time' % statutils.impala_col_map[metric],
+                   '%s as window_count' % statutils.get_time_window_count(
+                       metric, options.start_time, options.end_time)]
     select_cols.extend([
         "sum(if(cast(serverTime as timestamp) < '{cur_time}' and {metric} is not null, 1, 0)) as '{cur_time}'".format(
             metric=statutils.impala_col_map[metric],
@@ -187,8 +203,7 @@ def get_event_data(video_id, key_times, metric, null_metric):
             pub_id=options.pub_id,
             video_id=video_id,
             url_clause=url_clause,
-            time_clause=statutils.get_time_clause(options.start_time,
-                                                  options.end_time),
+            time_clause=statutils.get_time_clause(min_time, max_time),
             groupby_clauses=','.join(groupby_clauses)))
 
     conn = statutils.impala_connect()
@@ -196,10 +211,11 @@ def get_event_data(video_id, key_times, metric, null_metric):
     cursor.execute(query)
     
     cols = [metadata[0] for metadata in cursor.description]
-    retval = pandas.DataFrame((dict(zip(cols, row))
+    data = pandas.DataFrame((dict(zip(cols, row))
                                for row in cursor))
-    dateRe = re.compile('^[0-9]{4}-[0-9]{2}-[0-9]{2}')
-    return retval.set_index(groupby_clauses).sortlevel()
+    if 'page_type' in data.columns:
+        data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
+    return data.set_index(groupby_clauses).sortlevel()
 
 def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     '''Calculate all the stats for a single video.
@@ -254,12 +270,16 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
             inplace = True)
         slice_stats[thumb_id] = cur_stats
         
+    if len(slice_stats) == 0:
+        return None
     vid_stats = pandas.concat(slice_stats.values(), keys=slice_stats.keys(),
                               axis=0)
     vid_stats.index = vid_stats.index.set_names('thumbnail_id', level=0)
     vid_stats = pandas.concat([vid_stats,
-                               pandas.Series(imp['all_time'], name='tot_imp'),
-                               pandas.Series(conv['all_time'], name='tot_conv')
+                               pandas.Series(imp['window_count'],
+                                             name='tot_imp'),
+                               pandas.Series(conv['window_count'],
+                                             name='tot_conv'),
                                ],
                                axis=1)
     vid_stats['tot_ctr'] = vid_stats['tot_conv'] / vid_stats['tot_imp']
@@ -309,32 +329,29 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
         if cur_stats is not None:
             thumb_stats.append(cur_stats)
 
-        #if len(thumb_stats) > 10:
-        #    break
-
     return pandas.concat(thumb_stats)
 
-def sort_stats(stats):
+def sort_stats(stats_table, slices):
     _log.info('Finished collecting the data. Now sorting the table.')
     
     # First group by the index
-    stats.sortlevel()
+    stats_table.sortlevel()
 
-    index_names = stats.index.names
-    stats.reset_index(inplace=True)
+    index_names = stats_table.index.names
+    stats_table.reset_index(inplace=True)
 
     # Sort so that the videos with the best lift are first
-    sortIdx = stats.groupby('video_id').transform(
+    sortIdx = stats_table.groupby('video_id').transform(
         lambda x: x.max()).sort(['lift'], ascending=False).index
-    stats = stats.ix[sortIdx]
+    stats_table = stats_table.ix[sortIdx]
 
     # Now sort within each video first by type, then by lift
-    stats = stats.groupby('video_id', sort=False).apply(
+    stats_table = stats_table.groupby(['video_id'] + slices, sort=False).apply(
         lambda x: x.sort(['type', 'lift'], ascending=False))
-    stats = stats.set_index(index_names)
-    return stats
+    stats_table = stats_table.set_index(index_names)
+    return stats_table
 
-def main():    
+def get_full_stats_table():
     video_objs = statutils.get_video_objects(statutils.MetricTypes.VIEWS,
                                              options.pub_id,
                                              options.start_time,
@@ -356,21 +373,51 @@ def main():
                               right_index=True)
 
     # Zero out the non-neon data
-    stat_table.loc[stat_table['type'] != 'neon', ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
+    stat_table.loc[stat_table['type'] != 'neon', 
+                   ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
 
     # Set the indices
     groups = stat_table.index.names
+    slices = [x for x in groups if x != 'thumbnail_id']
     stat_table = stat_table.reset_index()
-    stat_table.set_index(['integration_id', 'video_id', 'type', 'rank'] +
-                         groups, inplace=True)
-    stat_table = sort_stats(stat_table)
+    stat_table.set_index(['integration_id', 'video_id'] + slices +
+                         ['type', 'rank', 'thumbnail_id'], inplace=True)
+    return sort_stats(stat_table, slices), slices
+
+def calculate_aggregate_stats(full_table, slices):
+    full_table = full_table.reset_index()
+    full_table = full_table.set_index(slices + ['video_id'])
+
+    return stats.metrics.calc_aggregate_click_based_stats_from_dataframe(
+        full_table).transpose()
+
+def main():  
+
+    full_table, slices = get_full_stats_table()
+
+    _log.info('Calculating aggregate stats')
+    sheets = { 'Per Video Stats' : full_table }
+    sheets['Overall'] = calculate_aggregate_stats(full_table, slices)
+    sheets['Raw Stats']= pandas.DataFrame(
+        stats.statutils.calculate_raw_stats(options.pub_id,
+                                            options.start_time,
+                                            options.end_time))
+    sheets['CMSDB Stats'] = pandas.DataFrame(
+        stats.statutils.calculate_cmsdb_stats(options.pub_id,
+                                              options.start_video_time,
+                                              options.end_video_time))
+
 
     if options.output.endswith('.xls'):
         with pandas.ExcelWriter(options.output, encoding='utf-8') as writer:
-            stat_table.to_excel(writer)
+            for sheet_name, data in sheets.iteritems():
+                data.to_excel(writer, sheet_name=sheet_name)
 
     elif options.output.endswith('.csv'):
-        stat_table.to_csv(options.output)
+        for sheet_name, data in sheets.iteritems():
+            splits = options.output.rpartition('.')
+            fn = '%s_%s.%s' % (splits[0], sheet_name, splits[1])
+            data.to_csv(fn)
 
     else:
         raise Exception('Unknown output format for %s' % options.output)

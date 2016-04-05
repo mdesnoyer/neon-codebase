@@ -163,7 +163,8 @@ def get_thumb_metadata(video_objs):
         [{'thumbnail_id' : x.key,
           'video_id': x.video_id, 
           'type': x.type,
-          'rank': x.rank if x.type=='neon' else 0}
+          'rank': x.rank,
+          'thumb_url': x.urls[0]}
            for x in thumbnail_objs if x is not None])
 
     retval = pandas.merge(thumb_data, video_data, on='video_id')
@@ -198,6 +199,23 @@ def get_time_clause(start_time=None, end_time=None):
         return ''
 
     return ' and ' + ' and '.join(clauses)
+
+def get_time_window_count(metric, start_time=None, end_time=None):
+    '''Returns a select clause to count the number of events between two times.'''
+    clauses = ['%s is not null' % impala_col_map[metric]]
+    if start_time:
+        if not isinstance(start_time, datetime):
+            start_time = dateutil.parser.parse(start_time)
+        clauses.append("cast(serverTime as timestamp) >= '%s'" %
+                       start_time.strftime('%Y-%m-%d %H:%M:%S'))
+
+    if end_time:
+        if not isinstance(end_time, datetime):
+            end_time = dateutil.parser.parse(end_time)
+        clauses.append("cast(serverTime as timestamp) < '%s'" %
+                       end_time.strftime('%Y-%m-%d %H:%M:%S'))
+
+    return 'sum(if(%s, 1, 0))' % ' and '.join(clauses)
 
 def get_mobile_clause(do_mobile):
     if do_mobile:
@@ -310,3 +328,49 @@ def get_baseline_thumb(thumb_info, impressions, baseline_types=['default'],
             return valid_bases.index[0]
 
     return None
+
+
+def calculate_raw_stats(pub_id, start_time=None, end_time=None):
+    _log.info('Calculating some raw stats')
+    conn = impala_connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        '''select count(imloadclienttime), count(imvisclienttime),
+           count(imclickclienttime), count(adplayclienttime),
+           count(videoplayclienttime) from eventsequences where 
+           tai='%s' %s''' %(pub_id,
+                            get_time_clause(start_time, end_time)))
+    stat_rows = cursor.fetchall()
+
+    cursor.execute(
+         '''select cast(min(servertime) as timestamp),
+         cast(max(servertime) as timestamp) 
+         from eventsequences where 
+         tai='%s' %s''' %(pub_id,
+                            get_time_clause(start_time,end_time)))
+    time_rows = cursor.fetchall()
+    
+    return pandas.Series({
+        'loads': stat_rows[0][0],
+        'views' : stat_rows[0][1],
+        'clicks' : stat_rows[0][2],
+        'ads' : stat_rows[0][3],
+        'video plays' : stat_rows[0][4],
+        'start time' : time_rows[0][0],
+        'end time' : time_rows[0][1]})
+
+def calculate_cmsdb_stats(pub_id, start_video_time=None, end_video_time=None):
+    _log.info('Getting some stats from the CMSDB')
+    api_key, typ = neondata.TrackerAccountIDMapper.get_neon_account_id(
+        pub_id)
+
+    videos = list(neondata.NeonUserAccount(
+        None, api_key=api_key).iterate_all_videos())
+
+    videos = filter_video_objects(videos, start_video_time, end_video_time)
+
+    return pandas.Series({
+        'Video Counts' : len(videos),
+        'Total Video Time (s)' : sum([x.duration for x in videos
+                                      if x.duration is not None])
+        })

@@ -154,7 +154,8 @@ def calc_extra_conversions(conversions, revlift):
 def calc_aggregate_click_based_stats_from_dataframe(data):
     '''Calculate click based stats using a dataframe.
     Inputs:
-    data - Data frame with columns of extra_conversions, impr, conv and is_base
+    data - Data frame with columns of extra_conversions, tot_impr, tot_conv
+           and is_base
     Returns:
     pandas series of stats we generate
     '''
@@ -167,14 +168,14 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     # Get the data from videos where there was a statistically
     # significant lift
     sig_data = all_data.copy()
-    sig_data = sig_data.groupby(level=1).filter(
+    sig_data = sig_data.groupby(level='video_id').filter(
         lambda x: np.any(x['p_value']>0.95))
 
     neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
                             (sig_data['p_value'] > 0.95)]
 
-    lots_of_clicks = all_data.groupby(level=1).filter(
-        lambda x: np.sum(x['conv']) > 100)
+    lots_of_clicks = all_data.groupby(level='video_id').filter(
+        lambda x: np.sum(x['tot_conv']) > 100)
 
     cap_runaways = all_data.copy()
     cap_runaways['extra_conversions'] = cap_runaways['extra_conversions'].clip(-50)
@@ -183,10 +184,10 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     #    np.sum(x['conv']) < 50)
     
 
-    return pandas.Series(
-        {'significant_video_count' : sig_data.groupby(level=1).ngroups,
-         'total_video_count' : all_data.groupby(level=1).ngroups,
-         'total_neon_winners' : neon_winners.groupby(level=1).ngroups,
+    return pandas.DataFrame(
+        {'significant_video_count': count_unique_index(sig_data, 'video_id'),
+         'total_video_count' : count_unique_index(all_data, 'video_id'),
+         'total_neon_winners' : count_unique_index(neon_winners, 'video_id'),
          'significant lift': calc_lift_from_dataframe(sig_data),
          'all_lift' : calc_lift_from_dataframe(all_data),
          'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
@@ -194,11 +195,19 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
              all_data, 'xtra_conv_with_clamp'),
          'cap_runaways' : calc_lift_from_dataframe(cap_runaways)})
 
+def count_unique_index(data, level='video_id'):
+    groups = [x for x in data.index.names if x not in level]
+    return data.reset_index(level).groupby(level=groups).apply(
+        lambda x: len(set(x[level])))
+
 def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     if len(data) == 0:
         return float('nan')
-    base_sums = data.groupby(['is_base']).sum()
-    neon_sums = data.groupby(level=['type']).sum()
+    #base_sums = data.groupby(['is_base']).sum()
+    slices = [x for x in data.index.names if x != 'video_id']
+    data = data.reset_index()
+    data = data[['type', xtra_conv_col, 'tot_conv'] + slices]
+    type_sums = data.groupby(['type'] + slices).sum()
     all_sums = data.sum()
 
     #lift = base_sums['impr'][True] * base_sums[xtra_conv_col][False] / \
@@ -209,8 +218,8 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     #  (base_sums['conv'][True] * neon_sums['impr']['neon'])
    
     # Lift based on the extra clicks compared to the total clicks
-    lift = neon_sums[xtra_conv_col]['neon'] / (all_sums['conv'] - 
-           neon_sums[xtra_conv_col]['neon'])
+    lift = type_sums[xtra_conv_col]['neon'] / (all_sums['tot_conv'] - 
+           type_sums[xtra_conv_col]['neon'])
 
     return lift
 
@@ -249,6 +258,7 @@ def calc_thumb_stats(base_impressions, base_conversions,
 
     zscore = (ctr_base - ctr_thumb) / \
       np.sqrt(se_base*se_base + se_thumb*se_thumb)
+    zscore = zscore.fillna(0.0)
 
     p_value = pandas.Series(
         scipy.stats.norm(0, 1).cdf(zscore),
@@ -256,7 +266,7 @@ def calc_thumb_stats(base_impressions, base_conversions,
     p_value = p_value.where(p_value > 0.5, 1 - p_value)
     tstats['p_value'] = p_value
 
-    tstats['ctr'] = ctr_thumb
+    tstats['ctr_base'] = ctr_base
     tstats['extra_conversions'] = (thumb_conversions * tstats['revlift']).replace(np.inf, 0).replace(-np.inf, 0)
 
     return tstats

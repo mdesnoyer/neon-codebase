@@ -412,37 +412,6 @@ def calculate_aggregate_stats(video_stats):
     agg_data = agg_data.sortlevel()
     return agg_data
 
-def calculate_raw_stats():
-    _log.info('Calculating some raw stats')
-    conn = statutils.impala_connect()
-    cursor = conn.cursor()
-    cursor.execute(
-        '''select count(imloadclienttime), count(imvisclienttime),
-           count(imclickclienttime), count(adplayclienttime),
-           count(videoplayclienttime) from eventsequences where 
-           tai='%s' %s''' %(options.pub_id,
-                            statutils.get_time_clause(options.start_time,
-                                                      options.end_time)))
-    stat_rows = cursor.fetchall()
-
-    cursor.execute(
-         '''select cast(min(servertime) as timestamp),
-         cast(max(servertime) as timestamp) 
-         from eventsequences where 
-         tai='%s' %s''' %(options.pub_id,
-                            statutils.get_time_clause(options.start_time,
-                                                      options.end_time)))
-    time_rows = cursor.fetchall()
-    
-    return pandas.Series({
-        'loads': stat_rows[0][0],
-        'views' : stat_rows[0][1],
-        'clicks' : stat_rows[0][2],
-        'ads' : stat_rows[0][3],
-        'video plays' : stat_rows[0][4],
-        'start time' : time_rows[0][0],
-        'end time' : time_rows[0][1]})
-
 def calculate_cmsdb_stats():
     _log.info('Getting some stats from the CMSDB')
     api_key, typ = neondata.TrackerAccountIDMapper.get_neon_account_id(
@@ -519,7 +488,7 @@ def main():
     _log.info('Calculating aggregate statistics')
     aggregate_sheets = {}
     aggregate_sheets['Overall'] = calculate_aggregate_stats(video_stats)
-    aggregate_sheets['Raw Stats']= pandas.DataFrame(calculate_raw_stats())
+    aggregate_sheets['Raw Stats']= pandas.DataFrame(stats.statutils.calculate_raw_stats(options.start_time, options.end_time()))
     aggregate_sheets['CMSDB Stats'] = pandas.DataFrame(calculate_cmsdb_stats())
 
 
