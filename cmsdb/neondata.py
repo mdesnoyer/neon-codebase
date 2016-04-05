@@ -5928,7 +5928,9 @@ class VideoMetadata(StoredObject):
         until_time = None  
         wc_params = []
         rv = {}  
-         
+        
+        where_clause = "_data->'job_id' != 'null'"
+ 
         if since: 
             if where_clause: 
                 where_clause += " AND "
@@ -5977,7 +5979,7 @@ class VideoMetadata(StoredObject):
 
         rv['videos'] = videos 
         rv['since_time'] = since_time
-        rv['until_time'] = since_time
+        rv['until_time'] = until_time
         raise tornado.gen.Return(rv) 
          
 class VideoStatus(DefaultedStoredObject):

@@ -3535,6 +3535,20 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         # should return all the videos despite no account
         self.assertEquals(rjson['video_count'], 2)
 
+    @tornado.testing.gen_test 
+    def test_search_without_requests(self):
+        video = neondata.VideoMetadata('kevin_vid1')
+        yield video.save(async=True)   
+        url = '/api/v2/videos/search?fields='\
+              'video_id,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        video_count = rjson['video_count'] 
+        videos = rjson['videos']
+        self.assertEquals(video_count, 0) 
+        self.assertEquals(videos, None) 
+       
 class TestVideoSearchExternalHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
