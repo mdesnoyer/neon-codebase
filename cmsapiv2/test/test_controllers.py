@@ -35,6 +35,17 @@ from tornado.httputil import HTTPServerRequest
 from utils.options import options
 
 class TestBase(test_utils.neontest.AsyncHTTPTestCase): 
+    def setUp(self):
+        self.send_email_mocker = patch(
+            'cmsapiv2.authentication.NewAccountHandler.send_email')
+        self.send_email_mock = self.send_email_mocker.start()
+        self.send_email_mock.return_value = True
+        super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.send_email_mocker.stop()
+        super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+        
     def post_exceptions(self, url, params, exception_mocker): 
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = Exception('blah blah')  
@@ -198,6 +209,21 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+                                 'account verification email sent to')
+
+        # verifier row gets created 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True) 
+        
+        # now send this token to the verify endpoint        
+        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
@@ -207,8 +233,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
-        self.assertEquals(user.username, 'a@a.com') 
- 
+        self.assertEquals(user.username, 'a@a.com')
+        
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
         params = json.dumps({'customer_name': 'meisnew', 
@@ -221,6 +247,20 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+                                 'account verification email sent to')
+
+        # verifier row gets created 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+
+ 
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
@@ -247,6 +287,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header)
         self.assertEquals(response.code, 200) 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
  
         params = json.dumps({'customer_name': 'meisnew2', 
                              'email': 'a@a.bc', 
@@ -266,7 +313,6 @@ class TestNewAccountHandler(TestAuthenticationBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['data'],
                                  'user with that email already exists')
-
 
 
     @tornado.testing.gen_test 
@@ -296,6 +342,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header) 
         self.assertEquals(response.code, 200)
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
         prod_t_id = rjson['tracker_account_id'] 
@@ -318,6 +371,48 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header) 
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test 
+    def test_create_account_send_email_exception(self):
+        self.send_email_mock.return_value = None 
+        self.send_email_mock.side_effect = Exception('blah blah') 
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.invalid', 
+                             'admin_user_username':'a@a.invalid', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            yield self.http_client.fetch(self.get_url(url), 
+                                         body=params, 
+                                         method='POST', 
+                                         headers=header)
+        self.assertEquals(e.exception.code, 500)
+
+    @tornado.testing.gen_test
+    def test_create_account_send_email_ses_exception(self):
+        self.send_email_mocker.stop()
+        ses_mocker = patch('boto.ses.connection.SESConnection.send_email')
+        ses_mock = ses_mocker.start()
+        ses_mock.side_effect = Exception('random exception')  
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc.invalid', 
+                             'admin_user_username':'a@a.invalid', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            yield self.http_client.fetch(self.get_url(url), 
+                                         body=params, 
+                                         method='POST', 
+                                         headers=header)
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(e.exception.code, 500) 
+        self.assertRegexpMatches(rjson['error']['data'],
+                                 'unable to send verification')
+        self.send_email_mocker.start()
+        ses_mocker.stop() 
+        
  
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -3013,57 +3108,6 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
                                                 body='', 
                                                 method='POST') 
 	self.assertEquals(response.code, 200)
-
-    def test_create_new_account_create_mode(self): 
-        user = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
-        
-        token = JWTHelper.generate_token({'username' : 'testuser'})  
-        user.access_token = token 
-        user.save()
-
-        params = json.dumps({'name': 'meisnew', 'token': token})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        self.http_client.fetch(self.get_url(url), 
-                               body=params,
-                               callback=self.stop, 
-                               method='POST', 
-                               headers=header) 
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access') 
-
-        params = json.dumps({'name': 'meisnew'})
-        header = { 
-                   'Content-Type':'application/json', 
-                   'Authorization': 'Bearer %s' % token 
-                 }
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               callback=self.stop, 
-                               method='POST', 
-                               headers=header) 
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access')  
-
-        url = '/api/v2/accounts?name=meisnew&token=%s' % token
-        self.http_client.fetch(self.get_url(url),
-                               allow_nonstandard_methods=True,
-                               callback=self.stop, 
-                               body='', 
-                               method='POST') 
-        response = self.wait()
-	self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access') 
 
 class TestAuthenticationHandler(TestAuthenticationBase): 
     def setUp(self): 

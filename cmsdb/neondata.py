@@ -2881,7 +2881,7 @@ class NeonUserAccount(NamespacedStoredObject):
                  default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
                  name=None, 
                  abtest=True, 
-                 serving_enabled=True, 
+                 serving_enabled=False, 
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
                  users=[], 
                  email=None):
@@ -5509,6 +5509,30 @@ class ThumbnailStatus(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ThumbnailStatus.__name__
+
+class Verification(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by email
+    '''
+    def __init__(self, email, token=None, extra_info=None): 
+        super(Verification, self).__init__(email)
+        
+        # the special token that is used to verify the account
+        self.token = token or uuid.uuid1().hex  
+
+        # extra_info is a json store, that could store any 
+        # number of things, but is mostly used for objects 
+        # that may need to be saved after verification is 
+        # complete 
+        self.extra_info = extra_info or {}
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Verification.__name__
 
 class VideoMetadata(StoredObject):
     '''

@@ -7,6 +7,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import ast
+import boto
 from cmsdb import neondata
 from datetime import datetime, timedelta
 import dateutil.parser
@@ -53,6 +54,11 @@ _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
 define("token_secret", default="9gRvLemgdfHUlzpv", help="the secret for tokens", type=str)
 define("access_token_exp", default=720, help="user access token expiration in seconds", type=int)
 define("refresh_token_exp", default=1209600, help="user refresh token expiration in seconds", type=int)
+define("verify_token_exp", default=86400, help="account verify token expiration in seconds", type=int)
+define("frontend_base_url", 
+       default='https://app.neon-lab.com', 
+       help="will default to this if the origin is null", 
+       type=str)
 
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -73,6 +79,7 @@ class HTTPVerbs(object):
 class TokenTypes(object): 
     ACCESS_TOKEN = 0 
     REFRESH_TOKEN = 1
+    VERIFY_TOKEN = 2 
 
 class APIV2Sender(object): 
     def success(self, data, code=ResponseCode.HTTP_OK):            
@@ -93,7 +100,9 @@ class APIV2Sender(object):
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
         self.set_header('Content-Type', 'application/json')
-        self.uri = self.request.uri 
+        self.uri = self.request.uri
+        self.origin = self.request.headers.get("Origin") or\
+            options.frontend_base_url
     
     def set_access_token_information(self): 
         """Helper function to get the access token 
@@ -383,6 +392,8 @@ class JWTHelper(object):
             exp_time_add = options.access_token_exp
         elif token_type is TokenTypes.REFRESH_TOKEN:
             exp_time_add = options.refresh_token_exp
+        elif token_type is TokenTypes.VERIFY_TOKEN:
+            exp_time_add = options.verify_token_exp
         else:
             _log.exception('requested a token_type that does not exist') 
             raise Exception('token type not recognized')  
