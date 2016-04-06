@@ -20,6 +20,7 @@ from cmsdb import neondata
 from datetime import datetime, timedelta
 import dateutil.parser
 import logging
+import numpy as np
 import pandas
 import re
 import stats.cluster
@@ -82,10 +83,13 @@ def get_thumbnail_statuses(thumb_ids):
 
 def get_key_timepoints(video, video_status, thumb_statuses):
     '''Identifies the key times for each thumb turning having valid data
+    for calculating the lift. 
 
-    For calculating the lift.
+    Returns a list of on->off timestamps between possible valid time
+    segments. Either end of the time segments can be None, in which
+    case it means an unbounded segment.
 
-    Returns: dict of thumb_id -> (on_timestamp, off_timestamp)
+    Returns: dict of thumb_id -> [(on_timestamp, off_timestamp)]
     '''
     TIME_DELAY = timedelta(minutes=5)
     
@@ -95,22 +99,19 @@ def get_key_timepoints(video, video_status, thumb_statuses):
                      % video.key)
         return retval
     
-    # First find the time when the experiment finished
-    finish_time = None
-    start_time = None
-    # If the only entry is a completed experiment, we accept the
-    # complete at the beginning.
-    if (len(video_status.state_history) == 1 and 
-        video_status.state_history[0][1] == neondata.ExperimentState.COMPLETE):
-        finish_time = dateutil.parser.parse(video_status.state_history[0][0])
-    else:
-        for change_time, new_status in video_status.state_history[1:]:
-            if new_status == neondata.ExperimentState.COMPLETE:
-                finish_time = dateutil.parser.parse(change_time)
-                break
+    # First find the time blocks when experiments were happening
+    experiment_blocks = []
+    cur_block = [None, None]
+    for change_time, new_status in video_status.state_history:
+        if new_status == neondata.ExperimentState.COMPLETE:
+            cur_block[1] = dateutil.parser.parse(change_time)
+            experiment_blocks.append(cur_block)
+            cur_block = [None, None]
+        elif new_status == neondata.ExperimentState.RUNNING:
+            cur_block[0] = dateutil.parser.parse(change_time)
 
-    if finish_time:
-        finish_time = (finish_time + TIME_DELAY).strftime('%Y-%m-%d %H:%M:%S')
+    if cur_block[0] or cur_block[1]:
+        experiment_blocks.append(cur_block)
 
     # Now go through each thumbnail and get the latest time there is
     # valid data for it.
@@ -123,19 +124,63 @@ def get_key_timepoints(video, video_status, thumb_statuses):
 
         off_time = None
         on_time = None
-        for change_time, serving_frac in thumb_status.serving_history:
-            if serving_frac > 0 and on_time is None:
-                # The thumbnail was turned on at this time
-                on_time = dateutil.parser.parse(change_time) + TIME_DELAY
-                on_time = on_time.strftime('%Y-%m-%d %H:%M:%S')
-            if serving_frac == 0.0:
-                # The thumbnail was turned off at this time
-                off_time = dateutil.parser.parse(change_time) + TIME_DELAY
-                off_time = off_time.strftime('%Y-%m-%d %H:%M:%S')
-                break
-            
-        retval[thumb_id] = (on_time, off_time or finish_time)
+        data_blocks = []
+        TIME_EPS = timedelta(seconds=5)
+        # Find the times in each experiment block when this thumb was
+        # on and has valid data. 
+        serving_history = sorted(
+            [(dateutil.parser.parse(tm), frac)
+             for tm, frac in thumb_status.serving_history])
+        for start_experiment, end_experiment in experiment_blocks:
+            cur_block = [None, None]
+            was_on = False
+            for change_time, serving_frac in serving_history:
+                if start_experiment is not None:
+                    if change_time < start_experiment - TIME_EPS:
+                        # This change was in a different experiment block
+                        was_on = serving_frac > 0.0
+                        continue
+                    elif abs(change_time - start_experiment) < TIME_EPS:
+                        # We've found the start time of this experiment block
+                        cur_block[0] = change_time
+                    elif cur_block[0] is None and serving_frac > 0.0:
+                        # We haven't found the start before, but this
+                        # thumbjust turned on in the middle of the
+                        # block
+                        if was_on:
+                            # It was on when the experiment started
+                            cur_block[0] = start_experiment
+                        else:
+                            cur_block[0] = change_time
+                        
+                if end_experiment is not None:
+                    if change_time > end_experiment:
+                        # We're past the end of the experiment
+                        if cur_block[1] is None:
+                            cur_block[1] = end_experiment
+                        break
+                    elif abs(change_time - end_experiment) < TIME_EPS:
+                        # The change happened at the end of the experiment time
+                        cur_block[1] = change_time + TIME_DELAY
+                        break
+                    elif (serving_frac == 0.0 and (
+                            start_experiment is None or
+                            change_time > start_experiment - TIME_EPS)):
+                        # We're in an experiment and saw this thumb turn off
+                        cur_block[1] = change_time
+                        break
 
+                was_on = serving_frac > 0.0
+
+            if cur_block[0] or cur_block[1]:
+                if cur_block[1]:
+                    cur_block[1] += TIME_DELAY
+                data_blocks.append([x.strftime('%Y-%m-%d %H:%M:%S') 
+                                    if x else None
+                                    for x in cur_block])
+            
+        retval[thumb_id] = data_blocks
+        
     return retval
 
 def get_event_data(video_id, key_times, metric, null_metric):
@@ -215,7 +260,10 @@ def get_event_data(video_id, key_times, metric, null_metric):
                                for row in cursor))
     if 'page_type' in data.columns:
         data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
-    return data.set_index(groupby_clauses).sortlevel()
+    data = data.set_index(groupby_clauses)
+    if len(groupby_clauses) > 1:
+        data=data.sortlevel()
+    return data
 
 def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     '''Calculate all the stats for a single video.
@@ -235,31 +283,42 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     # Build up the stats that have to be counted when both the
     # baseline and this thumbnail was on for experiment purposes.
     slice_stats = {}
-    for thumb_id in imp.index.levels[0]:
+    slices_exist = True
+    try:
+        thumbnail_ids = imp.index.levels[0]
+    except AttributeError:
+        thumbnail_ids = imp.index
+        slices_exist = False
+    for thumb_id in thumbnail_ids:
         if thumb_id == base_thumb_id:
             continue
-        
-        try:
-            times = thumb_times[thumb_id]
-            start_col = times[0]
-            end_col = times[1]
+
+        experiment_blocks = []
+        times = thumb_times.get(thumb_id, [(None, 'all_time')])
+        for start_col, end_col in times:
             if end_col is None:
                 end_col = 'all_time'
-        except KeyError:
-            start_col = None
-            end_col = 'all_time'
-            
-        experiment_imp = imp[end_col]
-        experiment_conv = conv[end_col]
-        if start_col is not None:
-            experiment_imp -= imp[start_col]
-            experiment_conv -= conv[start_col]
+            cur_block = pandas.DataFrame({'imp': imp[end_col],
+                                          'conv': conv[end_col]})
+            if start_col is not None:
+                cur_block.imp -= imp[start_col]
+                cur_block.conv -= conv[start_col]
+                
+            experiment_blocks.append(cur_block)
+        experiment_blocks = pandas.concat(experiment_blocks,
+                                          keys=range(len(experiment_blocks)))
+
+        # Find the block with the most impressions for this thumb and
+        # treat that as the best one to work with.
+        blockI = experiment_blocks.groupby(
+            level=['thumbnail_id', 0]).sum().loc[thumb_id]['imp'].argmax()
+        experiment_counts = experiment_blocks.loc[blockI]
 
         try:    
-            base_imp = experiment_imp.loc[base_thumb_id]
-            base_conv = experiment_conv.loc[base_thumb_id]
-            treatment_imp = experiment_imp.loc[thumb_id]
-            treatment_conv = experiment_conv.loc[thumb_id]
+            base_imp = experiment_counts['imp'][base_thumb_id]
+            base_conv = experiment_counts['conv'][base_thumb_id]
+            treatment_imp = experiment_counts['imp'][thumb_id]
+            treatment_conv = experiment_counts['conv'][thumb_id]
         except KeyError:
             continue
         
@@ -275,6 +334,8 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     vid_stats = pandas.concat(slice_stats.values(), keys=slice_stats.keys(),
                               axis=0)
     vid_stats.index = vid_stats.index.set_names('thumbnail_id', level=0)
+    if not slices_exist:
+        vid_stats = vid_stats.reset_index(level=1, drop=True)
     vid_stats = pandas.concat([vid_stats,
                                pandas.Series(imp['window_count'],
                                              name='tot_imp'),
@@ -282,6 +343,8 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
                                              name='tot_conv'),
                                ],
                                axis=1)
+    if vid_stats.index.names[0] is None:
+        vid_stats.index = vid_stats.index.set_names('thumbnail_id')
     vid_stats['tot_ctr'] = vid_stats['tot_conv'] / vid_stats['tot_imp']
     vid_stats['extra_conversions'] = stats.metrics.calc_extra_conversions(
         vid_stats['tot_conv'], vid_stats['revlift'])
@@ -309,9 +372,10 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
         thumb_times = get_key_timepoints(video,
                                          video_statuses.get(video.key, None),
                                          thumb_statuses)
-                                         
-        key_times = reduce(lambda x, y: x|y,
-                           [set(x) for x in thumb_times.values()])
+
+        set_join = lambda x, y: x|y
+        key_times = reduce(set_join, [reduce(set_join, [set(y) for y in x]) 
+                                      for x in thumb_times.values()])
         key_times = [x for x in key_times if x is not None]
 
         imp_data = get_event_data(video.key, key_times, options.impressions,
@@ -338,6 +402,12 @@ def sort_stats(stats_table, slices):
     stats_table.sortlevel()
 
     index_names = stats_table.index.names
+
+    # Filter out any slices with no clicks
+    last_level = index_names.index('type')
+    stats_table = stats_table.groupby(level=range(0,last_level)).filter(
+        lambda x: np.sum(x['tot_conv']) > 1)
+
     stats_table.reset_index(inplace=True)
 
     # Sort so that the videos with the best lift are first
@@ -402,10 +472,10 @@ def main():
         stats.statutils.calculate_raw_stats(options.pub_id,
                                             options.start_time,
                                             options.end_time))
-    sheets['CMSDB Stats'] = pandas.DataFrame(
-        stats.statutils.calculate_cmsdb_stats(options.pub_id,
-                                              options.start_video_time,
-                                              options.end_video_time))
+    #sheets['CMSDB Stats'] = pandas.DataFrame(
+    #    stats.statutils.calculate_cmsdb_stats(options.pub_id,
+    #                                          options.start_video_time,
+    #                                          options.end_video_time))
 
 
     if options.output.endswith('.xls'):

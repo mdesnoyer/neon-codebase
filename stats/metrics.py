@@ -183,20 +183,26 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     #    lambda x: np.sum(x['extra_conversions']) > -50 or
     #    np.sum(x['conv']) < 50)
     
+    index=None
+    if len(data.index.names) == 1:
+        index = [0]
 
     return pandas.DataFrame(
         {'significant_video_count': count_unique_index(sig_data, 'video_id'),
          'total_video_count' : count_unique_index(all_data, 'video_id'),
          'total_neon_winners' : count_unique_index(neon_winners, 'video_id'),
-         'significant lift': calc_lift_from_dataframe(sig_data),
          'all_lift' : calc_lift_from_dataframe(all_data),
+         'significant lift': calc_lift_from_dataframe(sig_data),
          'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
          'shutdown_bad_thumbs' : calc_lift_from_dataframe(
              all_data, 'xtra_conv_with_clamp'),
-         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)})
+         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)},
+         index=index)
 
 def count_unique_index(data, level='video_id'):
     groups = [x for x in data.index.names if x not in level]
+    if len(groups) == 0:
+        return len(set(data.index))
     return data.reset_index(level).groupby(level=groups).apply(
         lambda x: len(set(x[level])))
 
@@ -208,7 +214,10 @@ def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
     data = data.reset_index()
     data = data[['type', xtra_conv_col, 'tot_conv'] + slices]
     type_sums = data.groupby(['type'] + slices).sum()
-    all_sums = data.sum()
+    if len(slices) == 0:
+        all_sums = data.sum()
+    else:
+        all_sums = data.groupby(slices).sum()
 
     #lift = base_sums['impr'][True] * base_sums[xtra_conv_col][False] / \
     #  (base_sums['conv'][True] * base_sums['impr'][False])
@@ -233,8 +242,10 @@ def calc_thumb_stats(base_impressions, base_conversions,
     Outputs:
     DataSeries indexed by groups and columns of stats
     '''
-    ctr_base = pandas.Series(base_conversions / base_impressions)
-    ctr_thumb = pandas.Series(thumb_conversions / thumb_impressions)
+    ctr_base = pandas.Series(base_conversions, dtype=np.float64) \
+        / base_impressions
+    ctr_thumb = pandas.Series(thumb_conversions, dtype=np.float64) \
+        / thumb_impressions
 
     idx_names = ctr_thumb.index.names
     if len(idx_names) == 1:
