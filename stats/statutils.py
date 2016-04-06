@@ -38,9 +38,9 @@ class MetricTypes:
     PLAYS = 'plays'
     
 impala_col_map = {
-    MetricTypes.LOADS: 'imloadclienttime',
-    MetricTypes.VIEWS: 'imvisclienttime',
-    MetricTypes.CLICKS: 'imclickclienttime'
+    MetricTypes.LOADS: 'imloadservertime',
+    MetricTypes.VIEWS: 'imvisservertime',
+    MetricTypes.CLICKS: 'imclickservertime'
     }
 
 def impala_connect():
@@ -102,7 +102,7 @@ def filter_video_objects(videos, start_video_time=None, end_video_time=None):
 def get_video_objects(impression_metric, pub_id,
                       start_time=None, end_time=None,
                       start_video_time=None, end_video_time=None,
-                       video_id_file=None):
+                      video_id_file=None, min_impressions=0):
     '''Returns all the videos in the impala database within the time we 
     care about
     '''
@@ -115,25 +115,34 @@ def get_video_objects(impression_metric, pub_id,
         _log.info('Querying for video ids')
         conn = impala_connect()
         cursor = conn.cursor()
-        cursor.execute(
-        """select distinct regexp_extract(thumbnail_id, 
-        '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1) from eventsequences where 
+        query = """select count({metric}) as imp_count,
+        regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1)
+          as video_id 
+        from eventsequences where 
         thumbnail_id is not NULL and
-        %s is not null and
-        tai='%s' %s""" % (impala_col_map[impression_metric],
-                          pub_id, 
-                          get_time_clause(start_time,
-                                          end_time)))
+        {metric} is not null and
+        tai='{pub_id}'
+        {time_clause}
+        group by video_id
+        having imp_count > {min_impressions}""".format(
+            metric = impala_col_map[impression_metric],
+            pub_id = pub_id, 
+            min_impressions = min_impressions,
+            time_clause = get_time_clause(start_time, end_time))
+        cursor.execute(query)
 
         vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-\~]+)')
-        video_ids = [vidRe.match(x[0]).group(2) for 
-                     x in cursor if vidRe.match(x[0])]
+        video_ids = [vidRe.match(x[1]).group(2) for 
+                     x in cursor if vidRe.match(x[1])]
 
     videos = neondata.VideoMetadata.get_many(video_ids)
     videos = [x for x in videos if x is not None]
 
-    return filter_video_objects(videos, start_video_time,
-                                end_video_time)
+    videos = filter_video_objects(videos, start_video_time,
+                                  end_video_time)
+
+    _log.info('Found %d videos to examine' % len(videos))
+    return videos
 
 def get_thumb_metadata(video_objs):
     '''Returns a pandas DataFrame for metadata about each thumbnail.'''
@@ -183,7 +192,7 @@ def get_time_clause(start_time=None, end_time=None):
         clauses.extend([
             '(yr > {year} or (yr = {year} and mnth >= {month}))'.format(
                 year=start_time.year, month=start_time.month),
-            "cast(serverTime as timestamp) >= '%s'" % 
+            "cast(imloadserverTime as timestamp) >= '%s'" % 
             start_time.strftime('%Y-%m-%d %H:%M:%S')])
 
     if end_time is not None:
@@ -192,7 +201,7 @@ def get_time_clause(start_time=None, end_time=None):
         clauses.extend([
             '(yr < {year} or (yr = {year} and mnth <= {month}))'.format(
                 year=end_time.year, month=end_time.month),
-            "cast(serverTime as timestamp) <= '%s'" % 
+            "cast(imloadserverTime as timestamp) <= '%s'" % 
             end_time.strftime('%Y-%m-%d %H:%M:%S')])
 
     if len(clauses) == 0:
@@ -206,13 +215,13 @@ def get_time_window_count(metric, start_time=None, end_time=None):
     if start_time:
         if not isinstance(start_time, datetime):
             start_time = dateutil.parser.parse(start_time)
-        clauses.append("cast(serverTime as timestamp) >= '%s'" %
+        clauses.append("cast(imloadserverTime as timestamp) >= '%s'" %
                        start_time.strftime('%Y-%m-%d %H:%M:%S'))
 
     if end_time:
         if not isinstance(end_time, datetime):
             end_time = dateutil.parser.parse(end_time)
-        clauses.append("cast(serverTime as timestamp) < '%s'" %
+        clauses.append("cast(imloadserverTime as timestamp) < '%s'" %
                        end_time.strftime('%Y-%m-%d %H:%M:%S'))
 
     return 'sum(if(%s, 1, 0))' % ' and '.join(clauses)
@@ -343,8 +352,8 @@ def calculate_raw_stats(pub_id, start_time=None, end_time=None):
     stat_rows = cursor.fetchall()
 
     cursor.execute(
-         '''select cast(min(servertime) as timestamp),
-         cast(max(servertime) as timestamp) 
+         '''select cast(min(imloadservertime) as timestamp),
+         cast(max(imloadservertime) as timestamp) 
          from eventsequences where 
          tai='%s' %s''' %(pub_id,
                             get_time_clause(start_time,end_time)))

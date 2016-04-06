@@ -217,7 +217,7 @@ def get_event_data(video_id, key_times, metric, null_metric):
                    '%s as window_count' % statutils.get_time_window_count(
                        metric, options.start_time, options.end_time)]
     select_cols.extend([
-        "sum(if(cast(serverTime as timestamp) < '{cur_time}' and {metric} is not null, 1, 0)) as '{cur_time}'".format(
+        "sum(if(cast(imloadserverTime as timestamp) < '{cur_time}' and {metric} is not null, 1, 0)) as '{cur_time}'".format(
             metric=statutils.impala_col_map[metric],
             cur_time=t)
         for t in key_times if t is not None])
@@ -238,8 +238,7 @@ def get_event_data(video_id, key_times, metric, null_metric):
         from EventSequences
         where {null_metric} is not NULL and
         tai='{pub_id}' and
-        regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_',
-            1)='{video_id}'
+        thumbnail_id like '{video_id}_%'
         {url_clause}
         {time_clause}
         group by {groupby_clauses}""".format(
@@ -258,6 +257,9 @@ def get_event_data(video_id, key_times, metric, null_metric):
     cols = [metadata[0] for metadata in cursor.description]
     data = pandas.DataFrame((dict(zip(cols, row))
                                for row in cursor))
+    if len(data) == 0:
+        return None
+    
     if 'page_type' in data.columns:
         data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
     data = data.set_index(groupby_clauses)
@@ -303,7 +305,9 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
             if start_col is not None:
                 cur_block.imp -= imp[start_col]
                 cur_block.conv -= conv[start_col]
-                
+            
+            if len(cur_block.index.names) == 1 and cur_block.index.name is None:
+                cur_block.index.name = 'thumbnail_id'    
             experiment_blocks.append(cur_block)
         experiment_blocks = pandas.concat(experiment_blocks,
                                           keys=range(len(experiment_blocks)))
@@ -367,21 +371,34 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
     '''
     thumb_stats = [] # List of stats dictionary
 
+    proc_count = 0
     for video in video_objs:
         _log.info('Processing video %s' % video.key)
+        proc_count += 1
+        if proc_count % 10 == 0:
+            _log.info('Processed %d of %d videos' % 
+                      (proc_count, len(video_objs)))
+            
         thumb_times = get_key_timepoints(video,
                                          video_statuses.get(video.key, None),
                                          thumb_statuses)
 
         set_join = lambda x, y: x|y
-        key_times = reduce(set_join, [reduce(set_join, [set(y) for y in x]) 
-                                      for x in thumb_times.values()])
+        key_times = reduce(set_join, [reduce(set_join, [set(y) for y in x],
+                                             set([])) 
+                                      for x in thumb_times.values()], set([]))
         key_times = [x for x in key_times if x is not None]
 
         imp_data = get_event_data(video.key, key_times, options.impressions,
                                   options.impressions)
+        if imp_data is None:
+            continue
+        
         conv_data = get_event_data(video.key, key_times, options.conversions,
                                    options.impressions)
+        if conv_data is None:
+            continue
+        
         base_thumb_id = statutils.get_baseline_thumb(
             thumb_meta.loc[thumb_meta['video_id'] == video.key],
             imp_data['all_time'].groupby(level='thumbnail_id').sum(),
@@ -422,13 +439,14 @@ def sort_stats(stats_table, slices):
     return stats_table
 
 def get_full_stats_table():
-    video_objs = statutils.get_video_objects(statutils.MetricTypes.VIEWS,
+    video_objs = statutils.get_video_objects(options.impressions,
                                              options.pub_id,
                                              options.start_time,
                                              options.end_time,
                                              options.start_video_time,
                                              options.end_video_time,
-                                             options.video_ids
+                                             options.video_ids,
+                                             options.min_impressions
                                              )
     thumb_meta = statutils.get_thumb_metadata(video_objs)
 
@@ -472,10 +490,10 @@ def main():
         stats.statutils.calculate_raw_stats(options.pub_id,
                                             options.start_time,
                                             options.end_time))
-    #sheets['CMSDB Stats'] = pandas.DataFrame(
-    #    stats.statutils.calculate_cmsdb_stats(options.pub_id,
-    #                                          options.start_video_time,
-    #                                          options.end_video_time))
+    sheets['CMSDB Stats'] = pandas.DataFrame(
+        stats.statutils.calculate_cmsdb_stats(options.pub_id,
+                                              options.start_video_time,
+                                              options.end_video_time))
 
 
     if options.output.endswith('.xls'):
