@@ -7,7 +7,6 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import copy
 import datetime
 import logging
 import random
@@ -373,24 +372,30 @@ class TestSubmitVideoPG(TestSubmitVideo):
         # Set up one previously uploaded video
         search_result = self.create_search_response(1)['docs'][0]
         ext_video_id = search_result['videoId']
-        ext_thumb_id = search_result['relatedMedia']['media'][0]['imageId']
+        ext_thumb_ids = CNNIntegration._extract_image_field(search_result, 'id')
         int_video_id = neondata.InternalVideoID.generate(
                 self.external_integration.neon_api_key, ext_video_id)
-        int_thumb_id = '%s_%s' % (int_video_id, ext_thumb_id)
-        video_meta = VideoMetadata(int_video_id, tids=[int_thumb_id])
+        int_thumb_ids = ['%s_%s' % (int_video_id, ext_thumb_id) for ext_thumb_id in ext_thumb_ids]
+        video_meta = VideoMetadata(int_video_id, tids=int_thumb_ids)
         video_meta.save()
-        thumb_meta = ThumbnailMetadata(
-                int_thumb_id, int_video_id, ['http://test_url.com'],
-                ttype=ThumbnailType.DEFAULT, rank=0)
-        thumb_meta.save()
+        thumbs_meta = []
+        i = 0
+        for int_thumb_id in int_thumb_ids:
+            thumb_meta = ThumbnailMetadata(
+                    int_thumb_id, int_video_id, [search_result['relatedMedia']['media'][i]['cuts']['exlarge16to9']['url']],
+                    ttype=ThumbnailType.DEFAULT, rank=i)
+            thumb_meta.save()
+            thumbs_meta.append(thumb_meta)
+            i += 1
+
         self.previous_video = {
             'search_result': search_result,
             'ext_video_id': ext_video_id,
-            'ext_thumb_id': ext_thumb_id,
+            'ext_thumb_ids': ext_thumb_ids,
             'int_video_id': int_video_id,
-            'int_thumb_id': int_thumb_id,
+            'int_thumb_ids': int_thumb_ids,
             'video_meta': video_meta,
-            'thumb_meta': thumb_meta
+            'thumbs_meta': thumbs_meta
         }
 
         # Mock out the image download
@@ -404,7 +409,6 @@ class TestSubmitVideoPG(TestSubmitVideo):
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
         self.cdn_mock = self._future_wrap_mock(
             self.cdn_mocker.start().create().upload)
-        #self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
 
     def tearDown(self):
         self.submit_mocker.stop()
@@ -431,32 +435,23 @@ class TestSubmitVideoPG(TestSubmitVideo):
            is included, the new image is made the default
            thumbnail.
         '''
-        # Sanity
-        video = VideoMetadata.get(self.previous_video['int_video_id'])
-        self.assertEqual(len(video.thumbnail_ids), 1)
+        prev_thumbs_count = len(self.previous_video['video_meta'].thumbnail_ids)
 
-        # Get a copy of the original search response. Alter its thumb url
+        # Replace the media in the search result to trigger change
         video_data = self.previous_video['search_result']
-        media = []
         new_id = 'new_id'
         new_url = 'http://cdn.cnn.com/thumbnail_new.jpg'
         # Prepend new media including one thumbnail
-        media.insert(0, {'id': 'ref123', 'type': 'reference', 'cuts': {}})
-        media.insert(0, {
-            'id': new_id,
-            'type': 'image',
-            'cuts': {
-                'exlarge16to9': {
-                    'url': new_url
-                }
-            }
-        })
+        media = [
+            {'id': 'ref123', 'type': 'reference', 'cuts': {}},
+            {'id': new_id, 'type': 'image', 'cuts': {'exlarge16to9': {'url': new_url}}}
+        ]
         video_data['relatedMedia'] = {'media': media}
 
         # Submit the video with new thumbnail
         yield self.external_integration.submit_one_video_object(video_data)
         video = VideoMetadata.get(self.previous_video['int_video_id'])
-        self.assertEqual(len(video.thumbnail_ids), 2)
+        self.assertEqual(len(video.thumbnail_ids), 1 + prev_thumbs_count)
         thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
         self.assertEqual(self.im_download_mock.call_count, 1)
 
@@ -470,10 +465,23 @@ class TestSubmitVideoPG(TestSubmitVideo):
                 self.assertEqual(thumb.urls, [new_url])
                 self.assertEqual(thumb.external_id, new_id)
 
+    @tornado.testing.gen_test
     def test_when_default_thumb_has_no_change(self):
         '''Default thumbnail remains on submit
 
            When a CNN is processed and the image is recognized,
            the original default thumbnail remains.
         '''
-        pass
+        prev_thumbs_count = len(self.previous_video['video_meta'].thumbnail_ids)
+        video_data = self.previous_video['search_result']
+        yield self.external_integration.submit_one_video_object(video_data)
+
+        # Nothing changes so counts are the same
+        video = VideoMetadata.get(self.previous_video['int_video_id'])
+        self.assertEqual(len(video.thumbnail_ids), prev_thumbs_count)
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        self.assertEqual(self.im_download_mock.call_count, 0)
+
+        previous_thumbs = self.previous_video['video_meta'].thumbnail_ids
+        for thumb in thumbs:
+            self.assertIn(thumb.key, previous_thumbs)

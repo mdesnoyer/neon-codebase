@@ -445,8 +445,9 @@ class OVPIntegration(object):
         def _set_external_id(obj):
             obj.external_id = external_id
 
-        # Get the highest rank so a new thumbnail can be ranked in front of it 
+        # Get the highest rank so a new thumbnail can be ranked in front of it
         found_thumb, min_rank = False, 1
+
         for thumb in thumbs_meta:
             # Some videos have a legacy format and need migration
             self._run_migration(thumb)
@@ -459,8 +460,7 @@ class OVPIntegration(object):
 
             # Check if our record's external id matches the response's
             if thumb.external_id is not None:
-                if (unicode(thumb.external_id) in
-                        self._extract_image_field(data, 'id')):
+                if (unicode(thumb.external_id) in self._extract_image_field(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
                 # For legacy thumbs, we specified a reference id. Match on it
