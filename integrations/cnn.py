@@ -101,10 +101,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''
-        thumb_url, thumb_ref = self._get_best_image_info(video)
+        thumb_url, thumb_obj = self._get_best_image_info(video)
         return {
             'thumb_url': thumb_url,
-            'thumb_ref': thumb_ref
+            'thumb_ref': thumb_obj['id']
         }
 
     def set_video_iter(self, videos):
@@ -134,13 +134,16 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
                 try:
                     if item['type'] == 'image':
                         cuts = item['cuts']
-                        thumb_id = item['imageId']
+                        if item.get('id') is not None:
+                            thumb_id = item['id']
+                        elif item.get('imageId') is not None:
+                            thumb_id = item['imageId']
                         if 'exlarge16to9' in cuts:
-                            return cuts['exlarge16to9']['url'], thumb_id
+                            return cuts['exlarge16to9']['url'], {'id': thumb_id}
                 except KeyError:
                     continue
         else:
-            return None
+            return None, {'id': None}
 
     @staticmethod
     def _find_best_cdn_url(cdn_urls):

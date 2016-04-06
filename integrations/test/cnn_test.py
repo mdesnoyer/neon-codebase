@@ -7,20 +7,26 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import copy
 import datetime
 import logging
-from mock import patch
 import random
 import string
 import time
+from mock import patch
+
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
-from cmsdb import neondata
-import integrations.cnn
+from cvutils.imageutils import PILImageUtils
+
+from integrations.cnn import CNNIntegration
 import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
+from cmsdb import neondata
+from cmsdb.neondata import DBConnection, NeonUserAccount
+from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
 from utils.options import options
 
 
@@ -35,7 +41,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
     def test_cdn_urls_one_valid(self):
         cdn_urls = {}
         cdn_urls['1920x1080_5500k_mp4'] = 'http://5500k-url.com'
-        url = integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+        url = CNNIntegration._find_best_cdn_url(cdn_urls)
         self.assertEquals(url, 'http://5500k-url.com')
 
     def test_cdn_urls_multiple_valid(self):
@@ -43,7 +49,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
         cdn_urls['1920x1080_5500k_mp4'] = 'http://5500k-url.com'
         cdn_urls['1920x500_3000k_mp4'] = 'http://3000k-url.com'
         cdn_urls['720x100_1000k_mp4'] = 'http://100k-url.com'
-        url = integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+        url = CNNIntegration._find_best_cdn_url(cdn_urls)
         self.assertEquals(url, 'http://5500k-url.com')
 
     def test_cdn_urls_no_valid(self):
@@ -52,7 +58,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
         cdn_urls['2_3000k_mp4'] = 'http://3000k-url.com'
         cdn_urls['3_1000k_mp4'] = 'http://100k-url.com'
         with self.assertRaises(Exception):
-            integrations.cnn.CNNIntegration._find_best_cdn_url(cdn_urls)
+            CNNIntegration._find_best_cdn_url(cdn_urls)
 
     _mock_video_response = {
         'id': 'video_id',
@@ -109,7 +115,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
     def test_extract_image_field(self):
         id0 = u'thumbid0'
         id1 = u'thumbid1'
-        ids = integrations.cnn.CNNIntegration._extract_image_field(
+        ids = CNNIntegration._extract_image_field(
                 self._mock_video_response, 'id')
         self.assertIn(id0, ids)
         self.assertIn(id1, ids)
@@ -117,48 +123,53 @@ class TestParseFeed(test_utils.neontest.TestCase):
     def test_extract_image_urls(self):
         url0 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-0.jpg'
         url1 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-1.jpg'
-        extract = integrations.cnn.CNNIntegration._extract_image_urls(
+        extract = CNNIntegration._extract_image_urls(
                 self._mock_video_response)
-        self.assertTrue(url0 in extract and url1 in extract)
+        self.assertIn(url0, extract)
+        self.assertIn(url1, extract)
 
     def test_normalize_thumbnail_url(self):
         given = ('http://ht.cdn.turner.com/cnn/big/world/2016/03/01/'
                  'child-china-orig-vstan-bpb.cnn_512x288_550k.mp4?param=0&param=1%20')
         want = ('ht.cdn.turner.com/cnn/big/world/2016/03/01/'
                 'child-china-orig-vstan-bpb.cnn_512x288_550k.mp4')
-        self.assertEquals(
-                integrations.cnn.CNNIntegration._normalize_thumbnail_url(given), want)
+        self.assertEqual(
+                CNNIntegration._normalize_thumbnail_url(given), want)
 
-    def test_get_video_title(self):
-        cnn_video_with_title_and_headline = {
+    def test_get_video_title_with_both_title_and_headline(self):
+        '''Video title is just title when it is present'''
+        submit = {
             'id': 'h_4f9ca8a64c2911905bd2196b8a246253',
             'title': 'Sanders, Clinton spar over Wall Street ties',
             'headline': 'Sanders, Clinton spar'
         }
-        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
-            cnn_video_with_title_and_headline),
-            'Sanders, Clinton spar over Wall Street ties',
-            'prefer title over headline')
+        self.assertEqual(
+                CNNIntegration.get_video_title(submit),
+                'Sanders, Clinton spar over Wall Street ties',
+                'prefer title over headline')
 
-        cnn_video_with_just_title = {
+    def test_get_video_title_with_just_title(self):
+        '''Video title is title in submission'''
+        submit = {
             'id': 'h_4f9ca8a64c2911905bd2196b8a246254',
             'title': 'Sanders and Clinton team up to fight the Nazi zombie horde',
             'headline': None
         }
-        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
-            cnn_video_with_just_title),
-            'Sanders and Clinton team up to fight the Nazi zombie horde',
-            'use a title if given one')
+        self.assertEqual(
+                CNNIntegration.get_video_title(submit),
+                'Sanders and Clinton team up to fight the Nazi zombie horde',
+                'use a title if given one')
 
-        cnn_video_with_just_headline = {
+    def test_get_video_title_just_headline(self):
+        '''Video title falls back to headline if no title'''
+        submit = {
             'id': 'h_4f9ca8a64c2911905bd2196b8a246255',
             'title': None,
             'headline': 'Clinton and Sanders battle over auto industry bailout'
         }
-        self.assertEquals(integrations.cnn.CNNIntegration.get_video_title(
-            cnn_video_with_just_headline),
-            'Clinton and Sanders battle over auto industry bailout'
-        )
+        self.assertEqual(
+                CNNIntegration.get_video_title(submit),
+                'Clinton and Sanders battle over auto industry bailout')
 
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
@@ -170,7 +181,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
 
         user_id = '134234adfs'
-        self.user = neondata.NeonUserAccount(user_id, name='testingaccount')
+        self.user = NeonUserAccount(user_id, name='testingaccount')
         self.user.save()
         self.integration = neondata.CNNIntegration(
             self.user.neon_api_key,
@@ -178,7 +189,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             api_key_ref='c2vfn5fb8gubhrmd67x7bmv9')
         self.integration.save()
 
-        self.external_integration = integrations.cnn.CNNIntegration(
+        self.external_integration = CNNIntegration(
             self.user.neon_api_key, self.integration)
         self.cnn_api_mocker = patch('api.cnn_api.CNNApi.search')
         self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start())
@@ -186,9 +197,9 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.submit_mocker.stop()
         self.cnn_api_mocker.stop()
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
+        conn = DBConnection.get(VideoMetadata)
         conn.clear_db()
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
+        conn = DBConnection.get(ThumbnailMetadata)
         conn.clear_db()
         super(TestSubmitVideo, self).tearDown()
 
@@ -251,38 +262,6 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             integration.last_process_date)
 
     @tornado.testing.gen_test
-    def test_when_default_thumb_changes(self):
-        '''When a CNN video is processed and a new thumbnail
-           is included, the new thumbnail is made the default
-           thumbnail.
-        '''
-
-        response = self.create_search_response(1)
-        api_video = response['docs'][0]
-        submit_thumb_url = api_video['relatedMedia']['media'][0]['cuts']['exlarge16to9']['url'] = 'http://cdn.cnn.com/thumbnail_orig.jpg'
-        self.cnn_api_mock.side_effect = [response]
-        yield self.external_integration.submit_one_video_object(api_video)
-
-        # Check the url of the default thumbnail
-        cargs_list = self.submit_mock.call_args_list
-        call_args = cargs_list[0][1]
-        self.assertEquals(submit_thumb_url, call_args['default_thumbnail'])
-
-        # Set the database record for the second call
-        ext_video_id = call_args['video_id']
-        video_id = neondata.InternalVideoID.generate(
-            self.external_integration.neon_api_key, ext_video_id)
-        neon_video = neondata.VideoMetadata(video_id)
-        neon_video.save()
-
-        # Alter the search api response so a new thumbnail url is present
-        new_thumb_url = api_video['relatedMedia']['media'][0]['cuts']['exlarge16to9']['url'] = 'http://cdn.cnn.com/thumbnail_new.jpg'
-        #yield self.external_integration.submit_one_video_object(api_video)
-
-    def test_when_default_thumb_has_no_change(self):
-        pass
-
-    @tornado.testing.gen_test
     def test_video_has_title(self):
         '''CNN video's NeonApiRequest has a title field after submission.'''
 
@@ -333,7 +312,7 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
                     media['type'] = 'image'
                     media['cuts'] = {}
                     media['cuts']['exlarge16to9'] = {
-                        'url': 'http://test_url.com'}
+                        'url': 'http://test_url.com/image%d' % i}
                     related_media['media'].append(media)
                 return related_media
 
@@ -378,7 +357,7 @@ class TestSubmitVideoPG(TestSubmitVideo):
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
 
         user_id = '134234adfs'
-        self.user = neondata.NeonUserAccount(user_id, name='testingaccount')
+        self.user = NeonUserAccount(user_id, name='testingaccount')
         self.user.save()
         self.integration = neondata.CNNIntegration(
             self.user.neon_api_key,
@@ -386,10 +365,46 @@ class TestSubmitVideoPG(TestSubmitVideo):
             api_key_ref='c2vfn5fb8gubhrmd67x7bmv9')
         self.integration.save()
 
-        self.external_integration = integrations.cnn.CNNIntegration(
+        self.external_integration = CNNIntegration(
             self.user.neon_api_key, self.integration)
         self.cnn_api_mocker = patch('api.cnn_api.CNNApi.search')
         self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start())
+
+        # Set up one previously uploaded video
+        search_result = self.create_search_response(1)['docs'][0]
+        ext_video_id = search_result['videoId']
+        ext_thumb_id = search_result['relatedMedia']['media'][0]['imageId']
+        int_video_id = neondata.InternalVideoID.generate(
+                self.external_integration.neon_api_key, ext_video_id)
+        int_thumb_id = '%s_%s' % (int_video_id, ext_thumb_id)
+        video_meta = VideoMetadata(int_video_id, tids=[int_thumb_id])
+        video_meta.save()
+        thumb_meta = ThumbnailMetadata(
+                int_thumb_id, int_video_id, ['http://test_url.com'],
+                ttype=ThumbnailType.DEFAULT, rank=0)
+        thumb_meta.save()
+        self.previous_video = {
+            'search_result': search_result,
+            'ext_video_id': ext_video_id,
+            'ext_thumb_id': ext_thumb_id,
+            'int_video_id': int_video_id,
+            'int_thumb_id': int_thumb_id,
+            'video_meta': video_meta,
+            'thumb_meta': thumb_meta
+        }
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+                'cvutils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image]
+        # Mock out the image upload
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+        #self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
 
     def tearDown(self):
         self.submit_mocker.stop()
@@ -407,3 +422,58 @@ class TestSubmitVideoPG(TestSubmitVideo):
     def tearDownClass(cls):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_when_default_thumb_changes(self):
+        '''Default thumbnail changes on submit
+
+           When a CNN video is processed and a new image
+           is included, the new image is made the default
+           thumbnail.
+        '''
+        # Sanity
+        video = VideoMetadata.get(self.previous_video['int_video_id'])
+        self.assertEqual(len(video.thumbnail_ids), 1)
+
+        # Get a copy of the original search response. Alter its thumb url
+        video_data = self.previous_video['search_result']
+        media = []
+        new_id = 'new_id'
+        new_url = 'http://cdn.cnn.com/thumbnail_new.jpg'
+        # Prepend new media including one thumbnail
+        media.insert(0, {'id': 'ref123', 'type': 'reference', 'cuts': {}})
+        media.insert(0, {
+            'id': new_id,
+            'type': 'image',
+            'cuts': {
+                'exlarge16to9': {
+                    'url': new_url
+                }
+            }
+        })
+        video_data['relatedMedia'] = {'media': media}
+
+        # Submit the video with new thumbnail
+        yield self.external_integration.submit_one_video_object(video_data)
+        video = VideoMetadata.get(self.previous_video['int_video_id'])
+        self.assertEqual(len(video.thumbnail_ids), 2)
+        thumbs = ThumbnailMetadata.get_many(video.thumbnail_ids)
+        self.assertEqual(self.im_download_mock.call_count, 1)
+
+        # For the thumbnail not in the previous video submission,
+        # assert properties are correct
+        previous_thumbs = self.previous_video['video_meta'].thumbnail_ids
+        for thumb in thumbs:
+            if thumb.key not in previous_thumbs:
+                self.assertEqual(thumb.rank, -1)
+                self.assertEqual(thumb.type, ThumbnailType.DEFAULT)
+                self.assertEqual(thumb.urls, [new_url])
+                self.assertEqual(thumb.external_id, new_id)
+
+    def test_when_default_thumb_has_no_change(self):
+        '''Default thumbnail remains on submit
+
+           When a CNN is processed and the image is recognized,
+           the original default thumbnail remains.
+        '''
+        pass

@@ -148,9 +148,10 @@ class OVPIntegration(object):
                             self.platform.modify,
                             self.platform.integration_id,
                             _increase_retries)
-                    _log.info('Added or found %d jobs for account: %s integration: %s before failure.' %
+                    _log.info('Added or found %d jobs for account:'
+                              '%s integration: %s before failure.' %
                               (added_jobs, self.neon_api_key,
-                               self.platform.integration_id))
+                                  self.platform.integration_id))
                     return
                 else:
                     _log.error('Unknown error, reached max retries on '
@@ -226,8 +227,9 @@ class OVPIntegration(object):
                 # already a string, leave it alone
                 pass
 
-        existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-            neondata.InternalVideoID.generate(self.neon_api_key, video_id))
+        existing_video = yield tornado.gen.Task(
+                neondata.VideoMetadata.get,
+                neondata.InternalVideoID.generate(self.neon_api_key, video_id))
 
         # TODO this won't be necessary once videos are removed from platforms
         if not self.does_video_exist(existing_video, video_id):
@@ -403,7 +405,6 @@ class OVPIntegration(object):
             neondata.NeonApiRequest.modify,
             job_id, self.neon_api_key, _update_request)
 
-
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, external_video_id):
         '''Grab a new thumbnail from a video object if there is one.
@@ -412,6 +413,11 @@ class OVPIntegration(object):
         data - The video object in the partner's data structure format
         external_video_id - The partner's video id
         '''
+        # @TODO with get_best_image, we make the assumption that
+        # the first image of high-enough quality is the best
+        # thumbnail for the image. And the partner's preference
+        # is for that image i.e., if their preferred image changes
+        # the new preferred one would be found first in the images list.
         thumb_url, thumb_data = self._get_best_image_info(data)
         if thumb_data is None:
             _log.warn_n('Could not find thumbnail in %s' % data)
@@ -420,8 +426,9 @@ class OVPIntegration(object):
                           for x in self._extract_image_urls(data)]
 
         # Get our video and thumbnail metadata objects
-        video_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
-            neondata.InternalVideoID.generate(self.neon_api_key, external_video_id))
+        video_meta = yield tornado.gen.Task(
+                neondata.VideoMetadata.get,
+                neondata.InternalVideoID.generate(self.neon_api_key, external_video_id))
         if not video_meta:
             _log.error('Could not find video %s' % external_video_id)
             statemon.state.increment('video_not_found')
@@ -438,10 +445,9 @@ class OVPIntegration(object):
         def _set_external_id(obj):
             obj.external_id = external_id
 
-        # Track the highest rank so a new thumbnail can be ranked above 
+        # Get the highest rank so a new thumbnail can be ranked in front of it 
         found_thumb, min_rank = False, 1
         for thumb in thumbs_meta:
-
             # Some videos have a legacy format and need migration
             self._run_migration(thumb)
 
@@ -451,14 +457,12 @@ class OVPIntegration(object):
             if thumb.rank < min_rank:
                 min_rank = thumb.rank
 
+            # Check if our record's external id matches the response's
             if thumb.external_id is not None:
-
-                # Check if our record's external id matches the response's
                 if (unicode(thumb.external_id) in
                         self._extract_image_field(data, 'id')):
                     found_thumb = True
             elif thumb.refid is not None:
-
                 # For legacy thumbs, we specified a reference id. Match on it
                 if thumb.refid in self._extract_image_field(data, 'referenceId'):
                     found_thumb = True
@@ -495,6 +499,7 @@ class OVPIntegration(object):
                         rank=min_rank - 1,
                         external_id=external_id
                     )
+
                     yield video_meta.download_and_add_thumbnail(
                         new_thumb,
                         url,
@@ -538,8 +543,8 @@ class OVPIntegration(object):
                         video_meta.__dict__ = updated_video.__dict__
 
                     _log.info(
-                        'Found new thumbnail %s for video %s at Brightcove.' %
-                        (external_id, video_meta.key))
+                        'Found new thumbnail %s for video %s for account %s.' %
+                        (external_id, video_meta.key, self.account_id))
                     statemon.state.increment('new_images_found')
                     added_image = True
                     break
