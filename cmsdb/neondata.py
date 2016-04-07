@@ -5930,11 +5930,13 @@ class VideoMetadata(StoredObject):
         rv = {}  
         
         where_clause = "_data->'job_id' != 'null'"
- 
+        order_clause = "ORDER BY created_time DESC" 
         if since: 
             if where_clause: 
                 where_clause += " AND "
-            where_clause += " created_time > to_timestamp(%s)::timestamp" 
+            where_clause += " created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot 
+            order_clause = "ORDER BY created_time ASC" 
             wc_params.append(since) 
 
         if until: 
@@ -5957,7 +5959,7 @@ class VideoMetadata(StoredObject):
                     where_clause, 
                     wc_params=wc_params, 
                     limit_clause="LIMIT %d" % limit, 
-     		    order_clause="ORDER BY created_time DESC",
+     		    order_clause=order_clause,
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         def _get_time(result): 
@@ -5967,15 +5969,24 @@ class VideoMetadata(StoredObject):
             _time = (cc_tt + created_time.microsecond / 1000000.0)
             return _time 
         
-        try:    
-            since_time = _get_time(results[0]) 
-            until_time = _get_time(results[-1]) 
+        try:   
+            do_reverse = False 
+            if since: 
+                since_time = _get_time(results[-1])
+                until_time = _get_time(results[0])
+                do_reverse = True
+            else:  
+                since_time = _get_time(results[0]) 
+                until_time = _get_time(results[-1]) 
         except (KeyError,IndexError): 
             pass
         
         for result in results:
             obj = cls._create(result['_data']['key'], result)
             videos.append(obj)
+
+        if do_reverse: 
+            videos.reverse() 
 
         rv['videos'] = videos 
         rv['since_time'] = since_time
