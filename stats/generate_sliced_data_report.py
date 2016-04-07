@@ -63,7 +63,12 @@ define("page_regex", default=None, type=str,
              "Data will be split by the first group."))
 define("baseline_types", default="default",
        help="Comma separated list of thumbnail type to treat as baseline")
-       
+
+define("total_video_conversions", default=None,
+       help=("File with lines of <video_id>,<# of conversions> that lists "
+             "the total number of video conversions, some of which we may "
+             "not know about."))
+
 
 def get_video_statuses(video_ids):
     '''Returns a dictionary of video status objects.
@@ -267,7 +272,9 @@ def get_event_data(video_id, key_times, metric, null_metric):
         data=data.sortlevel()
     return data
 
-def get_video_stats(imp, conv, thumb_times, base_thumb_id):
+def get_video_stats(imp, conv, thumb_times, base_thumb_id,
+                    winner_thumb_id=None,
+                    total_conversions=None):
     '''Calculate all the stats for a single video.
 
     Inputs:
@@ -275,6 +282,8 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     conv - get_event_data DataFrame for the conversions
     thumb_times - dict of thumb_id -> (on_timestamp, off_timestamp)
     base_thumb_id - the baseline thumbnail id
+    winner_tid - the winner thumbnail id
+    total_video_conversions - The total conversions from an external source
 
     Returns:
     A DataFrame keyed by thumbnail id with columns for the stats
@@ -350,21 +359,31 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id):
     if vid_stats.index.names[0] is None:
         vid_stats.index = vid_stats.index.set_names('thumbnail_id')
     vid_stats['tot_ctr'] = vid_stats['tot_conv'] / vid_stats['tot_imp']
+
+    # Calculate the extra conversions
+    tot_conv = vid_stats['tot_conv']
+    if winner_thumb_id is not None and total_conversions is not None:
+        vid_stats['conv_after_winner'] = pandas.Series(
+            { winner_thumb_id: total_conversions - imp['all_time'].sum() })
+        vid_stats['conv_after_winner'].fillna(0, inplace=True)
+        tot_conv = vid_stats['conv_after_winner'] + vid_stats['tot_conv']
     vid_stats['extra_conversions'] = stats.metrics.calc_extra_conversions(
-        vid_stats['tot_conv'], vid_stats['revlift'])
+        tot_conv, vid_stats['revlift'])
     
     vid_stats['is_base'] = (vid_stats.index.get_level_values('thumbnail_id') 
                             == base_thumb_id)
 
     return vid_stats
 
-def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
+def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
+                  total_video_conversions=None):
     '''Build up a stats table.
 
     Inputs:
     video_objs - List of VideoMetadata objects
     video_statuses - Dictionary of video_id -> VideoStatus objects
     thumb_statuses - Dictionary of thumb_id -> ThumbnailStatus objects
+    total_video_conversions - Dict of video_id -> Total conversions
 
     Outputs:
     pandas DataFrame with an outer index of thumbnail id
@@ -405,8 +424,15 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta):
             options.baseline_types.split(','),
             min_impressions=options.min_impressions)
 
+        vstatus = video_statuses.get(video.key, None)
+        winner_thumb_id = None
+        if vstatus is not None:
+            winner_thumb_id = vstatus.winner_tid
+
         cur_stats = get_video_stats(
-            imp_data, conv_data, thumb_times, base_thumb_id)
+            imp_data, conv_data, thumb_times, base_thumb_id,
+            winner_thumb_id,
+            total_video_conversions.get(video.key, None))
         if cur_stats is not None:
             thumb_stats.append(cur_stats)
 
@@ -438,6 +464,25 @@ def sort_stats(stats_table, slices):
     stats_table = stats_table.set_index(index_names)
     return stats_table
 
+def get_total_conversions(fn):
+    '''Opens a file that lists the total conversions for each video.
+
+    Format is one per line <video_id>,<conversions>
+
+    Returns:
+    Dict of video_id -> conversions
+    '''
+    if fn is None:
+        return None
+    
+    retval = {}
+    with open(fn) as f:
+        for line in lines:
+            fields = line.strip().split(',')
+            if len(fields) >= 2:
+                retval[fields[0]] = float(fields[1])
+    return retval
+
 def get_full_stats_table():
     video_objs = statutils.get_video_objects(options.impressions,
                                              options.pub_id,
@@ -453,8 +498,12 @@ def get_full_stats_table():
     video_statuses = get_video_statuses(thumb_meta['video_id'])
     thumb_statuses = get_thumbnail_statuses(thumb_meta.index)
 
+    total_video_conversions = get_total_conversions(
+        options.total_video_conversions)
+
     thumb_stats = collect_stats(video_objs, video_statuses,
-                                thumb_statuses, thumb_meta)
+                                thumb_statuses, thumb_meta,
+                                total_video_conversions)
 
     stat_table = pandas.merge(thumb_stats, thumb_meta,
                               how='left', left_index=True,
