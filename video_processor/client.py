@@ -33,7 +33,6 @@ import multiprocessing
 import numpy as np 
 from PIL import Image
 import psutil
-import pytube
 import Queue
 import random
 import re
@@ -56,6 +55,7 @@ import utils.neon
 from utils import pycvutils
 import utils.http
 from utils import statemon
+import youtube_dl
 
 import logging
 _log = logging.getLogger(__name__)
@@ -297,35 +297,30 @@ class VideoProcessor(object):
             if ytmatch:
                 watch_portion = ytmatch.group(1) 
                 video_portion = ytmatch.group(2) 
-                youtube = pytube.YouTube('%s%s' % 
-                    (watch_portion, video_portion))
-                videos = youtube.filter('mp4')
-                found_video = None
-                for v in videos:
-                    # they are ordered by resolution ASC, keep
-                    # and replace as we find a better reso up 
-                    # to 720p 
-                    if (v.resolution == '720p' or
-                       v.resolution == '480p' or 
-                       v.resolution == '360p'): 
-                        found_video = v 
-                try:
-                    if found_video:  
-                        def _move_file(path):
-                            shutil.move(path, self.tempfile.name)  
-                        found_video.download(os.path.dirname(
-                            self.tempfile.name), on_finish=_move_file) 
-                        self.tempfile.flush()  
-                    else:
-                        msg = 'Could not find a downloadable YouTube video' 
-                        _log.warning(msg)
-                        statemon.state.increment('youtube_video_not_found') 
-                except Exception as e:
-                    msg = 'Unexpected Error getting YouTube content : %s' % e
-                    _log.error(msg)
-                    statemon.state.increment('youtube_video_download_error')
-                finally: 
-                    return
+                url_to_get = '%s%s' % (watch_portion, video_portion)
+ 
+                def _finish_stuff(x): 
+                    if x['status'] == 'finished':
+                        shutil.move(x['filename'], self.tempfile.name)  
+                 
+                ydl = youtube_dl.YoutubeDL({'format' : '22', 
+                          'progress_hooks' : [_finish_stuff], 
+                          'outtmpl' : unicode(str('/tmp/%(title)s-%(id)s.%(ext)s')), 
+                          'restrictfilenames' : True})
+
+                with ydl: 
+                    try: 
+                        result = ydl.extract_info(url_to_get, download=True)
+                        if not result: 
+                            msg = 'Could not find a downloadable YouTube video' 
+                            _log.warning(msg)
+                            statemon.state.increment('youtube_video_not_found') 
+                    except Exception as e: 
+                        msg = 'Unexpected Error getting YouTube content : %s' % e
+                        _log.error(msg)
+                        statemon.state.increment('youtube_video_download_error')
+                    finally: 
+                        return
 
             parsed_url = VideoProcessor.percent_encode_url_path(self.video_url)
             req = urllib2.Request(parsed_url, headers=self.headers)

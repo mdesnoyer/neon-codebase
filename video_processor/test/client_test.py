@@ -280,89 +280,32 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
     def test_download_youtube_video(self):
         vprocessor = self.setup_video_processor(
             "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
-        vdata = '%030x' % random.randrange(16**(10*1024*1024))
-        video_one = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='360p'
-        ) 
-        video_two = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='720p'
-        ) 
-        video_three = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='1080p'
-        ) 
-        video_two.download = MagicMock(return_value='blah blah')
-        youtube_mock = video_processor.client.pytube
-        youtube_mock.YouTube = MagicMock() 
-        youtube_mock.YouTube().filter = MagicMock(
-            return_value=([video_one, video_two, video_three]))
-        vprocessor.download_video_file()
-        # this assures us that we found the 720p video in the list 
-        # and called download on it 
-        video_two.download.assert_called_with('/tmp', on_finish=ANY)
- 
+
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
+        with patch(patch_str) as youtube_mock: 
+            vprocessor.download_video_file()
+
+        youtube_mock.assert_called_with(
+            'http://www.youtube.com/watch?v=9bZkp7q19f0', 
+             download=True)
+       
     def test_download_youtube_video_error(self):
         vprocessor = self.setup_video_processor(
             "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
-        vdata = '%030x' % random.randrange(16**(10*1024*1024))
-        video_one = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='720p'
-        ) 
-        video_one.download = MagicMock(side_effect=Exception('blah'))
-        youtube_mock = video_processor.client.pytube
-        youtube_mock.YouTube = MagicMock() 
-        youtube_mock.YouTube().filter = MagicMock(
-            return_value=([video_one]))
+
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
         with self.assertLogExists(logging.ERROR, "Unexpected Error getting"): 
-            vprocessor.download_video_file()
-            self.assertEquals(
-                statemon.state.get('video_processor.client.youtube_video_download_error'),
-                1)
+            with patch(patch_str, 
+                       side_effect=Exception('blah')) as youtube_mock: 
+                vprocessor.download_video_file()
 
     def test_download_youtube_video_not_found(self):
         vprocessor = self.setup_video_processor(
             "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
-        vdata = '%030x' % random.randrange(16**(10*1024*1024))
-        video_one = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='9231p'
-        ) 
-        video_two = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='1080p'
-        ) 
-        video_three = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='1080p'
-        ) 
-        video_two.download = MagicMock(return_value='blah blah')
-        youtube_mock = video_processor.client.pytube
-        youtube_mock.YouTube = MagicMock() 
-        youtube_mock.YouTube().filter = MagicMock(
-            return_value=([video_one, video_two, video_three]))
-
-        with self.assertLogExists(logging.WARNING, "Could not find a"):
-            vprocessor.download_video_file()
-            self.assertEquals(
-                statemon.state.get('video_processor.client.youtube_video_not_found'),
-                1)
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
+        with self.assertLogExists(logging.WARNING, "Could not find a"): 
+            with patch(patch_str, return_value=[]) as youtube_mock: 
+                vprocessor.download_video_file()
      
     def test_process_video(self):
        
