@@ -216,7 +216,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         verifier = yield neondata.Verification.get('a@a.bc', async=True) 
         
         # now send this token to the verify endpoint        
-        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -254,7 +254,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         # verifier row gets created 
         verifier = yield neondata.Verification.get('a@a.bc', async=True)
 
-        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -289,7 +289,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200) 
         verifier = yield neondata.Verification.get('a@a.bc', async=True)
 
-        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -344,7 +344,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         verifier = yield neondata.Verification.get('a@a.bc', async=True)
 
-        url = '/api/v2/accts/verify?token=%s' % verifier.token
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 

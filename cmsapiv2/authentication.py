@@ -488,7 +488,7 @@ application = tornado.web.Application([
     (r'/api/v2/authenticate/?$', AuthenticateHandler),
     (r'/api/v2/refresh_token/?$', RefreshTokenHandler),
     (r'/api/v2/accounts/?$', NewAccountHandler),
-    (r'/api/v2/accts/verify?$', VerifyAccountHandler),
+    (r'/api/v2/accounts/verify?$', VerifyAccountHandler),
     (r'/api/v2/users/?$', NewUserHandler),
     (r'/api/v2/logout/?$', LogoutHandler)
 ], gzip=True)
