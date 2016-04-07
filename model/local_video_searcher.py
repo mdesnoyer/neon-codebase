@@ -1075,11 +1075,7 @@ class LocalSearcher(object):
                  testing=False,
                  testing_dir=None,
                  filter_text=True,
-                 text_filter_params=[os.path.join(__base_path__, 'cvutils', 'data', 
-                        'trained_classifierNM1.xml'),
-                     os.path.join(__base_path__, 'cvutils', 'data', 
-                        'trained_classifierNM2.xml'),
-                     16, 0.00015, 0.003, 0.8, True, 0.5, 0.9],
+                 text_filter_params=None,
                  filter_text_thresh=0.02):
         '''
         Inputs:
@@ -1168,8 +1164,30 @@ class LocalSearcher(object):
             filter_text:
                 Whether or not to remove text from the frames.
             text_filter_params:
-                The filters used to instantiate the text filter.
-            filter_text_thresh:
+                The parameters used to instantiate the text filter. This is a
+                list of 9 individual parameters:
+                    classifier xml 1 
+                        - (str) The path to the first level classifier
+                    classifier xml 2 
+                        - (str) The path to the second level classifier
+                    threshold delta [def: 16]
+                        - (int) the number of steps for MSER 
+                    min area [def: 0.00015]
+                        - (float) minimum ratio of the detection area to the
+                        total area of the image for acceptance as a text region.
+                    max area [def: 0.003]
+                        - (float) maximum ratio of the detection area to the
+                        total area of the image for acceptance as a text region.
+                    min probability, step 1 [def: 0.8]
+                        - (float) minimum probability for step 1 to proceed.
+                    non max suppression [def: True]
+                        - (bool) whether or not to use non max suppression.
+                    min probability difference [def: 0.5]
+                        - (float) minimum probability difference for 
+                        classification to proceed.
+                    min probability, step 2 [def: 0.9]
+                        - (float) minimum probability for step 2 to proceed.
+            filter_text_thresh: [def: 0.02]
                 The fraction of text that occupies the image in order to
                 filter it out.
 
@@ -1202,6 +1220,12 @@ class LocalSearcher(object):
             TESTING_DIR = testing_dir
         self._reset()
         self.filter_text = filter_text
+        if text_filter_params is None:
+            tc_base = os.path.join(__base_path__, 'cvutils', 'data')
+            tcnm1 = os.path.join(tc_base, 'trained_classifierNM1.xml')
+            tcnm2 = os.path.join(tc_base, 'trained_classifierNM2.xml')
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+                                  True, 0.5, 0.9]
         self.text_filter_params = text_filter_params
         self.analysis_crop = None  # this, if necessary at all, will be set
         # by update_processing_strategy
@@ -1243,6 +1267,9 @@ class LocalSearcher(object):
         self.startend_clip = processing_strategy.startend_clip
         self.adapt_improve = processing_strategy.adapt_improve
         self.analysis_crop = processing_strategy.analysis_crop
+        self.filter_text = processing_strategy.filter_text
+        self.text_filter_params = processing_strategy.text_filter_params
+        self.filter_text_thresh = processing_strategy.filter_text_thresh
 
     @property
     def min_score(self):
