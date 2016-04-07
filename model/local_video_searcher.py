@@ -168,6 +168,7 @@ import numpy as np
 from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
+from utils.options import define, options
 from model.metropolisHastingsSearch import MCMH_rpl
 
 _log = logging.getLogger(__name__)
@@ -176,6 +177,10 @@ statemon.define('all_frames_filtered', int)
 statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
+
+define("text_model_path", 
+       default=os.path.join(__base_path__, 'cvutils', 'data'), 
+       help="The location of the text detector models")
 
 MINIMIZE = -1  # flag for statistics where better = smaller
 NORMALIZE = 0  # flag for statistics where better = closer to mean
@@ -1167,9 +1172,11 @@ class LocalSearcher(object):
                 The parameters used to instantiate the text filter. This is a
                 list of 9 individual parameters:
                     classifier xml 1 
-                        - (str) The path to the first level classifier
+                        - (str) The first level classifier filename. Must be
+                        located in options.text_model_path
                     classifier xml 2 
-                        - (str) The path to the second level classifier
+                        - (str) The second level classifier filename. Must be
+                        located in options.text_model_path
                     threshold delta [def: 16]
                         - (int) the number of steps for MSER 
                     min area [def: 0.00015]
@@ -1221,11 +1228,17 @@ class LocalSearcher(object):
         self._reset()
         self.filter_text = filter_text
         if text_filter_params is None:
-            tc_base = os.path.join(__base_path__, 'cvutils', 'data')
-            tcnm1 = os.path.join(tc_base, 'trained_classifierNM1.xml')
-            tcnm2 = os.path.join(tc_base, 'trained_classifierNM2.xml')
+            tcnm1 = os.path.join(options.text_model_path,
+                                 'trained_classifierNM1.xml')
+            tcnm2 = os.path.join(options.text_model_path,
+                                 'trained_classifierNM2.xml')
             text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
                                   True, 0.5, 0.9]
+        else:
+            text_filter_params[0] = os.path.join(options.text_model_path, 
+                                                 text_filter_params[0])
+            text_filter_params[1] = os.path.join(options.text_model_path, 
+                                                 text_filter_params[1])
         self.text_filter_params = text_filter_params
         self.analysis_crop = None  # this, if necessary at all, will be set
         # by update_processing_strategy
@@ -1257,6 +1270,12 @@ class LocalSearcher(object):
         strategy. See the ProcessingStrategy object in cmsdb/neondata.py
         '''
         self._reset()
+        # handle the text filter parameters
+        text_filter_params = processing_strategy.text_filter_params
+        text_filter_params[0] = os.path.join(options.text_model_path, 
+                                             text_filter_params[0])
+        text_filter_params[1] = os.path.join(options.text_model_path, 
+                                             text_filter_params[1])
         self.processing_time_ratio = processing_strategy.processing_time_ratio
         self._orig_local_search_width = processing_strategy.local_search_width
         self._orig_local_search_step = processing_strategy.local_search_step
@@ -1268,7 +1287,7 @@ class LocalSearcher(object):
         self.adapt_improve = processing_strategy.adapt_improve
         self.analysis_crop = processing_strategy.analysis_crop
         self.filter_text = processing_strategy.filter_text
-        self.text_filter_params = processing_strategy.text_filter_params
+        self.text_filter_params = text_filter_params
         self.filter_text_thresh = processing_strategy.filter_text_thresh
 
     @property
