@@ -1463,8 +1463,8 @@ class LocalSearcher(object):
             text_d = [cv2.text.textDetect(x, *self.text_filter_params) 
                         for x in frames]
             masks = [x[1] for x in text_d]
-            # accept only those where tet occupies a sufficiently small amount of
-            # the image.
+            # accept only those where tet occupies a sufficiently small amount 
+            # of the image.
             accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
                         for x in masks]
             n_rej = np.sum(np.logical_not(accepted))
@@ -1483,7 +1483,7 @@ class LocalSearcher(object):
             framenos = [framenos[x] for x in acc_idxs]
             frames = [frames[x] for x in acc_idxs]
             gold = [gold[x] for x in acc_idxs]
-        # ---------- END OF ADDITION
+        # ---------- END OF TEXT PROCESSING
         for k, f in self.generators.iteritems():
             if k in frame_feats:
                 continue
