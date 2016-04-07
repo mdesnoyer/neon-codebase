@@ -559,6 +559,7 @@ class Mastermind(object):
             strategy.holdback_frac = float(strategy.holdback_frac)
             strategy.frac_adjust_rate = float(strategy.frac_adjust_rate)
             strategy.min_conversion = int(strategy.min_conversion)
+            strategy.min_impressions = int(strategy.min_impressions)
             strategy.max_neon_thumbs = (None if strategy.max_neon_thumbs 
                                         is None else 
                                         int(strategy.max_neon_thumbs))
@@ -929,7 +930,7 @@ class Mastermind(object):
         # For all those thumbs that haven't been seen for 1000 imp,
         # make sure that they will get some traffic
         for i in range(len(bandit_ids)):
-            if impressions[i] < 500:
+            if impressions[i] < strategy.min_impressions:
                 win_frac[i] = max(0.1, win_frac[i])
         win_frac = win_frac / np.sum(win_frac)
 
@@ -941,7 +942,7 @@ class Mastermind(object):
         if value_remaining <= Mastermind.VALUE_THRESHOLD:
             # There is a winner. See if there were enough imp to call it
             if (win_frac.shape[0] == 1 or 
-                (impressions[winner_idx] >= 500 and 
+                (impressions[winner_idx] >= strategy.min_impressions and 
                  total_conversions >= int(strategy.min_conversion))):
                 # The experiment is done
                 experiment_state = neondata.ExperimentState.COMPLETE
@@ -1115,7 +1116,7 @@ class Mastermind(object):
         value_remaining = 1 - p_winner
         if (len(data) == 1 or (
             value_remaining < 0.05 and
-            data['impr'][win_id] >= 500 and
+            data['impr'][win_id] >= strategy.min_impressions and
             enough_conversions)):
             experiment_state = neondata.ExperimentState.COMPLETE
             winner = [x for x in valid_thumbs if x.id == win_id][0]
@@ -1134,7 +1135,7 @@ class Mastermind(object):
                                   np.sqrt(data['std_var'] + 
                                           data['std_var'][baseline.id]))
                 done_thumbs = ((data['z_base'] < -1.645) &
-                               (data['impr'] >= 500))
+                               (data['impr'] >= strategy.min_impressions))
                 done_thumbs[off_thumbs] = True
                 if np.sum(~done_thumbs) >= 3:
                     run_frac[done_thumbs] = 0.0

@@ -2942,7 +2942,7 @@ class NeonUserAccount(NamespacedStoredObject):
                  default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
                  name=None, 
                  abtest=True, 
-                 serving_enabled=True, 
+                 serving_enabled=False, 
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
                  users=[], 
                  email=None):
@@ -3432,6 +3432,7 @@ class ExperimentStrategy(DefaultedStoredObject):
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
                  min_conversion = 50,
+                 min_impressions = 500,
                  frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
@@ -3458,6 +3459,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         # minimum combined conversion numbers before calling an experiment
         # complete
         self.min_conversion = min_conversion
+
+        # minimum number of impressions on a single thumb to declare a winner
+        self.min_impressions = min_impressions
 
         # Fraction adjusting power rate. When this number is 0, it is
         # equivalent to all the serving fractions being the same,
@@ -5566,6 +5570,30 @@ class ThumbnailStatus(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ThumbnailStatus.__name__
+
+class Verification(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by email
+    '''
+    def __init__(self, email, token=None, extra_info=None): 
+        super(Verification, self).__init__(email)
+        
+        # the special token that is used to verify the account
+        self.token = token or uuid.uuid1().hex  
+
+        # extra_info is a json store, that could store any 
+        # number of things, but is mostly used for objects 
+        # that may need to be saved after verification is 
+        # complete 
+        self.extra_info = extra_info or {}
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Verification.__name__
 
 class VideoMetadata(StoredObject):
     '''
