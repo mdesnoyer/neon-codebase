@@ -391,7 +391,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
     def test_create_account_send_email_ses_exception(self):
-        self.send_email_mocker.stop()
+        self.send_email_mocker.stop() 
         ses_mocker = patch('boto.ses.connection.SESConnection.send_email')
         ses_mock = ses_mocker.start()
         ses_mock.side_effect = Exception('random exception')  
@@ -410,9 +410,8 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(e.exception.code, 500) 
         self.assertRegexpMatches(rjson['error']['data'],
                                  'unable to send verification')
-        self.send_email_mocker.start()
         ses_mocker.stop() 
-        
+        self.send_email_mocker.start() 
  
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -876,6 +875,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestOoyalaIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1038,6 +1038,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestBrightcoveIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2297,6 +2298,7 @@ class TestHealthCheckHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.http_mocker.stop()
+        super(TestHealthCheckHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2485,6 +2487,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestThumbnailStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -3402,6 +3405,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
 class TestLogoutHandler(TestAuthenticationBase): 
     def setUp(self): 
         super(TestLogoutHandler, self).setUp()
+    def tearDown(self): 
+        super(TestLogoutHandler, self).tearDown()
    
     @classmethod
     def setUpClass(cls):
