@@ -3267,8 +3267,51 @@ class ProcessingStrategy(DefaultedStoredObject):
     def __init__(self, account_id, processing_time_ratio=2.5,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
-                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None,
+                 filter_text=True, text_filter_params=None, 
+                 filter_text_thresh=0.02):
         super(ProcessingStrategy, self).__init__(account_id)
+
+        # filter_text is a boolean indicating whether or not frames should
+        # filtered on the basis of detected text.
+        self.filter_text = filter_text
+
+        # text_filter_params defines the 9 parameters required to
+        # instantiate the text detector (in order):
+        # classifier xml 1 
+        #     - (str) The path to the first level classifier
+        # classifier xml 2 
+        #     - (str) The path to the second level classifier
+        # threshold delta [def: 16]
+        #     - (int) the number of steps for MSER 
+        # min area [def: 0.00015]
+        #     - (float) minimum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # max area [def: 0.003]
+        #     - (float) maximum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # min probability, step 1 [def: 0.8]
+        #     - (float) minimum probability for step 1 to proceed.
+        # non max suppression [def: True]
+        #     - (bool) whether or not to use non max suppression.
+        # min probability difference [def: 0.5]
+        #     - (float) minimum probability difference for 
+        #     classification to proceed.
+        # min probability, step 2 [def: 0.9]
+        #     - (float) minimum probability for step 2 to proceed.
+        if text_filter_params is None:
+            tc_base = os.path.join(__base_path__, 'cvutils', 'data')
+            tcnm1 = os.path.join(tc_base, 'trained_classifierNM1.xml')
+            tcnm2 = os.path.join(tc_base, 'trained_classifierNM2.xml')
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+                                  True, 0.5, 0.9]
+        self.text_filter_params = text_filter_params
+
+        # filter_text_thresh is the maximum allowable ratio of the area 
+        # occupied by the bounding boxes of detected text to the area of
+        # the entire image. If the ratio is greater than this, and
+        # filter_text is true, the frame will be filtered.
+        self.filter_text_thresh = 0.02
 
         # The processing time ratio dictates the maximum amount of time the
         # video can spend in processing, which is given by:
