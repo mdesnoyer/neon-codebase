@@ -300,33 +300,39 @@ class VideoProcessor(object):
                 def _finish_stuff(x): 
                     if x['status'] == 'finished':
                         shutil.move(x['filename'], self.tempfile.name)  
-                 
-                ydl = youtube_dl.YoutubeDL({'format' : '22', 
+                
+                ydl = youtube_dl.YoutubeDL({'format' : '0', 
                           'progress_hooks' : [_finish_stuff], 
                           'outtmpl' : unicode(str(
-                                          '/tmp/%(title)s-%(id)s.%(ext)s')), 
+                              '/tmp/%(title)s-%(id)s.%(ext)s')), 
                           'restrictfilenames' : True})
-
-                with ydl: 
-                    try: 
-                        result = ydl.extract_info(yturl, download=True)
-                        if not result: 
-                            msg = 'Could not find a downloadable YouTube video\
-                                   at %s' % yturl  
-                            _log.warning(msg)
-                            statemon.state.increment('youtube_video_not_found')
-                        else:  
-                            self.video_metadata.duration = result['duration']
-                    except KeyError:
-                        # in case there is not a duration  
-                        pass 
-                    except Exception as e: 
-                        msg = 'Unexpected Error getting YouTube content : %s\
-                               for %s' % (e, yturl)
-                        _log.error(msg)
-                        statemon.state.increment('youtube_video_download_error')
-                    finally: 
-                        return
+                for fq in [ '22', '35', '18', '34' ]:  
+                    ydl.params['format'] = fq 
+                    with ydl: 
+                        try: 
+                            result = ydl.extract_info(yturl, download=True)
+                            if not result: 
+                                msg = 'Could not find a downloadable\
+                                       YouTube video at %s' % yturl  
+                                _log.warning(msg)
+                                statemon.state.increment(
+                                    'youtube_video_not_found')
+                            else:  
+                                self.video_metadata.duration = result['duration']
+                            break
+                        except KeyError:
+                            # in case there is not a duration  
+                            pass
+                        except youtube_dl.utils.DownloadError as e:
+                            # let's try the next size 
+                            continue 
+                        except Exception as e:
+                            msg = 'Unexpected Error getting YouTube content : %s\
+                                   for %s' % (e, yturl)
+                            _log.error(msg)
+                            statemon.state.increment('youtube_video_download_error')
+                            return
+                return  
 
             parsed_url = VideoProcessor.percent_encode_url_path(self.video_url)
             req = urllib2.Request(parsed_url, headers=self.headers)
