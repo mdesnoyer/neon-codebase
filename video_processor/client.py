@@ -295,7 +295,7 @@ class VideoProcessor(object):
 
             ytmatch = ytre.search(self.video_url) 
             if ytmatch:
-                url_to_get = self.video_url
+                yturl = self.video_url
  
                 def _finish_stuff(x): 
                     if x['status'] == 'finished':
@@ -309,15 +309,20 @@ class VideoProcessor(object):
 
                 with ydl: 
                     try: 
-                        result = ydl.extract_info(url_to_get, download=True)
+                        result = ydl.extract_info(yturl, download=True)
                         if not result: 
                             msg = 'Could not find a downloadable YouTube video\
-                                   at %s' % url_to_get  
+                                   at %s' % yturl  
                             _log.warning(msg)
-                            statemon.state.increment('youtube_video_not_found') 
+                            statemon.state.increment('youtube_video_not_found')
+                        else:  
+                            self.video_metadata.duration = result['duration']
+                    except KeyError:
+                        # in case there is not a duration  
+                        pass 
                     except Exception as e: 
                         msg = 'Unexpected Error getting YouTube content : %s\
-                               for %s' % (e, url_to_get)
+                               for %s' % (e, yturl)
                         _log.error(msg)
                         statemon.state.increment('youtube_video_download_error')
                     finally: 

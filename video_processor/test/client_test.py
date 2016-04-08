@@ -300,6 +300,39 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         youtube_mock.assert_called_with(
             'https://youtu.be/yces6PZOsgc', 
              download=True)
+
+    def test_download_youtube_video_with_duration(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
+        with patch(patch_str, return_value={u'upload_date': u'20110620', 
+                 u'protocol': u'https', 
+                 u'creator': None, 
+                 u'format_note': u'hd720', 
+                 u'height': 720, 
+                 u'like_count': 0, 
+                 u'duration': 15, 
+                 u'player_url': None, 
+                 u'id': 'yces6PZOsgc', 
+                 u'view_count': 328}) as youtube_mock: 
+            vprocessor.download_video_file()
+        self.assertEquals(vprocessor.video_metadata.duration, 15)
+ 
+    def test_download_youtube_video_missing_duration(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
+        with patch(patch_str, return_value={u'upload_date': u'20110620', 
+                 u'protocol': u'https', 
+                 u'creator': None, 
+                 u'format_note': u'hd720', 
+                 u'height': 720, 
+                 u'like_count': 0, 
+                 u'player_url': None, 
+                 u'id': 'yces6PZOsgc', 
+                 u'view_count': 328}) as youtube_mock: 
+            vprocessor.download_video_file()
+        self.assertEquals(vprocessor.video_metadata.duration, None) 
        
     def test_download_youtube_video_error(self):
         vprocessor = self.setup_video_processor(
