@@ -20,6 +20,7 @@ import impala.error
 import logging
 import pandas
 import re
+import stats.cluster
 from utils.options import options, define
 
 _log = logging.getLogger(__name__)
@@ -102,38 +103,38 @@ def filter_video_objects(videos, start_video_time=None, end_video_time=None):
 def get_video_objects(impression_metric, pub_id,
                       start_time=None, end_time=None,
                       start_video_time=None, end_video_time=None,
-                      video_id_file=None, min_impressions=0):
+                      video_ids=None, min_impressions=0):
     '''Returns all the videos in the impala database within the time we 
     care about
     '''
     
-    if video_id_file:
-        _log.info('Using video ids from %s' % video_id_file)
-        with open(video_id_file) as f:
-            video_ids = [x.strip() for x in f]
-    else:
-        _log.info('Querying for video ids')
-        conn = impala_connect()
-        cursor = conn.cursor()
-        query = """select count({metric}) as imp_count,
-        regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1)
-          as video_id 
-        from eventsequences where 
-        thumbnail_id is not NULL and
-        {metric} is not null and
-        tai='{pub_id}'
-        {time_clause}
-        group by video_id
-        having imp_count > {min_impressions}""".format(
-            metric = impala_col_map[impression_metric],
-            pub_id = pub_id, 
-            min_impressions = min_impressions,
-            time_clause = get_time_clause(start_time, end_time))
-        cursor.execute(query)
+    _log.info('Querying for video ids')
+    conn = impala_connect()
+    cursor = conn.cursor()
+    query = """select count({metric}) as imp_count,
+    regexp_extract(thumbnail_id, '([A-Za-z0-9]+_[A-Za-z0-9~\\.\\-]+)_', 1)
+      as video_id 
+    from eventsequences where 
+    thumbnail_id is not NULL and
+    {metric} is not null and
+    tai='{pub_id}'
+    {time_clause}
+    group by video_id
+    having imp_count > {min_impressions}""".format(
+        metric = impala_col_map[impression_metric],
+        pub_id = pub_id, 
+        min_impressions = min_impressions,
+        time_clause = get_time_clause(start_time, end_time))
+    cursor.execute(query)
 
-        vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-\~]+)')
-        video_ids = [vidRe.match(x[1]).group(2) for 
-                     x in cursor if vidRe.match(x[1])]
+    vidRe = re.compile('(neontn)?([0-9a-zA-Z]+_[0-9a-zA-Z\.\-\~]+)')
+    video_ids_with_data = [vidRe.match(x[1]).group(2) for 
+                           x in cursor if vidRe.match(x[1])]
+
+    if video_ids is None:
+        video_ids = video_ids_with_data
+    else:
+        video_ids = set(video_ids) & set(video_ids_with_data)
 
     videos = neondata.VideoMetadata.get_many(video_ids)
     videos = [x for x in videos if x is not None]
@@ -157,7 +158,7 @@ def get_thumb_metadata(video_objs):
                     x is not None]
     requests = neondata.NeonApiRequest.get_many(request_keys)
     request_data = pandas.DataFrame(
-        [{'video_id': x.video_id,
+        [{'video_id': neondata.InternalVideoID.generate(x.api_key, x.video_id),
           'title': x.video_title} 
           for x in requests if x is not None])
 

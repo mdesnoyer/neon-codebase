@@ -278,6 +278,8 @@ def calc_thumb_stats(base_impressions, base_conversions,
     tstats['p_value'] = p_value
 
     tstats['ctr_base'] = ctr_base
+    tstats['conv_base'] = base_conversions
+    tstats['conv_thumb'] = thumb_conversions
     tstats['extra_conversions'] = (thumb_conversions * tstats['revlift']).replace(np.inf, 0).replace(-np.inf, 0)
 
     return tstats

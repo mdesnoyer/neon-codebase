@@ -112,7 +112,8 @@ def get_key_timepoints(video, video_status, thumb_statuses):
             cur_block[1] = dateutil.parser.parse(change_time)
             experiment_blocks.append(cur_block)
             cur_block = [None, None]
-        elif new_status == neondata.ExperimentState.RUNNING:
+        elif (cur_block[0] is None and 
+              new_status == neondata.ExperimentState.RUNNING):
             cur_block[0] = dateutil.parser.parse(change_time)
 
     if cur_block[0] or cur_block[1]:
@@ -183,8 +184,9 @@ def get_key_timepoints(video, video_status, thumb_statuses):
                 data_blocks.append([x.strftime('%Y-%m-%d %H:%M:%S') 
                                     if x else None
                                     for x in cur_block])
-            
-        retval[thumb_id] = data_blocks
+
+        if len(data_blocks) > 0:
+            retval[thumb_id] = data_blocks
         
     return retval
 
@@ -205,12 +207,17 @@ def get_event_data(video_id, key_times, metric, null_metric):
     column for the counts over all time.
     '''
     # Get the time window we need data for
-    min_time = min(key_times)
+    min_time = None
+    if len(key_times) > 0:
+        min_time = min(key_times)
     max_time = None
     if options.end_time is not None:
-        max_time = max(key_times)
-        max_time = max([dateutil.parser.parse(x) for 
-                        x in [max_time, options.end_time]])
+        if len(key_times) == 0:
+            max_time = dateutil.parser.parse(options.end_time)
+        else:
+            max_time = max(key_times)
+            max_time = max([dateutil.parser.parse(x) for 
+                            x in [max_time, options.end_time]])
         
     
     groupby_cols = ['thumbnail_id']
@@ -362,9 +369,18 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
 
     # Calculate the extra conversions
     tot_conv = vid_stats['tot_conv']
-    if winner_thumb_id is not None and total_conversions is not None:
-        vid_stats['conv_after_winner'] = pandas.Series(
-            { winner_thumb_id: total_conversions - imp['all_time'].sum() })
+    if total_conversions is not None:
+        if winner_thumb_id is not None:
+            # All the extra conversions go to the winner
+            vid_stats['conv_after_winner'] = pandas.Series(
+                {winner_thumb_id: total_conversions - conv['all_time'].sum()})
+        else:
+            # Proportion the extra conversions based on what we have
+            # seen because the experiment didn't finish.
+            weights = conv['all_time'] / float(conv['all_time'].sum())
+            tot_split = weights * total_conversions
+            vid_stats['conv_after_winner'] = tot_splits - conv['all_time']
+            
         vid_stats['conv_after_winner'].fillna(0, inplace=True)
         tot_conv = vid_stats['conv_after_winner'] + vid_stats['tot_conv']
     vid_stats['extra_conversions'] = stats.metrics.calc_extra_conversions(
@@ -429,10 +445,15 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
         if vstatus is not None:
             winner_thumb_id = vstatus.winner_tid
 
+
+        tot_conv = None
+        if total_video_conversions is not None:
+            tot_conv = total_video_conversions.get(video.key, None)
+            
         cur_stats = get_video_stats(
             imp_data, conv_data, thumb_times, base_thumb_id,
             winner_thumb_id,
-            total_video_conversions.get(video.key, None))
+            tot_conv)
         if cur_stats is not None:
             thumb_stats.append(cur_stats)
 
@@ -477,29 +498,38 @@ def get_total_conversions(fn):
     
     retval = {}
     with open(fn) as f:
-        for line in lines:
+        for line in f:
             fields = line.strip().split(',')
             if len(fields) >= 2:
                 retval[fields[0]] = float(fields[1])
     return retval
 
 def get_full_stats_table():
+
+    video_ids = None
+    if options.video_ids:
+        _log.info('Using video ids from %s' % video_ids)
+        with open(video_id_file) as f:
+            video_ids = [x.strip() for x in f]
+                
+    total_video_conversions = get_total_conversions(
+        options.total_video_conversions)
+    if total_video_conversions is not None:
+        video_ids = total_video_conversions.keys()
+        
     video_objs = statutils.get_video_objects(options.impressions,
                                              options.pub_id,
                                              options.start_time,
                                              options.end_time,
                                              options.start_video_time,
                                              options.end_video_time,
-                                             options.video_ids,
+                                             video_ids,
                                              options.min_impressions
                                              )
     thumb_meta = statutils.get_thumb_metadata(video_objs)
 
     video_statuses = get_video_statuses(thumb_meta['video_id'])
     thumb_statuses = get_thumbnail_statuses(thumb_meta.index)
-
-    total_video_conversions = get_total_conversions(
-        options.total_video_conversions)
 
     thumb_stats = collect_stats(video_objs, video_statuses,
                                 thumb_statuses, thumb_meta,
@@ -539,10 +569,10 @@ def main():
         stats.statutils.calculate_raw_stats(options.pub_id,
                                             options.start_time,
                                             options.end_time))
-    sheets['CMSDB Stats'] = pandas.DataFrame(
-        stats.statutils.calculate_cmsdb_stats(options.pub_id,
-                                              options.start_video_time,
-                                              options.end_video_time))
+    #sheets['CMSDB Stats'] = pandas.DataFrame(
+    #    stats.statutils.calculate_cmsdb_stats(options.pub_id,
+    #                                          options.start_video_time,
+    #                                          options.end_video_time))
 
 
     if options.output.endswith('.xls'):
