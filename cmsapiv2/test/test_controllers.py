@@ -201,7 +201,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
     def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
               '&admin_user_username=a@a.com'\
-              '&admin_user_password=b1234567'
+              '&admin_user_password=b1234567'\
+              '&admin_user_first_name=kevin'\
+              '&admin_user_last_name=fenger'\
+              '&admin_user_title=Mr.'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -234,13 +237,17 @@ class TestNewAccountHandler(TestAuthenticationBase):
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
         self.assertEquals(user.username, 'a@a.com')
+        self.assertEquals(user.first_name, 'kevin')
+        self.assertEquals(user.last_name, 'fenger')
+        self.assertEquals(user.title, 'Mr.')
         
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
         params = json.dumps({'customer_name': 'meisnew', 
                              'email': 'a@a.bc', 
                              'admin_user_username':'a@a.com', 
-                             'admin_user_password':'testacpas'})
+                             'admin_user_password':'testacpas', 
+                             'admin_user_first_name':'kevin'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/accounts'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -273,6 +280,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
         self.assertEquals(user.username, 'a@a.com')
+        self.assertEquals(user.first_name, 'kevin')
  
     @tornado.testing.gen_test 
     def test_create_new_account_duplicate_users(self):
@@ -688,7 +696,9 @@ class TestUserHandler(TestControllersBase):
     @tornado.testing.gen_test(timeout=10.0) 
     def test_get_user_does_exist(self):
         user = neondata.User(username='testuser', 
-                             password='testpassword', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
                              access_level=neondata.AccessLevels.CREATE | 
                                           neondata.AccessLevels.READ)
         
@@ -706,6 +716,8 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'testuser')
+        self.assertEquals(rjson['first_name'], 'kevin')
+        self.assertEquals(rjson['last_name'], 'kevin')
 
         user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(user.username, 'testuser') 
@@ -779,7 +791,10 @@ class TestUserHandler(TestControllersBase):
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
         params = json.dumps({'username':'testuser', 
-                             'access_level': 1, 
+                             'access_level': 1,
+                             'first_name' : 'kevin',  
+                             'last_name' : 'kevin',  
+                             'title' : 'DOCTOR',  
                              'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
@@ -790,6 +805,9 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         updated_user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(updated_user.access_level, 1)
+        self.assertEquals(updated_user.first_name, 'kevin')
+        self.assertEquals(updated_user.last_name, 'kevin')
+        self.assertEquals(updated_user.title, 'DOCTOR')
  
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 

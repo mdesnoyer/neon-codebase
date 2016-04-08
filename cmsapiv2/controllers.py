@@ -1379,7 +1379,10 @@ class UserHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Optional('access_level') : All(Coerce(int), Range(min=1, max=63))
+          Optional('access_level') : All(Coerce(int), Range(min=1, max=63)),
+          'first_name': Any(str, unicode, Length(min=1, max=256)),
+          'last_name': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=32))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -1398,6 +1401,9 @@ class UserHandler(APIV2Handler):
 
         def _update_user(u): 
             u.access_level = new_access_level 
+            u.first_name = args.get('first_name', u.first_name) 
+            u.last_name = args.get('last_name', u.last_name) 
+            u.title = args.get('title', u.title) 
 
         user_internal = yield neondata.User.modify(
             username, 
@@ -1421,11 +1427,13 @@ class UserHandler(APIV2Handler):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['username', 'access_level', 'created', 'updated' ]
+        return ['username', 'access_level', 'created', 'updated', 
+                'first_name', 'last_name', 'title' ]
     
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['username', 'access_level', 'created', 'updated' ]
+        return ['username', 'access_level', 'created', 'updated', 
+                'first_name', 'last_name', 'title' ]
 
 '''*********************************************************************
 Endpoints 
