@@ -280,7 +280,8 @@ def get_event_data(video_id, key_times, metric, null_metric):
     return data
 
 def get_video_stats(imp, conv, thumb_times, base_thumb_id,
-                    winner_thumb_id=None,
+                    thumb_statuses,
+                    video_status,
                     total_conversions=None):
     '''Calculate all the stats for a single video.
 
@@ -370,19 +371,47 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
     # Calculate the extra conversions
     tot_conv = vid_stats['tot_conv']
     if total_conversions is not None:
+        winner_thumb_id = None
+        experiment_state = None
+        if video_status is not None:
+            winner_thumb_id = video_status.winner_tid
+            experiment_state = video_status.experiment_state
+            
         if winner_thumb_id is not None:
             # All the extra conversions go to the winner
             vid_stats['conv_after_winner'] = pandas.Series(
                 {winner_thumb_id: total_conversions - conv['all_time'].sum()})
+            
+        elif (experiment_state == neondata.ExperimentState.RUNNING and
+              total_conversions > 10 * conv['all_time'].sum()):
+            # We're still running, but the total conversions is
+            # nowhere near what we see, so we have to assuming we're
+            # missing something, so ignore the total conversions.
+            _log.warn("We're missing a ton (%s%%) of data for running video "
+                      "%s" % (float(total_conversions)/conv['all_time'].sum(),
+                              neondata.InternalVideoID.from_thumbnail_id(
+                                  vid_stats.index[0])))
+            vid_stats['conv_after_winner'] = 0.0
+            
         else:
-            # Proportion the extra conversions based on what we have
-            # seen because the experiment didn't finish.
-            weights = conv['all_time'] / float(conv['all_time'].sum())
-            tot_split = weights * total_conversions
-            vid_stats['conv_after_winner'] = tot_splits - conv['all_time']
+            # Give the extra conversions based on the serving fracs
+            serving_frac = pandas.Series(dict(
+                [(x, thumb_statuses.get(x, None).serving_frac 
+                  if x in thumb_statuses else 0.0) for x in
+                 vid_stats.index.get_level_values('thumbnail_id')]))
+            if serving_frac.sum() < 0.95:
+                # We're missing some data so proportion based on what
+                # we've seen
+                serving_frac = conv['all_time'] / float(conv['all_time'].sum())
+            else:
+                serving_frac = serving_frac / serving_frac.sum()
+            
+            vid_stats['conv_after_winner'] = serving_frac * (
+                total_conversions - conv['all_time'].sum())
             
         vid_stats['conv_after_winner'].fillna(0, inplace=True)
         tot_conv = vid_stats['conv_after_winner'] + vid_stats['tot_conv']
+        
     vid_stats['extra_conversions'] = stats.metrics.calc_extra_conversions(
         tot_conv, vid_stats['revlift'])
     
@@ -441,10 +470,6 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
             min_impressions=options.min_impressions)
 
         vstatus = video_statuses.get(video.key, None)
-        winner_thumb_id = None
-        if vstatus is not None:
-            winner_thumb_id = vstatus.winner_tid
-
 
         tot_conv = None
         if total_video_conversions is not None:
@@ -452,7 +477,8 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
             
         cur_stats = get_video_stats(
             imp_data, conv_data, thumb_times, base_thumb_id,
-            winner_thumb_id,
+            thumb_statuses,
+            video_statuses.get(video.key, None),
             tot_conv)
         if cur_stats is not None:
             thumb_stats.append(cur_stats)
@@ -530,6 +556,25 @@ def get_full_stats_table():
 
     video_statuses = get_video_statuses(thumb_meta['video_id'])
     thumb_statuses = get_thumbnail_statuses(thumb_meta.index)
+
+    status_table = pandas.merge(
+        pandas.DataFrame([
+            {'video_id' : neondata.InternalVideoID.from_thumbnail_id(
+                x.get_id()),
+             'thumbnail_id' : x.get_id(),
+             'serving_frac' : x.serving_frac
+             } for x in thumb_statuses.values()]),
+        pandas.DataFrame([
+            {'video_id' : x.get_id(),
+            'exp_status' : x.experiment_state}
+            for x in video_statuses.values()]),
+        on='video_id')
+    status_table.set_index('thumbnail_id', inplace=True)
+    status_table.drop('video_id', axis=1, inplace=True)
+
+    thumb_meta = pandas.merge(thumb_meta, status_table,
+                              how='left', left_index=True,
+                              right_index=True)
 
     thumb_stats = collect_stats(video_objs, video_statuses,
                                 thumb_statuses, thumb_meta,
