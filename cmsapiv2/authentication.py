@@ -304,7 +304,7 @@ class NewAccountHandler(APIV2Handler):
             if something goes wrong it logs, and raises an exception
         """ 
         kwargs = {}
-        click_me_url = '%s/account/confirm/%s' % (self.origin, token) 
+        click_me_url = '%s/account/confirm?token=%s' % (self.origin, token) 
         kwargs['to_addresses'] = send_to 
         kwargs['subject'] = 'Welcome to Neon' 
              
