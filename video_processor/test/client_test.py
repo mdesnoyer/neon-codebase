@@ -288,6 +288,18 @@ class TestVideoClientPG(test_utils.neontest.TestCase):
         youtube_mock.assert_called_with(
             'http://www.youtube.com/watch?v=9bZkp7q19f0', 
              download=True)
+
+    def test_download_youtube_video_diff_link_style(self):
+        vprocessor = self.setup_video_processor(
+            "neon", url='https://youtu.be/yces6PZOsgc')
+
+        patch_str = 'video_processor.client.youtube_dl.YoutubeDL.extract_info'
+        with patch(patch_str) as youtube_mock: 
+            vprocessor.download_video_file()
+
+        youtube_mock.assert_called_with(
+            'https://youtu.be/yces6PZOsgc', 
+             download=True)
        
     def test_download_youtube_video_error(self):
         vprocessor = self.setup_video_processor(

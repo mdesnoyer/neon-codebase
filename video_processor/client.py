@@ -262,7 +262,7 @@ class VideoProcessor(object):
         '''
         CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        ytre = re.compile('(https?:\/\/[A-Za-z]*\.youtu.*be\..+\/watch\?).*(v=.+)') 
+        ytre = re.compile('https?\:\/\/www\.?youtube\.com|youtu\.?be\/.+') 
 
         # Find out if we should throttle
         do_throttle = False
@@ -295,9 +295,7 @@ class VideoProcessor(object):
 
             ytmatch = ytre.search(self.video_url) 
             if ytmatch:
-                watch_portion = ytmatch.group(1) 
-                video_portion = ytmatch.group(2) 
-                url_to_get = '%s%s' % (watch_portion, video_portion)
+                url_to_get = self.video_url
  
                 def _finish_stuff(x): 
                     if x['status'] == 'finished':
@@ -305,18 +303,21 @@ class VideoProcessor(object):
                  
                 ydl = youtube_dl.YoutubeDL({'format' : '22', 
                           'progress_hooks' : [_finish_stuff], 
-                          'outtmpl' : unicode(str('/tmp/%(title)s-%(id)s.%(ext)s')), 
+                          'outtmpl' : unicode(str(
+                                          '/tmp/%(title)s-%(id)s.%(ext)s')), 
                           'restrictfilenames' : True})
 
                 with ydl: 
                     try: 
                         result = ydl.extract_info(url_to_get, download=True)
                         if not result: 
-                            msg = 'Could not find a downloadable YouTube video' 
+                            msg = 'Could not find a downloadable YouTube video\
+                                   at %s' % url_to_get  
                             _log.warning(msg)
                             statemon.state.increment('youtube_video_not_found') 
                     except Exception as e: 
-                        msg = 'Unexpected Error getting YouTube content : %s' % e
+                        msg = 'Unexpected Error getting YouTube content : %s\
+                               for %s' % (e, url_to_get)
                         _log.error(msg)
                         statemon.state.increment('youtube_video_download_error')
                     finally: 
