@@ -25,7 +25,6 @@ if sys.path[0] != __base_path__:
 from api import ooyala_api
 import base64
 import binascii
-import calendar
 import cmsdb.cdnhosting
 import code
 import collections
@@ -412,7 +411,7 @@ class PostgresDB(tornado.web.RequestHandler):
                                         values='VALUES(%s, %s)',
                                         extra_params=None):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                     fields + " " + values
+                    " " + fields + " " + values
             params = (obj.get_json_data(), obj.__class__.__name__)
             if extra_params:
                 params = params + extra_params 
@@ -1573,7 +1572,7 @@ class StoredObject(object):
 
             # throw created updated on the object if its there 
             try:
-                for k in ['created_time_pg', 'updated_time_pg']: 
+                for k in ['created_time_pg', 'updated_time_pg']:
                     if isinstance(obj_dict[k], datetime.datetime): 
                         data_dict[k.split('_')[0]] = obj_dict[k].strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
@@ -1717,7 +1716,7 @@ class StoredObject(object):
             conn = yield db.get_connection()
             query = "SELECT _data, _type, \
                            created_time AS created_time_pg,\
-                           updated_time AS updated_time_pg\
+                           updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 

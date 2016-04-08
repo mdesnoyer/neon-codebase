@@ -69,7 +69,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
             self.mastermind,
             self.directive_publisher)
         logging.getLogger('mastermind.server').reset_sample_counters()
-        acct = neondata.NeonUserAccount('acct1', 'apikey')
+        acct = neondata.NeonUserAccount('acct1', 
+            'apikey', 
+            serving_enabled=True)
         acct.save()
 
     def tearDown(self):
@@ -85,7 +87,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # set up 4 accounts with videos, make sure it processes 
         # them all correctly
  
-        acct1 = neondata.NeonUserAccount('acct1', 'apikey1')
+        acct1 = neondata.NeonUserAccount('acct1', 
+            'apikey1', 
+            serving_enabled=True)
         job11 = neondata.NeonApiRequest('job11', 'apikey1', 0)
         job11.state = neondata.RequestState.FINISHED
 
@@ -93,18 +97,24 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job12 = neondata.NeonApiRequest('job12', 'apikey1', 10)
         job12.state = neondata.RequestState.SUBMIT
 
-        acct2 = neondata.NeonUserAccount('acct2', 'apikey2')
+        acct2 = neondata.NeonUserAccount('acct2', 
+            'apikey2', 
+            serving_enabled=True)
         job21 = neondata.NeonApiRequest('job21', 'apikey2', 1)
         job21.state = neondata.RequestState.FINISHED
 
         job22 = neondata.NeonApiRequest('job22', 'apikey2', 2)
         job22.state = neondata.RequestState.FINISHED
 
-        acct3 = neondata.NeonUserAccount('acct3', 'apikey3')
+        acct3 = neondata.NeonUserAccount('acct3', 
+           'apikey3', 
+           serving_enabled=True)
         job31 = neondata.NeonApiRequest('job31', 'apikey3', 4)
         job31.state = neondata.RequestState.CUSTOMER_ERROR
 
-        acct4 = neondata.NeonUserAccount('acct4', 'apikey4')
+        acct4 = neondata.NeonUserAccount('acct4', 
+            'apikey4', 
+            serving_enabled=True)
 
         datamock.NeonUserAccount.iterate_all.return_value = [acct1,acct2,acct3,acct4] 
         get_ivids_mock.side_effect = [
@@ -258,9 +268,9 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_account_default_thumb_update(self, get_ivids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
-        a1 = neondata.NeonUserAccount('a1', 'acct1')
+        a1 = neondata.NeonUserAccount('a1', 'acct1', serving_enabled=True)
         a1.default_thumbnail_id = 'a1_NOVIDEO_tdef'
-        a2 = neondata.NeonUserAccount('a2', 'acct2')
+        a2 = neondata.NeonUserAccount('a2', 'acct2', serving_enabled=True)
         datamock.NeonUserAccount.iterate_all.return_value = [
             a1, a2]
         get_ivids_mock.return_value = [] 
@@ -307,7 +317,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
     def test_video_metadata_missing(self, get_internal_vids_mock, datamock):
         datamock.InternalVideoID = neondata.InternalVideoID
         api_key = 'apikey'
-        acct = neondata.NeonUserAccount('acct1', api_key)
+        acct = neondata.NeonUserAccount('acct1', api_key, serving_enabled=True)
         datamock.NeonUserAccount.iterate_all.return_value = [acct] 
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 10)
@@ -331,7 +341,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         api_key = 'apikey'
         job11 = neondata.NeonApiRequest('job11', api_key, 0)
         job12 = neondata.NeonApiRequest('job12', api_key, 1)
-        acct = neondata.NeonUserAccount('acct1', api_key)
+        acct = neondata.NeonUserAccount('acct1', api_key, serving_enabled=True)
         datamock.NeonUserAccount.iterate_all.return_value = [acct] 
         
         vid_meta = {
@@ -383,7 +393,7 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         job11 = neondata.NeonApiRequest('job11', api_key, 0, 
                                         't', 't', 'r', 'h')
         job12 = neondata.NeonApiRequest('job11', api_key, '1')
-        acct = neondata.NeonUserAccount('acct1', api_key)
+        acct = neondata.NeonUserAccount('acct1', api_key, serving_enabled=True)
         datamock.NeonUserAccount.iterate_all.return_value = [acct] 
 
         vid_meta = {
@@ -449,8 +459,8 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
          datamock):
 
         datamock.InternalVideoID = neondata.InternalVideoID
-        acct1 = neondata.NeonUserAccount('a1', 'a1')
-        acct2 = neondata.NeonUserAccount('a2', 'a2')
+        acct1 = neondata.NeonUserAccount('a1', 'a1', serving_enabled=True)
+        acct2 = neondata.NeonUserAccount('a2', 'a2', serving_enabled=True)
 
         datamock.NeonUserAccount.iterate_all.return_value = [acct1,acct2] 
 
@@ -538,7 +548,9 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
         # Run a process cycle and then turn on the subscriptions
         self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
-        self.acct = neondata.NeonUserAccount('acct1', 'key1')
+        self.acct = neondata.NeonUserAccount('acct1', 
+                       'key1', 
+                       serving_enabled=True)
         self.acct.save()
 
         # Setup api request
@@ -649,7 +661,7 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
             lambda: len([x for x in self.mastermind.get_directives()]),
             0, async=True)
 
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test(timeout=20.0) 
     def test_add_new_video(self):
         tornado.ioloop.IOLoop.current().add_callback(lambda: 
             self.watcher._change_subscriber.subscribe_to_db_changes())
@@ -662,14 +674,13 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
                                      tids=['key1_vid2_t1'],
                                      i_id='i1')
         yield vid.save(async=True)
-
-        yield neondata.BrightcovePlatform.modify(
+        bp = yield neondata.BrightcovePlatform.modify(
             'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), 
             async=True)
         yield self.assertWaitForEquals(lambda: 
             len([x for x in self.mastermind.get_directives()]), 
               2, 
-            async=True)
+            async=True, timeout=10.0)
         yield self.assertWaitForEquals(lambda: 
             self.parse_directives()[('key1', 'key1_vid2')],
                 {'key1_vid2_t1': 1.0}, 
@@ -1770,7 +1781,9 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.redis.start()
 
         # setup neonuser account with apikey = 'acct1'
-        self.acc = neondata.NeonUserAccount('myacctid', 'acct1')
+        self.acc = neondata.NeonUserAccount('myacctid', 
+            'acct1', 
+            serving_enabled=True)
         self.acc.save()
 
         # Initialize the data in the database that we actually need
@@ -2173,7 +2186,9 @@ class TestPublisherStatusUpdatesInDBPG(TestPublisherStatusUpdatesInDB):
         mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # setup neonuser account with apikey = 'acct1'
-        self.acc = neondata.NeonUserAccount('myacctid', 'acct1')
+        self.acc = neondata.NeonUserAccount('myacctid', 
+            'acct1', 
+            serving_enabled=True)
         self.acc.save()
 
         # Initialize the data in the database that we actually need
@@ -2420,7 +2435,7 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         default_acct_thumb.save()
         neondata.ThumbnailServingURLs('key1_NOVIDEO_t0',
                                       {(160, 90) : 't_default.jpg'}).save()
-        acct = neondata.NeonUserAccount('acct1', 'key1')
+        acct = neondata.NeonUserAccount('acct1', 'key1', serving_enabled=True)
         acct.default_thumbnail_id = default_acct_thumb.key
         acct.save()
 
