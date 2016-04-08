@@ -2881,7 +2881,10 @@ class User(NamespacedStoredObject):
     def __init__(self, 
                  username, 
                  password='password', 
-                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS, 
+                 first_name=None,
+                 last_name=None,
+                 title=None):
  
         super(User, self).__init__(username)
 
@@ -2903,7 +2906,16 @@ class User(NamespacedStoredObject):
         self.refresh_token = None
 
         # access level granted to this user, uses class AccessLevels 
-        self.access_level = access_level 
+        self.access_level = access_level
+
+        # the first name of the user 
+        self.first_name = first_name 
+ 
+        # the last name of the user 
+        self.last_name = last_name 
+ 
+        # the title of the user 
+        self.title = title  
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

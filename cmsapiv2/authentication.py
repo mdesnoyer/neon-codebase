@@ -243,7 +243,10 @@ class NewAccountHandler(APIV2Handler):
               Length(min=8, max=64)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048))
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
+          'admin_user_first_name': Any(str, unicode, Length(min=1, max=256)),
+          'admin_user_last_name': Any(str, unicode, Length(min=1, max=256)),
+          'admin_user_title': Any(str, unicode, Length(min=1, max=32))
         })
         args = self.parse_args()
         schema(args) 
@@ -268,7 +271,10 @@ class NewAccountHandler(APIV2Handler):
  
         new_user = neondata.User(username=username, 
                        password=password,
-                       access_level = neondata.AccessLevels.ADMIN)
+                       access_level = neondata.AccessLevels.ADMIN,
+                       first_name = args.get('admin_user_first_name', None),
+                       last_name = args.get('admin_user_last_name', None), 
+                       title = args.get('admin_user_title', None))
         account.users.append(username) 
 
         extra_info = {} 
@@ -340,7 +346,10 @@ class NewUserHandler(APIV2Handler):
         schema = Schema({ 
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
           Required('password') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=63))
+          Required('access_level') : All(Coerce(int), Range(min=1, max=63)),
+          'first_name': Any(str, unicode, Length(min=1, max=256)),
+          'last_name': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -348,7 +357,10 @@ class NewUserHandler(APIV2Handler):
 
         new_user = neondata.User(username=args.get('username'), 
                        password=args.get('password'),
-                       access_level=args.get('access_level'))
+                       access_level=args.get('access_level'),
+                       first_name=args.get('first_name', None),
+                       last_name=args.get('last_name', None), 
+                       title=args.get('title',None))
 
         yield new_user.save(async=True)
         new_user = yield neondata.User.get(args.get('username'), async=True)  
@@ -364,11 +376,13 @@ class NewUserHandler(APIV2Handler):
  
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['username', 'created', 'updated' ]
+        return ['username', 'created', 'updated', 
+                'first_name', 'last_name', 'title' ]
     
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['username', 'created', 'updated' ]
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title' ]
 
 '''****************************************************************
 VerifyAccountHandler
