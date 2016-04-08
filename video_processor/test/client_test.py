@@ -30,7 +30,6 @@ import numpy as np
 import os
 import pickle
 from PIL import Image
-import pytube
 import re
 import redis
 import random
