@@ -376,6 +376,13 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
         if video_status is not None:
             winner_thumb_id = video_status.winner_tid
             experiment_state = video_status.experiment_state
+            if (experiment_state == neondata.ExperimentState.DISABLED and
+                winner_thumb_id is None):
+                # See if the experiment was completed and then later disabled (which erases the winner. In that case, take the max impressions thumb as the winner.
+                if (neondata.ExperimentState.COMPLETE 
+                    in [x[1] for x in video_status.state_history]):
+                    winner_thumb_id = conv['all_time'].argmax()
+                 
             
         if winner_thumb_id is not None:
             # All the extra conversions go to the winner
@@ -587,6 +594,11 @@ def get_full_stats_table():
     # Zero out the non-neon data
     stat_table.loc[stat_table['type'] != 'neon', 
                    ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
+
+    # If there is an assumption of conversions after the winner, adjust the tot_cov column
+    if 'conv_after_winner' in stat_table.columns:
+        stat_table['conv_before_winner'] = stat_table['tot_conv']
+        stat_table['tot_conv'] = stat_table['conv_before_winner'] + stat_table['conv_after_winner']
 
     # Set the indices
     groups = stat_table.index.names
