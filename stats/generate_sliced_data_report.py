@@ -19,6 +19,7 @@ if sys.path[0] != __base_path__:
 from cmsdb import neondata
 from datetime import datetime, timedelta
 import dateutil.parser
+import hashlib
 import logging
 import numpy as np
 import pandas
@@ -54,6 +55,8 @@ define("video_ids", default=None, type=str,
        help="File containing video ids to analyze, one per line")
 define("output", default=None, type=str,
        help="Output file. If not set, outputs to STDOUT")
+define("cache_dir", default=None, type=str,
+       help="Directory for cached results from the cluster")
 
 define("split_mobile", default=0, type=int,
        help="If 1, split the data by desktop and mobile")
@@ -190,7 +193,7 @@ def get_key_timepoints(video, video_status, thumb_statuses):
         
     return retval
 
-def get_event_data(video_id, key_times, metric, null_metric):
+def get_event_data(video_id, key_times, metric, null_metric, end_time):
     '''Retrieve from Impala the event counts for the different time periods.
 
     Inputs:
@@ -211,13 +214,13 @@ def get_event_data(video_id, key_times, metric, null_metric):
     if len(key_times) > 0:
         min_time = min(key_times)
     max_time = None
-    if options.end_time is not None:
+    if end_time is not None:
         if len(key_times) == 0:
-            max_time = dateutil.parser.parse(options.end_time)
+            max_time = dateutil.parser.parse(end_time)
         else:
             max_time = max(key_times)
             max_time = max([dateutil.parser.parse(x) for 
-                            x in [max_time, options.end_time]])
+                            x in [max_time, end_time]])
         
     
     groupby_cols = ['thumbnail_id']
@@ -227,7 +230,7 @@ def get_event_data(video_id, key_times, metric, null_metric):
     
     select_cols = ['count(%s) as all_time' % statutils.impala_col_map[metric],
                    '%s as window_count' % statutils.get_time_window_count(
-                       metric, options.start_time, options.end_time)]
+                       metric, options.start_time, end_time)]
     select_cols.extend([
         "sum(if(cast(imloadserverTime as timestamp) < '{cur_time}' and {metric} is not null, 1, 0)) as '{cur_time}'".format(
             metric=statutils.impala_col_map[metric],
@@ -262,6 +265,28 @@ def get_event_data(video_id, key_times, metric, null_metric):
             time_clause=statutils.get_time_clause(min_time, max_time),
             groupby_clauses=','.join(groupby_clauses)))
 
+    data = get_query_results(query)
+    
+    if 'page_type' in data.columns:
+        data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
+    data = data.set_index(groupby_clauses)
+    if len(groupby_clauses) > 1:
+        data=data.sortlevel()
+    return data
+
+def get_query_results(query):
+    query_hash = hashlib.md5(query).hexdigest()
+    cache_file = 'vidcounts_%s.cache' % query_hash
+
+    if options.cache_dir is not None:
+        full_cache_fn = os.path.join(options.cache_dir, cache_file)
+        if os.path.exists(full_cache_fn):
+            data = pandas.read_pickle(full_cache_fn)
+            if len(data) == 0:
+                data = None
+            return data
+
+    # The query isn't in the cache so do the actual call
     conn = statutils.impala_connect()
     cursor = conn.cursor()
     cursor.execute(query)
@@ -269,14 +294,16 @@ def get_event_data(video_id, key_times, metric, null_metric):
     cols = [metadata[0] for metadata in cursor.description]
     data = pandas.DataFrame((dict(zip(cols, row))
                                for row in cursor))
+
+    # Write the result to the cache
+    if options.cache_dir is not None:
+        full_cache_fn = os.path.join(options.cache_dir, cache_file)
+        if not os.path.exists(options.cache_dir):
+            os.makedirs(options.cache_dir)
+        data.to_pickle(full_cache_fn)
+
     if len(data) == 0:
-        return None
-    
-    if 'page_type' in data.columns:
-        data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
-    data = data.set_index(groupby_clauses)
-    if len(groupby_clauses) > 1:
-        data=data.sortlevel()
+        data = None
     return data
 
 def get_video_stats(imp, conv, thumb_times, base_thumb_id,
@@ -428,7 +455,7 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
     return vid_stats
 
 def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
-                  total_video_conversions=None):
+                  total_video_conversions=None, end_time=None):
     '''Build up a stats table.
 
     Inputs:
@@ -461,12 +488,12 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
         key_times = [x for x in key_times if x is not None]
 
         imp_data = get_event_data(video.key, key_times, options.impressions,
-                                  options.impressions)
+                                  options.impressions, end_time)
         if imp_data is None:
             continue
         
         conv_data = get_event_data(video.key, key_times, options.conversions,
-                                   options.impressions)
+                                   options.impressions, end_time)
         if conv_data is None:
             continue
         
@@ -537,7 +564,7 @@ def get_total_conversions(fn):
                 retval[fields[0]] = float(fields[1])
     return retval
 
-def get_full_stats_table():
+def get_full_stats_table(end_time):
 
     video_ids = None
     if options.video_ids:
@@ -553,7 +580,7 @@ def get_full_stats_table():
     video_objs = statutils.get_video_objects(options.impressions,
                                              options.pub_id,
                                              options.start_time,
-                                             options.end_time,
+                                             end_time,
                                              options.start_video_time,
                                              options.end_video_time,
                                              video_ids,
@@ -585,7 +612,8 @@ def get_full_stats_table():
 
     thumb_stats = collect_stats(video_objs, video_statuses,
                                 thumb_statuses, thumb_meta,
-                                total_video_conversions)
+                                total_video_conversions,
+                                end_time)
 
     stat_table = pandas.merge(thumb_stats, thumb_meta,
                               how='left', left_index=True,
@@ -617,15 +645,18 @@ def calculate_aggregate_stats(full_table, slices):
 
 def main():  
 
-    full_table, slices = get_full_stats_table()
-
-    _log.info('Calculating aggregate stats')
-    sheets = { 'Per Video Stats' : full_table }
-    sheets['Overall'] = calculate_aggregate_stats(full_table, slices)
+    sheets = {}
     sheets['Raw Stats']= pandas.DataFrame(
         stats.statutils.calculate_raw_stats(options.pub_id,
                                             options.start_time,
                                             options.end_time))
+
+    full_table, slices = get_full_stats_table(sheets['Raw Stats']['end time'])
+
+    _log.info('Calculating aggregate stats')
+    sheets['Per Video Stats']  = full_table
+    sheets['Overall'] = calculate_aggregate_stats(full_table, slices)
+    
     #sheets['CMSDB Stats'] = pandas.DataFrame(
     #    stats.statutils.calculate_cmsdb_stats(options.pub_id,
     #                                          options.start_video_time,
