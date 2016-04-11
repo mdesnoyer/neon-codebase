@@ -419,7 +419,7 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_location') : Any(str, unicode, Length(min=1, 
+          Required('url') : Any(str, unicode, Length(min=1, 
                                                                     max=2048))
         })
         args = self.parse_args()
@@ -453,7 +453,7 @@ class ThumbnailHandler(APIV2Handler):
             rank=cur_rank)
         # upload image to cdn 
         yield video.download_and_add_thumbnail(new_thumbnail,
-                                               external_thumbnail_id=args['thumbnail_location'],
+                                               external_thumbnail_id=args['url'],
                                                cdn_metadata=cdn_metadata,
                                                async=True)
         #save the thumbnail
@@ -479,17 +479,15 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
-          'enabled': All(Coerce(int), Range(min=0, max=1))
+          'enabled': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
         thumbnail_id = args['thumbnail_id'] 
-            
-        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get, 
-                                           thumbnail_id)
+        
         def _update_thumbnail(t):
-            t.enabled = bool(int(args.get('enabled', thumbnail.enabled)))
+            t.enabled = Boolean()(args.get('enabled', t.enabled))
 
         thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.modify, 
                                            thumbnail_id, 
