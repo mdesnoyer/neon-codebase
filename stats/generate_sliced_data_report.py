@@ -216,11 +216,10 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
     max_time = None
     if end_time is not None:
         if len(key_times) == 0:
-            max_time = dateutil.parser.parse(end_time)
+            max_time = end_time
         else:
-            max_time = max(key_times)
-            max_time = max([dateutil.parser.parse(x) for 
-                            x in [max_time, end_time]])
+            max_time = max([dateutil.parser.parse(x) for x in 
+                            key_times] + [end_time])
         
     
     groupby_cols = ['thumbnail_id']
