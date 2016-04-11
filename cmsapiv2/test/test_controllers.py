@@ -2017,7 +2017,7 @@ class TestThumbnailHandler(TestControllersBase):
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid1&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid1&url=blah.jpg' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST', 
@@ -2030,14 +2030,14 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah.jpg' % (self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&url=blah.jpg' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST', 
                                                 allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202)
         self.im_download_mock.side_effect = [self.random_image] 
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&thumbnail_location=blah2.jpg' % (self.account_id_api_key)
+        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid2&url=blah2.jpg' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST', 
