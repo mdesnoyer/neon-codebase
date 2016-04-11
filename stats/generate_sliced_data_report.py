@@ -652,7 +652,7 @@ def main():
                                             options.end_time))
 
     full_table, slices = get_full_stats_table(
-        sheets['Raw Stats'].loc['end time'])
+        sheets['Raw Stats'].loc['end time'][0])
 
     _log.info('Calculating aggregate stats')
     sheets['Per Video Stats']  = full_table
