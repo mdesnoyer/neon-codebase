@@ -404,10 +404,47 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
             experiment_state = video_status.experiment_state
             if (experiment_state == neondata.ExperimentState.DISABLED and
                 winner_thumb_id is None):
-                # See if the experiment was completed and then later disabled (which erases the winner. In that case, take the max impressions thumb as the winner.
+                # See if the experiment was completed and then later
+                # disabled (which erases the winner. In that case,
+                # look for the thumb with serving frac of 0.99
                 if (neondata.ExperimentState.COMPLETE 
-                    in [x[1] for x in video_status.state_history]):
-                    winner_thumb_id = conv['all_time'].argmax()
+                    in [x[1] for x in video_status.state_history[1:]]):
+                    max_ctr = 0.0
+                    max_ctr_tid = None
+                    for tid in vid_stats.index.get_level_values(
+                            'thumbnail_id'):
+                        tstatus = thumb_statuses.get(tid, None)
+                        if (tstatus and 
+                            len(tstatus.serving_history) > 0 and
+                            0.99 in zip(*tstatus.serving_history)[1]):
+                            winner_thumb_id = tid
+                            break
+                        if tstatus and tstatus.ctr > max_ctr:
+                            max_ctr = tstatus.ctr
+                            max_ctr_tid = tid
+                    if winner_thumb_id is None:
+                        # For now, pick the thumb with the highest
+                        # lift unless it's the baseline, in which
+                        # case, pick that as the winner. TODO(remove):
+                        # This is a very optimisitic assumption.
+                        max_lift = vid_stats['lift'].max()
+                        if max_lift > 0:
+                            winner_thumb_id = vid_stats['lift'].argmax()
+                        else:
+                            winner_thumb_id = base_thumb_id
+                        
+                        # Pick the highest ctr in the database
+                        #winner_thumb_id = max_ctr_tid
+
+                        if winner_thumb_id is None:                       
+                            # See if there is a thumb with significantly
+                            # more impressions
+                            if (imp['all_time'].max() > 
+                                0.4 * imp['all_time'].sum()):
+                                winner_thumb_id = imp['all_time'].argmax()
+                            else:
+                                # The highest CTR was probably picked
+                                winner_thumb_id = vid_stats['tot_ctr'].argmax()
                  
             
         if winner_thumb_id is not None:
@@ -426,7 +463,7 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
                                   vid_stats.index[0])))
             vid_stats['conv_after_winner'] = 0.0
             
-        else:
+        elif False:
             # Give the extra conversions based on the serving fracs
             serving_frac = pandas.Series(dict(
                 [(x, thumb_statuses.get(x, None).serving_frac 
@@ -441,6 +478,9 @@ def get_video_stats(imp, conv, thumb_times, base_thumb_id,
             
             vid_stats['conv_after_winner'] = serving_frac * (
                 total_conversions - conv['all_time'].sum())
+
+        else:
+            vid_stats['conv_after_winner'] = 0.0
             
         vid_stats['conv_after_winner'].fillna(0, inplace=True)
         tot_conv = vid_stats['conv_after_winner'] + vid_stats['tot_conv']
@@ -535,7 +575,9 @@ def sort_stats(stats_table, slices):
 
     # Sort so that the videos with the best lift are first
     sortIdx = stats_table.groupby('video_id').transform(
-        lambda x: x.max()).sort(['lift'], ascending=False).index
+        lambda x: x.max()).sort(['extra_conversions'], ascending=False).index
+        
+    #lambda x: x.max()).sort(['lift'], ascending=False).index
     stats_table = stats_table.ix[sortIdx]
 
     # Now sort within each video first by type, then by lift
@@ -619,7 +661,7 @@ def get_full_stats_table(end_time):
                               right_index=True)
 
     # Zero out the non-neon data
-    stat_table.loc[stat_table['type'] != 'neon', 
+    stat_table.loc[stat_table['type'].isin(options.baseline_types.split(',')), 
                    ['extra_conversions', 'xtra_conv_at_sig']] = float('nan')
 
     # If there is an assumption of conversions after the winner, adjust the tot_cov column
