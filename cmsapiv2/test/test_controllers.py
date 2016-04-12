@@ -240,6 +240,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(user.first_name, 'kevin')
         self.assertEquals(user.last_name, 'fenger')
         self.assertEquals(user.title, 'Mr.')
+
+        limits = yield neondata.Limits.get(account_id, async=True)
+        self.assertEquals(limits.key, account_id) 
+        self.assertEquals(limits.video_posts, 0)
         
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
@@ -281,7 +285,11 @@ class TestNewAccountHandler(TestAuthenticationBase):
                    async=True) 
         self.assertEquals(user.username, 'a@a.com')
         self.assertEquals(user.first_name, 'kevin')
- 
+
+        limits = yield neondata.Limits.get(account_id, async=True)
+        self.assertEquals(limits.key, account_id) 
+        self.assertEquals(limits.video_posts, 0)
+          
     @tornado.testing.gen_test 
     def test_create_new_account_duplicate_users(self):
         params = json.dumps({'customer_name': 'meisnew', 
@@ -1416,11 +1424,18 @@ class TestVideoHandler(TestControllersBase):
     
     @tornado.testing.gen_test
     def test_post_video(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1429,6 +1444,121 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
         cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_refresh_date_reset(self):
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        
+        limit = neondata.Limits(self.account_id_api_key, 
+            refresh_time_video_posts=datetime(1999,1,1), 
+            video_posts=10)
+        yield limit.save(async=True) 
+
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+       
+        yield self.assertWaitForEquals(
+            lambda: neondata.Limits.get(self.account_id_api_key).video_posts, 
+            1,
+            async=True)
+        yield self.assertWaitForEquals(
+            lambda: neondata.Limits.get(
+                self.account_id_api_key).refresh_time_video_posts, 
+            '1999-01-31 00:00:00.000000',
+            async=True)
+        # sanity check on the video make sure it made it 
+        video = yield neondata.VideoMetadata.get(
+            self.account_id_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url') 
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_increase_post_videos(self):
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        
+        limit = neondata.Limits(self.account_id_api_key, 
+            refresh_time_video_posts=datetime(2050,1,1), 
+            video_posts=3)
+        yield limit.save(async=True) 
+
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+         
+        yield self.assertWaitForEquals(
+            lambda: neondata.Limits.get(self.account_id_api_key).video_posts, 
+            4,
+            async=True)
+        yield self.assertWaitForEquals(
+            lambda: neondata.Limits.get(
+                self.account_id_api_key).refresh_time_video_posts, 
+            '2050-01-01 00:00:00.000000',
+            async=True)
+        # sanity check on the video make sure it made it 
+        video = yield neondata.VideoMetadata.get(
+            self.account_id_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url') 
+        
+        # finally lets sanity check the limits endpoint
+        url = '/api/v2/%s/limits' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_posts'], 4) 
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_too_many_requests(self):
+        limit = neondata.Limits(self.account_id_api_key, 
+            video_posts=10)
+        yield limit.save(async=True) 
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url),
+                                         body='',
+                                         method='POST',
+                                         allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 402)
 
     @tornado.testing.gen_test
     def test_post_video_video_exists_in_db(self):
@@ -3714,6 +3844,46 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         video = rjson['videos'][0]
         # this should grab the most recently created video
         self.assertEquals('kevins best video yet', video['title'])
+
+class TestAccountLimitsHandler(TestControllersBase): 
+    def setUp(self):
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        self.user.save()
+        self.account_id_api_key = self.user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestAccountLimitsHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestAccountLimitsHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        limits = neondata.Limits(self.user.neon_api_key)
+        yield limits.save(async=True)
+ 
+        url = '/api/v2/%s/limits' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['video_posts'], 0)
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

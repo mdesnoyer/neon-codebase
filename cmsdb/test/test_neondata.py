@@ -3415,7 +3415,10 @@ class TestPGVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         # this function is tested more thoroughly 
         # in the api tests, this is here as a sanity 
         # check. not going to double up the tests at this point
-        video_info = VideoMetadata('acct1_vid1')
+        request = NeonApiRequest('r1', 'acct1')
+        request.video_title="pie ala mode" 
+        yield request.save(async=True) 
+        video_info = VideoMetadata('acct1_vid1', request_id='r1')
         yield video_info.save(async=True)
 
         results = yield neondata.VideoMetadata.search_videos()
@@ -3444,6 +3447,30 @@ class TestPGVerification(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod 
     def _get_object_type(cls): 
         return neondata.Verification
+
+class TestPGLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @classmethod 
+    def _get_object_type(cls): 
+        return neondata.Limits
 
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 

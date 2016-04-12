@@ -1017,6 +1017,23 @@ class VideoHandler(APIV2Handler):
                                         HTTPVerbs.POST] 
                }
 
+    @classmethod
+    def get_limits(self):
+        post_list = [{ 'left_arg' : 'video_posts', 
+                       'right_arg' : 'max_video_posts', 
+                       'operator' : '<', 
+                       'timer_info' : { 
+                           'refresh_time' : 'refresh_time_video_posts',
+                           'add_to_refresh_time' : 'seconds_to_refresh_video_posts', 
+                           'timer_resets' : [ ('video_posts', 0) ]
+                       }, 
+                       'values_to_increase': [ ('video_posts', 1) ], 
+                       'values_to_decrease': [] 
+        }] 
+        return {
+                   HTTPVerbs.POST : post_list
+               } 
+
     @staticmethod
     @tornado.gen.coroutine
     def db2api(video, request, fields=None):
@@ -1209,7 +1226,49 @@ class HealthCheckHandler(APIV2Handler):
     def get_access_levels(self):
         return { 
                  HTTPVerbs.GET : neondata.AccessLevels.NONE 
-               }  
+               } 
+ 
+'''*********************************************************************
+AccountLimitsHandler : class responsible for returning limit information 
+                          about an account 
+   HTTP Verbs     : get
+*********************************************************************'''
+class AccountLimitsHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+
+        acct_limits = yield neondata.Limits.get(
+                          account_id_api_key, 
+                          async=True)
+
+        if not acct_limits: 
+            raise NotFoundError()
+
+        result = yield self.db2api(acct_limits)
+
+        self.success(result) 
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required' : [HTTPVerbs.GET] 
+               }
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['video_posts', 'max_video_posts', 'refresh_time_video_posts', 
+                'max_video_size' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['video_posts', 'max_video_posts', 'refresh_time_video_posts', 
+                'max_video_size' ]
 
 '''*********************************************************************
 OptimizelyIntegrationHandler : class responsible for creating/updating/
@@ -1454,6 +1513,7 @@ application = tornado.web.Application([
         ThumbnailSearchExternalHandler),
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),

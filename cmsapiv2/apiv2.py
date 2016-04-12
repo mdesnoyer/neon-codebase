@@ -64,7 +64,9 @@ class ResponseCode(object):
     HTTP_OK = 200
     HTTP_ACCEPTED = 202 
     HTTP_BAD_REQUEST = 400
-    HTTP_UNAUTHORIZED = 401 
+    HTTP_UNAUTHORIZED = 401
+    # should be a 429, but tornado does not like that 
+    HTTP_TOO_MANY_REQUESTS = 402 
     HTTP_NOT_FOUND = 404 
     HTTP_CONFLICT = 409 
     HTTP_INTERNAL_SERVER_ERROR = 500
@@ -101,6 +103,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
         self.set_header('Content-Type', 'application/json')
         self.uri = self.request.uri
+        self.account = None 
+        self.account_limits = None
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
     
@@ -133,10 +137,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 except KeyError: 
                     pass
         
-    def set_account_id(request):
-        parsed_url = urlparse(request.uri) 
-        request.account_id = parsed_url.path.split('/')[3]
- 
     def parse_args(self, keep_token=False):
         args = {} 
         # if we have query_arguments only use them 
@@ -156,7 +156,23 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                         args[key] = value
 
         return args
+
+    def set_account_id(request):
+        parsed_url = urlparse(request.uri)
+        try:  
+            request.account_id = parsed_url.path.split('/')[3]
+        except IndexError: 
+            request.account_id = None 
     
+    @tornado.gen.coroutine
+    def set_account(request): 
+        request.set_account_id()
+        if request.account_id:  
+            account = yield neondata.NeonUserAccount.get(
+                          request.account_id, 
+                          async=True)
+            request.account = account 
+
     @tornado.gen.coroutine
     def is_authorized(request, 
                       access_level_required, 
@@ -177,10 +193,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         request.set_access_token_information()
         if access_level_required is neondata.AccessLevels.NONE: 
             raise tornado.gen.Return(True)
-        request.set_account_id() 
-        account = yield neondata.NeonUserAccount.get(
-                      request.account_id, 
-                      async=True)
+
+        account = request.account 
         access_token = request.access_token
         if account_required and not account:
             raise NotAuthorizedError('account does not exist')
@@ -232,7 +246,117 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             raise NotAuthorizedError('invalid token') 
  
         raise tornado.gen.Return(True)
-    
+
+    @tornado.gen.coroutine
+    def check_account_limits(request, limit_list):
+        ''' responsible for checking account limits 
+             
+            this is called in prepare, and that pulls this info
+             from the get_limits functions in the children 
+             
+            it checks the defined limits to see if any of them
+               are exceeded. it will also reset the timer if 
+               that is necessary. 
+        '''
+       
+        if request.account is None:  
+            raise tornado.gen.Return(True) 
+
+        # grab the account_limit object for the requests 
+        acct_limits = yield neondata.Limits.get(
+                          request.account_id, 
+                          async=True)
+
+        # limits are not set up for this account, let it 
+        # slide for now 
+        if acct_limits is None:          
+            raise tornado.gen.Return(True) 
+
+        request.account_limits = acct_limits  
+        al_data_dict = acct_limits.to_dict()['_data'] 
+        for limit in limit_list:
+            try:
+                left_arg = al_data_dict[limit['left_arg']]
+                right_arg = al_data_dict[limit['right_arg']]
+                operator = limit['operator']
+            
+                eval_string = '%s %s %s' % (left_arg, operator, right_arg)
+                if eval(eval_string): 
+                    return 
+                else:
+                    # lets check the timer if there is one 
+                    timer_dict = request._get_timer_dict(limit, al_data_dict)
+                    if timer_dict: 
+                       refresh_time = timer_dict['refresh_time']
+                       # check to see if we should refresh 
+                       if dateutil.parser.parse(refresh_time) <= \
+                          datetime.utcnow(): 
+                           request.account_limits = yield request._reset_rate_limit(
+                                     request.account_id, 
+                                     timer_dict['timer_resets'],
+                                     limit['timer_info']['refresh_time'], 
+                                     timer_dict['add_to_refresh_time']) 
+                           return                   
+ 
+                    msg = 'The max amount of requests have been reached for \
+                           this endpoint. For more rate limit information \
+                           please see the account/limits endpoint.' 
+ 
+                    raise TooManyRequestsError(msg) 
+            except KeyError as e: 
+                _log.warning('Limit issue %s was encountered\
+                              when checking limits - passing' % (e))
+                pass 
+            raise tornado.gen.Return(True) 
+
+    @staticmethod 
+    @tornado.gen.coroutine
+    def _reset_rate_limit(account_id, 
+                          timer_resets, 
+                          key_to_add_time_to=None,
+                          amount_of_time_to_add=0.0): 
+        ''' reset everything in the timer_resets for this
+            rate limit '''
+        def _modify_me(x):
+            for tr in timer_resets:
+                x.__dict__[tr[0]] = tr[1]
+            if key_to_add_time_to: 
+                datetime_to_add_to = dateutil.parser.parse(
+                    x.__dict__[key_to_add_time_to])
+                new_date = (datetime_to_add_to + \
+                   timedelta(seconds=amount_of_time_to_add)).strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+ 
+                x.__dict__[key_to_add_time_to] = new_date 
+           
+        limit = yield neondata.Limits.modify(
+            account_id, 
+            _modify_me, 
+            async=True)
+
+        raise tornado.gen.Return(limit) 
+ 
+    @staticmethod
+    def _get_timer_dict(limit_info, acct_limit): 
+        ''' helper to get values from acct_limit based on the 
+            key values in limit_info '''
+ 
+        rv = {}
+        try: 
+            timer_info = limit_info['timer_info']
+            refresh_time_key = timer_info['refresh_time'] 
+            add_to_refresh_time_key = timer_info['add_to_refresh_time']
+            timer_resets = timer_info['timer_resets']
+ 
+            rv['refresh_time'] = acct_limit[refresh_time_key]
+            rv['add_to_refresh_time'] = acct_limit[add_to_refresh_time_key]
+            rv['timer_resets'] = timer_resets
+            
+        except KeyError: 
+            pass 
+
+        return rv
+ 
     def get_access_levels(self):
         ''' 
             to be specified in each of the handlers 
@@ -242,13 +366,59 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             { 
                  HTTPVerbs.GET : neondata.AccessLevels.READ, 
                  HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT] 
+                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT], 
+                 'internal_only' : False  
             }
             
             this means that GET requires READ, PUT requires UPDATE 
-             and an account is required on both endpoints  
+             and an account is required on both endpoints, it also 
+             is not an internal_only function
         ''' 
         raise NotImplementedError('access levels are not defined')
+
+    def get_limits(self):
+        '''if your function needs to be rate limited, define 
+           this class to return a dictionary that will define 
+           what limits need to be checked 
+
+           the first two args are fields from the Limits table 
+
+           the third arg is an operator that will be executed on 
+               the first two args 
+           supported operators : 
+           <, >, <=, >=, = 
+
+           the last optional arg, is a refresh_time, if sent in 
+           this will be checked as well, and reset if necessary
+
+           eg 
+           { 
+                HTTPVerbs.POST : [ 
+                    { 
+                        'left_arg' : 'video_posts', 
+                        'right_arg' : 'max_video_posts', 
+                        'operator' : '<', 
+                        'timer_info : { 
+                            'refresh_time' : 'refresh_time_video_posts', 
+                            'add_to_refresh_time' : 'seconds_to_refresh_video_posts',
+                            'timer_resets' : [ ('video_posts', 0) ]
+                        },
+                        'values_to_increase' : [ ('video_posts', 1) ],
+                        'values_to_decrease' : None  
+                    },
+                    ... 
+                    {
+                        you can specify any number of 
+                        limits you need checked for each http verb  
+                    }  
+                ]
+           } 
+           this would then do videos_posted < videos_posted_max in prepare 
+              check the timer (refresh if necessary, reset if necessary)
+              on_finish will increase the values, if we successfully served 
+                 the request 
+        ''' 
+        return None 
 
     def get_special_functions(self): 
         return []   
@@ -256,7 +426,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     @tornado.gen.coroutine 
     def prepare(self):
         access_level_dict = self.get_access_levels()
-        
+        yield self.set_account() 
+ 
         try: 
             account_required_list = access_level_dict['account_required'] 
         except KeyError: 
@@ -274,6 +445,48 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         except KeyError:
             raise NotImplementedError('access levels are not defined') 
 
+        limits_dict = self.get_limits() 
+        if limits_dict is not None:
+            try:  
+                yield self.check_account_limits(
+                    limits_dict[self.request.method])
+            except KeyError: 
+                pass 
+ 
+    @tornado.gen.coroutine 
+    def on_finish(self):
+        yield self._handle_limit_inc_dec() 
+
+    @tornado.gen.coroutine 
+    def _handle_limit_inc_dec(self):
+ 
+        if self.account_limits is None: 
+            return 
+        if self.get_status() not in [ ResponseCode.HTTP_OK, 
+                ResponseCode.HTTP_ACCEPTED ]: 
+            return
+
+        defined_limits_dict = self.get_limits() 
+        if defined_limits_dict is None: 
+            return
+
+        try:
+            defined_limit_list = defined_limits_dict[self.request.method]
+
+            for dl in defined_limit_list:
+                values_to_increase = dl['values_to_increase']
+                values_to_decrease = dl['values_to_decrease']
+                       
+                for v in values_to_increase: 
+                    self.account_limits.__dict__[v[0]] += v[1] 
+                for v in values_to_decrease: 
+                    self.account_limits.__dict__[v[0]] -= v[1]
+
+            yield self.account_limits.save(async=True)
+        except KeyError: 
+            pass 
+
+
     def write_error(self, status_code, **kwargs):
         def get_exc_message(exception):
             return exception.log_message if \
@@ -286,7 +499,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                                   NotAuthorizedError,
                                                   NotFoundError, 
                                                   BadRequestError,  
-                                                  NotImplementedError]):
+                                                  NotImplementedError, 
+                                                  TooManyRequestsError]):
             if isinstance(exception, Invalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
@@ -307,6 +521,11 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
+
+            if isinstance(exception, TooManyRequestsError):
+                statemon.state.increment(ref=_invalid_input_errors_ref,
+                                         safe=False)
+                self.set_status(ResponseCode.HTTP_TOO_MANY_REQUESTS)
 
             self.error(get_exc_message(exception), code=self.get_status())
 
@@ -444,27 +663,44 @@ class Error(Exception):
     pass 
 
 class SaveError(Error): 
-    def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR): 
+    def __init__(self, 
+                 msg, 
+                 code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR): 
         self.msg = msg
         self.code = code
  
 class NotFoundError(tornado.web.HTTPError): 
-    def __init__(self, msg='resource was not found', code=ResponseCode.HTTP_NOT_FOUND): 
+    def __init__(self, 
+                 msg='resource was not found', 
+                 code=ResponseCode.HTTP_NOT_FOUND): 
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
  
 class NotAuthorizedError(tornado.web.HTTPError): 
-    def __init__(self, msg='not authorized', code=ResponseCode.HTTP_UNAUTHORIZED): 
+    def __init__(self, 
+                 msg='not authorized', 
+                 code=ResponseCode.HTTP_UNAUTHORIZED): 
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+
+class TooManyRequestsError(tornado.web.HTTPError): 
+    def __init__(self, 
+                 msg='not authorized', 
+                 code=ResponseCode.HTTP_TOO_MANY_REQUESTS): 
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 
 class AlreadyExists(tornado.web.HTTPError): 
-    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST):
+    def __init__(self, 
+                 msg, 
+                 code=ResponseCode.HTTP_BAD_REQUEST):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 
 class BadRequestError(tornado.web.HTTPError): 
-    def __init__(self, msg, code=ResponseCode.HTTP_BAD_REQUEST): 
+    def __init__(self, 
+                 msg, 
+                 code=ResponseCode.HTTP_BAD_REQUEST): 
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 

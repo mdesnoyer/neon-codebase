@@ -5650,6 +5650,44 @@ class Verification(StoredObject):
         '''
         return Verification.__name__
 
+class Limits(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by account_id(api_key)
+    '''
+    def __init__(self, 
+                 account_id, 
+                 video_posts=0, 
+                 max_video_posts=10, 
+                 refresh_time_video_posts=datetime.datetime(2050,1,1), 
+                 seconds_to_refresh_video_posts=2592000.0,
+                 max_video_size=900.0):
+ 
+        super(Limits, self).__init__(account_id)
+        
+        # the number of video posts this account has made 
+        self.video_posts = video_posts 
+         
+        # the maximum amount of video posts the account is allowed 
+        self.max_video_posts = max_video_posts 
+
+        # when the video_posts counter will be reset 
+        self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f") 
+
+        # amount of seconds to add to now() when resetting the timer 
+        self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+
+        # maximum video length we will process in seconds 
+        self.max_video_size = max_video_size 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Limits.__name__
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored

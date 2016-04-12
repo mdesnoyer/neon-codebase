@@ -86,6 +86,20 @@ CREATE TABLE experimentstrategy (
 ALTER TABLE experimentstrategy OWNER TO pgadmin;
 
 --
+-- Name: limits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE limits (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE limits OWNER TO pgadmin;
+
+--
 -- Name: neonapikey; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -309,6 +323,12 @@ COPY cdnhostingmetadatalist (_data, _type) FROM stdin;
 COPY experimentstrategy (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: limits; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY limits (_data, _type) FROM stdin;
+\.
 
 --
 -- Data for Name: neonapikey; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -413,6 +433,7 @@ CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_dat
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX limits_key ON limits USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonapikey_key ON neonapikey USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonapirequest_key ON neonapirequest USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
@@ -529,6 +550,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER experimentstrategy_update_updated_time_trig 
 BEFORE UPDATE 
 ON experimentstrategy
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
+
+CREATE TRIGGER limits_update_updated_time_trig 
+BEFORE UPDATE 
+ON limits
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
 
 CREATE TRIGGER neonapikey_notify_trig
