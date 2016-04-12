@@ -291,7 +291,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                        # check to see if we should refresh 
                        if dateutil.parser.parse(refresh_time) <= \
                           datetime.utcnow(): 
-                           request.account_limits = yield request._reset_rate_limit(
+                           request.account_limits = yield \
+                               request._reset_rate_limit(
                                      request.account_id, 
                                      timer_dict['timer_resets'],
                                      limit['timer_info']['refresh_time'], 
@@ -323,7 +324,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             if key_to_add_time_to: 
                 datetime_to_add_to = dateutil.parser.parse(
                     x.__dict__[key_to_add_time_to])
-                new_date = (datetime_to_add_to + \
+                new_date = (datetime.utcnow() + \
                    timedelta(seconds=amount_of_time_to_add)).strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
  

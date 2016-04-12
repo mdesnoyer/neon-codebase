@@ -1479,8 +1479,8 @@ class TestVideoHandler(TestControllersBase):
             async=True)
         yield self.assertWaitForEquals(
             lambda: neondata.Limits.get(
-                self.account_id_api_key).refresh_time_video_posts, 
-            '1999-01-31 00:00:00.000000',
+                self.account_id_api_key).refresh_time_video_posts \
+            > '2016-04-15 00:00:00.000000', True,
             async=True)
         # sanity check on the video make sure it made it 
         video = yield neondata.VideoMetadata.get(
