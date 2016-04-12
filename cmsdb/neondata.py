@@ -405,11 +405,16 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a connection')
 
-        def get_insert_json_query_tuple(self, obj):
+        def get_insert_json_query_tuple(self, 
+                                        obj, 
+                                        fields='(_data, _type)',
+                                        values='VALUES(%s, %s)',
+                                        extra_params=None):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                     " (_data, _type) " \
-                     " VALUES(%s, %s)"  
+                    " " + fields + " " + values
             params = (obj.get_json_data(), obj.__class__.__name__)
+            if extra_params:
+                params = params + extra_params 
             return (query, params)
 
         def get_update_json_query_tuple(self, obj):
@@ -1396,9 +1401,16 @@ class AccessLevels(object):
     UPDATE = 2 
     CREATE = 4
     DELETE = 8 
+    ACCOUNT_EDITOR = 16 
+    INTERNAL_ONLY_USER = 32 
+    GLOBAL_ADMIN = 64
+    
+    # Helpers  
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
-    ADMIN = ALL_NORMAL_RIGHTS | 16  # 31  
-    GLOBAL_ADMIN = ADMIN | 32       # 63 
+    ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR
+    EVERYTHING = ALL_NORMAL_RIGHTS |\
+                 ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
+                 GLOBAL_ADMIN
 
 class PythonNaNStrings(object): 
     INF = 'Infinite' 
@@ -1416,7 +1428,6 @@ class StoredObject(object):
     ''' 
     def __init__(self, key):
         self.key = str(key)
-        self.created = self.updated = str(datetime.datetime.utcnow()) 
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -1486,15 +1497,16 @@ class StoredObject(object):
                     obj[key] = PythonNaNStrings.NAN
             return obj
         obj = _json_fixer(self.to_dict()['_data']) 
-        return json.dumps(obj)
+        def json_serial(obj):
+            if isinstance(obj, datetime.datetime):
+                serial = obj.isoformat()
+            return serial
+        return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
-        if not hasattr(self, 'created'): 
-            self.created = str(datetime.datetime.utcnow())
-        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
         if self.key is None:
             raise ValueError("key not set")
@@ -1557,7 +1569,20 @@ class StoredObject(object):
                 # type in the databse, so assume that the class is cls
                 classtype = cls
                 data_dict = obj_dict
-            
+
+            # throw created updated on the object if its there 
+            try:
+                for k in ['created_time_pg', 'updated_time_pg']:
+                    if isinstance(obj_dict[k], datetime.datetime): 
+                        data_dict[k.split('_')[0]] = obj_dict[k].strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str): 
+                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
+                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
+                                "%Y-%m-%d %H:%M:%S.%f")
+            except KeyError: 
+                pass
+ 
             # create basic object using the "default" constructor
             obj = classtype(key)
 
@@ -1620,7 +1645,9 @@ class StoredObject(object):
             conn = yield db.get_connection()
 
             obj = None 
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
@@ -1687,7 +1714,9 @@ class StoredObject(object):
             results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                           created_time AS created_time_pg,\
+                           updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
@@ -1720,7 +1749,10 @@ class StoredObject(object):
             db = PostgresDB()
             conn = yield db.get_connection()
             baseclass_name = cls._baseclass_name().lower()
-            query = "SELECT _data, _type FROM " + baseclass_name + \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg FROM "\
+                        + baseclass_name + \
                     " WHERE _data->>'key' LIKE %s"
 
             params = ['%'+key_portion+'%']
@@ -1755,7 +1787,9 @@ class StoredObject(object):
             # do this manually 
             yield conn.execute("BEGIN")
  
-            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
+                         created_time AS created_time_pg, \
+                         updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1887,7 +1921,9 @@ class StoredObject(object):
             for key in keys: 
                 key_to_object[key] = None
  
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type,\
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
@@ -1906,8 +1942,12 @@ class StoredObject(object):
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
+                    def json_serial(obj):
+                        if isinstance(obj, datetime.datetime):
+                            serial = obj.isoformat()
+                        return serial
                     # hack we need two copies of the object, copy won't work here
-                    item_one = json.loads(json.dumps(item))
+                    item_one = json.loads(json.dumps(item, default=json_serial))
                     cur_obj = create_class._create(key, item_one)
 
                 mappings[key] = cur_obj 
@@ -1919,7 +1959,17 @@ class StoredObject(object):
                 for key, obj in mappings.iteritems():
                    original_object = key_to_object.get(key, None)
                    if obj is not None and original_object is None: 
-                       query_tuple = db.get_insert_json_query_tuple(obj)
+                       created = datetime.datetime.utcnow()
+                       updated = datetime.datetime.utcnow()
+                       obj.__dict__['created'] = created.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       obj.__dict__['updated'] = updated.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       query_tuple = db.get_insert_json_query_tuple(
+                           obj, 
+                           fields='(_data, _type, created_time, updated_time)',
+                           values='VALUES(%s, %s, %s, %s)', 
+                           extra_params=(created, updated))  
                        insert_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
                        update_objs.append(obj)
@@ -2031,7 +2081,6 @@ class StoredObject(object):
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
             for obj in objects:
-                obj.updated = str(datetime.datetime.utcnow())
                 data[obj.key] = obj.to_json()
                 key_sets[obj._set_keyname()].append(obj.key)
     
@@ -2264,9 +2313,12 @@ class StoredObject(object):
     @tornado.gen.coroutine
     def get_and_execute_select_query(cls, 
                                      fields, 
-                                     where_clause,
-                                     table_name=None,  
-                                     wc_params=[]): 
+                                     where_clause=None,
+                                     table_name=None, 
+                                     wc_params=[],
+                                     limit_clause=None,
+                                     order_clause=None,  
+                                     cursor_factory=psycopg2.extensions.cursor): 
         ''' helper function to build up a select query
 
                fields : an array of the fields you want 
@@ -2299,12 +2351,20 @@ class StoredObject(object):
 
         csl_fields = ",".join("{0}".format(f) for f in fields) 
         query = "SELECT " + csl_fields + \
-                " FROM " + table_name + \
-                " WHERE " + where_clause 
+                " FROM " + table_name
+        
+        if where_clause:
+            query += " WHERE " + where_clause
+
+        if order_clause: 
+            query += " " + order_clause
+   
+        if limit_clause: 
+            query += " " + limit_clause 
  
         cursor = yield conn.execute(query, 
                                     wc_params,
-                                    cursor_factory=psycopg2.extensions.cursor)
+                                    cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn) 
         raise tornado.gen.Return(rv) 
@@ -2820,7 +2880,10 @@ class User(NamespacedStoredObject):
     def __init__(self, 
                  username, 
                  password='password', 
-                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS, 
+                 first_name=None,
+                 last_name=None,
+                 title=None):
  
         super(User, self).__init__(username)
 
@@ -2842,7 +2905,16 @@ class User(NamespacedStoredObject):
         self.refresh_token = None
 
         # access level granted to this user, uses class AccessLevels 
-        self.access_level = access_level 
+        self.access_level = access_level
+
+        # the first name of the user 
+        self.first_name = first_name 
+ 
+        # the last name of the user 
+        self.last_name = last_name 
+ 
+        # the title of the user 
+        self.title = title  
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2881,7 +2953,7 @@ class NeonUserAccount(NamespacedStoredObject):
                  default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
                  name=None, 
                  abtest=True, 
-                 serving_enabled=True, 
+                 serving_enabled=False, 
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
                  users=[], 
                  email=None):
@@ -5554,6 +5626,68 @@ class ThumbnailStatus(DefaultedStoredObject):
         '''
         return ThumbnailStatus.__name__
 
+class Verification(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by email
+    '''
+    def __init__(self, email, token=None, extra_info=None): 
+        super(Verification, self).__init__(email)
+        
+        # the special token that is used to verify the account
+        self.token = token or uuid.uuid1().hex  
+
+        # extra_info is a json store, that could store any 
+        # number of things, but is mostly used for objects 
+        # that may need to be saved after verification is 
+        # complete 
+        self.extra_info = extra_info or {}
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Verification.__name__
+
+class AccountLimits(StoredObject):
+    '''
+    Class schema for AccountLimits
+
+    Keyed by account_id(api_key)
+    '''
+    def __init__(self, 
+                 account_id, 
+                 video_posts=0, 
+                 max_video_posts=10, 
+                 refresh_time_video_posts=datetime.datetime(2050,1,1), 
+                 seconds_to_refresh_video_posts=2592000.0,
+                 max_video_size=900.0):
+ 
+        super(AccountLimits, self).__init__(account_id)
+        
+        # the number of video posts this account has made 
+        self.video_posts = video_posts 
+         
+        # the maximum amount of video posts the account is allowed 
+        self.max_video_posts = max_video_posts 
+
+        # when the video_posts counter will be reset 
+        self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f") 
+
+        # amount of seconds to add to now() when resetting the timer 
+        self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+
+        # maximum video length we will process in seconds 
+        self.max_video_size = max_video_size 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return AccountLimits.__name__
+
 class VideoMetadata(StoredObject):
     '''
     Schema for metadata associated with video which gets stored
@@ -5880,8 +6014,106 @@ class VideoMetadata(StoredObject):
         for tid in vmeta.thumbnail_ids:
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
-        yield VideoMetadata.delete(key, async=True) 
+        yield VideoMetadata.delete(key, async=True)
 
+    @classmethod 
+    @tornado.gen.coroutine
+    def search_videos(cls, 
+                      account_id=None, 
+                      since=None,
+                      until=None, 
+                      limit=25):
+
+        """Does a basic search over the videometadatas in the DB 
+
+           account_id : if specified will only search videos for that account, 
+                        defaults to None, meaning it will search all accounts 
+                        for videos 
+           since      : if specified will find videos since this date, 
+                        defaults to None, meaning it will grab the 25 most 
+                        recent videos 
+           until      : if specified will find videos until this date, 
+                        defaults to None
+           limit      : if specified it limits the search to this many 
+                        videos, defaults to 25
+
+           Returns : a dictionary of the following 
+               videos - the videos that the search returned 
+               since_time - this is the time of the most recent video that 
+                            the search returned, it's mainly here to prevent 
+                            consumers from having to do this 
+        """ 
+        where_clause = "" 
+        videos = []
+        since_time = None 
+        until_time = None  
+        wc_params = []
+        rv = {}  
+        
+        where_clause = "_data->'job_id' != 'null'"
+        order_clause = "ORDER BY created_time DESC" 
+        if since: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot 
+            order_clause = "ORDER BY created_time ASC" 
+            wc_params.append(since) 
+
+        if until: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time < to_timestamp(%s)::timestamp" 
+            wc_params.append(until) 
+        
+        if account_id: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " _data->>'key' LIKE %s"
+            wc_params.append(account_id+'_%')
+ 
+        results = yield cls.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg" ], 
+                    where_clause, 
+                    wc_params=wc_params, 
+                    limit_clause="LIMIT %d" % limit, 
+     		    order_clause=order_clause,
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        def _get_time(result): 
+            # need micros here 
+            created_time = result['created_time_pg']
+            cc_tt = time.mktime(created_time.timetuple())
+            _time = (cc_tt + created_time.microsecond / 1000000.0)
+            return _time 
+        
+        try:   
+            do_reverse = False 
+            if since: 
+                since_time = _get_time(results[-1])
+                until_time = _get_time(results[0])
+                do_reverse = True
+            else:  
+                since_time = _get_time(results[0]) 
+                until_time = _get_time(results[-1]) 
+        except (KeyError,IndexError): 
+            pass
+        
+        for result in results:
+            obj = cls._create(result['_data']['key'], result)
+            videos.append(obj)
+
+        if do_reverse: 
+            videos.reverse() 
+
+        rv['videos'] = videos 
+        rv['since_time'] = since_time
+        rv['until_time'] = until_time
+        raise tornado.gen.Return(rv) 
+         
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 

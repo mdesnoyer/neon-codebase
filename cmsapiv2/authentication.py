@@ -221,7 +221,13 @@ class RefreshTokenHandler(APIV2Handler):
 NewAccountHandler
 ****************************************************************'''
 class NewAccountHandler(APIV2Handler):
-    """Handles post requests to the account endpoint."""
+    """Handles post requests to the account endpoint.
+
+       This will create a row in verification table 
+         and will not create any other objects until 
+         the enduser verifies that the email address is 
+         indeed legit. 
+    """
     @tornado.gen.coroutine 
     def post(self):
         """handles account endpoint post request""" 
@@ -237,7 +243,10 @@ class NewAccountHandler(APIV2Handler):
               Length(min=8, max=64)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048))
+          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
+          'admin_user_first_name': Any(str, unicode, Length(min=1, max=256)),
+          'admin_user_last_name': Any(str, unicode, Length(min=1, max=256)),
+          'admin_user_title': Any(str, unicode, Length(min=1, max=32))
         })
         args = self.parse_args()
         schema(args) 
@@ -254,45 +263,206 @@ class NewAccountHandler(APIV2Handler):
         
         username = args.get('admin_user_username') 
         password = args.get('admin_user_password')
- 
-        try: 
-            new_user = neondata.User(username=username, password=password)
-            yield new_user.save(overwrite_existing_object=False, async=True)
-            account.users.append(username) 
-        except neondata.psycopg2.IntegrityError: 
+
+        # verify there isn't already an user with this email
+        current_user = yield neondata.User.get(username, async=True) 
+        if current_user: 
             raise AlreadyExists('user with that email already exists')
  
-        yield account.save(async=True)
-        account = yield neondata.NeonUserAccount.get(
-                      account.neon_api_key, 
-                      async=True)
+        new_user = neondata.User(username=username, 
+                       password=password,
+                       access_level = neondata.AccessLevels.ADMIN,
+                       first_name = args.get('admin_user_first_name', None),
+                       last_name = args.get('admin_user_last_name', None), 
+                       title = args.get('admin_user_title', None))
+        account.users.append(username) 
 
-        tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
-                                 account.tracker_account_id, 
-                                 account.neon_api_key, 
-                                 neondata.TrackerAccountIDMapper.PRODUCTION)
+        extra_info = {} 
+        extra_info['account'] = account.to_json() 
+        extra_info['user'] = new_user.to_json()
 
-        tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
-                                 account.staging_tracker_account_id, 
-                                 account.neon_api_key, 
-                                 neondata.TrackerAccountIDMapper.STAGING)
-
-        yield tracker_p_aid_mapper.save(async=True)
-        yield tracker_s_aid_mapper.save(async=True) 
-
-        account = yield self.db2api(account)
-        
-        _log.debug(('New Account has been added : name = %s id = %s') 
-                   % (account['customer_name'], account['account_id']))
-        statemon.state.increment('post_account_oks')
+        verify_token = JWTHelper.generate_token(
+            { 'email' : account.email }, 
+            token_type=TokenTypes.VERIFY_TOKEN)
  
-        self.success(account)
+        verifier = neondata.Verification(account.email,
+            token=verify_token,  
+            extra_info=extra_info)
+ 
+        yield verifier.save(async=True)
+        
+        self.send_email(account.email, verify_token)  
+        msg = 'account verification email sent to %s' % account.email
+        self.success({'message' : msg})  
+            
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               } 
+    
+    def send_email(self, 
+                   send_to, 
+                   token): 
+        """ Helper to send emails via ses 
 
+            if the email is sent successfully, it returns True 
+            if something goes wrong it logs, and raises an exception
+        """ 
+        kwargs = {}
+        click_me_url = '%s/account/confirm?token=%s' % (self.origin, token) 
+        kwargs['to_addresses'] = send_to 
+        kwargs['subject'] = 'Welcome to Neon' 
+             
+        kwargs['body'] = """<div style='margin-left:15px'><h3>Hi,</h3></div>
+                            <div style='margin-left:25px'>  
+                            Thank you for signing up for Neon. To validate
+                            your email address and sign-in please use the 
+                            link below : <br>
+                            <br>  
+                            <a href=%s>Verify Account</a></div>""" % click_me_url 
+        kwargs['source'] = 'Neon Account Creation <noreply@neon-lab.com>' 
+        kwargs['reply_addresses'] = 'noreply@neon-lab.com' 
+        kwargs['format'] = 'html' 
+        ses = boto.connect_ses()
+        try: 
+            ses.send_email(**kwargs)
+        except Exception as e: 
+            _log.error('Failed to Verification Send email to %s exc_info %s' % 
+                (send_to, e))
+            raise Exception('unable to send verification email')
+ 
+        return True 
+ 
+'''****************************************************************
+NewUserHandler
+****************************************************************'''
+class NewUserHandler(APIV2Handler):
+    """Handles post requests to the user endpoint."""
+    @tornado.gen.coroutine 
+    def post(self):
+        """handles user endpoint post request""" 
+
+        schema = Schema({ 
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('password') : All(Coerce(str), Length(min=8, max=64)),
+          Required('access_level') : All(Coerce(int), Range(min=1, max=63)),
+          'first_name': Any(str, unicode, Length(min=1, max=256)),
+          'last_name': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=32))
+        })
+
+        args = self.parse_args()
+        schema(args)
+
+        new_user = neondata.User(username=args.get('username'), 
+                       password=args.get('password'),
+                       access_level=args.get('access_level'),
+                       first_name=args.get('first_name', None),
+                       last_name=args.get('last_name', None), 
+                       title=args.get('title',None))
+
+        yield new_user.save(async=True)
+        new_user = yield neondata.User.get(args.get('username'), async=True)  
+        user = yield self.db2api(new_user)
+
+        self.success(user)
+ 
     @classmethod
     def get_access_levels(self):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.GLOBAL_ADMIN 
                } 
+ 
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['username', 'created', 'updated', 
+                'first_name', 'last_name', 'title' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title' ]
+
+'''****************************************************************
+VerifyAccountHandler
+****************************************************************'''
+class VerifyAccountHandler(APIV2Handler):
+    """Handles post requests to the account endpoint.
+
+       If we find a valid email that matches the token  
+         in our database, we will create User/NeonUserAccount/
+         TrackerAccountIDMappers
+           
+         Otherwise we will return the appropriate error code 
+    """
+    @tornado.gen.coroutine 
+    def post(self):
+        """handles account endpoint post request""" 
+        schema = Schema({ 
+          Required('token') : Any(str, unicode, Length(min=1, max=512))
+        })
+
+        args = self.parse_args(keep_token=True)
+        schema(args)
+        verify_token = args.get('token') 
+        try: 
+            payload = JWTHelper.decode_token(verify_token) 
+    
+            email = payload['email']
+            verifier = yield neondata.Verification.get(email, async=True)
+    
+            if not verifier: 
+                raise NotFoundError('no information for email %s' % (email))
+            
+            new_user_json = json.loads(verifier.extra_info['user'])
+            new_user = neondata.User._create(new_user_json['_data']['key'], 
+                           new_user_json)
+            account = neondata.NeonUserAccount.create(
+                verifier.extra_info['account'])
+ 
+            try: 
+                yield new_user.save(overwrite_existing_object=False, async=True)
+            except neondata.psycopg2.IntegrityError: 
+                raise AlreadyExists('user with that email already exists')
+    
+            yield account.save(async=True)
+            account = yield neondata.NeonUserAccount.get(
+                          account.neon_api_key, 
+                          async=True)
+    
+            tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
+                                     account.tracker_account_id, 
+                                     account.neon_api_key, 
+                                     neondata.TrackerAccountIDMapper.PRODUCTION)
+    
+            tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
+                                     account.staging_tracker_account_id, 
+                                     account.neon_api_key, 
+                                     neondata.TrackerAccountIDMapper.STAGING)
+    
+            yield tracker_p_aid_mapper.save(async=True)
+            yield tracker_s_aid_mapper.save(async=True)
+
+            account_limits = neondata.AccountLimits(account.neon_api_key)
+            yield account_limits.save(async=True)  
+    
+            account = yield self.db2api(account)
+            
+            _log.debug(('New Account has been added : name = %s id = %s') 
+                       % (account['customer_name'], account['account_id']))
+            statemon.state.increment('post_account_oks')
+     
+            self.success(account)
+    
+        except jwt.ExpiredSignatureError:
+            raise NotAuthorizedError('verify token has expired')
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE
+               }
  
     @classmethod
     def _get_default_returned_fields(cls):
@@ -326,48 +496,6 @@ class NewAccountHandler(APIV2Handler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
-
-'''****************************************************************
-NewUserHandler
-****************************************************************'''
-class NewUserHandler(APIV2Handler):
-    """Handles post requests to the user endpoint."""
-    @tornado.gen.coroutine 
-    def post(self):
-        """handles user endpoint post request""" 
-
-        schema = Schema({ 
-          Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Required('password') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=63))
-        })
-
-        args = self.parse_args()
-        schema(args)
-
-        new_user = neondata.User(username=args.get('username'), 
-                       password=args.get('password'),
-                       access_level=args.get('access_level'))
-
-        yield new_user.save(async=True)
- 
-        user = yield self.db2api(new_user)
-
-        self.success(user)
- 
-    @classmethod
-    def get_access_levels(self):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.GLOBAL_ADMIN 
-               } 
- 
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return ['username', 'created', 'updated' ]
-    
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return ['username', 'created', 'updated' ]
          
 '''*********************************************************************
 Endpoints 
@@ -377,6 +505,7 @@ application = tornado.web.Application([
     (r'/api/v2/authenticate/?$', AuthenticateHandler),
     (r'/api/v2/refresh_token/?$', RefreshTokenHandler),
     (r'/api/v2/accounts/?$', NewAccountHandler),
+    (r'/api/v2/accounts/verify?$', VerifyAccountHandler),
     (r'/api/v2/users/?$', NewUserHandler),
     (r'/api/v2/logout/?$', LogoutHandler)
 ], gzip=True)

@@ -35,6 +35,17 @@ from tornado.httputil import HTTPServerRequest
 from utils.options import options
 
 class TestBase(test_utils.neontest.AsyncHTTPTestCase): 
+    def setUp(self):
+        self.send_email_mocker = patch(
+            'cmsapiv2.authentication.NewAccountHandler.send_email')
+        self.send_email_mock = self.send_email_mocker.start()
+        self.send_email_mock.return_value = True
+        super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.send_email_mocker.stop()
+        super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+        
     def post_exceptions(self, url, params, exception_mocker): 
         exception_mock = self._future_wrap_mock(exception_mocker.start())
         exception_mock.side_effect = Exception('blah blah')  
@@ -190,7 +201,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
     def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
               '&admin_user_username=a@a.com'\
-              '&admin_user_password=b1234567'
+              '&admin_user_password=b1234567'\
+              '&admin_user_first_name=kevin'\
+              '&admin_user_last_name=fenger'\
+              '&admin_user_title=Mr.'
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body='', 
                                                 method='POST', 
@@ -198,29 +212,19 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
-        account_id = rjson['account_id'] 
-        account = yield neondata.NeonUserAccount.get(account_id, 
-                      async=True)
-        self.assertEquals(account.name, 'meisnew')
-        self.assertEquals(account.email, 'a@a.bc')
+        self.assertRegexpMatches(rjson['message'],
+                                 'account verification email sent to')
 
-        user = yield neondata.User.get('a@a.com', 
-                   async=True) 
-        self.assertEquals(user.username, 'a@a.com') 
- 
-    @tornado.testing.gen_test 
-    def test_create_new_account_json(self):
-        params = json.dumps({'customer_name': 'meisnew', 
-                             'email': 'a@a.bc', 
-                             'admin_user_username':'a@a.com', 
-                             'admin_user_password':'testacpas'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
+        # verifier row gets created 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True) 
+        
+        # now send this token to the verify endpoint        
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
+                                                body='', 
                                                 method='POST', 
-                                                headers=header) 
+                                                allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
@@ -233,7 +237,59 @@ class TestNewAccountHandler(TestAuthenticationBase):
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
         self.assertEquals(user.username, 'a@a.com')
+        self.assertEquals(user.first_name, 'kevin')
+        self.assertEquals(user.last_name, 'fenger')
+        self.assertEquals(user.title, 'Mr.')
+
+        limits = yield neondata.AccountLimits.get(account_id, async=True)
+        self.assertEquals(limits.key, account_id) 
+        self.assertEquals(limits.video_posts, 0)
+        
+    @tornado.testing.gen_test 
+    def test_create_new_account_json(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'a@a.com', 
+                             'admin_user_password':'testacpas', 
+                             'admin_user_first_name':'kevin'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+                                 'account verification email sent to')
+
+        # verifier row gets created 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+
  
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com')
+        self.assertEquals(user.first_name, 'kevin')
+
+        limits = yield neondata.AccountLimits.get(account_id, async=True)
+        self.assertEquals(limits.key, account_id) 
+        self.assertEquals(limits.video_posts, 0)
+          
     @tornado.testing.gen_test 
     def test_create_new_account_duplicate_users(self):
         params = json.dumps({'customer_name': 'meisnew', 
@@ -247,6 +303,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header)
         self.assertEquals(response.code, 200) 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
  
         params = json.dumps({'customer_name': 'meisnew2', 
                              'email': 'a@a.bc', 
@@ -266,7 +329,6 @@ class TestNewAccountHandler(TestAuthenticationBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['data'],
                                  'user with that email already exists')
-
 
 
     @tornado.testing.gen_test 
@@ -296,6 +358,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header) 
         self.assertEquals(response.code, 200)
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
         prod_t_id = rjson['tracker_account_id'] 
@@ -318,6 +387,47 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 method='POST', 
                                                 headers=header) 
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test 
+    def test_create_account_send_email_exception(self):
+        self.send_email_mock.return_value = None 
+        self.send_email_mock.side_effect = Exception('blah blah') 
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.invalid', 
+                             'admin_user_username':'a@a.invalid', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            yield self.http_client.fetch(self.get_url(url), 
+                                         body=params, 
+                                         method='POST', 
+                                         headers=header)
+        self.assertEquals(e.exception.code, 500)
+
+    @tornado.testing.gen_test
+    def test_create_account_send_email_ses_exception(self):
+        self.send_email_mocker.stop() 
+        ses_mocker = patch('boto.ses.connection.SESConnection.send_email')
+        ses_mock = ses_mocker.start()
+        ses_mock.side_effect = Exception('random exception')  
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc.invalid', 
+                             'admin_user_username':'a@a.invalid', 
+                             'admin_user_password':'testacpas'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            yield self.http_client.fetch(self.get_url(url), 
+                                         body=params, 
+                                         method='POST', 
+                                         headers=header)
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(e.exception.code, 500) 
+        self.assertRegexpMatches(rjson['error']['data'],
+                                 'unable to send verification')
+        ses_mocker.stop() 
+        self.send_email_mocker.start() 
  
     @tornado.testing.gen_test
     def test_get_new_acct_not_implemented(self):
@@ -594,7 +704,9 @@ class TestUserHandler(TestControllersBase):
     @tornado.testing.gen_test(timeout=10.0) 
     def test_get_user_does_exist(self):
         user = neondata.User(username='testuser', 
-                             password='testpassword', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
                              access_level=neondata.AccessLevels.CREATE | 
                                           neondata.AccessLevels.READ)
         
@@ -612,6 +724,8 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'testuser')
+        self.assertEquals(rjson['first_name'], 'kevin')
+        self.assertEquals(rjson['last_name'], 'kevin')
 
         user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(user.username, 'testuser') 
@@ -685,7 +799,10 @@ class TestUserHandler(TestControllersBase):
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
         params = json.dumps({'username':'testuser', 
-                             'access_level': 1, 
+                             'access_level': 1,
+                             'first_name' : 'kevin',  
+                             'last_name' : 'kevin',  
+                             'title' : 'DOCTOR',  
                              'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
@@ -696,6 +813,9 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(response.code, 200)
         updated_user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(updated_user.access_level, 1)
+        self.assertEquals(updated_user.first_name, 'kevin')
+        self.assertEquals(updated_user.last_name, 'kevin')
+        self.assertEquals(updated_user.title, 'DOCTOR')
  
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
@@ -781,6 +901,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestOoyalaIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -943,6 +1064,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestBrightcoveIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -1282,10 +1404,7 @@ class TestVideoHandler(TestControllersBase):
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
@@ -1294,20 +1413,29 @@ class TestVideoHandler(TestControllersBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1316,6 +1444,121 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
         cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_refresh_date_reset(self):
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        
+        limit = neondata.AccountLimits(self.account_id_api_key, 
+            refresh_time_video_posts=datetime(1999,1,1), 
+            video_posts=10)
+        yield limit.save(async=True) 
+
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+       
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id_api_key).video_posts, 
+            1,
+            async=True)
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(
+                self.account_id_api_key).refresh_time_video_posts \
+            > '2016-04-15 00:00:00.000000', True,
+            async=True)
+        # sanity check on the video make sure it made it 
+        video = yield neondata.VideoMetadata.get(
+            self.account_id_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url') 
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_increase_post_videos(self):
+        cmsdb_download_image_mocker = patch(
+            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
+        cmsdb_download_image_mock = self._future_wrap_mock(
+            cmsdb_download_image_mocker.start())
+        cmsdb_download_image_mock.side_effect = [self.random_image]
+        
+        limit = neondata.AccountLimits(self.account_id_api_key, 
+            refresh_time_video_posts=datetime(2050,1,1), 
+            video_posts=3)
+        yield limit.save(async=True) 
+
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
+        self.assertEquals(response.code, 202) 
+         
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(self.account_id_api_key).video_posts, 
+            4,
+            async=True)
+        yield self.assertWaitForEquals(
+            lambda: neondata.AccountLimits.get(
+                self.account_id_api_key).refresh_time_video_posts, 
+            '2050-01-01 00:00:00.000000',
+            async=True)
+        # sanity check on the video make sure it made it 
+        video = yield neondata.VideoMetadata.get(
+            self.account_id_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url') 
+        
+        # finally lets sanity check the limits endpoint
+        url = '/api/v2/%s/limits' % (self.account_id_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_posts'], 4) 
+        cmsdb_download_image_mocker.stop()
+
+    @tornado.testing.gen_test
+    def test_post_video_with_limits_too_many_requests(self):
+        limit = neondata.AccountLimits(self.account_id_api_key, 
+            video_posts=10)
+        yield limit.save(async=True) 
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&title=a_title&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url),
+                                         body='',
+                                         method='POST',
+                                         allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 402)
 
     @tornado.testing.gen_test
     def test_post_video_video_exists_in_db(self):
@@ -1760,7 +2003,7 @@ class TestVideoHandler(TestControllersBase):
        
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['video_count'], 2)
+        self.assertEquals(rjson['video_count'], 1)
         videos = rjson['videos']
         self.assertEquals(videos[0]['video_id'], 'vid1') 
  
@@ -1913,60 +2156,6 @@ class TestVideoHandler(TestControllersBase):
 	url = '/api/v2/%s/videos' % '1234234'
         self.post_exceptions(url, params, exception_mocker) 
 
-# TODO KF here until hot swap is done
-class TestVideoHandlerPG(TestVideoHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testvideohiid'
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500,
-                                   urls=['s']).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500,
-                                   urls=['d']).save()
-        neondata.NeonApiRequest('job1', self.account_id_api_key).save()
-        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
-        user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image]
-        self.http_mocker = patch('utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(
-              self.http_mocker.start()) 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        self.maxDiff = 5000
-        super(TestVideoHandler, self).setUp()
-
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.http_mocker.stop()
-        self.verify_account_mocker.stop()
-        super(TestVideoHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
 class TestThumbnailHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -1996,10 +2185,7 @@ class TestThumbnailHandler(TestControllersBase):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
@@ -2007,13 +2193,14 @@ class TestThumbnailHandler(TestControllersBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
-        super(TestThumbnailHandler, cls).tearDownClass() 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -2142,53 +2329,6 @@ class TestThumbnailHandler(TestControllersBase):
 	url = '/api/v2/%s/thumbnails' % '1234234'
         self.post_exceptions(url, params, exception_mocker) 
  
-# TODO KF here until hot swap is done
-class TestThumbnailHandlerPG(TestThumbnailHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save() 
-        self.account_id_api_key = user.neon_api_key
-        neondata.ThumbnailMetadata('testingtid', width=500, urls=['s']).save()
-        self.test_video = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
-                             'tn_test_vid1')).save()
-        neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,
-                             'tn_test_vid2')).save()
-
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-        self.cdn_mock.return_value = [('some_cdn_url.jpg', 640, 480)]
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image] 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestThumbnailHandler, self).setUp()
-
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.verify_account_mocker.stop()
-        super(TestThumbnailHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
 class TestHealthCheckHandler(TestControllersBase): 
     def setUp(self):
         self.http_mocker = patch('utils.http.send_request')
@@ -2202,6 +2342,7 @@ class TestHealthCheckHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.http_mocker.stop()
+        super(TestHealthCheckHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2390,6 +2531,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
         conn.clear_db()
         self.verify_account_mocker.stop()
+        super(TestThumbnailStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -2945,7 +3087,47 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header)
-        self.assertEquals(response.code, 200) 
+        self.assertEquals(response.code, 200)
+ 
+    @tornado.testing.gen_test 
+    def test_internal_search_access_level_normal(self): 
+        user = neondata.User(username='testuser', 
+                             password='testpassword', 
+                             access_level=neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        url = '/api/v2/videos/search?token=%s' % (token)
+        # should get a 401 unauth, because this is an internal only 
+        # resource, and this is not an internal_only user  
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                                          method='GET')
+
+        self.assertEquals(e.exception.code, 401)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'internal only resource')
+
+    @tornado.testing.gen_test 
+    def test_internal_search_access_level_internal_only(self): 
+        user = neondata.User(
+            username='testuser', 
+            password='testpassword', 
+            access_level=neondata.AccessLevels.INTERNAL_ONLY_USER | 
+                         neondata.AccessLevels.ALL_NORMAL_RIGHTS)
+        
+        token = JWTHelper.generate_token({'username' : 'testuser'})  
+        user.access_token = token 
+        user.save()
+        url = '/api/v2/videos/search?token=%s' % (token)
+        # should get a 200 as this user has access to this resource 
+        # resource, and this is not an internal_only user  
+        response = yield self.http_client.fetch(self.get_url(url), 
+                       method='GET')
+
+        self.assertEquals(response.code, 200)
 
 class TestAPIKeyRequiredAuth(TestAuthenticationBase):
     def setUp(self):
@@ -3013,57 +3195,6 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
                                                 body='', 
                                                 method='POST') 
 	self.assertEquals(response.code, 200)
-
-    def test_create_new_account_create_mode(self): 
-        user = neondata.User(username='testuser', 
-                             password='testpassword', 
-                             access_level=neondata.AccessLevels.CREATE)
-        
-        token = JWTHelper.generate_token({'username' : 'testuser'})  
-        user.access_token = token 
-        user.save()
-
-        params = json.dumps({'name': 'meisnew', 'token': token})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/accounts'
-        self.http_client.fetch(self.get_url(url), 
-                               body=params,
-                               callback=self.stop, 
-                               method='POST', 
-                               headers=header) 
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access') 
-
-        params = json.dumps({'name': 'meisnew'})
-        header = { 
-                   'Content-Type':'application/json', 
-                   'Authorization': 'Bearer %s' % token 
-                 }
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               callback=self.stop, 
-                               method='POST', 
-                               headers=header) 
-        response = self.wait()
-        self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access')  
-
-        url = '/api/v2/accounts?name=meisnew&token=%s' % token
-        self.http_client.fetch(self.get_url(url),
-                               allow_nonstandard_methods=True,
-                               callback=self.stop, 
-                               body='', 
-                               method='POST') 
-        response = self.wait()
-	self.assertEquals(response.code, 401)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access') 
 
 class TestAuthenticationHandler(TestAuthenticationBase): 
     def setUp(self): 
@@ -3358,6 +3489,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
 class TestLogoutHandler(TestAuthenticationBase): 
     def setUp(self): 
         super(TestLogoutHandler, self).setUp()
+    def tearDown(self): 
+        super(TestLogoutHandler, self).tearDown()
    
     @classmethod
     def setUpClass(cls):
@@ -3438,8 +3571,320 @@ class TestAuthenticationHealthCheckHandler(TestAuthenticationBase):
                                callback=self.stop, 
                                method='GET')
         response = self.wait()
-        self.assertEquals(response.code, 200) 
+        self.assertEquals(response.code, 200)
+ 
+class TestVideoSearchInternalHandler(TestControllersBase): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestVideoSearchInternalHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestVideoSearchInternalHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_search_no_videos(self):
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 0)
+    
+    @tornado.testing.gen_test 
+    def test_search_base(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test 
+    def test_search_get_newer_prev_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job3', 'kevin', 
+                  title='really kevins best video yet').save(async=True)
+        rjson1 = json.loads(response.body)
+        url = rjson1['prev_page'] 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('really kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_get_older_next_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('kevins best video yet', video['title'])
+
+        url = rjson['next_page']
+        url += '&limit=1'  
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('kevins video', video['title'])
         
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?account_id=kevin&fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        # this should grab the most recently created video
+        self.assertEquals('kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_without_account_id(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin2_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin2', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        # should return all the videos despite no account
+        self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test 
+    def test_search_without_requests(self):
+        video = neondata.VideoMetadata('kevin_vid1')
+        yield video.save(async=True)   
+        url = '/api/v2/videos/search?fields='\
+              'video_id,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        video_count = rjson['video_count'] 
+        videos = rjson['videos']
+        self.assertEquals(video_count, 0) 
+        self.assertEquals(videos, None) 
+       
+class TestVideoSearchExternalHandler(TestControllersBase): 
+    def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestVideoSearchExternalHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestVideoSearchExternalHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @tornado.testing.gen_test 
+    def test_search_base(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 2)
+
+    @tornado.testing.gen_test 
+    def test_search_get_older_prev_page(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+
+        video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job3', 'kevin', 
+                  title='really kevins best video yet').save(async=True)
+        rjson1 = json.loads(response.body)
+        url = rjson1['prev_page'] 
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        self.assertEquals('really kevins best video yet', video['title'])
+
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job1', 
+            'kevin', 
+             title='kevins video').save(async=True)
+        video = neondata.VideoMetadata('kevin_vid2', request_id='job2')
+        yield video.save(async=True)   
+        yield neondata.NeonApiRequest('job2', 
+            'kevin', 
+            title='kevins best video yet').save(async=True)
+        url = '/api/v2/kevin/videos/search?fields='\
+              'video_id,title,created,updated&limit=1'
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['video_count'], 1)
+        video = rjson['videos'][0]
+        # this should grab the most recently created video
+        self.assertEquals('kevins best video yet', video['title'])
+
+class TestAccountLimitsHandler(TestControllersBase): 
+    def setUp(self):
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        self.user.save()
+        self.account_id_api_key = self.user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestAccountLimitsHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestAccountLimitsHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_search_with_limit(self):
+        limits = neondata.AccountLimits(self.user.neon_api_key)
+        yield limits.save(async=True)
+ 
+        url = '/api/v2/%s/limits' % (self.user.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        self.assertEquals(rjson['video_posts'], 0)
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()

@@ -86,6 +86,20 @@ CREATE TABLE experimentstrategy (
 ALTER TABLE experimentstrategy OWNER TO pgadmin;
 
 --
+-- Name: accountlimits; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE accountlimits (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE accountlimits OWNER TO pgadmin;
+
+--
 -- Name: neonapikey; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -241,6 +255,20 @@ CREATE TABLE users (
 ALTER TABLE users OWNER TO pgadmin;
 
 --
+-- Name: verification; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE verification (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE verification OWNER TO pgadmin;
+
+--
 -- Name: videometadata; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -295,6 +323,12 @@ COPY cdnhostingmetadatalist (_data, _type) FROM stdin;
 COPY experimentstrategy (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: accountlimits; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY accountlimits (_data, _type) FROM stdin;
+\.
 
 --
 -- Data for Name: neonapikey; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -378,6 +412,12 @@ COPY users (_data, _type) FROM stdin;
 COPY videometadata (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: verification; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY verification (_data, _type) FROM stdin;
+\.
 
 --
 -- Data for Name: videostatus; Type: TABLE DATA; Schema: public; Owner: pgadmin
@@ -393,6 +433,7 @@ CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_dat
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX accountlimits_key ON accountlimits USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonapikey_key ON neonapikey USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonapirequest_key ON neonapirequest USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX neonuseraccount_key ON neonuseraccount USING btree (((_data ->> 'key'::text)));
@@ -405,6 +446,7 @@ CREATE UNIQUE INDEX trackeraccountidmapper_key ON trackeraccountidmapper USING b
 CREATE UNIQUE INDEX users_key ON users USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videometadata_key ON videometadata USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX videostatus_key ON videostatus USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX verification_key ON verification USING btree (((_data ->> 'key'::text)));
 
 -- Time updated indexes 
 --  since we should be accessing the data in small chunks let's index these
@@ -508,6 +550,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER experimentstrategy_update_updated_time_trig 
 BEFORE UPDATE 
 ON experimentstrategy
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
+
+CREATE TRIGGER accountlimits_update_updated_time_trig 
+BEFORE UPDATE 
+ON accountlimits
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
 
 CREATE TRIGGER neonapikey_notify_trig
@@ -618,6 +665,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER users_update_updated_time_trig 
 BEFORE UPDATE 
 ON users
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
+
+CREATE TRIGGER verification_update_updated_time_trig 
+BEFORE UPDATE 
+ON verification
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
 
 CREATE TRIGGER videometadata_notify_trig
