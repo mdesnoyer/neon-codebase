@@ -1242,7 +1242,7 @@ class AccountLimitsHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
 
-        acct_limits = yield neondata.Limits.get(
+        acct_limits = yield neondata.AccountLimits.get(
                           account_id_api_key, 
                           async=True)
 

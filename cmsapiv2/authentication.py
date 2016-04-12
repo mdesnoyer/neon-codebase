@@ -444,7 +444,7 @@ class VerifyAccountHandler(APIV2Handler):
             yield tracker_p_aid_mapper.save(async=True)
             yield tracker_s_aid_mapper.save(async=True)
 
-            account_limits = neondata.Limits(account.neon_api_key)
+            account_limits = neondata.AccountLimits(account.neon_api_key)
             yield account_limits.save(async=True)  
     
             account = yield self.db2api(account)

@@ -5650,9 +5650,9 @@ class Verification(StoredObject):
         '''
         return Verification.__name__
 
-class Limits(StoredObject):
+class AccountLimits(StoredObject):
     '''
-    Class schema for Verification
+    Class schema for AccountLimits
 
     Keyed by account_id(api_key)
     '''
@@ -5664,7 +5664,7 @@ class Limits(StoredObject):
                  seconds_to_refresh_video_posts=2592000.0,
                  max_video_size=900.0):
  
-        super(Limits, self).__init__(account_id)
+        super(AccountLimits, self).__init__(account_id)
         
         # the number of video posts this account has made 
         self.video_posts = video_posts 
@@ -5686,7 +5686,7 @@ class Limits(StoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return Limits.__name__
+        return AccountLimits.__name__
 
 class VideoMetadata(StoredObject):
     '''

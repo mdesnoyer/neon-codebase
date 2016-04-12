@@ -3448,7 +3448,7 @@ class TestPGVerification(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def _get_object_type(cls): 
         return neondata.Verification
 
-class TestPGLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+class TestPGAccountLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
 
@@ -3470,7 +3470,7 @@ class TestPGLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     
     @classmethod 
     def _get_object_type(cls): 
-        return neondata.Limits
+        return neondata.AccountLimits
 
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 

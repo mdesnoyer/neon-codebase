@@ -241,7 +241,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(user.last_name, 'fenger')
         self.assertEquals(user.title, 'Mr.')
 
-        limits = yield neondata.Limits.get(account_id, async=True)
+        limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
         
@@ -286,7 +286,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(user.username, 'a@a.com')
         self.assertEquals(user.first_name, 'kevin')
 
-        limits = yield neondata.Limits.get(account_id, async=True)
+        limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
           
@@ -1453,7 +1453,7 @@ class TestVideoHandler(TestControllersBase):
             cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
         
-        limit = neondata.Limits(self.account_id_api_key, 
+        limit = neondata.AccountLimits(self.account_id_api_key, 
             refresh_time_video_posts=datetime(1999,1,1), 
             video_posts=10)
         yield limit.save(async=True) 
@@ -1474,11 +1474,11 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
        
         yield self.assertWaitForEquals(
-            lambda: neondata.Limits.get(self.account_id_api_key).video_posts, 
+            lambda: neondata.AccountLimits.get(self.account_id_api_key).video_posts, 
             1,
             async=True)
         yield self.assertWaitForEquals(
-            lambda: neondata.Limits.get(
+            lambda: neondata.AccountLimits.get(
                 self.account_id_api_key).refresh_time_video_posts \
             > '2016-04-15 00:00:00.000000', True,
             async=True)
@@ -1497,7 +1497,7 @@ class TestVideoHandler(TestControllersBase):
             cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
         
-        limit = neondata.Limits(self.account_id_api_key, 
+        limit = neondata.AccountLimits(self.account_id_api_key, 
             refresh_time_video_posts=datetime(2050,1,1), 
             video_posts=3)
         yield limit.save(async=True) 
@@ -1518,11 +1518,11 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
          
         yield self.assertWaitForEquals(
-            lambda: neondata.Limits.get(self.account_id_api_key).video_posts, 
+            lambda: neondata.AccountLimits.get(self.account_id_api_key).video_posts, 
             4,
             async=True)
         yield self.assertWaitForEquals(
-            lambda: neondata.Limits.get(
+            lambda: neondata.AccountLimits.get(
                 self.account_id_api_key).refresh_time_video_posts, 
             '2050-01-01 00:00:00.000000',
             async=True)
@@ -1542,7 +1542,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_too_many_requests(self):
-        limit = neondata.Limits(self.account_id_api_key, 
+        limit = neondata.AccountLimits(self.account_id_api_key, 
             video_posts=10)
         yield limit.save(async=True) 
         url = '/api/v2/%s/videos?integration_id=%s'\
@@ -3875,7 +3875,7 @@ class TestAccountLimitsHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_search_with_limit(self):
-        limits = neondata.Limits(self.user.neon_api_key)
+        limits = neondata.AccountLimits(self.user.neon_api_key)
         yield limits.save(async=True)
  
         url = '/api/v2/%s/limits' % (self.user.neon_api_key) 

@@ -263,7 +263,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             raise tornado.gen.Return(True) 
 
         # grab the account_limit object for the requests 
-        acct_limits = yield neondata.Limits.get(
+        acct_limits = yield neondata.AccountLimits.get(
                           request.account_id, 
                           async=True)
 
@@ -330,7 +330,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
  
                 x.__dict__[key_to_add_time_to] = new_date 
            
-        limit = yield neondata.Limits.modify(
+        limit = yield neondata.AccountLimits.modify(
             account_id, 
             _modify_me, 
             async=True)
@@ -382,16 +382,19 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            this class to return a dictionary that will define 
            what limits need to be checked 
 
-           the first two args are fields from the Limits table 
+           the first two itemss are fields from the Limits table 
 
-           the third arg is an operator that will be executed on 
+           the third item is an operator that will be executed on 
                the first two args 
            supported operators : 
            <, >, <=, >=, = 
 
-           the last optional arg, is a refresh_time, if sent in 
+           the fourth item, is a dict of timer info , if sent in 
            this will be checked as well, and reset if necessary
 
+           the fourth and fifth items values_to_increase and decrease,
+             tell the limit checker what value to increase/decrease 
+             after a successful call 
            eg 
            { 
                 HTTPVerbs.POST : [ 
