@@ -13,7 +13,9 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import atexit
+from boto.s3.connection import S3Connection
 import code
+import re
 import signal
 import stats.batch_processor
 import stats.cluster
@@ -97,11 +99,11 @@ class BatchProcessManager(threading.Thread):
                     self.cluster, options.input_path,
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
+                self.last_output_path = cleaned_output_path
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
-                self.last_output_path = cleaned_output_path
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:
@@ -159,6 +161,19 @@ class BatchProcessManager(threading.Thread):
                 processed.
         '''
         try:
+            # Get the list of account ids based on the s3 paths
+            s3re = re.compile('s3://([a-zA-Z0-9\-_\.]+)/([^\*]+)')
+            s3search = s3re.search(options.input_path)
+            if not s3search:
+                _log.error('Could not find account ids in %s' % options.input)
+                return
+            bucket_name, prefix = s3search.groups()
+            conn = S3Connection()
+            bucket = conn.get_bucket(bucket_name)
+            account_ids = [x.name.split('/')[-2] for x in bucket.list(prefix,
+                                                                      '/')]
+            
+            
             if data_path is None:
                 data_path = \
                   stats.batch_processor.get_last_sucessful_batch_output(
@@ -166,16 +181,17 @@ class BatchProcessManager(threading.Thread):
             if (data_path is not None and (
                     force or 
                     data_path != self.last_output_path)):
+                self.last_output_path = data_path
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.build_impala_tables(
                     data_path,
                     self.cluster,
+                    account_ids,
                     timeout = (options.batch_period * 4))
-                self.last_output_path = data_path
 
         except Exception as e:
-            _log.exception('Error building the impala tables')
+            _log.error('Error building the impala tables: %s' % e)
 
         finally:
             try:
