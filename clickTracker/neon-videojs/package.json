@@ -1,8 +1,11 @@
 {
   "name": "@neon/videojs-neon-tracker",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Brightcove player event tracking for the Neon API",
   "main": "es5/plugin.js",
+  "engines": {
+    "node": "4.2.1"
+  },
   "scripts": {
     "prebuild": "npm run clean",
     "build": "npm-run-all -p build:*",
@@ -43,9 +46,7 @@
     "sinon": "global:sinon",
     "video.js": "global:videojs"
   },
-  "style": "dist/videojs-neon-tracker.css",
   "videojs-plugin": {
-    "style": "dist/videojs-neon-tracker.css",
     "script": "dist/videojs-neon-tracker.min.js"
   },
   "vjsstandard": {
