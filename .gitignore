@@ -77,3 +77,6 @@ CTestResults.xml
 *.swo
 *.swn
 *.swp
+
+#### OSX folder info ###
+.DS_Store
