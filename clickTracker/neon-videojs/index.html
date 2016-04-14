@@ -4,9 +4,16 @@
   <meta charset="utf-8">
   <title>videojs-neon-tracker Demo</title>
   <link href="/node_modules/video.js/dist/video-js.css" rel="stylesheet">
+  <link href="http://players.brightcove.net/videojs-ima3/2/videojs.ima3.min.css" rel="stylesheet">
 </head>
 <body>
-  <video id="videojs-neon-tracker-player" class="video-js vjs-default-skin" controls>
+  <video
+      id="videojs-neon-tracker-player"
+      class="video-js vjs-default-skin"
+      poster="https://upload.wikimedia.org/wikipedia/commons/6/64/Cavendish_Henry_signature.jpg"
+      controls
+      autoplay
+      muted>
     <source src="//vjs.zencdn.net/v/oceans.mp4" type='video/mp4'>
     <source src="//vjs.zencdn.net/v/oceans.webm" type='video/webm'>
   </video>
@@ -16,13 +23,20 @@
   </ul>
   <script src="/node_modules/video.js/dist/video.js"></script>
   <script src="/dist/videojs-neon-tracker.js"></script>
+  <script src="http://players.brightcove.net/videojs-ima3/2/videojs.ima3.min.js"></script>
   <script>
     (function(window, videojs) {
       var player = window.player = videojs('videojs-neon-tracker-player');
-      let options = { 
-          'tracking_url': 'http://private-265fc-trackerneonlabcom.apiary-mock.com'
-      }
-      player.neon(options);
+      player.neon({
+          // Dev override 
+          //'trackUrl': 'http://private-265fc-trackerneonlabcom.apiary-mock.com'
+          'trackUrl': 'http://10.0.69.190/v2/track',
+          // Neon's publisher id TODO
+          'publisherId': '56139847'
+      });
+      player.ima3({
+          'adTechOrder': ['html5', 'flash']
+      });
     }(window, window.videojs));
   </script>
 </body>
