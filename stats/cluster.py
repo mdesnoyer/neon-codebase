@@ -281,7 +281,7 @@ class Cluster():
             for key in s3conn.get_bucket(bucket_name).list(prefix):
                 input_data_size += key.size
 
-            n_reducers = math.ceil(input_data_size / 1073741824.)
+            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
             extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
         
         # If the cluster's core has larger instances, the memory

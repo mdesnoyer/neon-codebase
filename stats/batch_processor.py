@@ -178,7 +178,7 @@ class ImpalaTableBuilder(threading.Thread):
             cmd = ("""
             insert overwrite table {parq_table}
             partition(tai='{account_id}', yr, mnth)
-            select {select_cols}, trackerAccountId,
+            select {select_cols},
             year(cast(serverTime as timestamp)),
             month(cast(serverTime as timestamp)) from {avro_table}
             where trackerAccountId='{account_id}'""".format(
