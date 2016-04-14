@@ -292,7 +292,7 @@ def build_impala_tables(input_path, cluster, account_ids, timeout=None):
     '''
     _log.info("Building the impala tables")
 
-    with concurrent.futures.ThreadPoolExecutor(5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(2) as executor:
         jobs = {} # Future to jobs
         # TODO(mdesnoyer): Add ImageVisible and ImageClick back
         # in. Disabling for now because the job gets killed by a

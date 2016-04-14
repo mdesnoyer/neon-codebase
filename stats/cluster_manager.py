@@ -100,10 +100,7 @@ class BatchProcessManager(threading.Thread):
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
                 self.last_output_path = cleaned_output_path
-                stats.batch_processor.build_impala_tables(
-                    cleaned_output_path,
-                    self.cluster,
-                    timeout = (options.batch_period * 4))
+                self.build_impala_tables(cleaned_output_path)
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:
@@ -161,17 +158,6 @@ class BatchProcessManager(threading.Thread):
                 processed.
         '''
         try:
-            # Get the list of account ids based on the s3 paths
-            s3re = re.compile('s3://([a-zA-Z0-9\-_\.]+)/([^\*]+)')
-            s3search = s3re.search(options.input_path)
-            if not s3search:
-                _log.error('Could not find account ids in %s' % options.input)
-                return
-            bucket_name, prefix = s3search.groups()
-            conn = S3Connection()
-            bucket = conn.get_bucket(bucket_name)
-            account_ids = [x.name.split('/')[-2] for x in bucket.list(prefix,
-                                                                      '/')]
             
             
             if data_path is None:
@@ -187,8 +173,8 @@ class BatchProcessManager(threading.Thread):
                 stats.batch_processor.build_impala_tables(
                     data_path,
                     self.cluster,
-                    account_ids,
-                    timeout = (options.batch_period * 4))
+                    get_account_ids(),
+                    timeout = (options.batch_period * 10))
 
         except Exception as e:
             _log.error('Error building the impala tables: %s' % e)
@@ -203,6 +189,20 @@ class BatchProcessManager(threading.Thread):
                 _log.exception('Error shrinking task instance group: %s'
                                % e)
                 statemon.state.increment('cluster_resize_failures')
+
+def get_account_ids():
+    # Get the list of account ids based on the s3 paths
+    s3re = re.compile('s3://([a-zA-Z0-9\-_\.]+)/([^\*]+)')
+    s3search = s3re.search(options.input_path)
+    if not s3search:
+        _log.error('Could not find account ids in %s' % options.input)
+        return
+    bucket_name, prefix = s3search.groups()
+    conn = S3Connection()
+    bucket = conn.get_bucket(bucket_name)
+    account_ids = [x.name.split('/')[-2] for x in bucket.list(prefix, '/')]
+    return account_ids
+            
 
 def main():
     _log.info('Looking up cluster %s' % options.cluster_type)
