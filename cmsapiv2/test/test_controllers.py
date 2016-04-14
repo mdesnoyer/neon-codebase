@@ -1059,21 +1059,20 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         super(TestBrightcoveIntegrationHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestBrightcoveIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
         super(TestBrightcoveIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
@@ -1336,38 +1335,6 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/integrations/brightcove' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
-
-# TODO KF here until hot swap is done
-class TestBrightcoveIntegrationHandlerPG(TestBrightcoveIntegrationHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testbciid' 
-        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestBrightcoveIntegrationHandler, self).setUp()
-
-    def tearDown(self): 
-        self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
-        super(TestBrightcoveIntegrationHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestBrightcoveIntegrationHandlerPG, cls).tearDownClass() 
 
 class TestVideoHandler(TestControllersBase): 
     def setUp(self):

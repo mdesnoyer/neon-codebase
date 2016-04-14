@@ -245,7 +245,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
         integration = yield tornado.gen.Task(IntegrationHelper.create_integration, acct, args, neondata.IntegrationType.OOYALA)
         statemon.state.increment('post_ooyala_oks')
-        self.success(integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
  
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -263,7 +264,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                     neondata.IntegrationType.OOYALA)
 
         statemon.state.increment('get_ooyala_oks')
-        self.success(integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -297,7 +299,18 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                             neondata.IntegrationType.OOYALA)
  
         statemon.state.increment('put_ooyala_oks')
-        self.success(ooyala_integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return [ 'integration_id', 'account_id', 'partner_code',
+                 'api_key', 'api_secret' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return [ 'integration_id', 'account_id', 'partner_code',
+                 'api_key', 'api_secret' ]
 
     @classmethod
     def get_access_levels(self):
@@ -336,7 +349,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                                              args, 
                                                              neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('post_brightcove_oks')
-        self.success(integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
 
     @tornado.gen.coroutine
     def get(self, account_id):  
@@ -353,7 +367,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         integration = yield IntegrationHelper.get_integration(integration_id,  
                                                        neondata.IntegrationType.BRIGHTCOVE) 
         statemon.state.increment('get_brightcove_oks')
-        self.success(integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -394,7 +409,24 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                                   neondata.IntegrationType.BRIGHTCOVE) 
  
         statemon.state.increment('put_brightcove_oks')
-        self.success(integration.__dict__)
+        rv = yield self.db2api(integration)
+        self.success(rv)
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return [ 'integration_id', 'account_id', 'read_token', 
+                 'write_token', 'last_process_date', 'publisher_id',
+                 'callback_url', 'enabled', 'playlist_feed_ids',
+                 'uses_batch_provisioning', 'id_field', 
+                 'created', 'updated' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return [ 'integration_id', 'read_token', 'account_id', 
+                 'write_token', 'last_process_date', 'publisher_id',
+                 'callback_url', 'enabled', 'playlist_feed_ids', 
+                 'uses_batch_provisioning', 'id_field', 
+                 'created', 'updated' ]
 
     @classmethod
     def get_access_levels(self):
