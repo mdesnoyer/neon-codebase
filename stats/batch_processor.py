@@ -297,8 +297,8 @@ def build_impala_tables(input_path, cluster, account_ids, timeout=None):
         # TODO(mdesnoyer): Add ImageVisible and ImageClick back
         # in. Disabling for now because the job gets killed by a
         # mysterious force.
-        for event in ['ImageLoad', 'AdPlay', 'VideoPlay',
-                      'VideoViewPercentage', 'EventSequence']:
+        for event in ['EventSequence', 'ImageLoad', 'AdPlay', 'VideoPlay',
+                      'VideoViewPercentage']:
             for account_id in account_ids:
                 job = ImpalaTableBuilder(input_path, cluster, event, 
                                          account_id)
