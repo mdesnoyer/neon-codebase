@@ -15,6 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'gen-py'))
 import avro.schema
 from boto.s3.connection import S3Connection
 import boto.s3.key
+import concurrent.futures
 import datetime
 from hive_service import ThriftHive
 from hive_service.ttypes import HiveServerException
@@ -58,11 +59,12 @@ class UnexpectedInfo(NeonDataPipelineException): pass
 
 class ImpalaTableBuilder(threading.Thread):
     '''Thread that will dispatch and monitor the job to build the impala table.'''
-    def __init__(self, base_input_path, cluster, event):
+    def __init__(self, base_input_path, cluster, event, account_id):
         super(ImpalaTableBuilder, self).__init__()
         self.event = event
         self.base_input_path = base_input_path
         self.cluster = cluster
+        self.account_id = account_id
         self.status = 'INIT'
         self._stopped = threading.Event()
 
@@ -74,6 +76,8 @@ class ImpalaTableBuilder(threading.Thread):
 
     def run(self):
         self._stopped.clear()
+        _log.info('Building event %s for account %s' % (self.event,
+                                                        self.account_id))
         try:
             self.cluster.connect()
             hive_event = '%sHive' % self.event
@@ -172,14 +176,16 @@ class ImpalaTableBuilder(threading.Thread):
             hive.execute("SET mapreduce.map.java.opts=-Xmx14000m")
             hive.execute("SET hive.exec.max.dynamic.partitions.pernode=200")
             cmd = ("""
-            insert overwrite table %s
-            partition(tai, yr, mnth)
-            select %s, trackerAccountId,
+            insert overwrite table {parq_table}
+            partition(tai='{account_id}', yr, mnth)
+            select {select_cols}, trackerAccountId,
             year(cast(serverTime as timestamp)),
-            month(cast(serverTime as timestamp)) from %s""" %
-            (parq_table, ','.join(x.name for x in 
-                                  self.avro_schema.fields),
-             external_table))
+            month(cast(serverTime as timestamp)) from {avro_table}
+            where trackerAccountId='{account_id}'""".format(
+                parq_table=parq_table,
+                account_id=self.account_id,
+                select_cols=','.join(x.name for x in self.avro_schema.fields),
+                avro_table=external_table))
             _log.info("Running command: %s" % cmd)
             hive.execute(cmd)
 
@@ -269,7 +275,7 @@ class ImpalaTableBuilder(threading.Thread):
         return ','.join(cols)
         
 
-def build_impala_tables(input_path, cluster, timeout=None):
+def build_impala_tables(input_path, cluster, account_ids, timeout=None):
     '''Builds the impala tables.
 
     Blocks until the tables are built.
@@ -278,6 +284,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
     input_path - The input path, which should be the output of the
                  RawTrackerMR job.
     cluster - A Cluster object for working with the cluster
+    account_ids - List of tracker account ids to build the tables for
     timeout - If specified, it will timeout after this number of seconds
 
     Returns:
@@ -285,37 +292,28 @@ def build_impala_tables(input_path, cluster, timeout=None):
     '''
     _log.info("Building the impala tables")
 
-    if timeout is not None:
-        budget_time = datetime.datetime.now() + \
-          datetime.timedelta(seconds=timeout)
+    with concurrent.futures.ThreadPoolExecutor(5) as executor:
+        jobs = {} # Future to jobs
+        # TODO(mdesnoyer): Add ImageVisible and ImageClick back
+        # in. Disabling for now because the job gets killed by a
+        # mysterious force.
+        for event in ['ImageLoad', 'AdPlay', 'VideoPlay',
+                      'VideoViewPercentage', 'EventSequence']:
+            for account_id in account_ids:
+                job = ImpalaTableBuilder(input_path, cluster, event, 
+                                         account_id)
+                jobs[executor.submit(job.run)] = job
+                time.sleep(5)
 
-    threads = [] 
-    # TODO(mdesnoyer): Add ImageVisible and ImageClick back in. Disabling for
-    # now because the job gets killed by a mysterious force.
-
-    for event in ['ImageLoad', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
-                  'EventSequence']:
-        thread = ImpalaTableBuilder(input_path, cluster, event)
-        thread.start()
-        threads.append(thread)
-        time.sleep(5)
-
-    # Wait for all of the tables to be built
-    for thread in threads:
-        time_left = None
-        if timeout is not None:
-            time_left = (budget_time - datetime.datetime.now()).total_seconds()
-            if time_left < 0:
-                raise TimeoutException()
-        thread.join(time_left)
-        if thread.is_alive():
-            for t2 in threads:
-                t2.stop()
-            raise TimeoutException()
-        if thread.status != 'SUCCESS':
-            _log.error("Error building impala table %s. State is %s. See logs."
-                       % (thread.event, thread.status))
-            raise ImpalaError("Error building impala table")
+        # Wait for all the tables to be built
+        for future in concurrent.futures.as_completed(jobs, timeout):
+            job = jobs[future]
+            garb = future.result()
+            if job.status != 'SUCCESS':
+                _log.error("Error building impala table %s for account %s."
+                           "State is %s. See logs."
+                           % (job.event, job.account_id, job.status))
+                raise ImpalaError("Error building impala table")
 
     _log.info('Updating table table_build_times')
     impala_conn = impala.dbapi.connect(host=cluster.master_ip,
