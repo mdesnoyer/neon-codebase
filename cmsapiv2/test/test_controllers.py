@@ -928,7 +928,9 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s' % (self.account_id_api_key, self.test_i_id)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s' % (
+            self.account_id_api_key, 
+            self.test_i_id)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
@@ -937,6 +939,29 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
                                           self.test_i_id)
 
         self.assertEquals(rjson['integration_id'], platform.integration_id)
+        self.assertEquals(rjson['account_id'], platform.account_id)
+        self.assertEquals(rjson['partner_code'], platform.partner_code)
+        self.assertEquals(rjson['api_key'], platform.api_key)
+        self.assertEquals(rjson['api_secret'], platform.api_secret)
+
+    @tornado.testing.gen_test 
+    def test_get_integration_with_fields(self):
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s'\
+              '&fields=%s' % (self.account_id_api_key, 
+                   self.test_i_id, 
+                   'integration_id,account_id,partner_code')
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body) 
+        platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+                                          self.test_i_id)
+
+        self.assertEquals(rjson['integration_id'], platform.integration_id)
+        self.assertEquals(rjson['account_id'], platform.account_id)
+        self.assertEquals(rjson['partner_code'], platform.partner_code)
+        self.assertEquals(rjson.get('api_key',None), None)
+        self.assertEquals(rjson.get('api_secret',None), None)
  
     def test_get_integration_dne(self):
         url = '/api/v2/%s/integrations/ooyala?integration_id=idontexist' % (self.account_id_api_key)
@@ -951,7 +976,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration(self):
         api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -965,7 +990,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     def test_put_integration_dne(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             api_key = 'testapikey' 
-            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&ooyala_api_key=%s' % (self.account_id_api_key, api_key)
+            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&api_key=%s' % (self.account_id_api_key, api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     body='',
                                                     method='PUT', 
@@ -977,13 +1002,13 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
         api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
                                                 allow_nonstandard_methods=True)
-        ooyala_api_secret = 'testapisecret' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&ooyala_api_secret=%s' % (self.account_id_api_key, self.test_i_id, ooyala_api_secret)
+        api_secret = 'testapisecret' 
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_secret=%s' % (self.account_id_api_key, self.test_i_id, api_secret)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -993,7 +1018,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
                                           self.test_i_id)
 
         self.assertEquals(platform.api_key, api_key) 
-        self.assertEquals(platform.api_secret, ooyala_api_secret)
+        self.assertEquals(platform.api_secret, api_secret)
  
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.get')
@@ -1123,7 +1148,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
-        url = '/api/v2/%s/integrations/brightcove?integration_id=%s' % (self.account_id_api_key, self.test_i_id)
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s' % (
+            self.account_id_api_key, 
+            self.test_i_id)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
@@ -1131,7 +1158,32 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           self.test_i_id)
 
-        self.assertEquals(rjson['integration_id'], platform.integration_id) 
+        self.assertEquals(rjson['integration_id'], platform.integration_id)
+        self.assertEquals(rjson['playlist_feed_ids'], platform.playlist_feed_ids) 
+        self.assertEquals(rjson['read_token'], platform.read_token) 
+        self.assertEquals(rjson['write_token'], platform.write_token) 
+        self.assertEquals(rjson['callback_url'], platform.callback_url) 
+        self.assertEquals(rjson['uses_batch_provisioning'], platform.uses_batch_provisioning)
+        self.assertEquals(rjson['id_field'], platform.id_field)
+
+    @tornado.testing.gen_test 
+    def test_get_integration_with_fields(self):
+        url = '/api/v2/%s/integrations/brightcove?integration_id=%s'\
+              '&fields=%s' % (
+            self.account_id_api_key, 
+            self.test_i_id, 'read_token,write_token,callback_url')
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method='GET')
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+                                          self.test_i_id)
+
+        self.assertEquals(rjson['read_token'], platform.read_token) 
+        self.assertEquals(rjson['write_token'], platform.write_token) 
+        self.assertEquals(rjson['callback_url'], platform.callback_url) 
+        self.assertEquals(rjson.get('uses_batch_provisioning', None), None)
+        self.assertEquals(rjson.get('id_field', None), None)
  
     @tornado.testing.gen_test 
     def test_put_integration(self):

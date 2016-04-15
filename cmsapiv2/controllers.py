@@ -166,8 +166,8 @@ class IntegrationHelper():
             integration = neondata.OoyalaIntegration()
             integration.account_id = acct.neon_api_key
             integration.partner_code = args['publisher_id'] 
-            integration.api_key = args.get('ooyala_api_key', integration.api_key)
-            integration.api_secret = args.get('ooyala_api_secret', integration.api_secret)
+            integration.api_key = args.get('api_key', integration.api_key)
+            integration.api_secret = args.get('api_secret', integration.api_secret)
             integration.save()
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
@@ -236,8 +236,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
-          'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
+          'api_key': Any(str, unicode, Length(min=1, max=1024)), 
+          'api_secret': Any(str, unicode, Length(min=1, max=1024)), 
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -254,17 +254,24 @@ class OoyalaIntegrationHandler(APIV2Handler):
  
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
+
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+
         integration_id = args['integration_id'] 
-        integration = yield IntegrationHelper.get_integration(integration_id, 
-                                                    neondata.IntegrationType.OOYALA)
+        integration = yield IntegrationHelper.get_integration(
+            integration_id, 
+            neondata.IntegrationType.OOYALA)
 
         statemon.state.increment('get_ooyala_oks')
-        rv = yield self.db2api(integration)
+        rv = yield self.db2api(integration, fields=fields)
         self.success(rv)
 
     @tornado.gen.coroutine
@@ -274,8 +281,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'ooyala_api_key': Any(str, unicode, Length(min=1, max=1024)), 
-          'ooyala_api_secret': Any(str, unicode, Length(min=1, max=1024)), 
+          'api_key': Any(str, unicode, Length(min=1, max=1024)), 
+          'api_secret': Any(str, unicode, Length(min=1, max=1024)), 
           'publisher_id': Any(str, unicode, Length(min=1, max=1024))
         })
         args = self.parse_args()
@@ -287,8 +294,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
                                                      neondata.IntegrationType.OOYALA)
 
         def _update_integration(p):
-            p.api_key = args.get('ooyala_api_key', integration.api_key)
-            p.api_secret = args.get('ooyala_api_secret', integration.api_secret)
+            p.api_key = args.get('api_key', integration.api_key)
+            p.api_secret = args.get('api_secret', integration.api_secret)
             p.partner_code = args.get('publisher_id', integration.partner_code)
  
         result = yield tornado.gen.Task(neondata.OoyalaIntegration.modify, 
@@ -337,9 +344,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=512)), 
           'write_token': Any(str, unicode, Length(min=1, max=512)),
+          'callback_url': Any(str, unicode, Length(min=1, max=1024)), 
           'id_field': Any(str, unicode, Length(min=1, max=32)),
           'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': All(Coerce(int), Range(min=0, max=1))
+          'uses_batch_provisioning': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -358,16 +366,23 @@ class BrightcoveIntegrationHandler(APIV2Handler):
  
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256))
+          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
+
+        fields = args.get('fields', None)
+        if fields:
+            fields = set(fields.split(','))
+
         integration_id = args['integration_id'] 
-        integration = yield IntegrationHelper.get_integration(integration_id,  
-                                                       neondata.IntegrationType.BRIGHTCOVE) 
+        integration = yield IntegrationHelper.get_integration(
+            integration_id,  
+            neondata.IntegrationType.BRIGHTCOVE) 
         statemon.state.increment('get_brightcove_oks')
-        rv = yield self.db2api(integration)
+        rv = yield self.db2api(integration, fields=fields)
         self.success(rv)
 
     @tornado.gen.coroutine
@@ -379,17 +394,19 @@ class BrightcoveIntegrationHandler(APIV2Handler):
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=1024)), 
           'write_token': Any(str, unicode, Length(min=1, max=1024)), 
+          'callback_url': Any(str, unicode, Length(min=1, max=1024)), 
           'publisher_id': Any(str, unicode, Length(min=1, max=512)),
           'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': All(Coerce(int), Range(min=0, max=1))
+          'uses_batch_provisioning': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         integration_id = args['integration_id'] 
         schema(args)
 
-        integration = yield IntegrationHelper.get_integration(integration_id,  
-                                                  neondata.IntegrationType.BRIGHTCOVE) 
+        integration = yield IntegrationHelper.get_integration(
+            integration_id,  
+            neondata.IntegrationType.BRIGHTCOVE) 
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
@@ -398,15 +415,18 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             playlist_feed_ids = args.get('playlist_feed_ids', None)
             if playlist_feed_ids: 
                 p.playlist_feed_ids = playlist_feed_ids.split(',')
-            p.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
-                                                          integration.uses_batch_provisioning)))
+            p.uses_batch_provisioning = Boolean()(
+               args.get('uses_batch_provisioning', 
+               integration.uses_batch_provisioning))
  
-        result = yield tornado.gen.Task(neondata.BrightcoveIntegration.modify, 
-                                     integration_id, 
-                                     _update_integration)
+        result = yield neondata.BrightcoveIntegration.modify(
+            integration_id, 
+            _update_integration, 
+            async=True)
 
-        integration = yield IntegrationHelper.get_integration(integration_id,  
-                                                  neondata.IntegrationType.BRIGHTCOVE) 
+        integration = yield IntegrationHelper.get_integration(
+            integration_id,  
+            neondata.IntegrationType.BRIGHTCOVE) 
  
         statemon.state.increment('put_brightcove_oks')
         rv = yield self.db2api(integration)
