@@ -97,6 +97,8 @@ class BatchProcessManager(threading.Thread):
                     self.cluster, options.input_path,
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
+                _log.info('Sucessful cleaning job output to: %s' %
+                          cleaned_output_path)
                 self.last_output_path = cleaned_output_path
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
