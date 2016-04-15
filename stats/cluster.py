@@ -723,7 +723,7 @@ class Cluster():
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
         conn = EmrConnection()
-	ec2conn = EC2Connection()
+        ec2conn = EC2Connection()
         
         self.master_ip = None
 
@@ -825,7 +825,7 @@ class Cluster():
             
         subnet_id, instance_group = self._get_subnet_id_and_core_instance_group() 
         instance_groups = [
-            InstanceGroup(1, 'MASTER', 'm4.large', 'ON_DEMAND',
+            InstanceGroup(1, 'MASTER', 'r3.xlarge', 'ON_DEMAND',
                           'Master Instance Group'),
             instance_group
             ]
