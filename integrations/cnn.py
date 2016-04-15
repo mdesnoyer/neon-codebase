@@ -29,6 +29,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, integration):
         super(CNNIntegration, self).__init__(account_id, integration)
 
+        # @TODO in production, the only call to this constructor
+        # uses the neon api key for parameter account_id, so the
+        # account_id in self is not the account id (used in v1
+        # of our api.
         self.account_id = account_id
         self.api = api.cnn_api.CNNApi(integration.api_key_ref)
         self.last_process_date = integration.last_process_date
@@ -42,13 +46,14 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
 
     @tornado.gen.coroutine
     def submit_new_videos(self):
-        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, self.account_id)
+        acct = yield neondata.NeonUserAccount.get(self.neon_api_key, async=True)
         self.neon_api_key = acct.neon_api_key
         self.account_id = acct.account_id
         search_results = yield self.api.search(
             dateutil.parser.parse(self.last_process_date)
         )
         videos = search_results['docs']
+
         _log.info('Processing %d videos for cnn' % (len(videos)))
         self.set_video_iter(videos)
 
@@ -99,6 +104,12 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
     def get_video_publish_date(self, video):
         '''override from ovp'''
         return video['firstPublishDate']
+
+    def get_video_last_modified_date(self, video):
+        ''' Try last modified date; fall back to publish date'''
+        if video.get('lastModifiedDate') is not None:
+            return video['lastModifiedDate']
+        return self.get_video_publish_date(video)
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''

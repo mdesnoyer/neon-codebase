@@ -397,6 +397,7 @@ class TestSubmitVideoPG(TestSubmitVideo):
             'video_meta': video_meta,
             'thumbs_meta': thumbs_meta
         }
+        self.external_integration.platform.last_process_date = '2015-10-29T23:59:59Z'
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -487,3 +488,46 @@ class TestSubmitVideoPG(TestSubmitVideo):
         previous_thumbs = self.previous_video['video_meta'].thumbnail_ids
         for thumb in thumbs:
             self.assertIn(thumb.key, previous_thumbs)
+
+    @tornado.testing.gen_test
+    def test_submit_new_videos_twice(self):
+        '''Assert running submit_new_videos() twice keeps acct values'''
+        self.external_integration.submit_new_videos()
+        self.assertEqual(self.user.neon_api_key,
+                         self.external_integration.neon_api_key)
+        self.external_integration.submit_new_videos()
+        self.assertEqual(self.user.neon_api_key,
+                         self.external_integration.neon_api_key)
+
+    @tornado.testing.gen_test
+    def test_when_newer_video_is_submitted(self):
+        '''Video is processed when submitted as feed'''
+
+        patch_target = 'integrations.cnn.CNNIntegration.submit_one_video_object'
+        one_vid_mocker = patch(patch_target)
+        one_vid_mock = self._future_wrap_mock(one_vid_mocker.start())
+
+        # Sanity base check
+        self.assertEquals(one_vid_mock.call_count, 0)
+        yield self.external_integration.submit_new_videos()
+        # No new video, count is zero
+        self.assertEquals(one_vid_mock.call_count, 0)
+
+        # Submit a brand new video
+        new_video = self.create_search_response(1)
+        self.cnn_api_mock.side_effect = [new_video]
+        yield self.external_integration.submit_new_videos()
+        self.assertEquals(one_vid_mock.call_count, 1)
+        yield self.external_integration.submit_new_videos()
+        self.assertEquals(one_vid_mock.call_count, 1)
+
+        # Modify the mock video timestamp to trigger new processing
+        dt = datetime.datetime.fromtimestamp(time.time())
+        dt += datetime.timedelta(minutes=60)
+        new_date = dt.strftime('%Y-%m-%dT%H:%M:%S')
+        new_video['docs'][0]['lastModifiedDate'] = new_date
+        self.cnn_api_mock.side_effect = [new_video]
+        yield self.external_integration.submit_new_videos()
+        self.assertEquals(one_vid_mock.call_count, 2)
+
+        one_vid_mocker.stop()

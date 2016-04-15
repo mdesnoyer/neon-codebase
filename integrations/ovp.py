@@ -174,6 +174,7 @@ class OVPIntegration(object):
                                 video,
                                 grab_new_thumb=True):
 
+
         try:
             job_id = yield self._submit_one_video_object_impl(
                     video, grab_new_thumb=grab_new_thumb)
@@ -427,14 +428,14 @@ class OVPIntegration(object):
         # Get our video and thumbnail metadata objects
         video_meta = yield tornado.gen.Task(
                 neondata.VideoMetadata.get,
-                neondata.InternalVideoID.generate(self.neon_api_key, external_video_id))
+                neondata.InternalVideoID.generate(self.neon_api_key,
+                                                  external_video_id))
         if not video_meta:
             _log.error('Could not find video %s' % external_video_id)
             statemon.state.increment('video_not_found')
             return
-        thumbs_meta = yield tornado.gen.Task(neondata.ThumbnailMetadata.get_many,
-                                             video_meta.thumbnail_ids)
-
+        thumbs_meta = yield neondata.ThumbnailMetadata.get_many(
+                video_meta.thumbnail_ids, async=True)
         external_id = thumb_data.get('id', None)
         if external_id is not None:
             external_id = unicode(external_id)
