@@ -2083,7 +2083,7 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'invalid field') 
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=10.0)
     def test_update_video_testing_enabled(self):
         vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
         vm.save()
@@ -2976,7 +2976,7 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
                              password='testpassword', 
                              access_level=neondata.AccessLevels.READ)
         
-        token = JWTHelper.generate_token({'username' : 'testuser', 'exp' : 0 }) 
+        token = JWTHelper.generate_token({'username' : 'testuser', 'exp' : -1 }) 
         user.access_token = token 
         user.save()
         urls = [ 
@@ -3219,8 +3219,14 @@ class TestAuthenticationHandler(TestAuthenticationBase):
     def setUp(self): 
         TestAuthenticationHandler.username = 'kevin' 
         TestAuthenticationHandler.password = '12345678'
+        TestAuthenticationHandler.first_name = 'kevin'
+        TestAuthenticationHandler.last_name = 'keviniii'
+        TestAuthenticationHandler.title = 'blah' 
         self.user = neondata.User(username=TestAuthenticationHandler.username, 
-                                  password=TestAuthenticationHandler.password)
+            password=TestAuthenticationHandler.password, 
+            first_name=TestAuthenticationHandler.first_name,
+            last_name=TestAuthenticationHandler.last_name,
+            title=TestAuthenticationHandler.title)
         self.user.save()
         super(TestAuthenticationHandler, self).setUp()
 
@@ -3308,7 +3314,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
     def test_token_returned(self): 
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestAuthenticationHandler.username, 
-                             'password': TestAuthenticationHandler.password})
+                             'password': TestAuthenticationHandler.password }) 
         header = { 'Content-Type':'application/json' }
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
@@ -3316,9 +3322,18 @@ class TestAuthenticationHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
-        user = yield tornado.gen.Task(neondata.User.get, TestAuthenticationHandler.username)
+        user = yield neondata.User.get(
+            TestAuthenticationHandler.username, 
+            async=True)
         self.assertEquals(user.access_token, rjson['access_token'])
         self.assertEquals(user.refresh_token, rjson['refresh_token'])
+        user_info = rjson['user_info'] 
+        self.assertEquals(user_info['first_name'],
+            TestAuthenticationHandler.first_name) 
+        self.assertEquals(user_info['last_name'],
+            TestAuthenticationHandler.last_name) 
+        self.assertEquals(user_info['title'],
+            TestAuthenticationHandler.title) 
  
     @tornado.testing.gen_test
     def test_token_changed(self):  
@@ -3442,7 +3457,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
                                  'required key not')
 
     def test_refresh_token_expired(self):
-        options._set('cmsapiv2.apiv2.refresh_token_exp', 0) 
+        refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp')
+        options._set('cmsapiv2.apiv2.refresh_token_exp', -1) 
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
@@ -3470,6 +3486,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
             rjson['error']['message'],
             'refresh token has expired, please authenticate again') 
         self.assertEquals(response.code, 401) 
+        options._set('cmsapiv2.apiv2.refresh_token_exp', refresh_token_exp) 
 
     @tornado.testing.gen_test 
     def test_get_new_access_token(self):
@@ -3498,7 +3515,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         self.assertEquals(refresh_token, refresh_token2) 
         account_ids = rjson2['account_ids'] 
         self.assertEquals(1, len(account_ids)) 
-        user = yield tornado.gen.Task(neondata.User.get, TestRefreshTokenHandler.username)
+        user = yield tornado.gen.Task(neondata.User.get, 
+            TestRefreshTokenHandler.username)
         # verify that the access_token was indeed updated 
         self.assertNotEquals(user.access_token, rjson1['access_token'])
         self.assertEquals(user.access_token, rjson2['access_token'])
@@ -3563,6 +3581,33 @@ class TestLogoutHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
+
+    @tornado.testing.gen_test
+    def test_logout_with_expired_token(self): 
+        token_exp = options.get('cmsapiv2.apiv2.access_token_exp') 
+        
+        options._set('cmsapiv2.apiv2.access_token_exp', -1) 
+        url = '/api/v2/authenticate' 
+        params = json.dumps({'username': TestLogoutHandler.username, 
+                             'password': TestLogoutHandler.password})
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        access_token = rjson['access_token'] 
+        url = '/api/v2/logout' 
+        params = json.dumps({'token': access_token })
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+                                 'logged out expired user')
+        self.assertEquals(response.code, 200)
+        options._set('cmsapiv2.apiv2.access_token_exp', token_exp) 
 
 class TestAuthenticationHealthCheckHandler(TestAuthenticationBase): 
     def setUp(self):
