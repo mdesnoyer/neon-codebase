@@ -157,8 +157,7 @@ class OVPIntegration(object):
                     _log.error('Unknown error, reached max retries on '
                                'video submit for account %s: item %s: %s' %
                                (self.account_id, video if video else None, e))
-                    statemon.state.define_and_increment(
-                        'submit_video_error.%s' % self.account_id)
+                    self._log_statemon_submit_video_error()
                     pass
 
             last_processed_date = max(last_processed_date,
@@ -235,15 +234,15 @@ class OVPIntegration(object):
         if not self.does_video_exist(existing_video, video_id):
             try:
                 response = yield self.submit_video(
-                        video_id=video_id,
-                        video_url=video_url,
-                        callback_url=callback_url,
-                        external_thumbnail_id=thumb_id,
-                        custom_data=custom_data,
-                        duration=duration,
-                        publish_date=publish_date,
-                        video_title=unicode(video_title),
-                        default_thumbnail=default_thumbnail)
+                    video_id=video_id,
+                    video_url=video_url,
+                    callback_url=callback_url,
+                    external_thumbnail_id=thumb_id,
+                    custom_data=custom_data,
+                    duration=duration,
+                    publish_date=publish_date,
+                    video_title=unicode(video_title),
+                    default_thumbnail=default_thumbnail)
 
                 if response['job_id']:
                     rv = response['job_id']
@@ -707,4 +706,9 @@ class OVPIntegration(object):
         return False
 
     def _run_migration(self, thumb=None):
+        '''Run data model migration on thumbnail'''
+        pass
+
+    def _log_statemon_submit_video_error(self):
+        '''Log submit video error with implementation-specific statemon key'''
         pass

@@ -15,6 +15,7 @@ import dateutil.parser
 import integrations.ovp
 import logging
 import re
+from utils import statemon
 import time
 import tornado.gen
 import urlparse
@@ -122,6 +123,10 @@ class CNNIntegration(integrations.ovp.OVPIntegration):
             video = StopIteration('hacky')
 
         raise tornado.gen.Return(video)
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_cnn_error.%s' % self.account_id)
 
     @staticmethod
     def _get_best_image_info(media_json):

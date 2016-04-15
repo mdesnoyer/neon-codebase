@@ -111,12 +111,10 @@ class TestParseFeed(test_utils.neontest.TestCase):
     }
 
     def test_extract_image_field(self):
-        id0 = u'thumbid0'
-        id1 = u'thumbid1'
         ids = CNNIntegration._extract_image_field(
                 self._mock_video_response, 'id')
-        self.assertIn(id0, ids)
-        self.assertIn(id1, ids)
+        self.assertIn(u'thumbid0', ids)
+        self.assertIn(u'thumbid1', ids)
 
     def test_extract_image_urls(self):
         url0 = 'http://i2.cdn.com/2152-gfx-cnn-video-synd-ex-0.jpg'
