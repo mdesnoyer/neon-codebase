@@ -7,25 +7,26 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
+from cStringIO import StringIO
 from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
-from cStringIO import StringIO
+from cvutils.imageutils import PILImageUtils
 import datetime
 import integrations.brightcove
 import json
 import logging
 from mock import patch, MagicMock
 import multiprocessing
-import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
+import test_utils.redis
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
 import unittest
-from cvutils.imageutils import PILImageUtils
-from utils.options import define, options
 import utils.neon
+from utils.options import define, options
+
 
 class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def setUp(self):

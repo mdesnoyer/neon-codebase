@@ -9,15 +9,15 @@ import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
+import api.cnn_api
 import datetime
 import dateutil.parser
+import integrations.ovp
 import logging
 import re
 import time
-import urlparse
 import tornado.gen
-import api.cnn_api
-import integrations.ovp
+import urlparse
 from cmsdb import neondata
 
 _log = logging.getLogger(__name__)

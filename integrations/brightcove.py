@@ -449,4 +449,4 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''
         if thumb.type == neondata.ThumbnailType.BRIGHTCOVE:
             thumb.type = neondata.ThumbnailType.DEFAULT
-        return thumb
+	return thumb

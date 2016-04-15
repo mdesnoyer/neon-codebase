@@ -1,31 +1,30 @@
 #!/usr/bin/env python
 
+import os
 import os.path
 import sys
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
-                                             '..'))
+                                '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
-
-import datetime
-import logging
-import random
-import string
-import time
-from mock import patch
-
-import tornado.gen
-import tornado.httpclient
-import tornado.testing
-from cvutils.imageutils import PILImageUtils
-
-from integrations.cnn import CNNIntegration
-import test_utils.redis
-import test_utils.neontest
-import test_utils.postgresql
 from cmsdb import neondata
 from cmsdb.neondata import DBConnection, NeonUserAccount
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
+from cvutils.imageutils import PILImageUtils
+import datetime
+from integrations.cnn import CNNIntegration
+from integrations.ovp import OVPNoValidURL
+import logging
+from mock import patch
+import random
+import string
+import test_utils.neontest
+import test_utils.postgresql
+import test_utils.redis
+import time
+import tornado.gen
+import tornado.httpclient
+import tornado.testing
 from utils.options import options
 
 
@@ -56,7 +55,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
         cdn_urls['1_5500k_mp4'] = 'http://5500k-url.com'
         cdn_urls['2_3000k_mp4'] = 'http://3000k-url.com'
         cdn_urls['3_1000k_mp4'] = 'http://100k-url.com'
-        with self.assertRaises(Exception):
+        with self.assertRaises(OVPNoValidURL):
             CNNIntegration._find_best_cdn_url(cdn_urls)
 
     _mock_video_response = {
@@ -375,14 +374,17 @@ class TestSubmitVideoPG(TestSubmitVideo):
         ext_thumb_ids = CNNIntegration._extract_image_field(search_result, 'id')
         int_video_id = neondata.InternalVideoID.generate(
                 self.external_integration.neon_api_key, ext_video_id)
-        int_thumb_ids = ['%s_%s' % (int_video_id, ext_thumb_id) for ext_thumb_id in ext_thumb_ids]
+        int_thumb_ids = ['%s_%s' % (int_video_id, ext_thumb_id) for
+                         ext_thumb_id in ext_thumb_ids]
         video_meta = VideoMetadata(int_video_id, tids=int_thumb_ids)
         video_meta.save()
         thumbs_meta = []
         i = 0
         for int_thumb_id in int_thumb_ids:
+            xl_url = search_result['relatedMedia']['media'][i][
+                    'cuts']['exlarge16to9']['url']
             thumb_meta = ThumbnailMetadata(
-                    int_thumb_id, int_video_id, [search_result['relatedMedia']['media'][i]['cuts']['exlarge16to9']['url']],
+                    int_thumb_id, int_video_id, [xl_url],
                     ttype=ThumbnailType.DEFAULT, rank=i)
             thumb_meta.save()
             thumbs_meta.append(thumb_meta)
@@ -411,8 +413,10 @@ class TestSubmitVideoPG(TestSubmitVideo):
             self.cdn_mocker.start().create().upload)
 
     def tearDown(self):
-        self.submit_mocker.stop()
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
         self.cnn_api_mocker.stop()
+        self.submit_mocker.stop()
         self.postgresql.clear_all_tables()
         super(test_utils.neontest.AsyncTestCase, self).tearDown()
 

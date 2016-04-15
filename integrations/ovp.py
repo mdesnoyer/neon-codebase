@@ -449,6 +449,7 @@ class OVPIntegration(object):
         found_thumb, min_rank = False, 1
 
         for thumb in thumbs_meta:
+
             # Some videos have a legacy format and need migration
             self._run_migration(thumb)
 
