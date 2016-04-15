@@ -1479,8 +1479,16 @@ class LocalSearcher(object):
         # ---------- START OF TEXT PROCESSING
         # filter text too
         if self.filter_text:
-            text_d = [cv2.text.textDetect(x, *self.text_filter_params) 
-                        for x in frames]
+            lower_crop_frac = 0.2  # how much of the lower portion of the
+            # image to crop out
+            text_d = []
+            for cframe in frames:
+                # Cut out the bottom 20% of the image because it often has 
+                # tickers
+                text_det_out = cv2.text.textDetect(
+                    cframe[0:int(cframe.shape[0]*.82), :, :],
+                    *self.text_filter_params)
+                text_d.append(text_det_out)
             masks = [x[1] for x in text_d]
             # accept only those where tet occupies a sufficiently small amount 
             # of the image.
