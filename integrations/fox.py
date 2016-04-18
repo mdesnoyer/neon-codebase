@@ -68,9 +68,10 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         '''override from ovp''' 
         return None 
 
-    def get_video_title(self, video):
+    @staticmethod
+    def get_video_title(video):
         '''override from ovp''' 
-        return video.get('title', 'no title')
+        return video.get('title', u'no title')
 
     def get_video_custom_data(self, video):
         '''override from ovp''' 
@@ -129,3 +130,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.submit_new_videos()
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_fox_error.%s' % self.account_id)
