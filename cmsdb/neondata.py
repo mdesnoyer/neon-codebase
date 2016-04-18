@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 '''
-Data Model classes
+Data Model classes 
 
 Defines interfaces for Neon User Account, Platform accounts
 Account Types
@@ -28,7 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import code
 import collections
-from collections import OrderedDict
+from collections import OrderedDict 
 import concurrent.futures
 import contextlib
 import copy
@@ -44,7 +44,7 @@ import multiprocessing
 import psycopg2
 from passlib.hash import sha256_crypt
 from PIL import Image
-import queries
+import queries 
 import random
 import re
 import redis as blockingRedis
@@ -59,7 +59,7 @@ import tornado.web
 import tornado.httpclient
 import threading
 import time
-import api.brightcove_api #coz of cyclic import
+import api.brightcove_api #coz of cyclic import 
 import api.youtube_api
 import utils.botoutils
 import utils.logs
@@ -70,7 +70,7 @@ from utils.options import define, options
 from utils import statemon
 import utils.sync
 import utils.s3
-import utils.http
+import utils.http 
 import urllib
 import urlparse
 import warnings
@@ -86,7 +86,7 @@ define("accountDB", default="0.0.0.0", type=str, help="")
 define("videoDB", default="0.0.0.0", type=str, help="")
 define("thumbnailDB", default="0.0.0.0", type=str ,help="")
 define("dbPort", default=6379, type=int, help="redis port")
-define("watchdogInterval", default=3, type=int,
+define("watchdogInterval", default=3, type=int, 
         help="interval for watchdog thread")
 define("maxRedisRetries", default=5, type=int,
        help="Maximum number of retries when sending a request to redis")
@@ -103,8 +103,8 @@ define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
 define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
-# this basically means how many open pubsubs we can have at once, most other pools will be relatively
-# small, and not get to this size. see momoko pool for more info.
+# this basically means how many open pubsubs we can have at once, most other pools will be relatively 
+# small, and not get to this size. see momoko pool for more info. 
 define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
 define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
 
@@ -127,12 +127,12 @@ statemon.define('sucessful_callbacks', int)
 statemon.define('callback_error', int)
 statemon.define('invalid_callback_url', int)
 
-statemon.define('postgres_pubsub_connections', int)
-statemon.define('postgres_unknown_errors', int)
-statemon.define('postgres_connection_failed', int)
-statemon.define('postgres_listeners', int)
-statemon.define('postgres_successful_pubsub_callbacks', int)
-statemon.define('postgres_pools', int)
+statemon.define('postgres_pubsub_connections', int) 
+statemon.define('postgres_unknown_errors', int) 
+statemon.define('postgres_connection_failed', int) 
+statemon.define('postgres_listeners', int) 
+statemon.define('postgres_successful_pubsub_callbacks', int) 
+statemon.define('postgres_pools', int) 
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -162,21 +162,21 @@ def _get_db_address(class_name, is_writeable=True):
             host = options.get('cmsdb.neondata.thumbnailDB')
     return (host, port)
 
-def _get_db_information():
+def _get_db_information(): 
     '''Function that returns the address to the database for an object.
 
     Inputs:
-    Returns: { host:, port:, dbname:, user:, password:, }
+    Returns: { host:, port:, dbname:, user:, password:, }  
     '''
     # This function can get called a lot, so all the options lookups
     # are done without introspection.
-    db_info = {}
-    db_info['host'] = options.get('cmsdb.neondata.db_address')
-    db_info['port'] = options.get('cmsdb.neondata.db_port')
-    db_info['dbname'] = options.get('cmsdb.neondata.db_name')
-    db_info['user'] = options.get('cmsdb.neondata.db_user')
+    db_info = {} 
+    db_info['host'] = options.get('cmsdb.neondata.db_address') 
+    db_info['port'] = options.get('cmsdb.neondata.db_port') 
+    db_info['dbname'] = options.get('cmsdb.neondata.db_name') 
+    db_info['user'] = options.get('cmsdb.neondata.db_user') 
     db_info['password'] = options.get('cmsdb.neondata.db_password')
-    return db_info
+    return db_info  
 
 def _object_to_classname(otype=None):
     '''Returns the class name of an object.
@@ -194,78 +194,78 @@ def _object_to_classname(otype=None):
               if otype.__class__.__name__ != "type" else otype.__name__
     return cname
 
-class PostgresDB(tornado.web.RequestHandler):
-    '''A DB singleton class for postgres. Manages
-       connections and pools that are currently
-       connected to the postgres db.
-    '''
-    class _PostgresDB:
+class PostgresDB(tornado.web.RequestHandler): 
+    '''A DB singleton class for postgres. Manages 
+       connections and pools that are currently 
+       connected to the postgres db. 
+    ''' 
+    class _PostgresDB: 
         def __init__(self):
-            # where the db is located
-            self.db_info = None
-            # keeps track of the io_loops we have seen, mapped from
+            # where the db is located 
+            self.db_info = None 
+            # keeps track of the io_loops we have seen, mapped from 
             # io_loop_obj -> pool
             self.io_loop_dict = {}
             # amount of time to wait until we will reconnect a dead conn
-            # this comes from momoko reconnect_interval
-            self.reconnect_dead = 250.0
-            # the starting size of the pool
-            self.pool_start_size = 3
-
-        def _set_current_host(self):
-            self.old_host = self.host
+            # this comes from momoko reconnect_interval 
+            self.reconnect_dead = 250.0  
+            # the starting size of the pool 
+            self.pool_start_size = 3 
+        
+        def _set_current_host(self): 
+            self.old_host = self.host 
             self.host = options.db_address
-
-        def _build_dsn(self):
-            return 'dbname=%s user=%s host=%s port=%s password=%s' % (self.db_info['dbname'],
-                        self.db_info['user'],
-                        self.db_info['host'],
-                        self.db_info['port'],
+ 
+        def _build_dsn(self): 
+            return 'dbname=%s user=%s host=%s port=%s password=%s' % (self.db_info['dbname'], 
+                        self.db_info['user'], 
+                        self.db_info['host'], 
+                        self.db_info['port'], 
                         self.db_info['password'])
 
         def _clean_up_io_dict(self):
-            '''since we allow optional_sync on many of these calls
-                  and it creates a ton of io_loops, walk through this
-                  dict and cleanup any io_loops that have been killed
-                  recently
-            '''
+            '''since we allow optional_sync on many of these calls 
+                  and it creates a ton of io_loops, walk through this 
+                  dict and cleanup any io_loops that have been killed 
+                  recently 
+            '''  
             if len(self.io_loop_dict) > options.max_io_loop_dict_size:
                 for key in self.io_loop_dict.keys():
                     if key._running is False:
-                        try:
+                        try: 
                             pool = self.io_loop_dict[key]['pool']
-                            if not pool.closed:
-                                pool.close()
-                        except (KeyError, TypeError, AttributeError):
+                            if not pool.closed: 
+                                pool.close() 
+                        except (KeyError, TypeError, AttributeError): 
                             pass
-                        try:
+                        try: 
                             del self.io_loop_dict[key]
-                        except Exception as e:
-                            pass
+                        except Exception as e: 
+                            pass 
             statemon.state.postgres_pools = len(self.io_loop_dict)
 
-        def _get_momoko_db(self):
+        def _get_momoko_db(self): 
             current_io_loop = tornado.ioloop.IOLoop.current()
             conn = momoko.Connection(dsn=self._build_dsn(),
                                      ioloop=current_io_loop,
                                      cursor_factory=psycopg2.extras.RealDictCursor)
             return conn
-
+                        
         @tornado.gen.coroutine
-        def get_connection(self):
-            '''gets a connection to postgres, this is ioloop based
-                 we want to be able to share pools across ioloops
-                 however, since we have optional_sync (which creates
-                 a new ioloop) we have to manage how the pools/connections
-                 are created.
+        def get_connection(self): 
+            '''gets a connection to postgres, this is ioloop based 
+                 we want to be able to share pools across ioloops 
+                 however, since we have optional_sync (which creates 
+                 a new ioloop) we have to manage how the pools/connections 
+                 are created.  
             '''
-            self._clean_up_io_dict()
-            conn = None
+            self._clean_up_io_dict() 
+            conn = None 
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
 
-            def _get_momoko_db():
+            def _get_momoko_db(): 
                 current_io_loop = tornado.ioloop.IOLoop.current()
                 conn = momoko.Connection(
                            dsn=self._build_dsn(),
@@ -273,190 +273,194 @@ class PostgresDB(tornado.web.RequestHandler):
                            cursor_factory=psycopg2.extras.RealDictCursor)
                 return conn
 
-            if self.db_info is None:
+            if self.db_info is None: 
                 self.db_info = current_db_info = _get_db_information()
             else:
                 current_db_info = _get_db_information()
-
-            if dict_item is None:
-                # this is the first time we've seen this io_loop just
-                # get them set up for a pool, and return the connection
+  
+            if dict_item is None: 
+                # this is the first time we've seen this io_loop just 
+                # get them set up for a pool, and return the connection 
                 item = {}
-                item['pool'] = None
-                self.io_loop_dict[io_loop_id] = item
+                item['pool'] = None 
+                self.io_loop_dict[io_loop_id] = item 
                 db = _get_momoko_db()
-                conn = yield self._get_momoko_connection(db)
+                conn = yield self._get_momoko_connection(db) 
             else:
                 # we have seen this ioloop before, it has a pool use it
                 if dict_item['pool'] is None:
                     dict_item['pool'] = yield self._connect_a_pool()
                 pool = dict_item['pool']
-                try:
+                try: 
                     conn = yield self._get_momoko_connection(
-                               pool,
-                               True,
+                               pool, 
+                               True, 
                                dict_item)
-                except Exception as e:
-                    pool.close()
-                    dict_item['pool'] = None
+                except Exception as e: 
+                    pool.close() 
+                    dict_item['pool'] = None 
                     raise
-
+ 
             raise tornado.gen.Return(conn)
 
-        def return_connection(self, conn):
+        def return_connection(self, conn): 
             '''
-            call this to return connections you are done with
+            call this to return connections you are done with 
 
-            this should always be called to ensure the
-            connections are properly returned to the pool, or
-            closed entirely assuming the connection was made
-            without a pool
-            '''
+            this should always be called to ensure the 
+            connections are properly returned to the pool, or 
+            closed entirely assuming the connection was made 
+            without a pool 
+            '''  
             current_io_loop = tornado.ioloop.IOLoop.current()
             io_loop_id = current_io_loop
             dict_item = self.io_loop_dict.get(io_loop_id)
             pool = dict_item['pool']
-            try:
+            try: 
                 if pool is None:
                     conn.close()
                 else:
-                    try:
-                        pool.putconn(conn)
-                    except AssertionError:
+                    try: 
+                        pool.putconn(conn) 
+                    except AssertionError: 
                         # probably a release of an already released conn
-                        pass
-            except Exception as e:
-                _log.exception('Unknown Error : on close connection %s' % e)
-
-        @tornado.gen.coroutine
-        def _connect_a_pool(self):
+                        pass 
+            except Exception as e: 
+                _log.exception('Unknown Error : on close connection %s' % e) 
+      
+        @tornado.gen.coroutine 
+        def _connect_a_pool(self): 
             def _get_momoko_pool():
                 current_io_loop = tornado.ioloop.IOLoop.current()
                 pool = momoko.Pool(
-                           dsn=self._build_dsn(),
-                           ioloop=current_io_loop,
-                           size=self.pool_start_size,
+                           dsn=self._build_dsn(),  
+                           ioloop=current_io_loop, 
+                           size=self.pool_start_size, 
                            max_size=options.max_pool_size,
-                           auto_shrink=True,
-                           reconnect_interval=self.reconnect_dead,
+                           auto_shrink=True, 
+                           reconnect_interval=self.reconnect_dead,  
                            cursor_factory=psycopg2.extras.RealDictCursor)
                 return pool
 
-            pool = _get_momoko_pool()
+            pool = _get_momoko_pool() 
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
             pool_connection = None
             for i in range(int(num_of_tries)):
-                try:
+                try: 
                     pool_connection = yield pool.connect()
-                    break
-                except Exception as e:
-                    current_db_info = _get_db_information()
-                    if current_db_info != self.db_info:
-                        self.db_info = current_db_info
-                        pool = _get_momoko_pool()
-                    _log.error('Retrying PG Pool connection : attempt=%d : %s' %
+                    break 
+                except Exception as e: 
+                    current_db_info = _get_db_information() 
+                    if current_db_info != self.db_info: 
+                        self.db_info = current_db_info 
+                        pool = _get_momoko_pool() 
+                    _log.error('Retrying PG Pool connection : attempt=%d : %s' % 
                                (int(i+1), e))
                     sleepy_time = (1 << (i+1)) * 0.2 * random.random()
                     yield tornado.gen.sleep(sleepy_time)
 
-            if pool_connection:
+            if pool_connection: 
                 raise tornado.gen.Return(pool_connection)
-            else:
+            else: 
                 _log.error('Unable to create a pool for Postgres Database')
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a pool of connections')
-
-        @tornado.gen.coroutine
+ 
+        @tornado.gen.coroutine 
         def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
-            conn = None
+            conn = None 
             num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
             for i in range(int(num_of_tries)):
                 try:
                     if is_pool:
-                        # momoko has a reconnect_interval on dead
-                        # connections, it will hang and not reconnect
-                        # if we don't wait long enough
+                        # momoko has a reconnect_interval on dead 
+                        # connections, it will hang and not reconnect 
+                        # if we don't wait long enough 
                         if len(db.conns.dead) > 0:
                             yield tornado.gen.sleep(
-                                self.reconnect_dead / 1000.0)
+                                self.reconnect_dead / 1000.0) 
                         conn = yield db.getconn()
-                    else:
+                    else: 
                         conn = yield db.connect()
                     break
-                except Exception as e:
-                    current_db_info = _get_db_information()
-                    if current_db_info != self.db_info:
+                except Exception as e: 
+                    current_db_info = _get_db_information()  
+                    if current_db_info != self.db_info: 
                         self.db_info = current_db_info
                         if is_pool:
                             db = yield self._connect_a_pool()
-                            dict_item['pool'] = db
-                        else:
+                            dict_item['pool'] = db  
+                        else: 
                             db = self._get_momoko_db()
-
-                    _log.error('Retrying PG connection : attempt=%d : %s' %
+ 
+                    _log.error('Retrying PG connection : attempt=%d : %s' % 
                                (int(i+1), e))
-                    sleepy_time = (1 << (i+1)) * 0.1
+                    sleepy_time = (1 << (i+1)) * 0.1 
                     yield tornado.gen.sleep(sleepy_time)
-
-            if conn:
+ 
+            if conn: 
                 raise tornado.gen.Return(conn)
-            else:
+            else: 
                 _log.error('Unable to get a connection to Postgres Database')
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a connection')
 
-        def get_insert_json_query_tuple(self, obj):
+        def get_insert_json_query_tuple(self, 
+                                        obj, 
+                                        fields='(_data, _type)',
+                                        values='VALUES(%s, %s)',
+                                        extra_params=None):
             query = "INSERT INTO " + obj._baseclass_name().lower() + \
-                     " (_data, _type) " \
-                     " VALUES(%s, %s)"
+                    " " + fields + " " + values
             params = (obj.get_json_data(), obj.__class__.__name__)
+            if extra_params:
+                params = params + extra_params 
             return (query, params)
 
         def get_update_json_query_tuple(self, obj):
             query = "UPDATE " + obj._baseclass_name().lower() + \
                     " SET _data = %s " \
-                    " WHERE _data->>'key' = %s"
-            params = (obj.get_json_data(), obj.key)
+                    " WHERE _data->>'key' = %s" 
+            params = (obj.get_json_data(), obj.key)   
             return (query, params)
-
-        def get_update_many_query_tuple(self, objects):
-            ''' helper function to build up an update multiple
-                   query
-                builds queries of the form
+ 
+        def get_update_many_query_tuple(self, objects): 
+            ''' helper function to build up an update multiple 
+                   query  
+                builds queries of the form 
                 UPDATE table AS t SET t._data = changes.data
-                FROM (values (obj.key, obj.get_json_data()))
+                FROM (values (obj.key, obj.get_json_data())) 
                   AS changes(key, data)
-                WHERE changes.key = t._data->>'key'
+                WHERE changes.key = t._data->>'key' 
             '''
-            try:
+            try: 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
                 query = "UPDATE %s AS t SET _data = changes.data "\
-                        " FROM (VALUES " % table
-                for obj in objects:
-                    query += '(%s, %s::jsonb),'
+                        " FROM (VALUES " % table 
+                for obj in objects: 
+                    query += '(%s, %s::jsonb),' 
                     param_list.append(obj.key)
-                    param_list.append(obj.get_json_data())
-                query = query[:-1]
+                    param_list.append(obj.get_json_data()) 
+                query = query[:-1] 
                 query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
-                return (query, tuple(param_list))
-            except KeyError:
+                return (query, tuple(param_list))  
+            except KeyError: 
                 return
-
-
-    instance = None
-
-    def __new__(cls):
-        if not PostgresDB.instance:
-            PostgresDB.instance = PostgresDB._PostgresDB()
-        return PostgresDB.instance
+ 
+    instance = None 
+    
+    def __new__(cls): 
+        if not PostgresDB.instance: 
+            PostgresDB.instance = PostgresDB._PostgresDB() 
+        return PostgresDB.instance 
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
 
     def __setattr__(self, name):
         return setattr(self.instance, name)
-
+ 
 class DBConnection(object):
     '''Connection to the database.
 
@@ -466,8 +470,8 @@ class DBConnection(object):
     '''
 
     #Note: Lock for each instance, currently locks for any instance creation
-    __singleton_lock = threading.Lock()
-    _singleton_instance = {}
+    __singleton_lock = threading.Lock() 
+    _singleton_instance = {} 
 
     def __init__(self, class_name):
         '''Init function.
@@ -501,7 +505,7 @@ class DBConnection(object):
         scan_func = conn.scan
         if set_name:
             scan_func = lambda **kw: conn.sscan(set_name, **kw)
-
+            
         keys = set([])
         cursor = '0'
         cnt = keys_per_call
@@ -542,7 +546,7 @@ class DBConnection(object):
 
     @classmethod
     def update_instance(cls, cname):
-        ''' Method to update the connection object in case of
+        ''' Method to update the connection object in case of 
         db config update '''
         if cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
@@ -554,11 +558,11 @@ class DBConnection(object):
         '''Gets a DB connection for a given object type.
 
         otype - The object type to get the connection for.
-                Can be a class object, an instance object or the class name
+                Can be a class object, an instance object or the class name 
                 as a string.
         '''
         cname = _object_to_classname(otype)
-
+        
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
                 if not cls._singleton_instance.has_key(cname):
@@ -582,7 +586,7 @@ class RedisRetryWrapper(object):
     '''Wraps a redis client so that it retries with exponential backoff.
 
     You use this class exactly the same way that you would use the
-    StrctRedis class.
+    StrctRedis class. 
 
     Calls on this object are blocking.
 
@@ -607,7 +611,7 @@ class RedisRetryWrapper(object):
         if db_address != self.conn_address:
             # Reconnect to database because the address has changed
             self._disconnect()
-
+            
             self.connection = blockingRedis.ConnectionPool(
                 host=db_address[0], port=db_address[1],
                 **self.conn_kwargs)
@@ -628,7 +632,7 @@ class RedisRetryWrapper(object):
         def RetryWrapper(*args, **kwargs):
             cur_try = 0
             busy_count = 0
-
+            
             while True:
                 try:
                     self._connect()
@@ -643,7 +647,7 @@ class RedisRetryWrapper(object):
                     time.sleep(delay)
                 except Exception as e:
                     _log.error('Error talking to sync redis on attempt %i'
-                               ' for function %s: %s' %
+                               ' for function %s: %s' % 
                                (cur_try, attr, e))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
@@ -660,7 +664,7 @@ class RedisRetryWrapper(object):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_retry_func(
                     attr)
-
+                
         raise AttributeError(attr)
 
     def pubsub(self, **kwargs):
@@ -669,14 +673,14 @@ class RedisRetryWrapper(object):
 
 class RedisAsyncWrapper(object):
     '''
-    Replacement class for tornado-redis
-
+    Replacement class for tornado-redis 
+    
     This is a wrapper class which does redis operation
     in a background thread and on completion transfers control
     back to the tornado ioloop. If you wrap this around gen/Task,
     you can write db operations as if they were synchronous.
-
-    usage:
+    
+    usage: 
     value = yield tornado.gen.Task(RedisAsyncWrapper().get, key)
 
 
@@ -686,7 +690,7 @@ class RedisAsyncWrapper(object):
 
     _thread_pools = {}
     _pool_lock = multiprocessing.RLock()
-
+    
     def __init__(self, class_name, **kwargs):
         self.conn_kwargs = kwargs
         self.conn_address = None
@@ -708,7 +712,7 @@ class RedisAsyncWrapper(object):
             with self._lock:
                 # Reconnect to database because the address has changed
                 self._disconnect()
-
+            
                 self.connection = blockingRedis.ConnectionPool(
                     host=db_address[0], port=db_address[1],
                     **self.conn_kwargs)
@@ -752,9 +756,9 @@ class RedisAsyncWrapper(object):
                     args = args[:-1]
                 else:
                     raise AttributeError('A callback is necessary')
-
+                    
             io_loop = tornado.ioloop.IOLoop.current()
-
+            
             def _cb(future, cur_try=0, busy_count=0):
                 if future.exception() is None:
                     callback(future.result())
@@ -767,7 +771,7 @@ class RedisAsyncWrapper(object):
                     busy_count += 1
                 else:
                     _log.error('Error talking to async redis on attempt %i for'
-                               ' call %s: %s' %
+                               ' call %s: %s' % 
                                (cur_try, attr, future.exception()))
                     cur_try += 1
                     if cur_try == options.maxRedisRetries:
@@ -789,16 +793,16 @@ class RedisAsyncWrapper(object):
                 func, *args, **kwargs)
             io_loop.add_future(future, _cb)
         return AsyncWrapper
-
+        
 
     def __getattr__(self, attr):
         '''Allows us to wrap all of the redis-py functions.'''
         if hasattr(self.client, attr):
             if hasattr(getattr(self.client, attr), '__call__'):
                 return self._get_wrapped_async_func(attr)
-
+                
         raise AttributeError(attr)
-
+    
     def pipeline(self):
         ''' pipeline '''
         #TODO(Sunil) make this asynchronous
@@ -817,163 +821,163 @@ def _erase_all_data():
     VideoMetadata._erase_all_data()
 
 class PostgresPubSub(object):
-    class _PostgresPubSub:
-        def __init__(self):
-            self.channels = {}
-
-        @tornado.gen.coroutine
+    class _PostgresPubSub: 
+        def __init__(self): 
+            self.channels = {} 
+        
+        @tornado.gen.coroutine    
         def _connect(self):
             '''connect function for pubsub
-
+               
                just use the PostgresDB class to get a connection
-               to the database
+               to the database 
             '''
-            self.db = PostgresDB()
+            self.db = PostgresDB() 
             conn = yield self.db.get_connection()
             raise tornado.gen.Return(conn)
-
-        @tornado.gen.coroutine
-        def _receive_notification(self,
-                                  fd,
-                                  events,
+        
+        @tornado.gen.coroutine 
+        def _receive_notification(self, 
+                                  fd, 
+                                  events, 
                                   channel_name):
-
-            '''_receive_notification, callback for add_handler that monitors an open
-               pg file handler
+ 
+            '''_receive_notification, callback for add_handler that monitors an open 
+               pg file handler 
 
                will use the current io_loop to add a future to the expecting callbacks
-
-               sends a future with a list of json strings
+ 
+               sends a future with a list of json strings  
             '''
-            try:
+            try:  
                 channel = self.channels[channel_name]
-                notifications = []
-                connection = channel['connection'].connection
+                notifications = [] 
+                connection = channel['connection'].connection 
                 connection.poll()
-                _log.info_n('Notifying listeners of db changes - %s' %
+                _log.info_n('Notifying listeners of db changes - %s' % 
                     (connection.notifies),25)
                 while connection.notifies:
-                    notification = connection.notifies.pop()
+                    notification = connection.notifies.pop() 
                     payload = notification.payload
-                    notifications.append(payload)
+                    notifications.append(payload) 
 
                 future = concurrent.futures.Future()
                 future.set_result(notifications)
                 channel = self.channels[channel_name]
                 callback_functions = channel['callback_functions']
                 for func in callback_functions:
-                    tornado.ioloop.IOLoop.current().add_future(future, func)
-            except Exception as e:
+                    tornado.ioloop.IOLoop.current().add_future(future, func) 
+            except Exception as e: 
                 statemon.state.increment('postgres_unknown_errors')
-                _log.exception('Error in pubsub trying to get notifications %s. ' % e)
-                self._reconnect(channel_name)
-
+                _log.exception('Error in pubsub trying to get notifications %s. ' % e) 
+                self._reconnect(channel_name) 
+        
         def _reconnect(self, channel_name):
-            '''reconnects to postgres in the case of a database mishap, or
-               a possible io_loop mishap
+            '''reconnects to postgres in the case of a database mishap, or 
+               a possible io_loop mishap 
 
-               grabs the current channel that is listening
-               closes the connection (in case it's still open)
+               grabs the current channel that is listening 
+               closes the connection (in case it's still open) 
                deletes it from the singleton list
                readds it and relistens on the callback functions that
                    currently exist
 
-               TODO - make it so previous notifications that may have
+               TODO - make it so previous notifications that may have 
                       been lost get retried
             '''
-            channel = self.channels[channel_name]
+            channel = self.channels[channel_name] 
             callback_functions = channel['callback_functions']
-            self.unlisten(channel_name)
-
-            for cb in callback_functions:
-                self.listen(channel_name, cb)
+            self.unlisten(channel_name)  
+ 
+            for cb in callback_functions: 
+                self.listen(channel_name, cb)  
 
         @tornado.gen.coroutine
         def listen(self, channel_name, func):
-            '''publicly accessible function that starts listening on a channel
-
-               handles the postgres connection as well, no need to connect before
-               calling me
-
-               channel - baseclassname of the object, will call PG LISTEN on this
-               func - the function to callback to if we receive notifications
-
-               simply is added to the io_loop via add_handler
-            '''
+            '''publicly accessible function that starts listening on a channel 
+               
+               handles the postgres connection as well, no need to connect before 
+               calling me 
+  
+               channel - baseclassname of the object, will call PG LISTEN on this 
+               func - the function to callback to if we receive notifications 
+ 
+               simply is added to the io_loop via add_handler 
+            ''' 
             if channel_name in self.channels:
-                self.channels[channel_name]['callback_functions'].append(func)
-            else:
-                try:
+                self.channels[channel_name]['callback_functions'].append(func) 
+            else: 
+                try: 
                     momoko_conn = yield self._connect()
                     yield momoko_conn.execute('LISTEN %s' % channel_name)
                     io_loop = tornado.ioloop.IOLoop.current()
-                    self.channels[channel_name] = {
-                                                    'connection' : momoko_conn,
-                                                    'callback_functions' : [func]
+                    self.channels[channel_name] = { 
+                                                    'connection' : momoko_conn, 
+                                                    'callback_functions' : [func] 
                                                   }
-                    io_loop.add_handler(momoko_conn.connection.fileno(),
-                                        lambda fd, events: self._receive_notification(fd, events, channel_name),
-                                        io_loop.READ)
+                    io_loop.add_handler(momoko_conn.connection.fileno(), 
+                                        lambda fd, events: self._receive_notification(fd, events, channel_name), 
+                                        io_loop.READ) 
                     _log.info(
                         'Opening a new listener on postgres at %s for channel %s' %
                         (self.db.db_info['host'], channel_name))
                     statemon.state.increment('postgres_listeners')
-                except psycopg2.Error as e:
+                except psycopg2.Error as e: 
                     _log.exception('a psycopg error occurred when listening to %s on postgres %s' \
-                                   % (channel_name, e))
-                except Exception as e:
+                                   % (channel_name, e)) 
+                except Exception as e: 
                     _log.exception('an unknown error occurred when listening to %s on postgres %s' \
-                                   % (channel_name, e))
+                                   % (channel_name, e)) 
                     statemon.state.increment('postgres_unknown_errors')
-
+                    
         @tornado.gen.coroutine
         def unlisten(self, channel_name):
-            '''unlisten from a subscribed channel
+            '''unlisten from a subscribed channel 
 
-               WARN : this is a clear all command, any callback functions
+               WARN : this is a clear all command, any callback functions 
                       that have open listeners to this will be cleared out
 
-               TODO : have function_id passed in as well, to only clear
-                      the callback we care about
+               TODO : have function_id passed in as well, to only clear 
+                      the callback we care about  
             '''
             _log.info(
                 'Unlistening on postgres at %s for channel %s' %
                 (self.db.db_info['host'], channel_name))
-            try:
-                channel = self.channels[channel_name]
+            try: 
+                channel = self.channels[channel_name] 
                 connection = channel['connection']
-                try:
+                try: 
                     yield connection.execute('UNLISTEN %s' % channel_name)
                     connection.close()
                 except psycopg2.InterfaceError as e:
-                    # this means we already lost connection, and can not close a
-                    # closed connection
+                    # this means we already lost connection, and can not close a 
+                    # closed connection  
                     _log.exception('psycopg error when unlistening to %s on postgres %s' \
                                    % (channel, e))
-                    pass
+                    pass  
                 self.channels.pop(channel_name, None)
                 statemon.state.decrement('postgres_listeners')
-            except psycopg2.Error as e:
+            except psycopg2.Error as e: 
                 _log.exception('a psycopg error occurred when UNlistening to %s on postgres %s' \
-                                % (channel_name, e))
-            except Exception as e:
+                                % (channel_name, e)) 
+            except Exception as e: 
                 _log.exception('an unknown error occurred when UNlistening to %s on postgres %s' \
-                               % (channel_name, e))
+                               % (channel_name, e)) 
                 statemon.state.increment('postgres_unknown_errors')
 
-    instance = None
-
-    def __new__(cls):
-        if not PostgresPubSub.instance:
-            PostgresPubSub.instance = PostgresPubSub._PostgresPubSub()
-        return PostgresPubSub.instance
+    instance = None 
+    
+    def __new__(cls): 
+        if not PostgresPubSub.instance: 
+            PostgresPubSub.instance = PostgresPubSub._PostgresPubSub() 
+        return PostgresPubSub.instance 
 
     def __getattr__(self, name):
         return getattr(self.instance, name)
 
     def __setattr__(self, name):
-        return setattr(self.instance, name)
-
+        return setattr(self.instance, name) 
+        
 class PubSubConnection(threading.Thread):
     '''Handles a pubsub connection.
 
@@ -989,7 +993,7 @@ class PubSubConnection(threading.Thread):
 
         DO NOT CALL THIS DIRECTLY. Use the get() function instead
         '''
-        super(PubSubConnection, self).__init__(name='PubSubConnection[%s]'
+        super(PubSubConnection, self).__init__(name='PubSubConnection[%s]' 
                                                % class_name)
         self.class_name = class_name
         self._client = None
@@ -1035,7 +1039,7 @@ class PubSubConnection(threading.Thread):
     @tornado.gen.coroutine
     def _resubscribe(self):
         '''Resubscribes to channels.'''
-
+        
         # Re-subscribe to channels
         error = None
         for pattern, func in self._channels.items():
@@ -1068,7 +1072,7 @@ class PubSubConnection(threading.Thread):
 
     def run(self):
         error_count = 0
-        while self._running.wait() and not self._exit:
+        while self._running.wait() and not self._exit:            
             try:
                 with self._publock:
                     if not self.subscribed():
@@ -1097,7 +1101,7 @@ class PubSubConnection(threading.Thread):
                         self._handle_timedout_futures(self._sub_futures)
 
                         error_count = 0
-
+                
             except Exception as e:
                 _log.exception('Error in thread listening to objects %s. '
                            ': %s' %
@@ -1115,7 +1119,7 @@ class PubSubConnection(threading.Thread):
                                           name='resubscribe')
                 thread.daemon = True
                 thread.start()
-
+                        
             time.sleep(0.05)
 
     def close(self):
@@ -1138,7 +1142,7 @@ class PubSubConnection(threading.Thread):
         '''
         if msg is None:
             return
-
+        
         future = None
         if msg['type'] in \
           blockingRedis.client.PubSub.UNSUBSCRIBE_MESSAGE_TYPES:
@@ -1215,7 +1219,7 @@ class PubSubConnection(threading.Thread):
                 pass
 
         raise error
-
+                
 
     def _subscribe_impl(self, func, pattern='*', timeout=10.0):
         try:
@@ -1230,7 +1234,7 @@ class PubSubConnection(threading.Thread):
                 future = concurrent.futures.Future()
                 self._sub_futures[pattern] = (future, time.time() + timeout)
                 return future
-
+                
         except redis.exceptions.RedisError as e:
             msg = 'Error subscribing to channel %s: %s' % (pattern, e)
             _log.error(msg)
@@ -1238,7 +1242,7 @@ class PubSubConnection(threading.Thread):
             raise DBConnectionError(msg)
         except socket.error as e:
             msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
-            _log.error(msg)
+            _log.error(msg) 
             statemon.state.increment('subscription_errors')
             raise DBConnectionError(msg)
 
@@ -1258,7 +1262,7 @@ class PubSubConnection(threading.Thread):
                         del self._channels[channel]
                 except KeyError:
                     return
-
+        
 
         error = None
         for i in range(options.maxRedisRetries):
@@ -1301,7 +1305,7 @@ class PubSubConnection(threading.Thread):
             raise DBConnectionError(msg)
         except socket.error as e:
             msg = 'Socket error unsubscribing to channel %s: %s' % (channel, e)
-            _log.error(msg)
+            _log.error(msg) 
             statemon.state.increment('subscription_errors')
             raise DBConnectionError(msg)
 
@@ -1312,11 +1316,11 @@ class PubSubConnection(threading.Thread):
         Gets a connection for a given object type.
 
         otype - The object type to get the connection for.
-                Can be a class object, an instance object or the class name
+                Can be a class object, an instance object or the class name 
                 as a string.
         '''
         cname = _object_to_classname(otype)
-
+        
         if not cls._singleton_instance.has_key(cname):
             with cls.__singleton_lock:
                 if not cls._singleton_instance.has_key(cname):
@@ -1337,13 +1341,13 @@ class PubSubConnection(threading.Thread):
                     inst.stop()
                     inst.close()
             cls._singleton_instance = {}
-
+    
 
 ##############################################################################
 
-def id_generator(size=32,
+def id_generator(size=32, 
             chars=string.ascii_lowercase + string.digits):
-    ''' Generate a random alpha numeric string to be used as
+    ''' Generate a random alpha numeric string to be used as 
     '''
     retval = ''.join(random.choice(chars) for x in range(size))
 
@@ -1351,7 +1355,7 @@ def id_generator(size=32,
 
 ##############################################################################
 ## Enum types
-##############################################################################
+############################################################################## 
 
 class ThumbnailType(object):
     ''' Thumbnail type enumeration '''
@@ -1379,32 +1383,39 @@ class MetricType:
     CLICKS = 'clicks'
     PLAYS = 'plays'
 
-class IntegrationType(object):
+class IntegrationType(object): 
     BRIGHTCOVE = 'brightcove'
     OOYALA = 'ooyala'
     OPTIMIZELY = 'optimizely'
 
-class DefaultSizes(object):
-    WIDTH = 160
-    HEIGHT = 90
+class DefaultSizes(object): 
+    WIDTH = 160 
+    HEIGHT = 90 
 
-class ServingControllerType(object):
+class ServingControllerType(object): 
     IMAGEPLATFORM = 'imageplatform'
 
 class AccessLevels(object):
-    NONE = 0
-    READ = 1
-    UPDATE = 2
+    NONE = 0 
+    READ = 1 
+    UPDATE = 2 
     CREATE = 4
-    DELETE = 8
+    DELETE = 8 
+    ACCOUNT_EDITOR = 16 
+    INTERNAL_ONLY_USER = 32 
+    GLOBAL_ADMIN = 64
+    
+    # Helpers  
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
-    ADMIN = 16
-    GLOBAL_ADMIN = 32
+    ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR
+    EVERYTHING = ALL_NORMAL_RIGHTS |\
+                 ACCOUNT_EDITOR | INTERNAL_ONLY_USER |\
+                 GLOBAL_ADMIN
 
-class PythonNaNStrings(object):
-    INF = 'Infinite'
-    NEGINF = '-Infinite'
-    NAN = 'NaN'
+class PythonNaNStrings(object): 
+    INF = 'Infinite' 
+    NEGINF = '-Infinite' 
+    NAN = 'NaN' 
 
 ##############################################################################
 class StoredObject(object):
@@ -1414,10 +1425,9 @@ class StoredObject(object):
 
     This contains common routines for interacting with the data.
     TODO: Convert all the objects to use this consistent interface.
-    '''
+    ''' 
     def __init__(self, key):
         self.key = str(key)
-        self.created = self.updated = str(datetime.datetime.utcnow())
 
     def __str__(self):
         return "%s: %s" % (self.__class__.__name__, self.__dict__)
@@ -1426,17 +1436,17 @@ class StoredObject(object):
         return str(self)
 
     def __cmp__(self, other):
-        classcmp = cmp(self.__class__, other.__class__)
+        classcmp = cmp(self.__class__, other.__class__) 
         if classcmp:
             return classcmp
 
         obj_one = set(self.__dict__).difference(('created', 'updated'))
-        obj_two = set(other.__dict__).difference(('created', 'updated'))
+        obj_two = set(other.__dict__).difference(('created', 'updated')) 
         classcmp = obj_one == obj_two and all(self.__dict__[k] == other.__dict__[k] for k in obj_one)
 
-        if classcmp:
+        if classcmp: 
             return 0
-
+ 
         return cmp(self.__dict__, other.__dict__)
 
     @classmethod
@@ -1468,17 +1478,17 @@ class StoredObject(object):
     def to_json(self):
         '''Returns a json version of the object'''
         return json.dumps(self, default=lambda o: o.to_dict())
-
+    
     def get_json_data(self):
-
+         
         '''
-            for postgres we only want the _data field, since we
+            for postgres we only want the _data field, since we 
             have a column that is named _data we do not want _data->_data
 
             override this if you need something custom to get _data
         '''
-        def _json_fixer(obj):
-            for key, value in obj.items():
+        def _json_fixer(obj): 
+            for key, value in obj.items(): 
                 if value == float('-inf'):
                     obj[key] = PythonNaNStrings.NEGINF
                 if value == float('inf'):
@@ -1486,48 +1496,51 @@ class StoredObject(object):
                 if value == float('nan'):
                     obj[key] = PythonNaNStrings.NAN
             return obj
-        obj = _json_fixer(self.to_dict()['_data'])
-        return json.dumps(obj)
+        obj = _json_fixer(self.to_dict()['_data']) 
+        def json_serial(obj):
+            if isinstance(obj, datetime.datetime):
+                serial = obj.isoformat()
+            return serial
+        return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(self, overwrite_existing_object=True):
         '''Save the object to the database.'''
-        if not hasattr(self, 'created'):
-            self.created = str(datetime.datetime.utcnow())
-        self.updated = str(datetime.datetime.utcnow())
         value = self.to_json()
         if self.key is None:
             raise ValueError("key not set")
 
         if options.wants_postgres:
-            rv = True
+            rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
             query_tuple = db.get_insert_json_query_tuple(self)
-            try:
+            try:  
                 result = yield conn.execute(query_tuple[0], query_tuple[1])
-            except psycopg2.IntegrityError as e:
-                # since upsert is not available until postgres 9.5
+            except psycopg2.IntegrityError as e:  
+                # since upsert is not available until postgres 9.5 
                 # we need to do an update here
-                if overwrite_existing_object:
+                if overwrite_existing_object: 
                     query_tuple = db.get_update_json_query_tuple(self)
                     result = yield conn.execute(query_tuple[0], query_tuple[1])
-            except Exception as e:
+                else: 
+                    raise  
+            except Exception as e: 
                 rv = False
-                _log.exception('an unknown error occurred when saving an object %s' % e)
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
                 statemon.state.increment('postgres_unknown_errors')
 
             db.return_connection(conn)
             raise tornado.gen.Return(rv)
-        else:
+        else: 
             db_connection = DBConnection.get(self)
-
+             
             def _save_and_add2set(pipe):
                 pipe.sadd(self._set_keyname(), self.key)
                 pipe.set(self.key, value)
                 return True
-
+                
             result = yield tornado.gen.Task(db_connection.conn.transaction, _save_and_add2set,
                                                                             self._set_keyname(),
                                                                             self.key,
@@ -1557,6 +1570,19 @@ class StoredObject(object):
                 classtype = cls
                 data_dict = obj_dict
 
+            # throw created updated on the object if its there 
+            try:
+                for k in ['created_time_pg', 'updated_time_pg']:
+                    if isinstance(obj_dict[k], datetime.datetime): 
+                        data_dict[k.split('_')[0]] = obj_dict[k].strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str): 
+                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
+                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
+                                "%Y-%m-%d %H:%M:%S.%f")
+            except KeyError: 
+                pass
+ 
             # create basic object using the "default" constructor
             obj = classtype(key)
 
@@ -1564,15 +1590,15 @@ class StoredObject(object):
             try:
                 for k, value in data_dict.iteritems():
                     if value == PythonNaNStrings.NEGINF:
-                        value = float('-inf')
+                        value = float('-inf') 
                     if value == PythonNaNStrings.INF:
                         value = float('inf')
                     if value == PythonNaNStrings.NAN:
-                        value = float('nan')
+                        value = float('nan') 
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None
-
+        
             return obj
 
     @classmethod
@@ -1608,18 +1634,20 @@ class StoredObject(object):
 
         Inputs:
         key - Key for the object to retrieve
-        create_default - If true, then if the object is not in the database,
+        create_default - If true, then if the object is not in the database, 
                          return a default version. Otherwise return None.
         log_missing - Log if the object is missing in the database.
 
         Returns the object
         '''
-        if options.wants_postgres:
+        if options.wants_postgres: 
             db = PostgresDB()
             conn = yield db.get_connection()
 
-            obj = None
-            query = "SELECT _data, _type \
+            obj = None 
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
@@ -1635,9 +1663,9 @@ class StoredObject(object):
 
             db.return_connection(conn)
             raise tornado.gen.Return(obj)
-        else:
+        else: 
             db_connection = DBConnection.get(cls)
-            jdata = yield tornado.gen.Task(db_connection.conn.get, key)
+            jdata = yield tornado.gen.Task(db_connection.conn.get, key) 
             if jdata is None:
                 if log_missing:
                     _log.warn('No %s for %s' % (cls.__name__, key))
@@ -1657,7 +1685,7 @@ class StoredObject(object):
 
         Inputs:
         keys - List of keys to get
-        create_default - If true, then if the object is not in the database,
+        create_default - If true, then if the object is not in the database, 
                          return a default version. Otherwise return None.
         log_missing - Log if the object is missing in the database.
         callback - Optional callback function to call
@@ -1683,23 +1711,25 @@ class StoredObject(object):
         '''
         retval = []
         if options.wants_postgres:
-            results = []
+            results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
-            query = "SELECT _data, _type \
+            query = "SELECT _data, _type, \
+                           created_time AS created_time_pg,\
+                           updated_time AS updated_time_pg \
                      FROM %s \
                      WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
             cursor = yield conn.execute(query)
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
-                results.append(obj)
+                results.append(obj) 
             db.return_connection(conn)
             raise tornado.gen.Return(results)
-        else:
+        else: 
             db_connection = DBConnection.get(cls)
             keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db, pattern, keys_per_call=10000)
-            raise tornado.gen.Return([x for x in
+            raise tornado.gen.Return([x for x in 
                                      cls._get_many_with_raw_keys(keys)
                                      if x is not None])
 
@@ -1707,30 +1737,33 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_many_with_key_like(cls, key_portion):
-        ''' Returns many rows that have a key that matches
-              in a query LIKE 'key_portion%'
+        ''' Returns many rows that have a key that matches 
+              in a query LIKE 'key_portion%' 
 
-            In Postgres this is much faster(4x) than the pattern
-            matching ~ and makes this the much better choice if
-            you are trying to match on accountid_blah
-        '''
+            In Postgres this is much faster(4x) than the pattern 
+            matching ~ and makes this the much better choice if 
+            you are trying to match on accountid_blah 
+        ''' 
         if options.wants_postgres:
-            results = []
+            results = [] 
             db = PostgresDB()
             conn = yield db.get_connection()
             baseclass_name = cls._baseclass_name().lower()
-            query = "SELECT _data, _type FROM " + baseclass_name + \
+            query = "SELECT _data, _type, \
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg FROM "\
+                        + baseclass_name + \
                     " WHERE _data->>'key' LIKE %s"
 
             params = ['%'+key_portion+'%']
             cursor = yield conn.execute(query, params)
             for result in cursor:
                 obj = cls._create(result['_data']['key'], result)
-                results.append(obj)
+                results.append(obj) 
             db.return_connection(conn)
             raise tornado.gen.Return(results)
         else:
-            raise NotImplementedError('not implemented for redis')
+            raise NotImplementedError('not implemented for redis')  
 
     @classmethod
     @utils.sync.optional_sync
@@ -1746,33 +1779,35 @@ class StoredObject(object):
         if options.wants_postgres and func_level_wpg:
             chunk_size = 1000
             rv = []
-            obj_map = OrderedDict()
+            obj_map = OrderedDict() 
             db = PostgresDB()
             conn = yield db.get_connection()
-            # let's use a server-side cursor here
-            # since momoko won't let me declare a cursor by name, I need to
-            # do this manually
+            # let's use a server-side cursor here 
+            # since momoko won't let me declare a cursor by name, I need to 
+            # do this manually 
             yield conn.execute("BEGIN")
-
-            query = "DECLARE get_many CURSOR FOR SELECT _data, _type \
+ 
+            query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
+                         created_time AS created_time_pg, \
+                         updated_time AS updated_time_pg \
                      FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(),
+                     WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
-
+            
             yield conn.execute(query)
-            for key in keys:
-                obj_map[key] = None
+            for key in keys: 
+                obj_map[key] = None 
 
             def _map_new_results(results):
                 for result in results:
-                    obj_key = result['_data']['key']
+                    obj_key = result['_data']['key'] 
                     obj_map[obj_key] = result
-
-            def _build_return_items():
-                rv = []
+ 
+            def _build_return_items(): 
+                rv = [] 
                 for key, item in obj_map.iteritems():
-                    if item:
-                        obj = cls._create(key, item)
+                    if item: 
+                        obj = cls._create(key, item) 
                     else:
                         if log_missing:
                             _log.warn('No %s for %s' % (cls.__name__, key))
@@ -1782,21 +1817,21 @@ class StoredObject(object):
                             obj = None
                     rv.append(obj)
                 return rv
-
+ 
             rows = True
             while rows:
-                cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))
-                rows = cursor.fetchmany(chunk_size)
+                cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
+                rows = cursor.fetchmany(chunk_size) 
                 _map_new_results(rows)
 
-            yield conn.execute("CLOSE get_many")
+            yield conn.execute("CLOSE get_many")  
             yield conn.execute("COMMIT")
-
+ 
             db.return_connection(conn)
             raise tornado.gen.Return(_build_return_items())
-        else:
+        else: 
             db_connection = DBConnection.get(cls)
-
+    
             def _process(results):
                 mappings = []
                 for key, item in zip(keys, results):
@@ -1811,10 +1846,10 @@ class StoredObject(object):
                             obj = None
                     mappings.append(obj)
                 return mappings
-
+    
             items = yield tornado.gen.Task(db_connection.conn.mget, keys)
             raise tornado.gen.Return(_process(items))
-
+    
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -1824,7 +1859,7 @@ class StoredObject(object):
         While in func, you have a lock on the object so you are
         guaranteed for it not to change. It is automatically saved at
         the end of func.
-
+        
         Inputs:
         func - Function that takes a single parameter (the object being edited)
         key - The key of the object to modify
@@ -1844,7 +1879,7 @@ class StoredObject(object):
         updated_d = yield StoredObject.modify_many(
                  [key], _process_one,
                  create_missing=create_missing,
-                 create_class=cls,
+                 create_class=cls, 
                  async=True)
         raise tornado.gen.Return(updated_d[key])
 
@@ -1857,12 +1892,12 @@ class StoredObject(object):
         While in func, you have a lock on the objects so you are
         guaranteed for them not to change. The objects are
         automatically saved at the end of func.
-
+        
         Inputs:
         func - Function that takes a single parameter (dictionary of key -> object being edited)
         keys - List of keys of the objects to modify
         create_missing - If True, create the default object if it doesn't exist
-        create_class - The class of the object to create. If None,
+        create_class - The class of the object to create. If None, 
                        cls is used (which is the most common case)
 
         Returns: A dictionary of {key -> updated object}. The updated
@@ -1870,7 +1905,7 @@ class StoredObject(object):
         couldn't be modified
 
         Example usage:
-        SoredObject.modify_many(['thumb_a'],
+        SoredObject.modify_many(['thumb_a'], 
           lambda d: thumb.update_phash() for thumb in d.itervalues())
         '''
         if create_class is None:
@@ -1880,15 +1915,17 @@ class StoredObject(object):
             conn = yield db.get_connection()
             if len(keys) == 0:
                 raise tornado.gen.Return({})
-
+                
             mappings = {}
-            key_to_object = {}
-            for key in keys:
+            key_to_object = {}  
+            for key in keys: 
                 key_to_object[key] = None
-
-            query = "SELECT _data, _type \
+ 
+            query = "SELECT _data, _type,\
+                            created_time AS created_time_pg,\
+                            updated_time AS updated_time_pg \
                      FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(),
+                     WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
                                                     ",".join("'{0}'".format(k) for k in keys))
 
             cursor = yield conn.execute(query)
@@ -1896,66 +1933,80 @@ class StoredObject(object):
             for item in items:
                 current_key = item['_data']['key']
                 key_to_object[current_key] = item
-
-            for key, item in key_to_object.iteritems():
-                if item is None:
+            
+            for key, item in key_to_object.iteritems(): 
+                if item is None:  
                     if create_missing:
                         cur_obj = create_class(key)
                     else:
                         _log.warn_n('Could not find postgres object: %s' % key)
                         cur_obj = None
                 else:
+                    def json_serial(obj):
+                        if isinstance(obj, datetime.datetime):
+                            serial = obj.isoformat()
+                        return serial
                     # hack we need two copies of the object, copy won't work here
-                    item_one = json.loads(json.dumps(item))
+                    item_one = json.loads(json.dumps(item, default=json_serial))
                     cur_obj = create_class._create(key, item_one)
 
-                mappings[key] = cur_obj
+                mappings[key] = cur_obj 
             try:
                 func(mappings)
             finally:
                 insert_statements = []
-                update_objs = []
+                update_objs = [] 
                 for key, obj in mappings.iteritems():
                    original_object = key_to_object.get(key, None)
-                   if obj is not None and original_object is None:
-                       query_tuple = db.get_insert_json_query_tuple(obj)
-                       insert_statements.append(query_tuple)
+                   if obj is not None and original_object is None: 
+                       created = datetime.datetime.utcnow()
+                       updated = datetime.datetime.utcnow()
+                       obj.__dict__['created'] = created.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       obj.__dict__['updated'] = updated.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
+                       query_tuple = db.get_insert_json_query_tuple(
+                           obj, 
+                           fields='(_data, _type, created_time, updated_time)',
+                           values='VALUES(%s, %s, %s, %s)', 
+                           extra_params=(created, updated))  
+                       insert_statements.append(query_tuple) 
                    elif obj is not None and obj != original_object:
                        update_objs.append(obj)
 
-            if update_objs:
-                try:
+            if update_objs:  
+                try: 
                     update_query = db.get_update_many_query_tuple(
                         update_objs)
-                    yield conn.execute(update_query[0],
-                                       update_query[1])
-                except Exception as e:
+                    yield conn.execute(update_query[0], 
+                                       update_query[1]) 
+                except Exception as e: 
                     _log.error('unknown error when running \
-                                update_query %s : %s' %
+                                update_query %s : %s' % 
                                 (update_query, e))
 
-            if insert_statements:
-                try:
-                    for it in insert_statements:
+            if insert_statements: 
+                try: 
+                    for it in insert_statements:  
                         yield conn.execute(it[0], it[1])
                 except psycopg2.IntegrityError:
-                    pass
-                except Exception as e:
+                    pass  
+                except Exception as e: 
                     _log.error('unknown error when running \
-                                inserts %s : %s' %
+                                inserts %s : %s' % 
                                 (insert_statements, e))
-
+                
             db.return_connection(conn)
             raise tornado.gen.Return(mappings)
-        else:
+        else:  
             def _getandset(pipe):
-                # mget can't handle an empty list
+                # mget can't handle an empty list 
                 if len(keys) == 0:
                     return {}
-
+    
                 items = pipe.mget(keys)
                 pipe.multi()
-
+    
                 mappings = {}
                 orig_objects = {}
                 key_sets = collections.defaultdict(list)
@@ -1980,72 +2031,71 @@ class StoredObject(object):
                     for key, obj in mappings.iteritems():
                         if obj is not None and obj != orig_objects.get(key, None):
                             to_set[key] = obj.to_json()
-
-                    to_set['updated'] = str(datetime.datetime.utcnow())
-
+    
+                    to_set['updated'] = str(datetime.datetime.utcnow()) 
+    
                     if len(to_set) > 0:
                         pipe.mset(to_set)
                     for set_key, cur_keys in key_sets.iteritems():
                         pipe.sadd(set_key, *cur_keys)
                 return mappings
-
+    
             db_connection = DBConnection.get(create_class)
 
-            result = yield tornado.gen.Task(db_connection.conn.transaction,
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
                                             _getandset, *keys, value_from_callable=True)
 
             raise tornado.gen.Return(result)
-
+            
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_all(cls, objects):
         '''Save many objects simultaneously'''
         data = {}
-        rv = True
+        rv = True 
         if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
-            sql_statements = []
+            sql_statements = [] 
             for obj in objects:
                 query_tuple = db.get_insert_json_query_tuple(obj)
                 sql_statements.append(query_tuple)
-            try:
+            try:  
                 cursor = yield conn.transaction(sql_statements)
-            except psycopg2.IntegrityError as e:
-                '''we rollback the transaction, but we still need to
+            except psycopg2.IntegrityError as e: 
+                '''we rollback the transaction, but we still need to 
                    save all the objects that were in the transaction
-                   we also do not know what object caused the integrityerror,
+                   we also do not know what object caused the integrityerror, 
                    so just save on all of them'''
-                for obj in objects:
-                    obj.save()
-            except Exception as e:
+                for obj in objects: 
+                    obj.save() 
+            except Exception as e: 
                 rv = False
-                _log.exception('an unknown error occurred when saving an object %s' % e)
+                _log.exception('an unknown error occurred when saving an object %s' % e) 
                 statemon.state.increment('postgres_unknown_errors')
 
             db.return_connection(conn)
-            raise tornado.gen.Return(rv)
-        else:
+            raise tornado.gen.Return(rv) 
+        else: 
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
             for obj in objects:
-                obj.updated = str(datetime.datetime.utcnow())
                 data[obj.key] = obj.to_json()
                 key_sets[obj._set_keyname()].append(obj.key)
-
+    
             def _save_and_add2set(pipe):
                 for set_key, keys in key_sets.iteritems():
                     pipe.sadd(set_key, *keys)
                 pipe.mset(data)
                 return True
-
+    
             lock_keys = key_sets.keys() + data.keys()
-            result = yield tornado.gen.Task(db_connection.conn.transaction,
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
                                             _save_and_add2set,
                                             *lock_keys,
                                             value_from_callable=True)
-            raise tornado.gen.Return(result)
+            raise tornado.gen.Return(result)                                 
 
     @classmethod
     def _erase_all_data(cls):
@@ -2090,14 +2140,14 @@ class StoredObject(object):
             sql_statements = []
             for key in keys:
                 query = "DELETE FROM %s \
-                         WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(),
+                         WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
                                               key)
-                sql_statements.append(query)
+                sql_statements.append(query) 
             #TODO figure out rv
             cursor = yield conn.transaction(sql_statements)
-            db.return_connection(conn)
-            raise tornado.gen.Return(True)
-        else:
+            db.return_connection(conn) 
+            raise tornado.gen.Return(True)  
+        else:  
             db_connection = DBConnection.get(cls)
             key_sets = collections.defaultdict(list) # set_keyname -> [keys]
             for key in keys:
@@ -2110,31 +2160,31 @@ class StoredObject(object):
                     pipe.srem(set_key, *keys)
                     pipe.delete(*keys)
                 return True
-
-            result = yield tornado.gen.Task(db_connection.conn.transaction,
+            
+            result = yield tornado.gen.Task(db_connection.conn.transaction, 
                                             _del_and_remfromset,
                                             *keys,
                                             value_from_callable=True)
             raise tornado.gen.Return(result)
-
+    
     @classmethod
-    @tornado.gen.coroutine
-    def _handle_all_changes_pg(cls, future, func):
-        '''Callback to handle all changes occurring on postgres objects
+    @tornado.gen.coroutine 
+    def _handle_all_changes_pg(cls, future, func): 
+        '''Callback to handle all changes occurring on postgres objects 
+           
+           the singleton connection that stores a map from classname -> func 
 
-           the singleton connection that stores a map from classname -> func
+           it will take this list and call all the expecting cbs with a format 
+           of : 
+               func(key, object, operation) 
 
-           it will take this list and call all the expecting cbs with a format
-           of :
-               func(key, object, operation)
-
-           these come in off a postgres trigger, see migrations/cmsdb.sql for
-             the definition of the this trigger.
+           these come in off a postgres trigger, see migrations/cmsdb.sql for 
+             the definition of the this trigger. 
         '''
         results = future.result()
-        for r in results:
+        for r in results: 
             r = json.loads(r)
-            key = r['_key']
+            key = r['_key'] 
             op = r['tg_op']
             obj = yield cls.get(key, async=True)
             try:
@@ -2142,7 +2192,7 @@ class StoredObject(object):
                 yield tornado.gen.maybe_future(func(obj.get_id() if obj else key, obj, op))
             except Exception as e:
                 _log.error('Unexpected exception on PG db change when calling'
-                           ' %s with arguments %s: %s' %
+                           ' %s with arguments %s: %s' % 
                            (func, (key, obj, op), e))
 
     @classmethod
@@ -2160,7 +2210,7 @@ class StoredObject(object):
         key - The internal key to delete
         '''
         raise NotImplementedError()
-
+        
     @classmethod
     def _handle_all_changes(cls, msg, func, conn, get_object):
         '''Handles any changes to objects subscribed on pubsub.
@@ -2172,7 +2222,7 @@ class StoredObject(object):
         small ones. Then, for each object, func is called once.
 
         Inputs:
-        func - The function to call with each object.
+        func - The function to call with each object. 
         conn - The connection we can drain from
         msg - The message structure for the first event
         '''
@@ -2184,32 +2234,32 @@ class StoredObject(object):
             if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
                 ops.append(response[3])
                 keys.append(cls.key2id(response[2].partition(':')[2]))
-
+    
             response = conn.get_parsed_message()
-
+    
         # Filter out the invalid keys
         filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
                                zip(*(keys, ops))))
         if len(filtered) == 0:
             return
         keys, ops = filtered
-
+    
         if get_object:
-            # this is a dirty hack, to prevent a race condition
-            # when we subscribe to changes in redis, but want to
-            # push to postgres -- i don't want to lock get_many for this
+            # this is a dirty hack, to prevent a race condition 
+            # when we subscribe to changes in redis, but want to 
+            # push to postgres -- i don't want to lock get_many for this 
             # case, adding the extra parameter instead to force redis here
             objs = cls.get_many(keys, func_level_wpg=False)
         else:
             objs = [None for x in range(len(keys))]
-
+    
         for key, obj, op in zip(*(keys, objs, ops)):
             if obj is None or isinstance(obj, cls):
                 try:
                     func(key, obj, op)
                 except Exception as e:
                     _log.error('Unexpected exception on db change when calling'
-                               ' %s with arguments %s: %s' %
+                               ' %s with arguments %s: %s' % 
                                (func, (key, obj, op), e))
 
     @classmethod
@@ -2231,11 +2281,11 @@ class StoredObject(object):
         if options.wants_postgres:
             pubsub = PostgresPubSub();
             pattern = cls._baseclass_name().lower()
-            yield pubsub.listen(pattern,
+            yield pubsub.listen(pattern, 
                                 lambda x: cls._handle_all_changes_pg(x, func))
-        else:
+        else: 
             conn = PubSubConnection.get(cls)
-
+        
             yield conn.subscribe(
                 lambda x: cls._handle_all_changes(x, func, conn, get_object),
                 '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
@@ -2247,10 +2297,10 @@ class StoredObject(object):
     def unsubscribe_from_changes(cls, channel):
         if options.wants_postgres:
             pubsub = PostgresPubSub();
-            yield pubsub.unlisten(cls._baseclass_name().lower())
-        else:
+            yield pubsub.unlisten(cls._baseclass_name().lower()) 
+        else: 
             conn = PubSubConnection.get(cls)
-
+        
             yield conn.unsubscribe(
                 '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
                 async=True)
@@ -2258,6 +2308,66 @@ class StoredObject(object):
     @classmethod
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
+
+    @classmethod 
+    @tornado.gen.coroutine
+    def get_and_execute_select_query(cls, 
+                                     fields, 
+                                     where_clause=None,
+                                     table_name=None, 
+                                     wc_params=[],
+                                     limit_clause=None,
+                                     order_clause=None,  
+                                     cursor_factory=psycopg2.extensions.cursor): 
+        ''' helper function to build up a select query
+
+               fields : an array of the fields you want 
+               where_clause : the portion of the query following WHERE 
+               table_name : defaults to _baseclass_name, but this populates 
+                            the from portion of the query 
+               wc_params : any params you need in the where clause
+
+ 
+               eg fields = ["_data->>'neon_api_key'", 
+                            "_data->>'key'"] 
+                  object_type = neonuseraccount 
+                  where_clause = "_data->'users' ? %s" 
+                  params = [user1] 
+               would execute 
+                  SELECT _data->>'neon_api_key', _data->>'key' 
+                   FROM neonuseraccount 
+                  WHERE _data->'users' ? user1 
+            returns the result array from the query 
+
+            be nice, this will do a fetchall, which can be 
+            memory intensive -- TODO make an option that 
+            operates like get_many does currently 
+        '''
+        
+        db = PostgresDB() 
+        conn = yield db.get_connection()
+        if table_name is None: 
+            table_name = cls._baseclass_name().lower()
+
+        csl_fields = ",".join("{0}".format(f) for f in fields) 
+        query = "SELECT " + csl_fields + \
+                " FROM " + table_name
+        
+        if where_clause:
+            query += " WHERE " + where_clause
+
+        if order_clause: 
+            query += " " + order_clause
+   
+        if limit_clause: 
+            query += " " + limit_clause 
+ 
+        cursor = yield conn.execute(query, 
+                                    wc_params,
+                                    cursor_factory=cursor_factory)
+        rv = cursor.fetchall()
+        db.return_connection(conn) 
+        raise tornado.gen.Return(rv) 
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -2312,7 +2422,7 @@ class StoredObjectIterator():
                 e = StopIteration()
                 e.value = StopIteration()
                 raise e
-
+            
             # Get more objects
             self.cur_objs = yield tornado.gen.Task(
                 self.obj_class.get_many,
@@ -2323,15 +2433,15 @@ class StoredObjectIterator():
 
         self.items_returned += 1
         raise tornado.gen.Return(self.cur_objs.pop())
-
+        
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
 
     Subclasses of this must define _baseclass_name in the base class
-    of the hierarchy.
+    of the hierarchy. 
     '''
-
+    
     def __init__(self, key):
         super(NamespacedStoredObject, self).__init__(
             self.__class__.format_key(key))
@@ -2374,7 +2484,7 @@ class NamespacedStoredObject(StoredObject):
         rv = yield super(NamespacedStoredObject, cls).get(
                          cls.format_key(key),
                          create_default=create_default,
-                         log_missing=log_missing,
+                         log_missing=log_missing, 
                          async=True)
         raise tornado.gen.Return(rv)
 
@@ -2389,10 +2499,10 @@ class NamespacedStoredObject(StoredObject):
         rv = yield super(NamespacedStoredObject, cls).get_many(
                          [cls.format_key(x) for x in keys],
                          create_default=create_default,
-                         log_missing=log_missing,
-                         func_level_wpg=func_level_wpg,
+                         log_missing=log_missing, 
+                         func_level_wpg=func_level_wpg, 
                          async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2444,8 +2554,8 @@ class NamespacedStoredObject(StoredObject):
     @tornado.gen.coroutine
     def get_all_keys(cls):
         '''Return all the keys in the database for this object type.'''
-        if options.wants_postgres:
-            rv = True
+        if options.wants_postgres: 
+            rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
 
@@ -2455,8 +2565,8 @@ class NamespacedStoredObject(StoredObject):
             db.return_connection(conn)
             rv = [x.partition('_')[2] for x in keys_list if
                                       x is not None]
-            raise tornado.gen.Return(rv)
-        else:
+            raise tornado.gen.Return(rv) 
+        else: 
             db_connection = DBConnection.get(cls)
             raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
                                               set_name=cls._set_keyname())
@@ -2471,7 +2581,7 @@ class NamespacedStoredObject(StoredObject):
                                  cls.format_key(key),
                                  func,
                                  create_missing=create_missing, async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2479,7 +2589,7 @@ class NamespacedStoredObject(StoredObject):
     def modify_many(cls, keys, func, create_missing=False):
         def _do_modify(raw_mappings):
             # Need to convert the keys in the mapping to the ids of the objects
-            mod_mappings = dict(((v.get_id(), v) for v in
+            mod_mappings = dict(((v.get_id(), v) for v in 
                                  raw_mappings.itervalues()))
             return func(mod_mappings)
 
@@ -2487,7 +2597,7 @@ class NamespacedStoredObject(StoredObject):
                                  [cls.format_key(x) for x in keys],
                                  _do_modify,
                                  create_missing=create_missing, async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2495,7 +2605,7 @@ class NamespacedStoredObject(StoredObject):
     def delete(cls, key, callback=None):
         rv = yield super(NamespacedStoredObject, cls).delete(
                                  cls.format_key(key), async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2503,7 +2613,7 @@ class NamespacedStoredObject(StoredObject):
     def delete_many(cls, keys, callback=None):
         rv = yield super(NamespacedStoredObject, cls).delete_many(
                                [cls.format_key(k) for k in keys], async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.
@@ -2522,9 +2632,9 @@ class DefaultedStoredObject(NamespacedStoredObject):
                     key,
                     create_default=True,
                     log_missing=log_missing,
-                    callback=callback,
+                    callback=callback, 
                     async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2534,22 +2644,22 @@ class DefaultedStoredObject(NamespacedStoredObject):
                     keys,
                     create_default=True,
                     log_missing=log_missing,
-                    callback=callback,
+                    callback=callback, 
                     func_level_wpg=func_level_wpg,
                     async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def modify_many(cls, keys, func, create_missing=None, callback=None):
         rv = yield super(DefaultedStoredObject, cls).modify_many(
-                    keys,
-                    func,
-                    create_missing=True,
-                    callback=callback,
+                    keys, 
+                    func, 
+                    create_missing=True, 
+                    callback=callback, 
                     async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
@@ -2572,31 +2682,31 @@ class NeonApiKey(NamespacedStoredObject):
         Returns the class name of the base class of the hierarchy.
         '''
         return NeonApiKey.__name__
-
+    
     @classmethod
-    def id_generator(cls, size=24,
+    def id_generator(cls, size=24, 
             chars=string.ascii_lowercase + string.digits):
         return ''.join(random.choice(chars) for x in range(size))
 
-
+        
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def generate(cls, a_id):
         ''' generate api key hash
             if present in DB, then return it
-
+        
         #NOTE: Generate method directly saves the key
         '''
         api_key = NeonApiKey.id_generator()
         obj = NeonApiKey(a_id, api_key)
-
+        
         # Check if the api_key for the account id exists in the DB
         _api_key = cls.get_api_key(a_id)
         if _api_key is not None:
             raise tornado.gen.Return(_api_key)
         else:
-            result = yield obj.save(async=True)
+            result = yield obj.save(async=True) 
             if result:
                 raise tornado.gen.Return(api_key)
 
@@ -2605,16 +2715,16 @@ class NeonApiKey(NamespacedStoredObject):
         # function uses to_json() and the NeonApiKey is saved as a plain string
         # in the database
         if options.wants_postgres:
-            return json.dumps(self.__dict__)
-        else:
+            return json.dumps(self.__dict__) 
+        else:  
             return self.api_key
-
+    
     @classmethod
     def _create(cls, key, obj_dict):
         obj = NeonApiKey(key)
         obj.value = obj_dict
         return obj_dict
-
+    
     @classmethod
     def get_api_key(cls, a_id, callback=None):
         ''' get api key from db '''
@@ -2632,7 +2742,7 @@ class NeonApiKey(NamespacedStoredObject):
         if options.wants_postgres:
             db = PostgresDB()
             conn = yield db.get_connection()
-
+            
             query = "SELECT _data \
                      FROM %s \
                      WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
@@ -2640,21 +2750,21 @@ class NeonApiKey(NamespacedStoredObject):
             cursor = yield conn.execute(query)
             result = cursor.fetchone()
             db.return_connection(conn)
-            if result:
-                raise tornado.gen.Return(result['_data']['api_key'])
-            else:
-                raise tornado.gen.Return(None)
-        else:
+            if result:  
+                raise tornado.gen.Return(result['_data']['api_key']) 
+            else: 
+                raise tornado.gen.Return(None) 
+        else:  
             db_connection = DBConnection.get(cls)
             if callback:
-                db_connection.conn.get(key, callback)
+                db_connection.conn.get(key, callback) 
             else:
                 raise tornado.gen.Return(db_connection.blocking_conn.get(key))
-
+   
     @classmethod
     def get_many(cls, keys, callback=None):
         raise NotImplementedError()
-
+    
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -2664,7 +2774,7 @@ class NeonApiKey(NamespacedStoredObject):
     @classmethod
     def modify(cls, key, func, create_missing=False, callback=None):
         raise NotImplementedError()
-
+    
     @classmethod
     def modify_many(cls, keys, func, create_missing=False, callback=None):
         raise NotImplementedError()
@@ -2675,7 +2785,7 @@ class InternalVideoID(object):
 
     VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.~]+'
     VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
-
+    
     @staticmethod
     def generate(api_key, vid=None):
         ''' external platform vid --> internal vid '''
@@ -2697,11 +2807,11 @@ class InternalVideoID(object):
     @staticmethod
     def to_external(internal_vid):
         ''' internal vid -> external platform vid'''
-
-        #first part of the key doesn't have _, hence use this below to
-        #generate the internal vid.
+        
+        #first part of the key doesn't have _, hence use this below to 
+        #generate the internal vid. 
         #note: found later that Ooyala can have _ in their video ids
-
+                
         if "_" not in internal_vid:
             _log.error('key=InternalVideoID msg=Invalid internal id %s' %internal_vid)
             return internal_vid
@@ -2718,7 +2828,7 @@ class TrackerAccountID(object):
 
 class TrackerAccountIDMapper(NamespacedStoredObject):
     '''
-    Maps a given Tracker Account ID to API Key
+    Maps a given Tracker Account ID to API Key 
 
     This is needed to keep the tracker id => api_key
     '''
@@ -2727,7 +2837,7 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
 
     def __init__(self, tai, api_key=None, itype=None):
         super(TrackerAccountIDMapper, self).__init__(tai)
-        self.value = api_key
+        self.value = api_key 
         self.itype = itype
 
     def get_tai(self):
@@ -2739,7 +2849,7 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return TrackerAccountIDMapper.__name__
-
+    
     @classmethod
     def get_neon_account_id(cls, tai, callback=None):
         '''
@@ -2755,76 +2865,101 @@ class TrackerAccountIDMapper(NamespacedStoredObject):
         else:
             return format_tuple(cls.get(tai))
 
-class User(NamespacedStoredObject):
-    ''' User
+class User(NamespacedStoredObject): 
+    ''' User 
+    
+    These are users that can used across multiple systems most notably 
+    the API and the current UI. 
 
-    These are users that can used across multiple systems most notably
-    the API and the current UI.
-
-    Each of these can be attached to a NeonUserAccount (misnamed, but this
-    is our Application/Customer layer). This will grant the User access to
-    anything the NeonUserAccount can access.
-
-    Users can be associated to many NeonUserAccounts
-    '''
-    def __init__(self,
-                 username,
-                 password='password',
-                 access_level=AccessLevels.ALL_NORMAL_RIGHTS):
-
+    Each of these can be attached to a NeonUserAccount (misnamed, but this 
+    is our Application/Customer layer). This will grant the User access to 
+    anything the NeonUserAccount can access.  
+        
+    Users can be associated to many NeonUserAccounts     
+    ''' 
+    def __init__(self, 
+                 username, 
+                 password='password', 
+                 access_level=AccessLevels.ALL_NORMAL_RIGHTS, 
+                 first_name=None,
+                 last_name=None,
+                 title=None):
+ 
         super(User, self).__init__(username)
 
-        # here for the conversion to postgres, not used yet
+        # here for the conversion to postgres, not used yet  
         self.user_id = uuid.uuid1().hex
 
-        # the users username, chosen by them, redis key
+        # the users username, chosen by them, redis key 
         self.username = username
 
-        # the users password_hash, we don't store plain text passwords
+        # the users password_hash, we don't store plain text passwords 
         self.password_hash = sha256_crypt.encrypt(password)
 
-        # short-lived JWtoken that will give user access to API calls
+        # short-lived JWtoken that will give user access to API calls 
         self.access_token = None
 
         # longer-lived JWtoken that will allow a user to refresh a token
         # this token should only be sent over HTTPS to the auth endpoints
-        # for now this is not encrypted
+        # for now this is not encrypted 
         self.refresh_token = None
 
-        # access level granted to this user, uses class AccessLevels
+        # access level granted to this user, uses class AccessLevels 
         self.access_level = access_level
 
+        # the first name of the user 
+        self.first_name = first_name 
+ 
+        # the last name of the user 
+        self.last_name = last_name 
+ 
+        # the title of the user 
+        self.title = title  
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_associated_account_ids(self):
+        results = yield self.get_and_execute_select_query(
+                    [ "_data->>'neon_api_key'" ], 
+                    "_data->'users' ? %s", 
+                    table_name='neonuseraccount', 
+                    wc_params=[self.username])
+ 
+        rv = [i[0] for i in results]
+        raise tornado.gen.Return(rv) 
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         if options.wants_postgres:
-            return 'users'
-        else:
-            return User.__name__
-
+            return 'users' 
+        else: 
+            return User.__name__  
+        
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
 
-    Every user in the system has a neon account and all other integrations are
-    associated with this account.
+    Every user in the system has a neon account and all other integrations are 
+    associated with this account. 
 
     @videos: video id / jobid map of requests made directly through neon api
     @integrations: all the integrations associated with this acccount
 
     '''
-    def __init__(self,
-                 a_id,
-                 api_key=None,
-                 default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT),
-                 name=None,
-                 abtest=True,
-                 serving_enabled=True,
-                 serving_controller=ServingControllerType.IMAGEPLATFORM,
-                 users=[]):
+    def __init__(self, 
+                 a_id, 
+                 api_key=None, 
+                 default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
+                 name=None, 
+                 abtest=True, 
+                 serving_enabled=False, 
+                 serving_controller=ServingControllerType.IMAGEPLATFORM, 
+                 users=None, 
+                 email=None):
 
-        # Account id chosen/or generated by the api when account is created
-        self.account_id = a_id
+        # Account id chosen/or generated by the api when account is created 
+        self.account_id = a_id 
         splits = '_'.split(a_id)
         if api_key is None and len(splits) == 2:
             api_key = splits[1]
@@ -2832,27 +2967,27 @@ class NeonUserAccount(NamespacedStoredObject):
         super(NeonUserAccount, self).__init__(self.neon_api_key)
         self.tracker_account_id = TrackerAccountID.generate(self.neon_api_key)
         self.staging_tracker_account_id = \
-                TrackerAccountID.generate(self.neon_api_key + "staging")
+                TrackerAccountID.generate(self.neon_api_key + "staging") 
         self.videos = {} #phase out,should be stored in neon integration
         # a mapping from integration id -> get_ovp() string
         self.integrations = {}
-        # name of the individual who owns the account, mainly for internal use
-        # so we know who it is
+        # name of the individual who owns the account, mainly for internal use 
+        # so we know who it is 
         self.name = name
 
         # The default thumbnail (w, h) to serve for this account
         self.default_size = default_size
-
+        
         # Priority Q number for processing, currently supports {0,1}
         self.processing_priority = 1
 
         # Default thumbnail to show if we don't have one for a video
         # under this account.
         self.default_thumbnail_id = None
-
+         
         # create on account creation this gives access to the API, passed via header
         self.api_v2_key = NeonApiKey.id_generator()
-
+        
         # Boolean on wether AB tests can run
         self.abtest = abtest
 
@@ -2863,9 +2998,12 @@ class NeonUserAccount(NamespacedStoredObject):
         self.serving_controller = serving_controller
 
         # What users are privy to the information assoicated to this NeonUserAccount
-        # simply a list of usernames
-        self.users = users
+        # simply a list of usernames 
+        self.users = users or [] 
 
+        # email address associated with this account 
+        self.email = email 
+        
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2884,7 +3022,7 @@ class NeonUserAccount(NamespacedStoredObject):
             return self.neon_api_key
         except AttributeError:
             if NeonUserAccount.__name__.lower() not in self.account_id:
-                return NeonApiKey.generate(self.account_id)
+                return NeonApiKey.generate(self.account_id) 
             return 'None'
 
     def get_processing_priority(self):
@@ -2906,8 +3044,8 @@ class NeonUserAccount(NamespacedStoredObject):
 
         ovp_map = {}
         #TODO: Add Ooyala when necessary
-
-        for plat in [NeonPlatform, BrightcovePlatform,
+         
+        for plat in [NeonPlatform, BrightcovePlatform, 
                      YoutubePlatform, BrightcoveIntegration, OoyalaIntegration]:
             ovp_map[plat.get_ovp()] = plat
 
@@ -2922,9 +3060,9 @@ class NeonUserAccount(NamespacedStoredObject):
                     calls.append(tornado.gen.Task(plat_type.get,
                                                   self.neon_api_key,
                                                   integration_id))
-
+                    
             except KeyError:
-                _log.error('key=get_platforms msg=Invalid ovp string: %s' %
+                _log.error('key=get_platforms msg=Invalid ovp string: %s' % 
                            ovp_string)
 
             except Exception as e:
@@ -2938,12 +3076,12 @@ class NeonUserAccount(NamespacedStoredObject):
     def get_ovp(cls):
         ''' ovp string '''
         return "neon"
-
+    
     def add_video(self, vid, job_id):
         ''' vid,job_id in to videos'''
-
+        
         self.videos[str(vid)] = job_id
-
+    
     def to_json(self):
         ''' to json '''
         return json.dumps(self, default=lambda o: o.__dict__)
@@ -2987,7 +3125,7 @@ class NeonUserAccount(NamespacedStoredObject):
             rank=cur_rank)
         yield tmeta.add_image_data(image, cdn_metadata=cdn_metadata, async=True)
         self.default_thumbnail_id = tmeta.key
-
+        
         success = yield tornado.gen.Task(tmeta.save)
         if not success:
             raise IOError("Could not save thumbnail")
@@ -3005,12 +3143,12 @@ class NeonUserAccount(NamespacedStoredObject):
         a_id = params['account_id']
         api_key = params['neon_api_key']
         na = cls(a_id, api_key)
-
+       
         for key in params:
             na.__dict__[key] = params[key]
-
+        
         return na
-
+   
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3018,7 +3156,7 @@ class NeonUserAccount(NamespacedStoredObject):
         ''' Get all NeonUserAccount instances '''
         retval = yield tornado.gen.Task(cls.get_all)
         raise tornado.gen.Return(retval)
-
+    
     @classmethod
     def get_neon_publisher_id(cls, api_key):
         '''
@@ -3033,23 +3171,23 @@ class NeonUserAccount(NamespacedStoredObject):
     def get_internal_video_ids(self):
         '''Return the list of internal videos ids for this account.'''
         if options.wants_postgres:
-            rv = True
+            rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
-            # right now, we are gonna do this with a LIKE query on the
-            # indexed key field, however, as data grows it may become
-            # necessary to store account_id/api_key on the object or table :
+            # right now, we are gonna do this with a LIKE query on the 
+            # indexed key field, however, as data grows it may become 
+            # necessary to store account_id/api_key on the object or table : 
             # index that, and query based on that
             query = "SELECT _data->>'key' FROM " + VideoMetadata._baseclass_name().lower() + \
-                    " WHERE _data->>'key' LIKE %s"
-            # what a mess...escaping 'hack'
+                    " WHERE _data->>'key' LIKE %s" 
+            # what a mess...escaping 'hack' 
             params = [self.neon_api_key+'%']
             cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
             rv = [i[0] for i in cursor.fetchall()]
 
             db.return_connection(conn)
-            raise tornado.gen.Return(rv)
-        else:
+            raise tornado.gen.Return(rv) 
+        else: 
             db_connection = DBConnection.get(self)
             vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
                                           set_name='objset:%s' % self.neon_api_key)
@@ -3089,17 +3227,17 @@ class NeonUserAccount(NamespacedStoredObject):
 
             query = "SELECT _data->>'key' FROM " + base_class_name + \
                     " WHERE _data->>'key' LIKE %s"
-
+ 
             params = [base_class_name+'_'+self.neon_api_key+'_%']
             cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
             tuple_to_list = [i[0] for i in cursor.fetchall()]
             db.return_connection(conn)
 
             raise tornado.gen.Return([x.split('_')[:0:-1] for x in tuple_to_list])
-        else:
+        else:  
             db_connection = DBConnection.get(self)
             base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                               set_name='objset:request:%s' %
+                                               set_name='objset:request:%s' % 
                                                self.neon_api_key)
 
             raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
@@ -3129,10 +3267,10 @@ class NeonUserAccount(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_videos_and_statuses(self):
-        '''
-            the join on this is slow in the database
-              perform via two separate queries
-        '''
+        ''' 
+            the join on this is slow in the database 
+              perform via two separate queries 
+        '''  
         db = PostgresDB()
         conn = yield db.get_connection()
         video_to_status_dict = {}
@@ -3147,46 +3285,46 @@ class NeonUserAccount(NamespacedStoredObject):
                 "  ) q2 ON TRUE"
         params = [self.neon_api_key+'_%']
         cursor = yield conn.execute(
-                    query,
-                    params,
+                    query, 
+                    params, 
                     cursor_factory=psycopg2.extensions.cursor)
         for res in cursor.fetchall():
-            try:
-                obj_dict = {}
+            try: 
+                obj_dict = {} 
                 obj_dict['_data'] = res[2]
-                key = obj_dict['_data']['key']
-                obj_dict['_type'] = res[3]
+                key = obj_dict['_data']['key']  
+                obj_dict['_type'] = res[3] 
                 video_to_status_dict[res[0]] = {
-                    'serving_enabled' : res[1],
-                    'video_status_obj' : self._create(key, obj_dict),
-                    'thumbnail_status_list' : []
+                    'serving_enabled' : res[1], 
+                    'video_status_obj' : self._create(key, obj_dict), 
+                    'thumbnail_status_list' : [] 
                 }
-            except (TypeError, KeyError):
-                pass
-
+            except (TypeError, KeyError): 
+                pass  
+        
         query = "SELECT _data, _type FROM thumbnailstatus " \
                 " WHERE replace(_data->>'key', 'thumbnailstatus_', '') IN( "\
                 "  SELECT jsonb_array_elements_text(v._data->'thumbnail_ids') " \
                 "   FROM videometadata v " \
                 "   WHERE v._data->>'key' LIKE %s)"
-
+ 
         params = [self.neon_api_key+'_%']
         cursor = yield conn.execute(
-                    query,
-                    params)
+                    query, 
+                    params) 
 
         for res in cursor.fetchall():
-            ts = self._create(res['_data']['key'], res)
+            ts = self._create(res['_data']['key'], res) 
             video_id = ts.get_video_id()
-            try:
-                video_to_status_dict[video_id]['thumbnail_status_list'].append(ts)
-            except KeyError as e:
+            try:  
+                video_to_status_dict[video_id]['thumbnail_status_list'].append(ts) 
+            except KeyError as e: 
                 _log.error('video_id %s was not in the dictionary : %s' % (video_id, e))
-                continue
-
+                continue 
+            
         db.return_connection(conn)
         raise tornado.gen.Return(video_to_status_dict)
-
+        
 # define a ProcessingStrategy, that will dictate the behavior of the model.
 class ProcessingStrategy(DefaultedStoredObject):
     '''
@@ -3201,13 +3339,15 @@ class ProcessingStrategy(DefaultedStoredObject):
     def __init__(self, account_id, processing_time_ratio=2.5,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
-                 startend_clip=0.1, adapt_improve=True, analysis_crop=None):
+                 startend_clip=0.1, adapt_improve=True, analysis_crop=None,
+                 filter_text=True, text_filter_params=None, 
+                 filter_text_thresh=0.02):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
         # video can spend in processing, which is given by:
         #
-        # max_processing_time = (length of video in seconds *
+        # max_processing_time = (length of video in seconds * 
         #                        processing_time_ratio)
         self.processing_time_ratio = processing_time_ratio
 
@@ -3215,7 +3355,7 @@ class ProcessingStrategy(DefaultedStoredObject):
         # Local search width is the size of the local search regions. If the
         # local_search_step is x, then for any frame which starts a local
         # search region i, the frames searched are given by
-        #
+        # 
         # i : i + local_search_width in steps of x.
         self.local_search_width = local_search_width
 
@@ -3232,8 +3372,8 @@ class ProcessingStrategy(DefaultedStoredObject):
         # (this should rarely need to be changed)
         # feat_score_weight is a multiplier that allows the feature score to
         # be combined with the valence score. This is given by:
-        #
-        # combined score = (valence score) +
+        # 
+        # combined score = (valence score) + 
         #                  (feat_score_weight * feature score)
         self.feat_score_weight = feat_score_weight
 
@@ -3255,7 +3395,7 @@ class ProcessingStrategy(DefaultedStoredObject):
 
         # adapt improve is a boolean that determines whether or not we should
         # be using CLAHE (contrast-limited adaptive histogram equalization) to
-        # improve frames.
+        # improve frames. 
         self.adapt_improve = adapt_improve
 
         # analysis crop dictates the region of the image that should be
@@ -3264,29 +3404,71 @@ class ProcessingStrategy(DefaultedStoredObject):
         # All methods are performed by specifying floats x.
         #
         # Method one: A single float x, 0 < x <= 1.0
-        #       - Takes the center (x*100)% of the image. For instance, if x
-        #         were 0.4, then 60% of the image's horizontal and vertical
-        #         would be removed (i.e., 30% off the left, 30% off the right,
-        #         30% off the top, 30% off the bottom).
-        #
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
         # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
         #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
         #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
         #
-        # Method three: All sides are specified with four floats, clockwise
-        #         order from the top (top, right, bottom, left). Four floats,
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
         #         as a list.
         #           NOTE:
         #         In contrast to the other methods, the floats specify how
         #         much to remove from each side (rather than how much to leave
         #         in). So they are all between 0 and 0.5 (although higher
         #         values are possible, they will no longer be with respect to
-        #         the center of the image and the behavior can get wonkey).
-        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top,
-        #         (y1 * 100)% off the right, etc.
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
         #         For example, to remove the bottom 1/3rd of an image, you
         #         would specify [0., 0., .3333, 0.]
         self.analysis_crop = analysis_crop
+
+        # filter_text is a boolean indicating whether or not frames should
+        # filtered on the basis of detected text.
+        self.filter_text = filter_text
+
+        # text_filter_params defines the 9 parameters required to
+        # instantiate the text detector (in order):
+        # classifier xml 1 
+        #     - (str) The first level classifier filename. Must be
+        #             located in options.text_model_path (see local search)
+        # classifier xml 2 
+        #     - (str) The second level classifier filename. Must be
+        #             located in options.text_model_path (see local search)
+        # threshold delta [def: 16]
+        #     - (int) the number of steps for MSER 
+        # min area [def: 0.00015]
+        #     - (float) minimum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # max area [def: 0.003]
+        #     - (float) maximum ratio of the detection area to the
+        #     total area of the image for acceptance as a text region.
+        # min probability, step 1 [def: 0.8]
+        #     - (float) minimum probability for step 1 to proceed.
+        # non max suppression [def: True]
+        #     - (bool) whether or not to use non max suppression.
+        # min probability difference [def: 0.5]
+        #     - (float) minimum probability difference for 
+        #     classification to proceed.
+        # min probability, step 2 [def: 0.9]
+        #     - (float) minimum probability for step 2 to proceed.
+        if text_filter_params is None:
+            tcnm1 = 'trained_classifierNM1.xml'
+            tcnm2 = 'trained_classifierNM2.xml'
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+                                  True, 0.5, 0.9]
+        self.text_filter_params = text_filter_params
+
+        # filter_text_thresh is the maximum allowable ratio of the area 
+        # occupied by the bounding boxes of detected text to the area of
+        # the entire image. If the ratio is greater than this, and
+        # filter_text is true, the frame will be filtered.
+        self.filter_text_thresh = filter_text_thresh
 
     @classmethod
     def _baseclass_name(cls):
@@ -3301,10 +3483,11 @@ class ExperimentStrategy(DefaultedStoredObject):
     '''
     SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
-
+    
     def __init__(self, account_id, exp_frac=0.01,
                  holdback_frac=0.01,
                  min_conversion = 50,
+                 min_impressions = 500,
                  frac_adjust_rate = 0.0,
                  only_exp_if_chosen=False,
                  always_show_baseline=True,
@@ -3318,7 +3501,7 @@ class ExperimentStrategy(DefaultedStoredObject):
         super(ExperimentStrategy, self).__init__(account_id)
         # Fraction of traffic to experiment on.
         self.exp_frac = exp_frac
-
+        
         # Fraction of traffic in the holdback experiment once
         # convergence is complete
         self.holdback_frac = holdback_frac
@@ -3331,6 +3514,9 @@ class ExperimentStrategy(DefaultedStoredObject):
         # minimum combined conversion numbers before calling an experiment
         # complete
         self.min_conversion = min_conversion
+
+        # minimum number of impressions on a single thumb to declare a winner
+        self.min_impressions = min_impressions
 
         # Fraction adjusting power rate. When this number is 0, it is
         # equivalent to all the serving fractions being the same,
@@ -3375,14 +3561,14 @@ class ExperimentStrategy(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
-
+        
 
 class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.
 
     Keyed by (api_key, integration_id). Use the create_key method to
     generate it before calling a normal function like get().
-
+    
     '''
     def __init__(self, key, cdns=None):
         super(CDNHostingMetadataList, self).__init__(key)
@@ -3408,7 +3594,7 @@ class CDNHostingMetadataList(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return CDNHostingMetadataList.__name__
-
+    
     def get_json_data(self):
         return json.dumps(json.loads(self.to_json())['_data'])
 
@@ -3421,9 +3607,9 @@ class CDNHostingMetadata(NamespacedStoredObject):
     These objects are not stored directly in the database.  They are
     actually stored in CDNHostingMetadataLists. If you try to save
     them directly, you will get a NotImplementedError.
-    '''
-
-    def __init__(self, key=None, cdn_prefixes=None, resize=False,
+    ''' 
+    
+    def __init__(self, key=None, cdn_prefixes=None, resize=False, 
                  update_serving_urls=False,
                  rendition_sizes=None,
                  source_crop=None,
@@ -3439,7 +3625,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
         cdn_prefixes = cdn_prefixes or []
         self.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
                                 cdn_prefixes)
-
+        
         # If true, the images should be resized into all the desired
         # renditions.
         self.resize = resize
@@ -3453,26 +3639,26 @@ class CDNHostingMetadata(NamespacedStoredObject):
         # All methods are performed by specifying floats x.
         #
         # Method one: A single float x, 0 < x <= 1.0
-        #       - Takes the center (x*100)% of the image. For instance, if x
-        #         were 0.4, then 60% of the image's horizontal and vertical
-        #         would be removed (i.e., 30% off the left, 30% off the right,
-        #         30% off the top, 30% off the bottom).
-        #
+        #       - Takes the center (x*100)% of the image. For instance, if x 
+        #         were 0.4, then 60% of the image's horizontal and vertical 
+        #         would be removed (i.e., 30% off the left, 30% off the right, 
+        #         30% off the top, 30% off the bottom). 
+        # 
         # Method two: Two floats x y, both between 0 and 1.0 excluding 0.
         #       - Takes (1.0 - x)/2 off the top and (1.0 - x)/2 off the bottom
         #         and (1.0 -y)/2 off the left and (1.0 - y)/2 off the right.
         #
-        # Method three: All sides are specified with four floats, clockwise
-        #         order from the top (top, right, bottom, left). Four floats,
+        # Method three: All sides are specified with four floats, clockwise 
+        #         order from the top (top, right, bottom, left). Four floats, 
         #         as a list.
         #           NOTE:
         #         In contrast to the other methods, the floats specify how
         #         much to remove from each side (rather than how much to leave
         #         in). So they are all between 0 and 0.5 (although higher
         #         values are possible, they will no longer be with respect to
-        #         the center of the image and the behavior can get wonkey).
-        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top,
-        #         (y1 * 100)% off the right, etc.
+        #         the center of the image and the behavior can get wonkey). 
+        #         Given x1, y1, x2, y2, crops (x1 * 100)% off the top, 
+        #         (y1 * 100)% off the right, etc. 
         #         For example, to remove the bottom 1/3rd of an image, you
         #         would specify [0., 0., .3333, 0.]
         self.source_crop = source_crop
@@ -3529,7 +3715,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
         # Normalize the CDN prefixes
         obj.cdn_prefixes = map(CDNHostingMetadata._normalize_cdn_prefix,
                                obj.cdn_prefixes)
-
+        
         return obj
 
     @staticmethod
@@ -3548,13 +3734,13 @@ class CDNHostingMetadata(NamespacedStoredObject):
         prefix_split[2] = path_split[1]
       scheme_added = urlparse.urlunparse(prefix_split)
       return scheme_added.strip('/')
-
+      
 class S3CDNHostingMetadata(CDNHostingMetadata):
     '''
-    If the images are to be uploaded to S3 bucket use this formatter
+    If the images are to be uploaded to S3 bucket use this formatter  
 
     '''
-    def __init__(self, key=None, access_key=None, secret_key=None,
+    def __init__(self, key=None, access_key=None, secret_key=None, 
                  bucket_name=None, cdn_prefixes=None, folder_prefix=None,
                  resize=False, update_serving_urls=False, do_salt=True,
                  make_tid_folders=False, rendition_sizes=None, policy=None,
@@ -3565,7 +3751,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         Create the object
         '''
         super(S3CDNHostingMetadata, self).__init__(
-            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes,
+            key, cdn_prefixes, resize, update_serving_urls, rendition_sizes, 
             source_crop, crop_with_saliency, crop_with_face_detection,
             crop_with_text_detection)
         self.access_key = access_key # S3 access key
@@ -3573,7 +3759,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
         self.bucket_name = bucket_name # S3 bucket to host in
         self.folder_prefix = folder_prefix # Folder prefix to host in
 
-        # Add a random named directory between folder prefix and the
+        # Add a random named directory between folder prefix and the 
         # image name? Useful for performance when serving.
         self.do_salt = do_salt
 
@@ -3587,7 +3773,7 @@ class S3CDNHostingMetadata(CDNHostingMetadata):
 class NeonCDNHostingMetadata(S3CDNHostingMetadata):
     '''
     Hosting on S3 using the Neon keys.
-
+    
     This default hosting just uses pure S3, no cloudfront.
     '''
     def __init__(self, key=None,
@@ -3622,7 +3808,7 @@ class PrimaryNeonHostingMetadata(S3CDNHostingMetadata):
     '''
     Primary Neon S3 Hosting
     This is where the primary copy of the thumbnails are stored
-
+    
     @make_tid_folders: If true, _ is replaced by '/' to create folder
     '''
     def __init__(self, key=None,
@@ -3715,23 +3901,23 @@ class AkamaiCDNHostingMetadata(CDNHostingMetadata):
             obj.cdn_prefixes = [re.sub(obj.folder_prefix, '', x).strip('/')
                                 for x in obj.cdn_prefixes]
             del obj.baseurl
-
+        
         return obj
 
 class AbstractIntegration(NamespacedStoredObject):
     ''' Abstract Integration class '''
 
-    def __init__(self, integration_id=None, enabled=True,
+    def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
-
-        if integration_id is None:
+        
+        if integration_id is None: 
             integration_id = uuid.uuid1().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
-
-        # should this integration be used
+        
+        # should this integration be used 
         self.enabled = enabled
-
+        
         # how many times have we tried to submit the current video
         self.video_submit_retries = video_submit_retries
 
@@ -3748,21 +3934,21 @@ class AbstractPlatform(NamespacedStoredObject):
     type can be None, in which case it becomes cls._baseclass_name()
     '''
 
-    def __init__(self, api_key, i_id=None, abtest=False, enabled=True,
+    def __init__(self, api_key, i_id=None, abtest=False, enabled=True, 
                 serving_enabled=True,
                 serving_controller=ServingControllerType.IMAGEPLATFORM):
         super(AbstractPlatform, self).__init__((None, api_key, i_id))
-        self.neon_api_key = api_key
-        self.integration_id = i_id
+        self.neon_api_key = api_key 
+        self.integration_id = i_id 
         self.videos = {} # External video id (Original Platform VID) => Job ID
         self.abtest = abtest # Boolean on wether AB tests can run
-        self.enabled = enabled # Account enabled for auto processing of videos
+        self.enabled = enabled # Account enabled for auto processing of videos 
 
         # Will thumbnails be served by our system?
         self.serving_enabled = serving_enabled
 
         # What controller is used to serve the image? Default to imageplatform
-        self.serving_controller = serving_controller
+        self.serving_controller = serving_controller 
 
     @classmethod
     def format_key(cls, key):
@@ -3794,7 +3980,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def _set_keyname(cls):
         return 'objset:%s' % cls._baseclass_name()
-
+   
     @classmethod
     def _create(cls, key, obj_dict):
         def __get_type(key):
@@ -3821,7 +4007,7 @@ class AbstractPlatform(NamespacedStoredObject):
                     '_type': __get_type(obj_dict['key']),
                     '_data': copy.deepcopy(obj_dict)
                 }
-
+            
             return super(AbstractPlatform, cls)._create(cls.format_key(key),
                                                         obj_dict)
 
@@ -3829,7 +4015,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @tornado.gen.coroutine
     def save(self, callback=None):
         raise NotImplementedError("To save this object use modify()")
-        # since we need a default constructor with empty strings for the
+        # since we need a default constructor with empty strings for the 
         # eval magic to work, check here to ensure apikey and i_id aren't empty
         # since the key is generated based on them
         if self.neon_api_key == '' or self.integration_id == '':
@@ -3844,8 +4030,8 @@ class AbstractPlatform(NamespacedStoredObject):
     def get(cls, api_key, i_id):
         ''' get instance '''
         rv = yield super(AbstractPlatform, cls).get((None, api_key, i_id), async=True)
-        raise tornado.gen.Return(rv)
-
+        raise tornado.gen.Return(rv) 
+    
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3858,9 +4044,9 @@ class AbstractPlatform(NamespacedStoredObject):
         rv = yield super(AbstractPlatform, cls).modify(
                 (None, api_key, i_id),
                 _set_parameters,
-                create_missing=create_missing,
+                create_missing=create_missing, 
                 async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -3874,9 +4060,9 @@ class AbstractPlatform(NamespacedStoredObject):
             func(objs)
 
         rv = yield super(AbstractPlatform, cls).modify_many(
-              keys,
+              keys, 
               _set_parameters,
-              create_missing=create_missing,
+              create_missing=create_missing, 
               async=True)
         raise tornado.gen.Return(rv)
 
@@ -3887,19 +4073,19 @@ class AbstractPlatform(NamespacedStoredObject):
         rv = yield super(AbstractPlatform, cls).delete(
                          (None, api_key, i_id), async=True)
         raise tornado.gen.Return(rv)
-
+        
     #@classmethod
     #@utils.sync.optional_sync
     #@tornado.gen.coroutine
     #def delete_many(cls, keys):
     #    rv = yield super(AbstractPlatform, cls).delete_many(
-    #                     [cls._generate_subkey(api_key, i_id) for
+    #                     [cls._generate_subkey(api_key, i_id) for 
     #                     api_key, i_id in keys], async=True)
     #    raise tornado.gen.Return(rv)
 
     def to_json(self):
         ''' to json '''
-        return json.dumps(self, default=lambda o: o.__dict__)
+        return json.dumps(self, default=lambda o: o.__dict__) 
 
     def add_video(self, vid, job_id):
         ''' external video id => job_id '''
@@ -3908,11 +4094,11 @@ class AbstractPlatform(NamespacedStoredObject):
     def get_videos(self):
         ''' list of external video ids '''
         return self.videos.keys()
-
+    
     def get_internal_video_ids(self):
-        ''' return list of internal video ids for the account '''
-        i_vids = []
-        for vid in self.videos.keys():
+        ''' return list of internal video ids for the account ''' 
+        i_vids = [] 
+        for vid in self.videos.keys(): 
             i_vids.append(InternalVideoID.generate(self.neon_api_key, vid))
         return i_vids
 
@@ -3926,7 +4112,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @tornado.gen.coroutine
     def get_all_keys(cls):
         '''The keys will be of the form (type, api_key, integration_id).'''
-
+        
         neon_keys = yield NeonPlatform._get_all_keys_impl(async=True)
         bc_keys = yield BrightcovePlatform._get_all_keys_impl(async=True)
         oo_keys = yield OoyalaPlatform._get_all_keys_impl(async=True)
@@ -3941,7 +4127,7 @@ class AbstractPlatform(NamespacedStoredObject):
     @tornado.gen.coroutine
     def _get_all_keys_impl(cls):
         keys = yield super(AbstractPlatform, cls).get_all_keys(async=True)
-        raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_')
+        raise tornado.gen.Return([[cls._baseclass_name().lower()] + x.split('_') 
                                   for x in keys])
 
     @classmethod
@@ -3983,14 +4169,14 @@ class AbstractPlatform(NamespacedStoredObject):
     @classmethod
     def format_subscribe_pattern(cls, pattern):
         return '%s_%s' % (cls._baseclass_name().lower(), pattern)
-
+    
 
     @classmethod
     def _erase_all_data(cls):
-        ''' erase all data '''
+        ''' erase all data ''' 
         db_connection = DBConnection.get(cls)
         db_connection.clear_db()
-
+ 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4000,11 +4186,11 @@ class AbstractPlatform(NamespacedStoredObject):
         Delete all data related to a given video
 
         request, vmdata, thumbs, thumb serving urls
-
-        #NOTE: Don't you dare call this method unless you really want to
-        delete
+        
+        #NOTE: Don't you dare call this method unless you really want to 
+        delete 
         '''
-
+        
         do_you_want_to_delete = kwargs.get('really_delete_keys', False)
         if do_you_want_to_delete == False:
             return
@@ -4015,27 +4201,27 @@ class AbstractPlatform(NamespacedStoredObject):
             except KeyError, e:
                 _log.error('no such video to delete')
                 return
-
-        i_vid = InternalVideoID.generate(self.neon_api_key,
+        
+        i_vid = InternalVideoID.generate(self.neon_api_key, 
                                          platform_vid)
         vm = yield tornado.gen.Task(VideoMetadata.get, i_vid)
         # update platform instance
         yield self.modify(self.neon_api_key, '0', _del_video, async=True)
 
         yield VideoMetadata.delete_related_data(i_vid, async=True)
-
+        
 class NeonPlatform(AbstractPlatform):
     '''
     Neon Integration ; stores all info about calls via Neon API
     '''
     def __init__(self, api_key, a_id=None, abtest=False):
-        # By default integration ID 0 represents
+        # By default integration ID 0 represents 
         # Neon Platform Integration (access via neon api)
-
+        
         super(NeonPlatform, self).__init__(api_key, '0', abtest)
         self.account_id = a_id
-        self.neon_api_key = api_key
-
+        self.neon_api_key = api_key 
+   
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -4062,9 +4248,9 @@ class NeonPlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres:
-            return AbstractPlatform.__name__
-        else:
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
             return NeonPlatform.__name__
 
 class BrightcoveIntegration(AbstractIntegration):
@@ -4072,15 +4258,15 @@ class BrightcoveIntegration(AbstractIntegration):
 
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
-
-    def __init__(self, i_id=None, a_id='', p_id=None,
+    
+    def __init__(self, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None,
+                oldest_video_allowed=None, 
                 video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
@@ -4091,14 +4277,14 @@ class BrightcoveIntegration(AbstractIntegration):
         self.read_token = rtoken
         self.write_token = wtoken
         #The publish date of the last processed video - UTC timestamp seconds
-        self.last_process_date = last_process_date
+        self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
         self.playlist_feed_ids = []
-        # the url that will be called when a video is finished processing
+        # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
 
         # Does the customer use batch provisioning (i.e. FTP
@@ -4115,8 +4301,8 @@ class BrightcoveIntegration(AbstractIntegration):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
-        # Amount of times we have retried a video submit
-        self.video_submit_retries = video_submit_retries
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
 
     @classmethod
     def get_ovp(cls):
@@ -4126,33 +4312,33 @@ class BrightcoveIntegration(AbstractIntegration):
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id,
-            self.read_token, self.write_token)
+            self.neon_api_key, self.publisher_id, 
+            self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
         ''' Set framewidth of the video resolution to process '''
         self.rendition_frame_width = f_width
 
     def set_video_still_width(self, width):
-        ''' Set framewidth of the video still to be used
+        ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
 class CNNIntegration(AbstractIntegration):
     ''' CNN Integration class '''
 
-    def __init__(self,
+    def __init__(self, 
                  account_id='',
-                 api_key_ref='',
-                 enabled=True,
-                 last_process_date=None):
+                 api_key_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
 
         ''' On every successful processing, the last video processed date is saved '''
 
         super(CNNIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
-        self.last_process_date = last_process_date
-        # user.neon_api_key this integration belongs to
+        self.last_process_date = last_process_date 
+        # user.neon_api_key this integration belongs to 
         self.account_id = account_id
         # the api_key required to make requests to cnn api - external
         self.api_key_ref = api_key_ref
@@ -4160,36 +4346,36 @@ class CNNIntegration(AbstractIntegration):
 class FoxIntegration(AbstractIntegration):
     ''' Fox Integration class '''
 
-    def __init__(self,
+    def __init__(self, 
                  account_id='',
-                 feed_pid_ref='',
-                 enabled=True,
-                 last_process_date=None):
+                 feed_pid_ref='', 
+                 enabled=True, 
+                 last_process_date=None):  
 
         ''' On every successful processing, the last video processed date is saved '''
 
         super(FoxIntegration, self).__init__(None, enabled=enabled)
         # The publish date of the last video we looked at - ISO 8601
-        self.last_process_date = last_process_date
-        # user.account_id this integration belongs to
+        self.last_process_date = last_process_date 
+        # user.account_id this integration belongs to 
         self.account_id = account_id
         # the feed_pid_ref required by the fox api - external
         self.feed_pid_ref = feed_pid_ref
 
-# DEPRECATED use BrightcoveIntegration instead
+# DEPRECATED use BrightcoveIntegration instead 
 class BrightcovePlatform(AbstractPlatform):
     ''' Brightcove Platform/ Integration class '''
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
-
-    def __init__(self, api_key, i_id=None, a_id='', p_id=None,
+    
+    def __init__(self, api_key, i_id=None, a_id='', p_id=None, 
                 rtoken=None, wtoken=None, auto_update=False,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None,
+                oldest_video_allowed=None, 
                 video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
@@ -4200,16 +4386,16 @@ class BrightcovePlatform(AbstractPlatform):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
-        self.auto_update = auto_update
-        #The publish date of the last processed video - UTC timestamp
-        self.last_process_date = last_process_date
+        self.auto_update = auto_update 
+        #The publish date of the last processed video - UTC timestamp 
+        self.last_process_date = last_process_date 
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
         self.playlist_feed_ids = []
-        # the url that will be called when a video is finished processing
+        # the url that will be called when a video is finished processing 
         self.callback_url = callback_url
 
         # Does the customer use batch provisioning (i.e. FTP
@@ -4226,8 +4412,8 @@ class BrightcovePlatform(AbstractPlatform):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
-        # Amount of times we have retried a video submit
-        self.video_submit_retries = video_submit_retries
+        # Amount of times we have retried a video submit 
+        self.video_submit_retries = video_submit_retries 
 
     @classmethod
     def get_ovp(cls):
@@ -4257,7 +4443,7 @@ class BrightcovePlatform(AbstractPlatform):
         self.rendition_frame_width = f_width
 
     def set_video_still_width(self, width):
-        ''' Set framewidth of the video still to be used
+        ''' Set framewidth of the video still to be used 
             when the still is updated in the brightcove account '''
         self.video_still_width = width
 
@@ -4270,15 +4456,15 @@ class BrightcovePlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres:
-            return AbstractPlatform.__name__
-        else:
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
             return BrightcovePlatform.__name__
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
 
-    # TODO(Sunil): Fix this class when Youtube is implemented
+    # TODO(Sunil): Fix this class when Youtube is implemented 
 
     def __init__(self, api_key, i_id=None, a_id='', access_token=None,
                  refresh_token=None,
@@ -4289,13 +4475,13 @@ class YoutubePlatform(AbstractPlatform):
         self.refresh_token = refresh_token
         self.expires = expires
         self.generation_time = None
-        self.valid_until = 0
+        self.valid_until = 0  
 
         #if blob is being created save the time when access token was generated
         if access_token:
             self.valid_until = time.time() + float(expires) - 50
         self.auto_update = auto_update
-
+    
         self.channels = None
 
     @classmethod
@@ -4314,7 +4500,7 @@ class YoutubePlatform(AbstractPlatform):
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
-
+    
     def get_access_token(self, callback):
         ''' Get a valid access token, if not valid -- get new one and set expiry'''
         def access_callback(result):
@@ -4332,7 +4518,7 @@ class YoutubePlatform(AbstractPlatform):
         else:
             #return current token
             callback(self.access_token)
-
+   
     def add_channels(self, callback):
         '''
         Add a list of channels that the user has
@@ -4368,7 +4554,7 @@ class YoutubePlatform(AbstractPlatform):
                 callback(False)
 
         if channel_id is None:
-            playlist_id = self.channels[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+            playlist_id = self.channels[0]["contentDetails"]["relatedPlaylists"]["uploads"] 
             self.get_access_token(atoken_exec)
         else:
             # Not yet supported
@@ -4389,41 +4575,41 @@ class YoutubePlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres:
-            return AbstractPlatform.__name__
-        else:
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
             return YoutubePlatform.__name__
 
 class OoyalaIntegration(AbstractIntegration):
     '''
     OOYALA Integration
     '''
-    def __init__(self,
-                 i_id=None,
-                 a_id='',
-                 p_code=None,
-                 api_key=None,
-                 api_secret=None):
+    def __init__(self, 
+                 i_id=None, 
+                 a_id='', 
+                 p_code=None, 
+                 api_key=None, 
+                 api_secret=None): 
         '''
-        Init ooyala platform
-
-        Partner code, o_api_key & api_secret are essential
-        for api calls to ooyala
+        Init ooyala platform 
+        
+        Partner code, o_api_key & api_secret are essential 
+        for api calls to ooyala 
 
         '''
         super(OoyalaIntegration, self).__init__(i_id)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key
-        self.api_secret = api_secret
-
+        self.api_secret = api_secret 
+ 
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
         return "ooyala_integration"
 
     @classmethod
-    def generate_signature(cls, secret_key, http_method,
+    def generate_signature(cls, secret_key, http_method, 
                     request_path, query_params, request_body=''):
         ''' Generate signature for ooyala requests'''
         signature = secret_key + http_method.upper() + request_path
@@ -4431,31 +4617,31 @@ class OoyalaIntegration(AbstractIntegration):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
-# DEPRECATED use OoyalaIntegration instead
+            return signature 
+    
+# DEPRECATED use OoyalaIntegration instead 
 class OoyalaPlatform(AbstractPlatform):
     '''
     OOYALA Platform
     '''
-    def __init__(self, api_key, i_id=None, a_id='', p_code=None,
-                 o_api_key=None, api_secret=None, auto_update=False):
+    def __init__(self, api_key, i_id=None, a_id='', p_code=None, 
+                 o_api_key=None, api_secret=None, auto_update=False): 
         '''
-        Init ooyala platform
-
-        Partner code, o_api_key & api_secret are essential
-        for api calls to ooyala
+        Init ooyala platform 
+        
+        Partner code, o_api_key & api_secret are essential 
+        for api calls to ooyala 
 
         '''
 
         super(OoyalaPlatform, self).__init__(api_key, i_id)
-
+ 
         self.account_id = a_id
         self.partner_code = p_code
         self.ooyala_api_key = o_api_key
-        self.api_secret = api_secret
-        self.auto_update = auto_update
-
+        self.api_secret = api_secret 
+        self.auto_update = auto_update 
+    
     @classmethod
     def get_ovp(cls):
         ''' return ovp name'''
@@ -4472,9 +4658,9 @@ class OoyalaPlatform(AbstractPlatform):
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
         yield cls._unsubscribe_from_changes_impl(channel)
-
+    
     @classmethod
-    def generate_signature(cls, secret_key, http_method,
+    def generate_signature(cls, secret_key, http_method, 
                     request_path, query_params, request_body=''):
         ''' Generate signature for ooyala requests'''
         signature = secret_key + http_method.upper() + request_path
@@ -4482,8 +4668,8 @@ class OoyalaPlatform(AbstractPlatform):
             signature += key + '=' + value
             signature = base64.b64encode(hashlib.sha256(signature).digest())[0:43]
             signature = urllib.quote_plus(signature)
-            return signature
-
+            return signature 
+    
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -4493,13 +4679,13 @@ class OoyalaPlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres:
-            return AbstractPlatform.__name__
-        else:
+        if options.wants_postgres: 
+            return AbstractPlatform.__name__ 
+        else: 
             return OoyalaPlatform.__name__
 
 #######################
-# Request Blobs
+# Request Blobs 
 ######################
 
 class RequestState(object):
@@ -4511,13 +4697,13 @@ class RequestState(object):
     FINALIZING = "finalizing" # In the process of finalizing the request
     REQUEUED   = "requeued"
     FINISHED   = "finished"
-    SERVING    = "serving" # Thumbnails are ready to be served
+    SERVING    = "serving" # Thumbnails are ready to be served 
     INT_ERROR  = "internal_error" # Neon had some code error
-    CUSTOMER_ERROR = "customer_error" # customer request had a partial error
+    CUSTOMER_ERROR = "customer_error" # customer request had a partial error 
     REPROCESS  = "reprocess" #new state added to support clean reprocessing
 
     # The following states are all DEPRECATED
-    SERVING_AND_ACTIVE = "serving_active" # DEPRECATED
+    SERVING_AND_ACTIVE = "serving_active" # DEPRECATED    
     FAILED     = "failed" # DEPRECATED in favor of INT_ERROR, CUSTOMER_ERROR
     ACTIVE     = "active" # DEPRECATED. Thumbnail selected by editor; Only releavant to BC
 
@@ -4525,7 +4711,7 @@ class ExternalRequestState(object):
     '''State enums for the request state that will be sent to the user.'''
     UNKNOWN = 'unknown' # We don't know the state
     PROCESSING = 'processing' # The object is being analyzed
-    PROCESSED = 'processed' # The object has been analyzed
+    PROCESSED = 'processed' # The object has been analyzed 
     SERVING = 'serving' # The object is available for serving at scale
     FAILED = 'failed' # There was an error processing the object
 
@@ -4546,7 +4732,7 @@ class ExternalRequestState(object):
             RequestState.INT_ERROR : ExternalRequestState.FAILED,
             RequestState.CUSTOMER_ERROR : ExternalRequestState.FAILED}
         return state_map.get(state, ExternalRequestState.UNKNOWN)
-
+            
 
 class CallbackState(object):
     '''State enums for callbacks being sent.'''
@@ -4558,10 +4744,10 @@ class NeonApiRequest(NamespacedStoredObject):
     '''
     Instance of this gets created during request creation
     (Neon web account, RSS Cron)
-    Json representation of the class is saved in the server queue and redis
+    Json representation of the class is saved in the server queue and redis  
     '''
 
-    def __init__(self, job_id, api_key=None, vid=None, title=None, url=None,
+    def __init__(self, job_id, api_key=None, vid=None, title=None, url=None, 
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
@@ -4574,7 +4760,7 @@ class NeonApiRequest(NamespacedStoredObject):
         super(NeonApiRequest, self).__init__(
             self._generate_subkey(job_id, api_key))
         self.job_id = job_id
-        self.api_key = api_key
+        self.api_key = api_key 
         self.video_id = vid #external video_id
         self.video_title = title
         self.video_url = url
@@ -4584,13 +4770,13 @@ class NeonApiRequest(NamespacedStoredObject):
         self.callback_state = callback_state
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
-
+        
         self.integration_type = integration_type
         self.integration_id = integration_id
         self.default_thumbnail = default_thumbnail # URL of a default thumb
         self.external_thumbnail_id = external_thumbnail_id
 
-        # The job response. Should be a dictionary defined by
+        # The job response. Should be a dictionary defined by 
         # VideoCallbackResponse
         self.response = {}
 
@@ -4598,8 +4784,8 @@ class NeonApiRequest(NamespacedStoredObject):
         self.api_method = None
         self.api_param  = None
         self.publish_date = publish_date # ISO date format of when video is published
-
-        # field used to store error message on partial error, explict error or
+       
+        # field used to store error message on partial error, explict error or 
         # additional information about the request
         self.msg = None
 
@@ -4662,14 +4848,14 @@ class NeonApiRequest(NamespacedStoredObject):
             return obj
 
     def get_default_thumbnail_type(self):
-        '''Return the thumbnail type that should be used for a default
+        '''Return the thumbnail type that should be used for a default 
         thumbnail in the request.
         '''
         return ThumbnailType.DEFAULT
-
+  
     def set_api_method(self, method, param):
-        ''' 'set api method and params '''
-
+        ''' 'set api method and params ''' 
+        
         self.api_method = method
         self.api_param  = param
 
@@ -4682,8 +4868,8 @@ class NeonApiRequest(NamespacedStoredObject):
         ''' get instance '''
         rv = yield super(NeonApiRequest, cls).get(cls._generate_subkey(job_id, api_key),
                                                   log_missing=log_missing,
-                                                  async=True)
-        raise tornado.gen.Return(rv)
+                                                  async=True) 
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -4696,9 +4882,9 @@ class NeonApiRequest(NamespacedStoredObject):
         rv = yield super(NeonApiRequest, cls).get_many(
                           [cls._generate_subkey(*k) for k in keys],
                           log_missing=log_missing,
-                          func_level_wpg=func_level_wpg,
+                          func_level_wpg=func_level_wpg, 
                           async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_all(cls):
@@ -4707,15 +4893,15 @@ class NeonApiRequest(NamespacedStoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def modify(cls, job_id, api_key, func, create_missing=False,
+    def modify(cls, job_id, api_key, func, create_missing=False, 
                callback=None):
         rv = yield super(NeonApiRequest, cls).modify(
                 cls._generate_subkey(job_id, api_key),
                 func,
                 create_missing=create_missing,
-                callback=callback,
+                callback=callback, 
                 async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -4729,9 +4915,9 @@ class NeonApiRequest(NamespacedStoredObject):
                     [cls._generate_subkey(*k) for k in keys],
                     func,
                     create_missing=create_missing,
-                    callback=callback,
+                    callback=callback, 
                     async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -4739,21 +4925,21 @@ class NeonApiRequest(NamespacedStoredObject):
     def delete(cls, job_id, api_key, callback=None):
         rv = yield super(NeonApiRequest, cls).delete(
                 cls._generate_subkey(job_id, api_key),
-                callback=callback,
+                callback=callback, 
                 async=True)
-        raise tornado.gen.Return(rv)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_many(cls, keys, callback=None):
         rv = yield super(NeonApiRequest, cls).delete_many(
-                [cls._generate_subkey(job_id, api_key) for
+                [cls._generate_subkey(job_id, api_key) for 
                 job_id, api_key in keys],
-                callback=callback,
+                callback=callback, 
                 async=True)
-        raise tornado.gen.Return(rv)
-
+        raise tornado.gen.Return(rv) 
+    
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_default_thumbnail(self, cdn_metadata=None):
@@ -4777,7 +4963,7 @@ class NeonApiRequest(NamespacedStoredObject):
 
         # Check to see if there is already a thumbnail that the system
         # knows about (and thus was already uploaded)
-
+        
         video = yield tornado.gen.Task(
             VideoMetadata.get,
             InternalVideoID.generate(self.api_key,
@@ -4797,7 +4983,7 @@ class NeonApiRequest(NamespacedStoredObject):
                 if thumb_url in thumb.urls:
                     # The exact thumbnail is already there
                     return
-
+            
                 if thumb.rank < min_rank:
                     min_rank = thumb.rank
         cur_rank = min_rank - 1
@@ -4813,7 +4999,7 @@ class NeonApiRequest(NamespacedStoredObject):
                                                cdn_metadata,
                                                save_objects=True,
                                                async=True)
-        raise tornado.gen.Return(thumb)
+        raise tornado.gen.Return(thumb) 
         # Push a thumbnail serving directive to Kinesis so that it can
         # be served quickly.
 
@@ -4851,7 +5037,7 @@ class NeonApiRequest(NamespacedStoredObject):
                 response.set_processing_state(self.state)
                 response.job_id = self.job_id
                 response.video_id = self.video_id
-
+            
                 # Send the callback
                 self.response = response.to_dict()
                 send_kwargs = send_kwargs or {}
@@ -4876,7 +5062,7 @@ class NeonApiRequest(NamespacedStoredObject):
                     if cb_response.error:
                         statemon.state.define_and_increment(
                             'callback_error.%s' % self.api_key)
-
+                                                            
                         statemon.state.increment('callback_error')
                         _log.warn('Error when sending callback to %s for '
                                   'video %s: %s' %
@@ -4885,7 +5071,7 @@ class NeonApiRequest(NamespacedStoredObject):
                         new_callback_state = CallbackState.ERROR
                     else:
                        statemon.state.increment('sucessful_callbacks')
-                       new_callback_state = CallbackState.SUCESS
+                       new_callback_state = CallbackState.SUCESS 
                 else:
                     statemon.state.increment('sucessful_callbacks')
                     new_callback_state = CallbackState.SUCESS
@@ -4913,11 +5099,11 @@ class BrightcoveApiRequest(NeonApiRequest):
         self.read_token = rtoken
         self.write_token = wtoken
         self.publisher_id = pid
-        self.integration_id = i_id
+        self.integration_id = i_id 
         self.autosync = False
-
+     
     def get_default_thumbnail_type(self):
-        '''Return the thumbnail type that should be used for a default
+        '''Return the thumbnail type that should be used for a default 
         thumbnail in the request.
         '''
         return ThumbnailType.BRIGHTCOVE
@@ -4936,11 +5122,11 @@ class OoyalaApiRequest(NeonApiRequest):
             default_thumbnail=default_thumbnail)
         self.oo_api_key = oo_api_key
         self.oo_secret_key = oo_secret_key
-        self.integration_id = i_id
+        self.integration_id = i_id 
         self.autosync = False
 
     def get_default_thumbnail_type(self):
-        '''Return the thumbnail type that should be used for a default
+        '''Return the thumbnail type that should be used for a default 
         thumbnail in the request.
         '''
         return ThumbnailType.OOYALA
@@ -4964,20 +5150,20 @@ class YoutubeApiRequest(NeonApiRequest):
         self.expiry = expiry
 
     def get_default_thumbnail_type(self):
-        '''Return the thumbnail type that should be used for a default
+        '''Return the thumbnail type that should be used for a default 
         thumbnail in the request.
         '''
         return ThumbnailType.YOUTUBE
 
 ###############################################################################
 ## Thumbnail store T_URL => TID => Metadata
-###############################################################################
+############################################################################### 
 
 class ThumbnailID(AbstractHashGenerator):
     '''
     Static class to generate thumbnail id
 
-    _input: String or Image stream.
+    _input: String or Image stream. 
 
     Thumbnail ID is: <internal_video_id>_<md5 MD5 hash of image data>
     '''
@@ -4990,7 +5176,7 @@ class ThumbnailID(AbstractHashGenerator):
     @classmethod
     def is_valid_key(cls, key):
         return len(key.split('_')) == 3
-
+        
 
 class ThumbnailMD5(AbstractHashGenerator):
     '''Static class to generate the thumbnail md5.
@@ -4998,7 +5184,7 @@ class ThumbnailMD5(AbstractHashGenerator):
     _input: String or Image stream.
     '''
     salt = 'Thumbn@il'
-
+    
     @staticmethod
     def generate_from_string(_input):
         ''' generate hash from string '''
@@ -5016,7 +5202,7 @@ class ThumbnailMD5(AbstractHashGenerator):
 
     @staticmethod
     def generate(_input):
-        ''' generate hash method '''
+        ''' generate hash method ''' 
         if isinstance(_input, basestring):
             return ThumbnailMD5.generate_from_string(_input)
         else:
@@ -5032,25 +5218,25 @@ class ThumbnailServingURLs(NamespacedStoredObject):
     thumbnail_id -> { (width, height) -> url }
 
     or, instead of a full url map, there can be a base_url and a list of sizes.
-    In that case, the full url would be generated by
+    In that case, the full url would be generated by 
     <base_url>/FNAME_FORMAT % (thumbnail_id, width, height)
-    '''
+    '''    
     FNAME_FORMAT = "neontn%s_w%s_h%s.jpg"
-    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' %
+    FNAME_REGEX = ('neontn(%s)_w([0-9]+)_h([0-9]+)\.jpg' % 
                    ThumbnailID.VALID_REGEX)
 
     def __init__(self, thumbnail_id, size_map=None, base_url=None, sizes=None):
         super(ThumbnailServingURLs, self).__init__(thumbnail_id)
         self.size_map = size_map or {}
-
+        
         self.base_url = base_url
         self.sizes = sizes or set([]) # List of (width, height)
 
     def __eq__(self, other):
         '''Sets can't do cmp, so we need to overright so that == and != works.
         '''
-        if ((other is None) or
-            (type(other) != type(self)) or
+        if ((other is None) or 
+            (type(other) != type(self)) or 
             (self.__dict__.keys() != other.__dict__.keys())):
             return False
         for k, v in self.__dict__.iteritems():
@@ -5063,7 +5249,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
 
     def __len__(self):
         return len(self.size_map) + len(self.sizes)
-
+    
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -5138,7 +5324,7 @@ class ThumbnailServingURLs(NamespacedStoredObject):
         if obj:
             # Convert the sizes into tuples and a set
             obj.sizes = set((tuple(x) for x in obj.sizes))
-
+            
             # Load in the url entries into the object
             size_map = obj.size_map
             obj.size_map = {}
@@ -5151,28 +5337,28 @@ class ThumbnailServingURLs(NamespacedStoredObject):
                 obj.add_serving_url(v, width, height)
             return obj
 
-
+        
 class ThumbnailURLMapper(NamespacedStoredObject):
     '''
-    Schema to map thumbnail url to thumbnail ID.
+    Schema to map thumbnail url to thumbnail ID. 
 
     _input - thumbnail url ( key ) , tid - string/image, converted to thumbnail ID
-            if imdata given, then generate tid
-
+            if imdata given, then generate tid 
+    
     THUMBNAIL_URL => (tid)
-
+    
     # NOTE: This has been deprecated and hence not being updated to be a stored
     object
     TODO: Remove this object. It is no longer needed
     '''
-
+    
     def __init__(self, thumbnail_url, tid, imdata=None):
         self.key = thumbnail_url
         if not imdata:
             self.value = tid
         else:
-            #TODO: Is this imdata really needed ?
-            raise #self.value = ThumbnailID.generate(imdata)
+            #TODO: Is this imdata really needed ? 
+            raise #self.value = ThumbnailID.generate(imdata) 
 
     def to_json(self):
         # Actually not json because we are only storing the value
@@ -5214,13 +5400,13 @@ class ThumbnailMetadata(StoredObject):
         self.external_id = external_id # External id if appropriate
         self.urls = urls or []  # List of all urls associated with single image
         self.created_time = created or datetime.datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S")# Timestamp when thumbnail was created
-        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with
+            "%Y-%m-%d %H:%M:%S")# Timestamp when thumbnail was created 
+        self.enabled = enabled #boolen, indicates if this thumbnail can be displayed/ tested with 
         self.chosen = chosen #boolean, indicates this thumbnail is chosen by the user as the primary one
         self.width = width
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
-        self.rank = 0 if not rank else rank  #int
+        self.rank = 0 if not rank else rank  #int 
         self.model_score = model_score #string
         self.model_version = model_version #string
         self.frameno = frameno #int Frame Number
@@ -5235,11 +5421,11 @@ class ThumbnailMetadata(StoredObject):
             self.do_smart_crop = True
 
         # DEPRECATED: Use the ThumbnailStatus table instead
-        self.serving_frac = serving_frac
+        self.serving_frac = serving_frac 
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
-
+        
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
@@ -5267,17 +5453,17 @@ class ThumbnailMetadata(StoredObject):
     def get_account_id(self):
         ''' get the internal account id. aka api key '''
         return self.key.split('_')[0]
-
+    
     def get_metadata(self):
         ''' get a dictionary of the thumbnail metadata
 
         This function is deprecated and is kept only for backwards compatibility
         '''
         return self.to_dict()
-
+    
     def to_dict_for_video_response(self):
         ''' to dict for video response object
-            replace key to thumbnail_id
+            replace key to thumbnail_id 
         '''
         new_dict = copy.copy(self.__dict__)
         new_dict["thumbnail_id"] = new_dict.pop("key")
@@ -5293,11 +5479,11 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is
+                       images. If this is None, it is looked up, which is 
                        slow. If a source_crop is requested, the image is also
                        cropped here.
-
-        '''
+        
+        '''        
         image = PILImageUtils.convert_to_rgb(image)
         # Update the image metadata
         self.width = image.size[0]
@@ -5307,19 +5493,19 @@ class ThumbnailMetadata(StoredObject):
         # Convert the image to JPG
         fmt = 'jpeg'
         filestream = StringIO()
-        image.save(filestream, fmt, quality=90)
+        image.save(filestream, fmt, quality=90) 
         filestream.seek(0)
         imgdata = filestream.read()
 
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
-        # Host the primary copy of the image
+        # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload(image, self.key, async=True,
+        s3_url_list = yield primary_hoster.upload(image, self.key, async=True, 
                                         do_source_crop=self.do_source_crop,
                                         do_smart_crop=self.do_smart_crop)
-
+        
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -5331,7 +5517,7 @@ class ThumbnailMetadata(StoredObject):
         # Host the image on the CDN
         if cdn_metadata is None:
             # Lookup the cdn metadata
-            if video_info is None:
+            if video_info is None: 
                 video_info = yield tornado.gen.Task(VideoMetadata.get,
                                                     self.video_id)
 
@@ -5342,15 +5528,15 @@ class ThumbnailMetadata(StoredObject):
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
-
+        
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, s3_url, async=True,
+        yield [x.upload(image, self.key, s3_url, async=True, 
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
-        '''Given a thumbnail id, retrieves the internal video id
+        '''Given a thumbnail id, retrieves the internal video id 
             asscociated with thumbnail
         '''
 
@@ -5374,17 +5560,17 @@ class ThumbnailMetadata(StoredObject):
         new_thumb_obj = None; old_thumb_obj = None
         for thumb in thumbnails:
             #set new tid as chosen
-            if thumb.key == new_tid:
+            if thumb.key == new_tid: 
                 thumb.chosen = True
-                new_thumb_obj = thumb
+                new_thumb_obj = thumb 
             else:
                 #set chosen=False for old tid
                 if thumb.chosen == True:
-                    thumb.chosen = False
-                    old_thumb_obj = thumb
+                    thumb.chosen = False 
+                    old_thumb_obj = thumb 
 
         #return only the modified thumbnail objs
-        return new_thumb_obj, old_thumb_obj
+        return new_thumb_obj, old_thumb_obj 
 
     @classmethod
     @utils.sync.optional_sync
@@ -5393,9 +5579,9 @@ class ThumbnailMetadata(StoredObject):
         #yield tornado.gen.Task(ThumbnailStatus.delete, key)
         #yield tornado.gen.Task(ThumbnailServingURLs.delete, key)
         #yield tornado.gen.Task(ThumbnailMetadata.delete, key)
-        yield ThumbnailStatus.delete(key, async=True)
+        yield ThumbnailStatus.delete(key, async=True) 
         yield ThumbnailServingURLs.delete(key, async=True)
-        yield ThumbnailMetadata.delete(key, async=True)
+        yield ThumbnailMetadata.delete(key, async=True) 
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
@@ -5421,7 +5607,7 @@ class ThumbnailStatus(DefaultedStoredObject):
 
     def set_serving_frac(self, serving_frac):
         '''Sets the serving fraction. Returns true if it is new.'''
-        if (self.serving_frac is None or
+        if (self.serving_frac is None or 
             abs(serving_frac - self.serving_frac) > 1e-3):
             self.serving_frac = serving_frac
             self.serving_history.append(
@@ -5429,8 +5615,8 @@ class ThumbnailStatus(DefaultedStoredObject):
                  serving_frac))
             return True
         return False
-
-    def get_video_id(self):
+            
+    def get_video_id(self): 
         splits = self.key.split('_')
         return '_'.join([splits[1], splits[2]])
 
@@ -5439,6 +5625,68 @@ class ThumbnailStatus(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ThumbnailStatus.__name__
+
+class Verification(StoredObject):
+    '''
+    Class schema for Verification
+
+    Keyed by email
+    '''
+    def __init__(self, email, token=None, extra_info=None): 
+        super(Verification, self).__init__(email)
+        
+        # the special token that is used to verify the account
+        self.token = token or uuid.uuid1().hex  
+
+        # extra_info is a json store, that could store any 
+        # number of things, but is mostly used for objects 
+        # that may need to be saved after verification is 
+        # complete 
+        self.extra_info = extra_info or {}
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Verification.__name__
+
+class AccountLimits(StoredObject):
+    '''
+    Class schema for AccountLimits
+
+    Keyed by account_id(api_key)
+    '''
+    def __init__(self, 
+                 account_id, 
+                 video_posts=0, 
+                 max_video_posts=10, 
+                 refresh_time_video_posts=datetime.datetime(2050,1,1), 
+                 seconds_to_refresh_video_posts=2592000.0,
+                 max_video_size=900.0):
+ 
+        super(AccountLimits, self).__init__(account_id)
+        
+        # the number of video posts this account has made 
+        self.video_posts = video_posts 
+         
+        # the maximum amount of video posts the account is allowed 
+        self.max_video_posts = max_video_posts 
+
+        # when the video_posts counter will be reset 
+        self.refresh_time_video_posts = refresh_time_video_posts.strftime(
+                            "%Y-%m-%d %H:%M:%S.%f") 
+
+        # amount of seconds to add to now() when resetting the timer 
+        self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+
+        # maximum video length we will process in seconds 
+        self.max_video_size = max_video_size 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return AccountLimits.__name__
 
 class VideoMetadata(StoredObject):
     '''
@@ -5449,7 +5697,7 @@ class VideoMetadata(StoredObject):
     '''
 
     '''  Keyed by API_KEY + VID (internal video id) '''
-
+    
     def __init__(self, video_id, tids=None, request_id=None, video_url=None,
                  duration=None, vid_valence=None, model_version=None,
                  i_id=None, frame_size=None, testing_enabled=True,
@@ -5457,11 +5705,11 @@ class VideoMetadata(StoredObject):
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
                  publish_date=None):
-        super(VideoMetadata, self).__init__(video_id)
+        super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
-        self.url = video_url
+        self.url = video_url 
         self.duration = duration # in seconds
-        self.video_valence = vid_valence
+        self.video_valence = vid_valence 
         self.model_version = model_version
         self.job_id = request_id
         self.integration_id = i_id
@@ -5475,9 +5723,9 @@ class VideoMetadata(StoredObject):
         self.experiment_value_remaining = experiment_value_remaining
 
         # Will thumbnails for this video be served by our system?
-        self.serving_enabled = serving_enabled
-
-        # Serving URL (ISP redirect URL)
+        self.serving_enabled = serving_enabled 
+        
+        # Serving URL (ISP redirect URL) 
         # NOTE: This is set by mastermind by calling get_serving_url() method
         # after the request state has been changed to SERVING
         self.serving_url = None
@@ -5494,7 +5742,8 @@ class VideoMetadata(StoredObject):
 
     @classmethod
     def _baseclass_name(cls):
-        '''Returns the class name of the base class of the hierarchy.'''
+        '''Returns the class name of the base class of the hierarchy.
+        '''
         return VideoMetadata.__name__
 
     @classmethod
@@ -5534,19 +5783,19 @@ class VideoMetadata(StoredObject):
 
         Inputs:
         @thumb: ThumbnailMetadata object. Should be incomplete
-                because image based data will be added along with
+                because image based data will be added along with 
                 information about the video. The object will be updated with
                 the proper key and other information
         @image: PIL Image
         @cdn_metadata: A list of CDNHostingMetadata objects for how to upload
-                       the images. If this is None, it is looked up, which is
+                       the images. If this is None, it is looked up, which is 
                        slow.
-        @save_objects: If true, the database is updated. Otherwise,
+        @save_objects: If true, the database is updated. Otherwise, 
                        just this object is updated along with the thumbnail
                        object.
         '''
         thumb.video_id = self.key
-        yield thumb.add_image_data(image, self, cdn_metadata,
+        yield thumb.add_image_data(image, self, cdn_metadata, 
                                    async=True)
 
         # TODO(mdesnoyer): Use a transaction to make sure the changes
@@ -5574,10 +5823,10 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(thumb)
 
-
+    
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_image_from_url(self, image_url):
+    def download_image_from_url(self, image_url): 
         try:
             image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
@@ -5596,31 +5845,31 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_and_add_thumbnail(self,
-                                   thumb=None,
+    def download_and_add_thumbnail(self, 
+                                   thumb=None, 
                                    image_url=None,
                                    cdn_metadata=None,
-                                   image=None,
-                                   external_thumbnail_id=None,
+                                   image=None, 
+                                   external_thumbnail_id=None, 
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata
 
         Inputs:
         @thumb: ThumbnailMetadata object. Should be incomplete
-                because image based data will be added along with
+                because image based data will be added along with 
                 information about the video. The object will be updated with
                 the proper key and other information
         @image_url: url of the image to download
         @cdn_metadata: A list CDNHostingMetadata objects for how to upload the
                        images. If this is None, it is looked up, which is slow.
-        @save_objects: If true, the database is updated. Otherwise,
+        @save_objects: If true, the database is updated. Otherwise, 
                        just this object is updated along with the thumbnail
                        object.
         '''
-        if image is None:
-            image = yield self.download_image_from_url(image_url, async=True)
-        if thumb is None:
+        if image is None: 
+            image = yield self.download_image_from_url(image_url, async=True) 
+        if thumb is None: 
             thumb = ThumbnailMetadata(None,
                           ttype=ThumbnailType.DEFAULT,
                           external_id=external_thumbnail_id)
@@ -5662,9 +5911,9 @@ class VideoMetadata(StoredObject):
                 request_keys.append(rkey)
                 request_idx.append(cur_idx)
             cur_idx += 1
-
-        #requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)
-        requests = yield NeonApiRequest.get_many(request_keys, async=True)
+          
+        #requests = yield tornado.gen.Task(NeonApiRequest.get_many, request_keys)  
+        requests = yield NeonApiRequest.get_many(request_keys, async=True)  
         for api_request, idx in zip(requests, request_idx):
             retval[idx] = api_request
         raise tornado.gen.Return(retval)
@@ -5674,11 +5923,11 @@ class VideoMetadata(StoredObject):
     def get_serving_url(self, staging=False, save=True):
         '''
         Get the serving URL of the video. If self.serving_url is not
-        set, fetch the neon publisher id (TAI) and save the video object
+        set, fetch the neon publisher id (TAI) and save the video object 
         with the serving_url set
-
-        NOTE: any call to this function will return a valid serving url.
-        multiple calls to this function may or may not return the same URL
+        
+        NOTE: any call to this function will return a valid serving url. 
+        multiple calls to this function may or may not return the same URL 
 
         @save : If true, the url is saved to the database
         '''
@@ -5707,21 +5956,21 @@ class VideoMetadata(StoredObject):
                 yield tornado.gen.Task(VideoMetadata.modify, self.key,
                                        _update_serving_url)
         raise tornado.gen.Return(serving_url)
-
+        
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def image_available_in_isp(self):
         try:
             neon_user_account = yield NeonUserAccount.get(
-                                          self.get_account_id(),
+                                          self.get_account_id(), 
                                           async=True)
             if neon_user_account is None:
                 msg = ('Cannot find the neon user account %s for video %s. '
-                       'This should never happen' %
+                       'This should never happen' % 
                        (self.get_account_id(), self.key))
                 _log.error(msg)
                 raise DBStateError(msg)
-
+                
             request = tornado.httpclient.HTTPRequest(
                 'http://%s/v1/video?%s' % (
                     options.isp_host,
@@ -5739,9 +5988,9 @@ class VideoMetadata(StoredObject):
                 else:
                     _log.debug('Image not available in ISP yet.')
                 raise tornado.gen.Return(False)
-
+                
             raise tornado.gen.Return(True)
-        except tornado.httpclient.HTTPError as e:
+        except tornado.httpclient.HTTPError as e: 
             _log.error('Unexpected response looking up video %s on '
                        'isp: %s' % (self.key, e))
 
@@ -5751,15 +6000,15 @@ class VideoMetadata(StoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_related_data(cls, key):
-        vmeta = yield VideoMetadata.get(key, async=True)
+        vmeta = yield VideoMetadata.get(key, async=True) 
         if vmeta is None:
             # Nothing to delete
             return
-
+        
         yield VideoStatus.delete(key, async=True)
 
         yield NeonApiRequest.delete(vmeta.job_id,
-                                    vmeta.get_account_id(),
+                                    vmeta.get_account_id(), 
                                     async=True)
 
         for tid in vmeta.thumbnail_ids:
@@ -5767,6 +6016,104 @@ class VideoMetadata(StoredObject):
 
         yield VideoMetadata.delete(key, async=True)
 
+    @classmethod 
+    @tornado.gen.coroutine
+    def search_videos(cls, 
+                      account_id=None, 
+                      since=None,
+                      until=None, 
+                      limit=25):
+
+        """Does a basic search over the videometadatas in the DB 
+
+           account_id : if specified will only search videos for that account, 
+                        defaults to None, meaning it will search all accounts 
+                        for videos 
+           since      : if specified will find videos since this date, 
+                        defaults to None, meaning it will grab the 25 most 
+                        recent videos 
+           until      : if specified will find videos until this date, 
+                        defaults to None
+           limit      : if specified it limits the search to this many 
+                        videos, defaults to 25
+
+           Returns : a dictionary of the following 
+               videos - the videos that the search returned 
+               since_time - this is the time of the most recent video that 
+                            the search returned, it's mainly here to prevent 
+                            consumers from having to do this 
+        """ 
+        where_clause = "" 
+        videos = []
+        since_time = None 
+        until_time = None  
+        wc_params = []
+        rv = {}  
+        
+        where_clause = "_data->'job_id' != 'null'"
+        order_clause = "ORDER BY created_time DESC" 
+        if since: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot 
+            order_clause = "ORDER BY created_time ASC" 
+            wc_params.append(since) 
+
+        if until: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " created_time < to_timestamp(%s)::timestamp" 
+            wc_params.append(until) 
+        
+        if account_id: 
+            if where_clause: 
+                where_clause += " AND "
+            where_clause += " _data->>'key' LIKE %s"
+            wc_params.append(account_id+'_%')
+ 
+        results = yield cls.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg" ], 
+                    where_clause, 
+                    wc_params=wc_params, 
+                    limit_clause="LIMIT %d" % limit, 
+     		    order_clause=order_clause,
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        def _get_time(result): 
+            # need micros here 
+            created_time = result['created_time_pg']
+            cc_tt = time.mktime(created_time.timetuple())
+            _time = (cc_tt + created_time.microsecond / 1000000.0)
+            return _time 
+        
+        try:   
+            do_reverse = False 
+            if since: 
+                since_time = _get_time(results[-1])
+                until_time = _get_time(results[0])
+                do_reverse = True
+            else:  
+                since_time = _get_time(results[0]) 
+                until_time = _get_time(results[-1]) 
+        except (KeyError,IndexError): 
+            pass
+        
+        for result in results:
+            obj = cls._create(result['_data']['key'], result)
+            videos.append(obj)
+
+        if do_reverse: 
+            videos.reverse() 
+
+        rv['videos'] = videos 
+        rv['since_time'] = since_time
+        rv['until_time'] = until_time
+        raise tornado.gen.Return(rv) 
+         
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 
@@ -5801,10 +6148,10 @@ class VideoStatus(DefaultedStoredObject):
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        return VideoStatus.__name__
+        return VideoStatus.__name__ 
 
 class AbstractJsonResponse(object):
-
+    
     def to_dict(self):
         return self.__dict__
 
@@ -5823,14 +6170,14 @@ class AbstractJsonResponse(object):
         return retval
 
 class VideoResponse(AbstractJsonResponse):
-    ''' VideoResponse object that contains list of thumbs for a video
-        # NOTE: this obj is only used to format in to a json response
+    ''' VideoResponse object that contains list of thumbs for a video 
+        # NOTE: this obj is only used to format in to a json response 
     '''
     def __init__(self, vid, job_id, status, i_type, i_id, title, duration,
             pub_date, cur_tid, thumbs, abtest=True, winner_thumbnail=None,
             serving_url=None):
         self.video_id = vid # External video id
-        self.job_id = job_id
+        self.job_id = job_id 
         self.status = status
         self.integration_type = i_type
         self.integration_id = i_id
@@ -5838,8 +6185,8 @@ class VideoResponse(AbstractJsonResponse):
         self.duration = duration
         self.publish_date = pub_date
         self.current_thumbnail = cur_tid
-        #list of ThumbnailMetdata dicts
-        self.thumbnails = thumbs if thumbs else []
+        #list of ThumbnailMetdata dicts 
+        self.thumbnails = thumbs if thumbs else [] 
         self.abtest = abtest
         self.winner_thumbnail = winner_thumbnail
         self.serving_url = serving_url
@@ -5864,7 +6211,7 @@ class VideoCallbackResponse(AbstractJsonResponse):
     def set_processing_state(self, internal_state):
         self.processing_state = ExternalRequestState.from_internal_state(
             internal_state)
-
+    
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
     # to the server. nifty eh?
