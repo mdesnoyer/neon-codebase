@@ -7,25 +7,26 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
+from cStringIO import StringIO
 from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
-from cStringIO import StringIO
+from cvutils.imageutils import PILImageUtils
 import datetime
 import integrations.brightcove
 import json
 import logging
 from mock import patch, MagicMock
 import multiprocessing
-import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
+import test_utils.redis
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
 import unittest
-from cvutils.imageutils import PILImageUtils
-from utils.options import define, options
 import utils.neon
+from utils.options import define, options
+
 
 class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -119,42 +120,6 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
                   }
                 }
                 )
-
-        # Make sure no image was uploaded
-        self.assertEquals(self.im_download_mock.call_count, 0)
-        self.assertEquals(self.cdn_mock.call_count, 0)
-
-    @tornado.testing.gen_test
-    def test_convert_bc_thumb_type(self):
-        ThumbnailMetadata('acct1_v1_bc1', 'acct1_v1',
-                          ['http://bc.com/vid_still.jpg'],
-                          ttype=ThumbnailType.BRIGHTCOVE,
-                          rank=1).save()
-
-        yield self.integration.submit_one_video_object(
-            { 'id' : 'v1',
-              'length' : 100,
-              'FLVURL' : 'http://video.mp4',
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : None,
-                  'remoteUrl' : None
-              },
-              'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
-              'thumbnail' : {
-                  'id' : 123456,
-                  'referenceId' : None,
-                  'remoteUrl' : None
-                  }
-                  }
-            )
-
-        # Make sure the type got updated
-        thumb = ThumbnailMetadata.get('acct1_v1_bc1')
-        self.assertEquals(thumb.type, ThumbnailType.DEFAULT)
-        self.assertEquals(thumb.external_id, 'still_id')
-        self.assertEquals(thumb.rank, 1)
 
         # Make sure no image was uploaded
         self.assertEquals(self.im_download_mock.call_count, 0)
