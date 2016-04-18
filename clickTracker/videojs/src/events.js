@@ -1,8 +1,34 @@
 // events.js
 // List of usable videojs events associated to a particular task
-
 exports.ads = [
-    'ads-request', 'ads-load', 'ads-ad-started', 'ads-ad-ended', 'ads-pause', 'ads-play', 'ads-first-quartile', 'ads-midpoint', 'ads-third-quartile', 'ads-click', 'ads-volumechange', 'ads-pod-started', 'ads-pod-ended', 'ads-allpods-completed', 'ima3-ready', 'contentupdate', 'readyforpreroll', 'contentplayback', 'adtimeout', 'contentended', 'contentupdate', 'contentplayback', 'adsready', 'adscanceled', 'adstart', 'adend', 'ima3-started', 'ima3-completed'
+    'ads-request',
+    'ads-load',
+    'ads-ad-started',
+    'ads-ad-ended',
+    'ads-pause',
+    'ads-play',
+    'ads-first-quartile',
+    'ads-midpoint',
+    'ads-third-quartile',
+    'ads-click',
+    'ads-volumechange',
+    'ads-pod-started',
+    'ads-pod-ended',
+    'ads-allpods-completed',
+    'ima3-ready',
+    'contentupdate',
+    'readyforpreroll',
+    'contentplayback',
+    'adtimeout',
+    'contentended',
+    'contentupdate',
+    'contentplayback',
+    'adsready',
+    'adscanceled',
+    'adstart',
+    'adend',
+    'ima3-started',
+    'ima3-completed'
 ];
 /**
   For reference, ad events
@@ -22,8 +48,10 @@ exports.ads = [
      ads-pod-ended	The last ad in a linear ad pod (a sequenced group of ads) has finished.
      ads-allpods-completed	All linear ads have finished playing.
      // From videojs-contrib-ads doc
-     contentupdate (EVENT) — Fires when a new content video has been assigned to the player, so your integration can update its ad inventory. NOTE: This will NOT fire while your ad integration is playing a linear Ad.
-     readyforpreroll (EVENT) — Fires when a content video is about to play for the first time, so your integration can indicate that it wants to play a preroll.
+     contentupdate (EVENT) — Fires when a new content video has been assigned to the player,
+     so your integration can update its ad inventory. NOTE: This will NOT fire while your ad integration is playing a linear Ad.
+     readyforpreroll (EVENT) — Fires when a content video is about to play for the first time,
+     so your integration can indicate that it wants to play a preroll.
      contentplayback
      // From ads contrib source
      // events emitted by ad plugin
