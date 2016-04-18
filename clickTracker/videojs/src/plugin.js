@@ -1,9 +1,9 @@
+/* jslint todo: true */
 'use strict';
 
 import videojs from 'video.js';
 import reqwest from 'reqwest';
 import printf from 'printf';
-//import ads from './events';
 
 // TODO consider throttling
 // TODO Implement for many-video-player pages
@@ -13,17 +13,17 @@ import printf from 'printf';
 // TODO implement pcount
 // TODO review flash js bridge
 
-// Reference to neon plugin after player initialized 
-var neon;
+// Reference to neon plugin after player initialized
+let neon;
 
 // Tracking defaults for the plugin
 const defaults = {
 
     // Default Neon api endpoint
-    'trackUrl': 'http://tracker.neon-images.com/v2/track',
+    trackUrl: 'http://tracker.neon-images.com/v2/track',
 
     // Default events to remote log to Neon
-    'trackEvents': [
+    trackEvents: [
         'image_load',
         'image_view',
         'image_click',
@@ -34,10 +34,10 @@ const defaults = {
     ],
 
     // Interval in percent to send video play percent
-    'timeupdateInterval': 25,
+    timeupdateInterval: 25,
 
     // Since the plugin is for Brightcove content
-    'trackingType': 'BRIGHTCOVE'
+    trackingType: 'BRIGHTCOVE'
 };
 
 // Mapping of Brightcove event type to Neon Api endpoint
@@ -55,6 +55,7 @@ const constants = {
 
 // Dummy dev params TODO
 const dummyData = {
+    // From the other trackers grab this from their api?
     // Video identifier
     'vid': 'alskdjf987'
 }
@@ -108,7 +109,7 @@ const onPlayerReady = (player, options) => {
         trackImageLoad({'type': 'image_load'});
     }
 
-    // Only watch these for their first
+    // Capture play events just for the first play.
     player.one('play', trackPlay);
     player.one('ad-play', trackAdPlay);
     player.one('ima3-started', trackAdPlay);
@@ -156,7 +157,7 @@ const trackImageLoad = (playerEvent, extra) => {
     } else {
         // Can't effectively track without more info
         return;
-    } 
+    }
     extra.bns = printf('%s %d %d',
         _getBasenameOf(url), width, height);
     _commonTrack(playerEvent, extra);
@@ -267,6 +268,7 @@ const _getPageUrl = () => {
 const _getReferrer = () => {
     return encodeURIComponent(document.referrer);
 }
+
 // @TODO implement
 const _getBasenameOf = (imageUrl) => {
     return imageUrl;
@@ -280,11 +282,10 @@ const _getPercentPlayed = () => {
     return Math.round(currentTime / duration * 100);
 }
 
-// Lifted from GA plugin
+// Lifted from the Google Analytics plugin
 const adStateRegex = /(\s|^)vjs-ad-(playing|loading)(\s|$)/;
 const _isInAdState = () => {
     return adStateRegex.test(player.el().className);
 }
-
 
 export default neonTracker;

@@ -46,7 +46,7 @@ QUnit.test('registers itself with video.js', function(assert) {
     'videojs-neon-tracker plugin was registered'
   );
 
-  this.player.neonTracker();
+  this.player.neon();
 
   // Tick the clock forward enough to trigger the player to be "ready".
   this.clock.tick(1);

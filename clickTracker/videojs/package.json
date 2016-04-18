@@ -3,8 +3,13 @@
   "version": "0.0.1",
   "description": "Brightcove player event tracking for the Neon API",
   "main": "es5/plugin.js",
+  "private": true,
   "engines": {
     "node": "4.2.1"
+  },
+  "repository": {
+      "type": "git",
+      "url": "git://github.com/neon-lab/neon-codebase.git"
   },
   "scripts": {
     "prebuild": "npm run clean",
@@ -70,7 +75,8 @@
   ],
   "dependencies": {
     "video.js": "^5.6.0",
-    "reqwest": "^2.0.5"
+    "reqwest": "^2.0.5",
+    "printf": "^0.2.3"
   },
   "devDependencies": {
     "babel": "^5.8.35",
