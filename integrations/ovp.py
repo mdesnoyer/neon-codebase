@@ -450,9 +450,6 @@ class OVPIntegration(object):
 
         for thumb in thumbs_meta:
 
-            # Some videos have a legacy format and need migration
-            self._run_migration(thumb)
-
             if (thumb is None or thumb.type != neondata.ThumbnailType.DEFAULT):
                 continue
 
@@ -705,10 +702,6 @@ class OVPIntegration(object):
              to skip old videos
         '''
         return False
-
-    def _run_migration(self, thumb=None):
-        '''Run data model migration on thumbnail'''
-        pass
 
     def _log_statemon_submit_video_error(self):
         '''Log submit video error with implementation-specific statemon key'''

@@ -130,3 +130,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.submit_new_videos()
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_bc_error.%s' % self.account_id)

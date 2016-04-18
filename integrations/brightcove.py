@@ -440,16 +440,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             return 'brightcove.com/%s' % (os.path.basename(parse.path))
         return '%s%s' % (parse.netloc, parse.path)
 
-    def _run_migration(self, thumb):
-        ''' Change the thumbnail type because the BRIGHTCOVE type is
-            deprecated
-
-            overrides ovp
-        '''
-        if thumb.type == neondata.ThumbnailType.BRIGHTCOVE:
-            thumb.type = neondata.ThumbnailType.DEFAULT
-        return thumb
-
     def _log_statemon_submit_video_error(self):
         statemon.state.define_and_increment(
             'submit_video_bc_error.%s' % self.account_id)
