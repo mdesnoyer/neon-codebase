@@ -1424,6 +1424,7 @@ class LocalSearcher(object):
                 formatted_result = (frame, 1.0, frameno, rr[2] / float(fps))
                 results.append(formatted_result)
         else:
+            _log.info('%i thumbs found', len(raw_results))
             for rr in raw_results:
                 formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
                                     '')
