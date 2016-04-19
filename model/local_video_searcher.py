@@ -1401,11 +1401,6 @@ class LocalSearcher(object):
                            end_frame, e)
         raw_results = self.results.get_results()
         # format it into the expected format
-        results = []
-        for rr in raw_results:
-            formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
-                                '')
-            results.append(formatted_result)
         try:
             perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
             _log.info('%.2f%% of video sampled' % perc_samp)
@@ -1416,6 +1411,23 @@ class LocalSearcher(object):
             _log.info('%.2f%% of video searched' % perc_srch)
         except:
             _log.info('Unknown percentage of video searched')
+        results = []
+        if not len(raw_results):
+            _log.warn('No suitable frames have been found for video %s!'
+                      ' Will uniformly select frames', video_name)
+            # select which frames to use
+            frames = np.linspace(self.search_algo.buffer, 
+                                 self.num_frames - self.search_algo.buffer, 
+                                 self.n_thumbs).astype(int)
+            rframes = [self._get_frame(x) for x in frames]
+            for frame, frameno in zip(rframes, frames):
+                formatted_result = (frame, 1.0, frameno, rr[2] / float(fps))
+                results.append(formatted_result)
+        else:
+            for rr in raw_results:
+                formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
+                                    '')
+                results.append(formatted_result)
         return results
 
     def _conduct_local_search(self, start_frame, end_frame,
