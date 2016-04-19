@@ -1081,7 +1081,7 @@ class LocalSearcher(object):
                  testing_dir=None,
                  filter_text=True,
                  text_filter_params=None,
-                 filter_text_thresh=0.02):
+                 filter_text_thresh=0.04):
         '''
         Inputs:
             predictor:
@@ -1194,7 +1194,7 @@ class LocalSearcher(object):
                         classification to proceed.
                     min probability, step 2 [def: 0.9]
                         - (float) minimum probability for step 2 to proceed.
-            filter_text_thresh: [def: 0.02]
+            filter_text_thresh: [def: 0.04]
                 The fraction of text that occupies the image in order to
                 filter it out.
 
