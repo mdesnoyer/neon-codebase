@@ -1422,7 +1422,7 @@ class LocalSearcher(object):
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
                 formatted_result = (frame, 1.0, frameno, 
-                                    frameno[2] / float(fps))
+                                    frameno / float(fps))
                 results.append(formatted_result)
         else:
             _log.info('%i thumbs found', len(raw_results))
