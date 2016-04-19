@@ -8,26 +8,19 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 from cmsdb import neondata
-from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
-import concurrent.futures
-#import integrations.ingester
-import integrations.ingester
-from cStringIO import StringIO
-import json
+import integrations.brightcove
 import logging
 from mock import patch, MagicMock
-import multiprocessing
 import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
 import tornado.gen
+import tornado.httpclient
 import tornado.testing
 import unittest
-from cvutils.imageutils import PILImageUtils
-from utils.options import define, options
 import utils.neon
+from utils.options import define, options
 from utils import statemon
-
 
 class SmokeTesting(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -42,210 +35,20 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
             self.int_mock().process_publisher_stream)
 
         # Build a platform
-        def _set_platform(x):
-            x.account_id = 'a1'
-        neondata.BrightcovePlatform.modify('acct1', 'i1', 
-                                           _set_platform,
-                                           create_missing=True)
+        user_id = '234234234dasfds'
+        self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
+        self.user.save()
+        self.integration = neondata.BrightcoveIntegration(self.user.neon_api_key,  
+                                                   last_process_date='2015-10-29T23:59:59Z', 
+                                                   rtoken='c2vfn5fb8gubhrmd67x7bmv9')
+        self.integration.save()
+        self.integration_id = self.integration.integration_id 
 
         self.old_poll_cycle = options.get(
             'integrations.ingester.poll_period')
         options._set('integrations.ingester.poll_period', 0.1)
         options._set('integrations.ingester.service_name', 'brightcove')
-        
-        super(SmokeTesting, self).setUp()
 
-        self.manager = integrations.ingester.Manager()
-
-    def tearDown(self):
-        self.manager.stop()
-        options._set('integrations.ingester.poll_period',
-                     self.old_poll_cycle)
-        self.int_mocker.stop()
-        conn = neondata.DBConnection.get(VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(ThumbnailMetadata)
-        conn.clear_db()
-
-        super(SmokeTesting, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-
-    @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
-
-    @tornado.testing.gen_test
-    def test_correct_platform(self):
-        self.manager.start()
-
-        # Make sure we processed the publisher stream
-        yield self.assertWaitForEquals(lambda: self.process_mock.call_count,
-                                       1,
-                                       async=True)
-        cargs, kwargs = self.int_mock.call_args
-        self.assertEquals(cargs[0], 'a1')
-        self.assertEquals(cargs[1].neon_api_key, 'acct1')
-        self.assertEquals(cargs[1].integration_id, 'i1')
-
-    @tornado.testing.gen_test
-    def test_two_platforms(self):
-        def _set_platform(x):
-            x.account_id = 'a2'
-        neondata.BrightcovePlatform.modify('acct2', 'i2', 
-                                           _set_platform,
-                                           create_missing=True)
-
-        self.int_mock.reset_mock()
-        self.manager.start()
-
-        yield self.assertWaitForEquals(lambda: self.int_mock.call_count,
-                                       2, async=True)
-
-        calls = dict([x[0] for x in self.int_mock.call_args_list])
-
-        self.assertItemsEqual(calls.keys(), ['a1', 'a2'])
-        self.assertEquals(calls['a1'].integration_id, 'i1')
-        self.assertEquals(calls['a2'].integration_id, 'i2')
-
-    @tornado.testing.gen_test
-    def test_platform_disabled(self):
-        def _set_platform(x):
-            x.enabled = False
-        neondata.BrightcovePlatform.modify('acct1', 'i1', 
-                                           _set_platform)
-
-        with self.assertLogNotExists(logging.INFO, 'Turning on integration'):
-            yield self.manager.check_integration_list()
-
-        self.assertEquals(len(self.manager._timers), 0)
-
-    @tornado.testing.gen_test
-    def test_turn_off_platform(self):
-        with self.assertLogExists(logging.INFO, 'Turning on integration'):
-            yield self.manager.check_integration_list()
-
-        self.assertEquals(len(self.manager._timers), 1)
-        timer = self.manager._timers.values()[0]
-        self.assertTrue(timer.is_running())
-
-        def _set_platform(x):
-            x.enabled = False
-        neondata.BrightcovePlatform.modify('acct1', 'i1', 
-                                           _set_platform)
-
-        with self.assertLogExists(logging.INFO, 'Turning off integration'):
-            yield self.manager.check_integration_list()
-
-        self.assertEquals(len(self.manager._timers), 0)
-        self.assertFalse(timer.is_running())
-
-    @tornado.testing.gen_test
-    def test_lookup_accountid(self):
-        def _set_platform(x):
-            x.account_id = None
-        neondata.BrightcovePlatform.modify('acct1', 'i1', 
-                                           _set_platform)
-        neondata.NeonUserAccount('a1', 'acct1').save()
-
-        yield integrations.ingester.process_one_account(
-            'acct1', 'i1')
-
-        # Make sure we processed the publisher stream
-        self.assertEquals(self.process_mock.call_count, 1)
-        cargs, kwargs = self.int_mock.call_args
-        self.assertEquals(cargs[0], 'a1')
-        self.assertEquals(cargs[1].neon_api_key, 'acct1')
-        self.assertEquals(cargs[1].integration_id, 'i1')
-
-    @tornado.testing.gen_test
-    def test_unxepected_error(self):
-        self.process_mock.side_effect = [Exception('Huh?!?')]
-
-        with self.assertLogExists(logging.ERROR, 
-                                  ('Unexpected exception when processing '
-                                   'publisher stream')):
-            yield integrations.ingester.process_one_account(
-                'acct1', 'i1')
-
-    @tornado.testing.gen_test
-    def test_slow_update(self):
-        with self.assertLogExists(logging.WARNING, 
-                                  ('Finished processing.*Time was')):
-            yield integrations.ingester.process_one_account(
-                'acct1', 'i1', slow_limit=0.0)
-
-        self.assertEquals(self.process_mock.call_count, 1)
-        cargs, kwargs = self.int_mock.call_args
-        self.assertEquals(cargs[0], 'a1')
-        self.assertEquals(cargs[1].neon_api_key, 'acct1')
-        self.assertEquals(cargs[1].integration_id, 'i1')
-
-        self.assertEquals(
-            statemon.state.get('integrations.ingester.slow_update'),
-            1)
-
-    @tornado.testing.gen_test
-    def test_platform_missing(self):
-        with self.assertLogExists(logging.ERROR, 'Could not find platform'):
-            yield integrations.ingester.process_one_account(
-                'acct1', 'i10')
-
-        self.assertEquals(
-            statemon.state.get('integrations.ingester.platform_missing'),
-            1)
-
-        self.assertEquals(self.process_mock.call_count, 0)
-
-    @tornado.testing.gen_test
-    def test_known_error(self):
-        self.process_mock.side_effect = [
-            integrations.ovp.OVPError('Oops'),
-            integrations.ovp.CMSAPIError('Oops CMSAPI')
-            ]
-
-        with self.assertLogNotExists(logging.ERROR, 
-                                     ('Unexpected exception when processing '
-                                      'publisher stream')):
-            yield integrations.ingester.process_one_account(
-                'acct1', 'i1')
-
-        self.assertEquals(self.process_mock.call_count, 1)
-
-        with self.assertLogNotExists(logging.ERROR, 
-                                     ('Unexpected exception when processing '
-                                      'publisher stream')):
-            yield integrations.ingester.process_one_account(
-                'acct1', 'i1')
-
-        self.assertEquals(self.process_mock.call_count, 2)
-
-class SmokeTestingPG(SmokeTesting):
-    def setUp(self):
-        statemon.state._reset_values()
-
-        # Mock brightcove integration
-        self.int_mocker = patch(
-            'integrations.ingester.integrations.brightcove.'
-            'BrightcoveIntegration')
-        self.int_mock = self.int_mocker.start()
-        self.process_mock = self._future_wrap_mock(
-            self.int_mock().process_publisher_stream)
-
-        # Build a platform
-        def _set_platform(x):
-            x.account_id = 'a1'
-        neondata.BrightcovePlatform.modify('acct1', 'i1', 
-                                           _set_platform,
-                                           create_missing=True)
-
-        self.old_poll_cycle = options.get(
-            'integrations.ingester.poll_period')
-        options._set('integrations.ingester.poll_period', 0.1)
-        options._set('integrations.ingester.service_name', 'brightcove')
         super(test_utils.neontest.AsyncTestCase, self).setUp()
 
         self.manager = integrations.ingester.Manager()
@@ -268,7 +71,131 @@ class SmokeTestingPG(SmokeTesting):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
-            
+
+    @tornado.testing.gen_test
+    def test_correct_platform(self):
+        self.manager.start()
+
+        # Make sure we processed the publisher stream
+        yield self.assertWaitForEquals(lambda: self.process_mock.call_count,
+                                       1,
+                                       async=True)
+        cargs, kwargs = self.int_mock.call_args
+        self.assertEquals(cargs[0], self.integration.account_id)
+        self.assertEquals(cargs[1].account_id, self.user.neon_api_key)
+        self.assertEquals(cargs[1].integration_id, self.integration_id)
+
+    @tornado.testing.gen_test
+    def test_two_platforms(self):
+        integration_two = neondata.BrightcoveIntegration('acct2',  
+                                                  last_process_date='2015-10-29T23:59:59Z', 
+                                                  rtoken='c2vfn5fb8gubhrmd67x7bmv9')
+        integration_two.save()
+
+        self.int_mock.reset_mock()
+        self.manager.start()
+
+        yield self.assertWaitForEquals(lambda: self.int_mock.call_count,
+                                       2, async=True)
+
+        calls = dict([x[0] for x in self.int_mock.call_args_list])
+
+        self.assertItemsEqual(calls.keys(), [self.user.neon_api_key, 'acct2'])
+        self.assertEquals(calls[self.user.neon_api_key].integration_id, self.integration.integration_id)
+        self.assertEquals(calls['acct2'].integration_id, integration_two.integration_id)
+
+    @tornado.testing.gen_test
+    def test_platform_disabled(self):
+        def _set_platform(x):
+            x.enabled = False
+        neondata.BrightcoveIntegration.modify(self.integration.integration_id, _set_platform)
+
+        with self.assertLogNotExists(logging.INFO, 'Turning on integration'):
+            yield self.manager.check_integration_list()
+
+        self.assertEquals(len(self.manager._timers), 0)
+
+    @tornado.testing.gen_test
+    def test_turn_off_platform(self):
+        with self.assertLogExists(logging.INFO, 'Turning on integration'):
+            yield self.manager.check_integration_list()
+
+        self.assertEquals(len(self.manager._timers), 1)
+        timer = self.manager._timers.values()[0]
+        self.assertTrue(timer.is_running())
+
+        def _set_platform(x):
+            x.enabled = False
+        neondata.BrightcoveIntegration.modify(self.integration.integration_id, _set_platform)
+
+        with self.assertLogExists(logging.INFO, 'Turning off integration'):
+            yield self.manager.check_integration_list()
+
+        self.assertEquals(len(self.manager._timers), 0)
+        self.assertFalse(timer.is_running())
+
+    @tornado.testing.gen_test
+    def test_unexpected_error(self):
+        self.process_mock.side_effect = [Exception('Huh?!?')]
+
+        with self.assertLogExists(logging.ERROR, 
+                                  ('Unexpected exception when processing '
+                                   'publisher stream')):
+            yield integrations.ingester.process_one_account(
+                'acct1', self.integration.integration_id)
+
+    @tornado.testing.gen_test
+    def test_slow_update(self):
+        with self.assertLogExists(logging.WARNING, 
+                                  ('Finished processing.*Time was')):
+            yield integrations.ingester.process_one_account(
+                self.user.neon_api_key, self.integration.integration_id, slow_limit=0.0)
+
+        self.assertEquals(self.process_mock.call_count, 1)
+        cargs, kwargs = self.int_mock.call_args
+        self.assertEquals(cargs[0], self.user.neon_api_key)
+        self.assertEquals(cargs[1].account_id, self.user.neon_api_key)
+        self.assertEquals(cargs[1].integration_id, self.integration.integration_id)
+
+        self.assertEquals(
+            statemon.state.get('integrations.ingester.slow_update'),
+            1)
+
+    @tornado.testing.gen_test
+    def test_platform_missing(self):
+        with self.assertLogExists(logging.ERROR, 'Could not find platform'):
+            yield integrations.ingester.process_one_account(
+                self.user.neon_api_key, 'i10')
+
+        self.assertEquals(
+            statemon.state.get('integrations.ingester.platform_missing'),
+            1)
+
+        self.assertEquals(self.process_mock.call_count, 0)
+
+    @tornado.testing.gen_test
+    def test_known_error(self):
+        self.process_mock.side_effect = [
+            integrations.ovp.OVPError('Oops'),
+            integrations.ovp.CMSAPIError('Oops CMSAPI')
+            ]
+
+        with self.assertLogNotExists(logging.ERROR, 
+                                     ('Unexpected exception when processing '
+                                      'publisher stream')):
+            yield integrations.ingester.process_one_account(
+                self.user.neon_api_key, self.integration.integration_id)
+
+        self.assertEquals(self.process_mock.call_count, 1)
+
+        with self.assertLogNotExists(logging.ERROR, 
+                                     ('Unexpected exception when processing '
+                                      'publisher stream')):
+            yield integrations.ingester.process_one_account(
+                self.user.neon_api_key, self.integration.integration_id)
+
+        self.assertEquals(self.process_mock.call_count, 2)
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

@@ -75,12 +75,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def __init__(self, account_id, platform):
         super(BrightcoveIntegration, self).__init__(account_id, platform)
         self.bc_api = brightcove_api.BrightcoveApi(
-            self.platform.neon_api_key, self.platform.publisher_id,
+            account_id, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
-        self.is_platform_dual_keyed = True
         self.skip_old_videos = False
-        self.needs_platform_videos = True 
-        self.neon_api_key = self.platform.neon_api_key  
+        self.neon_api_key = self.account_id = account_id 
 
     @staticmethod
     def get_submit_video_fields():
@@ -104,8 +102,8 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         '''Return a list of custom fields to request.'''
         custom_fields = None
         if self.platform.id_field not in [
-                neondata.BrightcovePlatform.REFERENCE_ID, 
-                neondata.BrightcovePlatform.BRIGHTCOVE_ID]:
+                neondata.BrightcoveIntegration.REFERENCE_ID, 
+                neondata.BrightcoveIntegration.BRIGHTCOVE_ID]:
             custom_fields = [self.platform.id_field]
 
         return custom_fields
@@ -259,16 +257,16 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
     def get_video_id(self, video):
         '''override from ovp''' 
         # Get the video id to use to key this video
-        if self.platform.id_field == neondata.BrightcovePlatform.REFERENCE_ID:
+        if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
             video_id = video.get('referenceId', None)
             if video_id is None:
                 msg = ('No valid reference id in video %s for account %s'
-                       % (video['id'], self.platform.neon_api_key))
+                       % (video['id'], self.neon_api_key))
                 statemon.state.increment('cant_get_refid')
                 _log.error_n(msg)
                 raise integrations.ovp.OVPRefIDError(msg)
         elif (self.platform.id_field == 
-              neondata.BrightcovePlatform.BRIGHTCOVE_ID):
+              neondata.BrightcoveIntegration.BRIGHTCOVE_ID):
             video_id = video['id']
         else:
             # It's a custom field, so look for it
@@ -278,7 +276,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 msg = ('No valid id in custom field %s in video %s for '
                        'account %s' %
                        (self.platform.id_field, video['id'],
-                        self.platform.neon_api_key))
+                        self.neon_api_key))
                 _log.error_n(msg)
                 statemon.state.increment('cant_get_custom_id')
                 raise integrations.ovp.OVPCustomRefIDError(msg)
@@ -390,13 +388,14 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             publish_date < 
             dateutil.parser.parse(self.platform.oldest_video_allowed)):
             _log.info('Skipped video %s from account %s because it is too'
-                      ' old' % (video_id, self.platform.neon_api_key))
+                      ' old' % (video_id, self.neon_api_key))
             statemon.state.increment('old_videos_skipped')
             rv = True
         return rv
 
     def does_video_exist(self, video_meta, video_ref): 
-        return video_ref in self.platform.videos   
+        #return video_ref in self.platform.videos   
+        return video_meta is not None 
 
     @tornado.gen.coroutine
     def _update_video_info(self, data, bc_video_id, job_id):
@@ -409,7 +408,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         # Get the data that could be updated
         video_id = neondata.InternalVideoID.generate(
-            self.platform.neon_api_key, bc_video_id)
+            self.neon_api_key, bc_video_id)
         publish_date = data.get('publishedDate', None)
         if publish_date is not None:
             publish_date = datetime.datetime.utcfromtimestamp(
@@ -431,7 +430,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             x.video_title = video_title
         yield tornado.gen.Task(
             neondata.NeonApiRequest.modify,
-            job_id, self.platform.neon_api_key, _update_request)
+            job_id, self.neon_api_key, _update_request)
         
     @tornado.gen.coroutine
     def _grab_new_thumb(self, data, bc_video_id):
@@ -458,7 +457,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
         # Get the video object from our database
         video_id = neondata.InternalVideoID.generate(
-            self.platform.neon_api_key, bc_video_id)
+            self.neon_api_key, bc_video_id)
         vid_meta = yield tornado.gen.Task(neondata.VideoMetadata.get,
                                           video_id)
         if not vid_meta:

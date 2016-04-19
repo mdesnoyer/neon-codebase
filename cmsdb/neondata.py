@@ -3072,6 +3072,11 @@ class NeonUserAccount(NamespacedStoredObject):
         retval = yield calls
         raise tornado.gen.Return(retval)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_integrations(self):
+        pass 
+
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -4259,7 +4264,7 @@ class BrightcoveIntegration(AbstractIntegration):
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
     
-    def __init__(self, i_id=None, a_id='', p_id=None, 
+    def __init__(self, a_id='', p_id=None, 
                 rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
@@ -4271,7 +4276,8 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(i_id, enabled)
+        #super(BrightcoveIntegration, self).__init__(i_id, enabled)
+        super(BrightcoveIntegration, self).__init__(None, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -4312,7 +4318,7 @@ class BrightcoveIntegration(AbstractIntegration):
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, 
+            self.account_id, self.publisher_id, 
             self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):

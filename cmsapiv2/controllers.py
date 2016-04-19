@@ -1453,6 +1453,22 @@ class ThumbnailSearchExternalHandler(APIV2Handler):
 '''*****************************************************************
 UserHandler 
 *****************************************************************'''
+class AccountIntegrationHandler(APIV2Handler):
+    """Handles get,put requests to the user endpoint. 
+       Gets and updates existing users
+    """
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+'''*****************************************************************
+UserHandler 
+*****************************************************************'''
 class UserHandler(APIV2Handler):
     """Handles get,put requests to the user endpoint. 
        Gets and updates existing users
@@ -1555,6 +1571,8 @@ application = tornado.web.Application([
         BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', 
         OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$', 
+        AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),

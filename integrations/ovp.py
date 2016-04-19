@@ -49,14 +49,10 @@ class OVPIntegration(object):
         self.account_id = account_id 
         # An AbstractPlatform or AbstractIntegration Object 
         self.platform = platform
-        # hacky to make generic work for dual keyed platform objects 
-        self.is_platform_dual_keyed = False
         # specify whether we want an async iterator  
         self.wants_async_iter = False
         # must be set to your video iterator for submit_ovp_videos 
         self.video_iter = None
-        # if the platform needs videos on it, TODO remove this 
-        self.needs_platform_videos = False          
  
     @tornado.gen.coroutine 
     def submit_ovp_videos(self, 
@@ -100,15 +96,12 @@ class OVPIntegration(object):
                 if job_id: 
                     video_dict[self.get_video_id(video)] = job_id 
                     added_jobs += 1 
-            except KeyError as e:
-                # let's continue here, we do not have enough to submit 
+            except (KeyError, OVPCustomRefIDError, OVPRefIDError):
+                # pass here, we do not have enough to submit 
                 pass 
-            except OVPCustomRefIDError: 
-                pass 
-            except OVPRefIDError: 
-                pass
             except OVPNoValidURL: 
-                _log.error('Unable to find a valid url for video_id : %s' % self.get_video_id(video))
+                _log.error('Unable to find a valid url for video_id : %s' % \
+                    self.get_video_id(video))
                 pass
             except OVPError as e:
                 if continue_on_error: 
@@ -131,17 +124,11 @@ class OVPIntegration(object):
                     # update last_process_date, so we start on this video next time
                     yield self.update_last_processed_date(last_processed_date, 
                                                           reset_retries=False)
-                    if self.is_platform_dual_keyed:  
-                        self.platform = yield tornado.gen.Task(
-                            self.platform.modify,
-                            self.platform.neon_api_key,
-                            self.platform.integration_id,
-                            _increase_retries)
-                    else: 
-                        self.platform = yield tornado.gen.Task(
-                            self.platform.modify,
-                            self.platform.integration_id,
-                            _increase_retries)
+                    self.platform = yield self.platform.modify(
+                        self.platform.integration_id,
+                        _increase_retries, 
+                        async=True)
+
                     _log.info('Added or found %d jobs for account : %s integration : %s before failure.' % \
                                 (added_jobs, self.neon_api_key, self.platform.integration_id))
                     return 
@@ -217,50 +204,35 @@ class OVPIntegration(object):
             except AttributeError as e:
                 # already a string, leave it alone
                 pass 
-        existing_video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                                neondata.InternalVideoID.generate(self.neon_api_key, video_id))
+        existing_video = yield neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(self.neon_api_key, video_id), 
+            async=True)
        
-        # TODO this won't be necessary once videos are removed from platforms
-        if not self.does_video_exist(existing_video, video_id):
-            try:       
-                response = yield self.submit_video(video_id=video_id, 
-                                                   video_url=video_url, 
-                                                   callback_url=callback_url,
-                                                   external_thumbnail_id=thumb_id, 
-                                                   custom_data=custom_data, 
-                                                   duration=duration, 
-                                                   publish_date=publish_date, 
-                                                   video_title=unicode(video_title), 
-                                                   default_thumbnail=default_thumbnail)
-                 
-                if response['job_id']:
-                    rv = response['job_id']
-            except Exception as e:
-                if existing_video is not None: 
-                    rv = existing_video.job_id  
-                raise e
-            finally:
-                # TODO: Remove this hack once videos aren't attached to
-                # platform objects.
-                # HACK: Add the video to the platform object because our call 
-                # will put it on the NeonPlatform object.
-                if self.needs_platform_videos: 
-                    if rv is not None: 
-                        self.platform = yield tornado.gen.Task(self.platform.modify, 
-                                                               self.platform.neon_api_key, 
-                                                               self.platform.integration_id, 
-                                                               lambda x: x.add_video(video_id, rv)) 
-        else:
-            if existing_video: 
-                rv = existing_video.job_id 
-            if rv is None:
-                # TODO remove this when platform videos are no more! 
-                if self.needs_platform_videos: 
-                    rv = self.platform.videos[video_id]  
-            if rv is not None: 
-                yield self._update_video_info(video, video_id, rv)
-            if grab_new_thumb: 
-                yield self._grab_new_thumb(video, video_id)  
+        try:       
+            response = yield self.submit_video(video_id=video_id, 
+                                               video_url=video_url, 
+                                               callback_url=callback_url,
+                                               external_thumbnail_id=thumb_id, 
+                                               custom_data=custom_data, 
+                                               duration=duration, 
+                                               publish_date=publish_date, 
+                                               video_title=unicode(video_title), 
+                                               default_thumbnail=default_thumbnail)
+             
+            if response['job_id']:
+                rv = response['job_id']
+
+        except Exception as e:
+            if existing_video is not None: 
+                rv = existing_video.job_id  
+            raise e
+
+        if existing_video and existing_video.job_id: 
+            rv = existing_video.job_id 
+        if rv is not None: 
+            yield self._update_video_info(video, video_id, rv)
+        if grab_new_thumb: 
+            yield self._grab_new_thumb(video, video_id)  
 
         raise tornado.gen.Return(rv) 
       
@@ -275,17 +247,10 @@ class OVPIntegration(object):
                     x.last_process_date = new_date
                 if reset_retries: 
                     x.video_submit_retries = 0
-            if self.is_platform_dual_keyed: 
-                self.platform = yield tornado.gen.Task(
-                    self.platform.modify,
-                    self.platform.neon_api_key,
-                    self.platform.integration_id,
-                    _set_mod_date_and_retries)
-            else: 
-                self.platform = yield tornado.gen.Task(
-                    self.platform.modify,
-                    self.platform.integration_id,
-                    _set_mod_date_and_retries)
+            self.platform = yield self.platform.modify(
+                self.platform.integration_id,
+                _set_mod_date_and_retries, 
+                async=True)
             
             _log.debug(
                 'updated last process date for account %s integration %s'

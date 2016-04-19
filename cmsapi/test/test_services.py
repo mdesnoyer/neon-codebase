@@ -65,7 +65,7 @@ def create_random_image_response():
 ###############################################
 
 def process_neon_api_requests(api_requests, api_key, i_id, t_type,
-                              plattype=neondata.BrightcovePlatform):
+                              plattype=neondata.BrightcoveIntegration):
     #Create thumbnail metadata
     images = {}
     thumbnail_url_to_image = {}
@@ -134,20 +134,18 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
                                         url, 10, 5, "test", i_id)
         vmdata.save()
 
-    def _update_videos(x):
-        x.videos.update(video_map)
+    #def _update_videos(x):
+    #    x.videos.update(video_map)
 
-    plattype.modify(api_key, i_id, _update_videos)
+    #plattype.modify(i_id, _update_videos)
 
     return images, thumbnail_url_to_image
 
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     ''' Services Test '''
-        
     def setUp(self):
         super(TestServices, self).setUp()
-        #NOTE: Make sure that you don't repatch objects
-
+        options._set('cmsdb.neondata.wants_postgres', 1)
         #Http Connection pool Mock
         self.cp_async_patcher = \
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
@@ -164,27 +162,28 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.job_ids = [] #ordered list
         self.video_ids = []
         self.images = {} 
+
         random.seed(19449)
         
     def tearDown(self):
         self.cp_async_patcher.stop()
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
+        self.postgresql.clear_all_tables() 
+        options._set('cmsdb.neondata.wants_postgres', 0)
         super(TestServices, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         super(TestServices, cls).setUpClass()
 
     @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
         super(TestServices, cls).tearDownClass()
-    
+        
     def get_app(self):
         ''' return services app '''
         return services.application
@@ -354,6 +353,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 'auto_update': False}
         resp = self.post_request(url, vals, self.api_key)
         self.assertEquals(resp.code, expected_code)
+        json_body = json.loads(resp.body)
+
+        try: 
+            self.b_id = json_body['integration_id'] 
+        except KeyError: 
+            pass 
+
         return resp.body
 
     def update_brightcove_account(self, rtoken=None, wtoken=None, autoupdate=None):
@@ -501,12 +507,12 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     
         #set up account and video state for testing
         self.api_key = self.create_neon_account()
-        json_video_response = self.create_brightcove_account()
-        
+        json_video_response = json.loads(self.create_brightcove_account())
+        self.b_id = json_video_response['integration_id'] 
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get(self.api_key)
         self.assertIn(self.b_id, nuser.integrations.keys())
-        
+         
         reqs = self._create_neon_api_requests()
         self._process_brightcove_neon_api_requests(reqs)
 
@@ -588,8 +594,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 200)
         data = json.loads(resp.body)
-        self.assertEqual(data['neon_api_key'], self.api_key)
-        self.assertEqual(data['integration_id'], self.b_id)
+        self.assertEqual(data['_data']['integration_id'], self.b_id)
 
     def test_create_update_brightcove_account(self):
         ''' updation of brightcove account '''
@@ -612,10 +617,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.create_brightcove_account()
 
         # Verify actual contents
-        platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                    self.b_id)
-        self.assertFalse(platform.abtest) # Should default to False
-        self.assertEqual(platform.neon_api_key, self.api_key)
+        platform = neondata.BrightcoveIntegration.get(
+            self.b_id)
         self.assertEqual(platform.integration_id, self.b_id)
         self.assertEqual(platform.account_id, self.a_id)
         self.assertEqual(platform.publisher_id, 'testpubid123')
@@ -628,8 +631,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         new_rtoken = ("newrtoken")
         update_response = self.update_brightcove_account(new_rtoken)
         self.assertEqual(update_response.code, 200)
-        platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                   self.b_id)
+        platform = neondata.BrightcoveIntegration.get(self.b_id)
         self.assertEqual(platform.read_token, "newrtoken")
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
@@ -1809,7 +1811,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         url = self.get_url("/healthcheck/video_server")
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
-
+'''
 class TestServicesPG(TestServices):
         
     def setUp(self):
@@ -1855,7 +1857,7 @@ class TestServicesPG(TestServices):
 
     def test_create_video_request_utf8(self):
         pass 
-
+'''
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

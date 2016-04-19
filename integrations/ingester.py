@@ -52,7 +52,7 @@ def get_platform_class():
     types = { 
               'fox' : neondata.FoxIntegration, 
               'cnn' : neondata.CNNIntegration, 
-              'brightcove' : neondata.BrightcovePlatform 
+              'brightcove' : neondata.BrightcoveIntegration 
             } 
     try: 
         return types[options.service_name.lower()] 
@@ -81,13 +81,9 @@ def process_one_account(api_key, integration_id, slow_limit=600.0):
     _log.debug('Processing %s platform for account %s, integration %s'
                % (options.service_name, api_key, integration_id))
     start_time = datetime.datetime.now()
-    pi_class = get_platform_class() 
-    # TODO hack once these platform objects go away
-    # import pdb; pdb.set_trace()
-    if options.service_name.lower() == 'brightcove': 
-        platform = yield tornado.gen.Task(pi_class.get, api_key, integration_id)
-    else: 
-        platform = yield tornado.gen.Task(pi_class.get, integration_id)
+    pi_class = get_platform_class()
+ 
+    platform = yield pi_class.get(integration_id, async=True)
 
     if platform is None:
         _log.error('Could not find platform %s for account %s' %
@@ -148,13 +144,8 @@ class Manager(object):
         pi_class = get_platform_class() 
         platforms = yield tornado.gen.Task(pi_class.get_all)
         
-        if options.service_name.lower() == 'brightcove': 
-            cur_keys = set([(x.neon_api_key, x.integration_id) for x in platforms
-                             if x is not None and x.enabled and isinstance(x, pi_class)])
-        else: 
-            cur_keys = set([(x.account_id, x.integration_id) for x in platforms
-                             if x is not None and x.enabled and isinstance(x, pi_class)])
-        
+        cur_keys = set([(x.account_id, x.integration_id) for x in platforms
+                         if x is not None and x.enabled and isinstance(x, pi_class)])
         # Schedule callbacks for new integration objects
         new_keys = cur_keys - orig_keys
         for key in new_keys:
