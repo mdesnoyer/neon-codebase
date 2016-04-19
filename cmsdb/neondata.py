@@ -2317,7 +2317,8 @@ class StoredObject(object):
                                      table_name=None, 
                                      wc_params=[],
                                      limit_clause=None,
-                                     order_clause=None,  
+                                     order_clause=None, 
+                                     group_clause=None,  
                                      cursor_factory=psycopg2.extensions.cursor): 
         ''' helper function to build up a select query
 
@@ -2358,7 +2359,10 @@ class StoredObject(object):
 
         if order_clause: 
             query += " " + order_clause
-   
+
+        if group_clause: 
+            query += " " + group_clause  
+ 
         if limit_clause: 
             query += " " + limit_clause 
  
@@ -3075,7 +3079,27 @@ class NeonUserAccount(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_integrations(self):
-        pass 
+        rv = [] 
+
+        # due to old data, these could either have account_id or api_key
+        # as account_id
+        results = yield self.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg"], 
+                    "_data->>'account_id' IN(%s, %s)", 
+                    table_name='abstractintegration', 
+                    wc_params=[self.neon_api_key, 
+                               self.account_id],
+                    group_clause = "ORDER BY _type",  
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        for result in results:
+            obj = self._create(result['_data']['key'], result)
+            rv.append(obj)
+
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     def get_ovp(cls):
@@ -4276,7 +4300,6 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        #super(BrightcoveIntegration, self).__init__(i_id, enabled)
         super(BrightcoveIntegration, self).__init__(None, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
@@ -4591,7 +4614,6 @@ class OoyalaIntegration(AbstractIntegration):
     OOYALA Integration
     '''
     def __init__(self, 
-                 i_id=None, 
                  a_id='', 
                  p_code=None, 
                  api_key=None, 
@@ -4603,7 +4625,7 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-        super(OoyalaIntegration, self).__init__(i_id)
+        super(OoyalaIntegration, self).__init__(None, True)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key

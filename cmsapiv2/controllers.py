@@ -1441,8 +1441,8 @@ class ThumbnailSearchInternalHandler(APIV2Handler):
         self.success({}) 
 
 '''*********************************************************************
-ThumbnailSearchExternalHandler : class responsible for searching videos 
-                                 an external source 
+ThumbnailSearchExternalHandler : class responsible for searching thumbs 
+                                 from an external source 
    HTTP Verbs     : get
 *********************************************************************'''
 class ThumbnailSearchExternalHandler(APIV2Handler): 
@@ -1454,8 +1454,9 @@ class ThumbnailSearchExternalHandler(APIV2Handler):
 UserHandler 
 *****************************************************************'''
 class AccountIntegrationHandler(APIV2Handler):
-    """Handles get,put requests to the user endpoint. 
-       Gets and updates existing users
+    """This is a bit of a one-off API, it will return 
+          all integrations (regardless of type) for an 
+          individual account. 
     """
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -1463,8 +1464,43 @@ class AccountIntegrationHandler(APIV2Handler):
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
         })
         args = self.parse_args()
-        args['account_id'] = str(account_id)
+        args['account_id'] = account_id = str(account_id)
         schema(args)
+
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        integrations = yield user_account.get_integrations(async=True)
+        rv = {} 
+        rv['integrations'] = [] 
+        for i in integrations:
+           new_obj = None  
+           if type(i) == neondata.BrightcoveIntegration:
+               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+               new_obj['type'] = 'brightcove'
+           elif type(i) == neondata.OoyalaIntegration: 
+               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
+               new_obj['type'] = 'ooyala'
+           else: 
+               continue  
+
+           if new_obj: 
+               rv['integrations'].append(new_obj)
+
+        rv['integration_count'] = len(rv['integrations']) 
+        self.success(rv) 
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required' : [HTTPVerbs.GET] 
+               }
+
 
 '''*****************************************************************
 UserHandler 
