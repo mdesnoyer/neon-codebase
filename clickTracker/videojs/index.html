@@ -28,23 +28,28 @@
       var player = window.player = videojs('videojs');
       var options = {
 
-          // Publisher's video id attribute
-          // The attribute of the videojs video tag with a value that is
-          // unique to and identifies this video
-          publisherIdAttribute: 'data-video-id',
-          // A regex to further extract the identifier
-          // Leave null if unneeded
-          publisherIdAttributeRegex: null,
+        publisher: {
           // Neon's publisher id; inject via compilation step
           // publisherId: {{publisherId}},
-          publisherId: '56139847',
+          id: '56139847',
+          // The attribute of the videojs video tag with a value that is
+          // unique to and identifies this video
+          videoIdAttribute: 'data-video-id',
+          // A regex to further extract the identifier
+          // Leave null if unneeded
+          videoIdAttributeRegex: null,
+        },
 
+        tracking: {
           // Dev override
           //'trackUrl': 'http://private-265fc-trackerneonlabcom.apiary-mock.com'
-          trackUrl: 'http://10.0.69.190/v2/track',
+          neonApiUrl: 'http://10.0.69.190/v2/track',
+        },
+
+        dev: {
           // For troubleshooting plugin install
           showConsoleLogging: true
-
+        }
       };
       player.neon(options);
     }(window, window.videojs));
