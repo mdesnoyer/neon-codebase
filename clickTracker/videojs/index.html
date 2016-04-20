@@ -8,7 +8,8 @@
 </head>
 <body>
   <video
-      id="videojs-neon-tracker-player"
+      id="videojs"
+      data-video-id="sunnyday-123-key"
       class="video-js vjs-default-skin"
       poster="https://upload.wikimedia.org/wikipedia/commons/6/64/Cavendish_Henry_signature.jpg"
       controls
@@ -18,26 +19,34 @@
   </video>
   <ul>
     <li><a href="/test/">Run unit tests in browser.</a></li>
-    
   </ul>
-  <script src="/node_modules/video.js/dist/video.js"></script>
+  <script src="/node_modules/video.js/dist/video.min.js"></script>
   <script src="/dist/videojs-neon-tracker.js"></script>
   <script src="http://players.brightcove.net/videojs-ima3/2/videojs.ima3.min.js"></script>
   <script>
     (function(window, videojs) {
-      var player = window.player = videojs('videojs-neon-tracker-player');
-      player.neon({
-          // Dev override 
+      var player = window.player = videojs('videojs');
+      var options = {
+
+          // Publisher's video id attribute
+          // The attribute of the videojs video tag with a value that is
+          // unique to and identifies this video
+          publisherIdAttribute: 'data-video-id',
+          // A regex to further extract the identifier
+          // Leave null if unneeded
+          publisherIdAttributeRegex: null,
+          // Neon's publisher id; inject via compilation step
+          // publisherId: {{publisherId}},
+          publisherId: '56139847',
+
+          // Dev override
           //'trackUrl': 'http://private-265fc-trackerneonlabcom.apiary-mock.com'
-          'trackUrl': 'http://10.0.69.190/v2/track',
-          // Neon's publisher id TODO
-          'publisherId': '56139847',
+          trackUrl: 'http://10.0.69.190/v2/track',
           // For troubleshooting plugin install
-          'showConsoleLogging': true
-      });
-      //player.ima3({
-      //    'adTechOrder': ['html5', 'flash']
-      //});
+          showConsoleLogging: true
+
+      };
+      player.neon(options);
     }(window, window.videojs));
   </script>
 </body>
