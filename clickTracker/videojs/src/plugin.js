@@ -78,9 +78,11 @@ const _getReferrer = () => {
     return encodeURIComponent(document.referrer);
 };
 
-// @TODO implement
-const _getBasenameOf = (imageUrl) => {
-    return imageUrl;
+// Get the basename of a url
+// e.g., "http://example.com/dir/thispart.jpg?withparams" => "thispart"
+const _basenameRegex = /^.*\/|\.[^.]*$/g
+const _getBasenameOf = (url) => {
+    return url.replace(_basenameRegex, '');
 };
 
 // Calculate the percentage of the video played
@@ -249,6 +251,7 @@ const _buildBnsParamFromList = (list) => {
 };
 
 // Thoughtfully get the images associated to the event
+// return list of Object{url, width, height} or an empty list
 const _getImagesForEvent = (playerEvent) => {
     let url;
     let width;
@@ -274,7 +277,8 @@ const onImageLoad = (playerEvent, eventDetails) => {
     const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
-        console.error('Abort log player image load event: not enough info to continue');
+        console.error(
+            'Abort log player image load event: not enough info to continue');
         return;
     }
     eventDetails.bns = _buildBnsParamFromList(images);
@@ -287,7 +291,8 @@ const onImageView = (playerEvent, eventDetails) => {
     const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
-        console.error('Abort log player image load event: not enough info to continue');
+        console.error(
+            'Abort log player image load event: not enough info to continue');
         return;
     }
     eventDetails.bns = _buildBnsParamFromList(images);
@@ -300,10 +305,12 @@ const onImageClick = (playerEvent, eventDetails) => {
     const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
-        console.error('Abort log player image load event: not enough info to continue');
+        console.error(
+            'Abort log player image load event: not enough info to continue');
         return;
     }
-    eventDetails.bn = _buildBnsParamFromList(images);
+    // Unlike the other image tracking event formats, the bn includes no dimension
+    eventDetails.bn = _getBasenameOf(images[0].url);
     _commonTrack('imageClick', eventDetails);
 };
 

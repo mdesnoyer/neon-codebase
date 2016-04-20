@@ -19,7 +19,7 @@ exports.player = [
     'pause',
     'play',
     'playing',
-    'posterchange'
+    'posterchange',
     'progress',
     'ratechange',
     'seeked',
@@ -29,7 +29,7 @@ exports.player = [
     'texttrackchange',
     'timeupdate',
     'volumechange',
-    'waiting',
+    'waiting'
 ];
 
 exports.ads = [
