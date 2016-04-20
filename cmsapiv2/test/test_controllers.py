@@ -2174,6 +2174,8 @@ class TestVideoHandler(TestControllersBase):
             method='POST',
             allow_nonstandard_methods=True)
 
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id'] 
         url = '/api/v2/%s/videos?video_id=vid1&title=vidkevinnew' % (
             self.account_id_api_key)
 
@@ -2182,8 +2184,15 @@ class TestVideoHandler(TestControllersBase):
             body='',
             method='PUT', 
             allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200) 
         rjson = json.loads(response.body) 
-        self.assertEquals(rjson['title'], 'vidkevinnew') 
+        self.assertEquals(rjson['title'], 'vidkevinnew')
+        request = yield neondata.NeonApiRequest.get(
+            job_id, 
+            self.account_id_api_key,
+            async=True)
+        self.assertEquals(request.video_title, 'vidkevinnew')
 
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')

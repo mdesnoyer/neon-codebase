@@ -1049,13 +1049,9 @@ class VideoHandler(APIV2Handler):
             v.testing_enabled = Boolean()(
                 args.get('testing_enabled', v.testing_enabled))
 
-        result = yield neondata.VideoMetadata.modify(
+        video = yield neondata.VideoMetadata.modify(
             internal_video_id, 
             _update_video, 
-            async=True)
-
-        video = yield neondata.VideoMetadata.get(
-            internal_video_id, 
             async=True)
 
         if not video: 
