@@ -1384,9 +1384,9 @@ class MetricType:
     PLAYS = 'plays'
 
 class IntegrationType(object): 
-    BRIGHTCOVE = 'brightcove'
-    OOYALA = 'ooyala'
-    OPTIMIZELY = 'optimizely'
+    BRIGHTCOVE = 'brightcoveintegration'
+    OOYALA = 'ooyalaintegration'
+    OPTIMIZELY = 'optimizelyintegration'
 
 class DefaultSizes(object): 
     WIDTH = 160 

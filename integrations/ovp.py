@@ -218,31 +218,33 @@ class OVPIntegration(object):
         existing_video = yield neondata.VideoMetadata.get(
             neondata.InternalVideoID.generate(self.neon_api_key, video_id), 
             async=True)
-        try:       
-            response = yield self.submit_video(video_id=video_id, 
-                                               video_url=video_url, 
-                                               callback_url=callback_url,
-                                               external_thumbnail_id=thumb_id, 
-                                               custom_data=custom_data, 
-                                               duration=duration, 
-                                               publish_date=publish_date, 
-                                               video_title=unicode(video_title), 
-                                               default_thumbnail=default_thumbnail)
-             
-            if response['job_id']:
-                rv = response['job_id']
 
-        except Exception as e:
-            if existing_video is not None: 
-                rv = existing_video.job_id  
-            raise e
-
-        if existing_video and existing_video.job_id: 
-            rv = existing_video.job_id 
-        if rv is not None: 
-            yield self._update_video_info(video, video_id, rv)
-        if grab_new_thumb: 
-            yield self._grab_new_thumb(video, video_id)  
+        if not self.does_video_exist(existing_video, video_id):
+            try:       
+                response = yield self.submit_video(video_id=video_id, 
+                                                   video_url=video_url, 
+                                                   callback_url=callback_url,
+                                                   external_thumbnail_id=thumb_id, 
+                                                   custom_data=custom_data, 
+                                                   duration=duration, 
+                                                   publish_date=publish_date, 
+                                                   video_title=unicode(video_title), 
+                                                   default_thumbnail=default_thumbnail)
+                 
+                if response['job_id']:
+                    rv = response['job_id']
+    
+            except Exception as e:
+                if existing_video is not None: 
+                    rv = existing_video.job_id  
+                raise e
+        else:
+            if existing_video and existing_video.job_id: 
+                rv = existing_video.job_id 
+            if rv is not None: 
+                yield self._update_video_info(video, video_id, rv)
+            if grab_new_thumb: 
+                yield self._grab_new_thumb(video, video_id)  
 
         raise tornado.gen.Return(rv) 
       

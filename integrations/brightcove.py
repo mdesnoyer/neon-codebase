@@ -342,7 +342,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         return rv
 
     def does_video_exist(self, video_meta, video_ref): 
-        #return video_ref in self.platform.videos   
         return video_meta is not None 
 
     @tornado.gen.coroutine

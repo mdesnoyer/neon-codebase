@@ -610,7 +610,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
        
         if platform_account:
             # TODO: Filter output in the future.
-            self.send_json_response(platform_account.to_json(), 200)
+            self.send_json_response(platform_account.get_json_data(), 200)
         else:
             data = '{"error":"account not found"}'
             statemon.state.increment('account_not_found')

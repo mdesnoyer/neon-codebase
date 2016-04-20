@@ -30,12 +30,12 @@ from utils.options import define, options
 
 class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        # Mock out the image download
         self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
         self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
+        # Mock out the image download
         self.im_download_mocker = patch(
             'cvutils.imageutils.PILImageUtils.download_image')
         self.random_image = PILImageUtils.create_random_image(480, 640)
@@ -59,7 +59,8 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
         # Add a video to the database
         vid = VideoMetadata('acct1_v1',
                             ['acct1_v1_n1', 'acct1_v1_bc1'],
-                            i_id=self.platform.integration_id)
+                            i_id=self.platform.integration_id, 
+                            request_id='job1')
         vid.save()
         #self.platform.add_video('v1', 'job1')
         ThumbnailMetadata('acct1_v1_n1', 'acct1_v1',
@@ -72,6 +73,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.im_download_mocker.stop()
         self.cdn_mocker.stop()
+        self.submit_mocker.stop()
         self.postgresql.clear_all_tables()
         super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
@@ -88,9 +90,7 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_no_video_in_db(self):
-        #self.platform.add_video('v2', None)
-
-        with self.assertLogExists(logging.ERROR, 'Could not find video'):
+        with self.assertLogExists(logging.WARNING, 'No VideoMetadata for'):
             yield self.integration.submit_one_video_object(
                 { 'id' : 'v2',
                   'length' : 100,

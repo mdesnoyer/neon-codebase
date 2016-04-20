@@ -134,11 +134,6 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
                                         url, 10, 5, "test", i_id)
         vmdata.save()
 
-    #def _update_videos(x):
-    #    x.videos.update(video_map)
-
-    #plattype.modify(i_id, _update_videos)
-
     return images, thumbnail_url_to_image
 
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
@@ -508,7 +503,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         #set up account and video state for testing
         self.api_key = self.create_neon_account()
         json_video_response = json.loads(self.create_brightcove_account())
-        self.b_id = json_video_response['integration_id'] 
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get(self.api_key)
         self.assertIn(self.b_id, nuser.integrations.keys())
@@ -594,7 +588,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         resp = self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 200)
         data = json.loads(resp.body)
-        self.assertEqual(data['_data']['integration_id'], self.b_id)
+        self.assertEqual(data['integration_id'], self.b_id)
 
     def test_create_update_brightcove_account(self):
         ''' updation of brightcove account '''
@@ -1811,53 +1805,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         url = self.get_url("/healthcheck/video_server")
         response = self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
-'''
-class TestServicesPG(TestServices):
-        
-    def setUp(self):
-        super(TestServices, self).setUp()
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        #Http Connection pool Mock
-        self.cp_async_patcher = \
-          patch('utils.http.tornado.httpclient.AsyncHTTPClient')
-        self.cp_mock_async_client = self._future_wrap_mock(
-            self.cp_async_patcher.start()().fetch)
 
-        self.api_key = "" # filled later
-        self.a_id = "unittester-0"
-        self.rtoken = "rtoken"
-        self.wtoken = "wtoken"
-        self.b_id = "i12345" #i_id bcove
-        self.pub_id = "p124"
-        self.thumbnail_url_to_image = {} # mock url => raw image buffer data
-        self.job_ids = [] #ordered list
-        self.video_ids = []
-        self.images = {} 
-
-        random.seed(19449)
-        
-    def tearDown(self):
-        self.cp_async_patcher.stop()
-        self.postgresql.clear_all_tables() 
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        super(TestServices, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        super(TestServices, cls).setUpClass()
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
-        super(TestServices, cls).tearDownClass()
-
-    def test_create_video_request_utf8(self):
-        pass 
-'''
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

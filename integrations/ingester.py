@@ -141,11 +141,20 @@ class Manager(object):
     def check_integration_list(self):
         '''Polls the database for the active integrations.'''
         orig_keys = set(self._timers.keys())
-        pi_class = get_platform_class() 
-        platforms = yield tornado.gen.Task(pi_class.get_all)
+        pi_class = get_platform_class()
+ 
+        integration_iter = yield pi_class.iterate_all(async=True)
         
-        cur_keys = set([(x.account_id, x.integration_id) for x in platforms
-                         if x is not None and x.enabled and isinstance(x, pi_class)])
+        cur_keys = [] 
+        while True:
+            x = yield integration_iter.next(async=True)
+            if isinstance(x, StopIteration):
+                break
+            if x is not None and x.enabled and isinstance(x, pi_class):
+                cur_keys.append((x.account_id, x.integration_id)) 
+        
+        cur_keys = set(cur_keys) 
+ 
         # Schedule callbacks for new integration objects
         new_keys = cur_keys - orig_keys
         for key in new_keys:

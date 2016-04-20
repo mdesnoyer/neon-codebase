@@ -222,6 +222,40 @@ class IntegrationHelper():
         else: 
             raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
 
+    @staticmethod 
+    @tornado.gen.coroutine
+    def get_integrations(account_id):
+        """ gets all integrations for an account. 
+        
+        Keyword arguments 
+        account_id - the account_id that is associated with the integrations
+        """ 
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        integrations = yield user_account.get_integrations(async=True)
+        rv = {} 
+        rv['integrations'] = [] 
+        for i in integrations:
+           new_obj = None  
+           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+               new_obj['type'] = 'brightcove'
+           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA: 
+               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
+               new_obj['type'] = 'ooyala'
+           else: 
+               continue  
+
+           if new_obj: 
+               rv['integrations'].append(new_obj)
+
+        raise tornado.gen.Return(rv) 
+
 '''*********************************************************************
 OoyalaIntegrationHandler
 *********************************************************************'''
@@ -1451,7 +1485,9 @@ class ThumbnailSearchExternalHandler(APIV2Handler):
         self.success({}) 
 
 '''*****************************************************************
-UserHandler 
+AccountIntegrationHandler : class responsible for getting all 
+                            integrations, on a specific account 
+  HTTP Verbs      : get 
 *****************************************************************'''
 class AccountIntegrationHandler(APIV2Handler):
     """This is a bit of a one-off API, it will return 
@@ -1474,23 +1510,7 @@ class AccountIntegrationHandler(APIV2Handler):
         if not user_account: 
             raise NotFoundError()
 
-        integrations = yield user_account.get_integrations(async=True)
-        rv = {} 
-        rv['integrations'] = [] 
-        for i in integrations:
-           new_obj = None  
-           if type(i) == neondata.BrightcoveIntegration:
-               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
-               new_obj['type'] = 'brightcove'
-           elif type(i) == neondata.OoyalaIntegration: 
-               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
-               new_obj['type'] = 'ooyala'
-           else: 
-               continue  
-
-           if new_obj: 
-               rv['integrations'].append(new_obj)
-
+        rv = yield IntegrationHelper.get_integrations(account_id) 
         rv['integration_count'] = len(rv['integrations']) 
         self.success(rv) 
 

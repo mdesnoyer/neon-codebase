@@ -38,9 +38,11 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         user_id = '234234234dasfds'
         self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
         self.user.save()
-        self.integration = neondata.BrightcoveIntegration(self.user.neon_api_key,  
-                                                   last_process_date='2015-10-29T23:59:59Z', 
-                                                   rtoken='c2vfn5fb8gubhrmd67x7bmv9')
+        self.integration = neondata.BrightcoveIntegration(
+            self.user.neon_api_key,  
+            last_process_date='2015-10-29T23:59:59Z', 
+            rtoken='c2vfn5fb8gubhrmd67x7bmv9')
+
         self.integration.save()
         self.integration_id = self.integration.integration_id 
 
@@ -87,9 +89,10 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_two_platforms(self):
-        integration_two = neondata.BrightcoveIntegration('acct2',  
-                                                  last_process_date='2015-10-29T23:59:59Z', 
-                                                  rtoken='c2vfn5fb8gubhrmd67x7bmv9')
+        integration_two = neondata.BrightcoveIntegration(
+            'acct2',  
+            last_process_date='2015-10-29T23:59:59Z', 
+            rtoken='c2vfn5fb8gubhrmd67x7bmv9')
         integration_two.save()
 
         self.int_mock.reset_mock()
@@ -101,14 +104,18 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         calls = dict([x[0] for x in self.int_mock.call_args_list])
 
         self.assertItemsEqual(calls.keys(), [self.user.neon_api_key, 'acct2'])
-        self.assertEquals(calls[self.user.neon_api_key].integration_id, self.integration.integration_id)
-        self.assertEquals(calls['acct2'].integration_id, integration_two.integration_id)
+        self.assertEquals(calls[self.user.neon_api_key].integration_id, 
+            self.integration.integration_id)
+        self.assertEquals(calls['acct2'].integration_id, 
+            integration_two.integration_id)
 
     @tornado.testing.gen_test
     def test_platform_disabled(self):
         def _set_platform(x):
             x.enabled = False
-        neondata.BrightcoveIntegration.modify(self.integration.integration_id, _set_platform)
+        neondata.BrightcoveIntegration.modify(
+            self.integration.integration_id, 
+            _set_platform)
 
         with self.assertLogNotExists(logging.INFO, 'Turning on integration'):
             yield self.manager.check_integration_list()
@@ -126,7 +133,9 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         def _set_platform(x):
             x.enabled = False
-        neondata.BrightcoveIntegration.modify(self.integration.integration_id, _set_platform)
+        neondata.BrightcoveIntegration.modify(
+            self.integration.integration_id, 
+            _set_platform)
 
         with self.assertLogExists(logging.INFO, 'Turning off integration'):
             yield self.manager.check_integration_list()
@@ -149,13 +158,16 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.WARNING, 
                                   ('Finished processing.*Time was')):
             yield integrations.ingester.process_one_account(
-                self.user.neon_api_key, self.integration.integration_id, slow_limit=0.0)
+                self.user.neon_api_key, 
+                self.integration.integration_id, 
+                slow_limit=0.0)
 
         self.assertEquals(self.process_mock.call_count, 1)
         cargs, kwargs = self.int_mock.call_args
         self.assertEquals(cargs[0], self.user.neon_api_key)
         self.assertEquals(cargs[1].account_id, self.user.neon_api_key)
-        self.assertEquals(cargs[1].integration_id, self.integration.integration_id)
+        self.assertEquals(cargs[1].integration_id, 
+            self.integration.integration_id)
 
         self.assertEquals(
             statemon.state.get('integrations.ingester.slow_update'),
