@@ -26,6 +26,7 @@ const defaults = {
         videoIdAttributeRegex: null
     },
 
+    // Tracking options
     tracking: {
         // Default Neon api endpoint
         neonApiUrl: 'http://tracker.neon-images.com/v2/track',
@@ -48,6 +49,7 @@ const defaults = {
         ]
     },
 
+    // Development options
     dev: {
         showConsoleLogging: false
     }
@@ -89,7 +91,9 @@ const _getPercentPlayed = () => {
     return Math.round(currentTime / duration * 100);
 };
 
-// Lifted from the Google Analytics plugin
+// Determine if player is in ad-playing state by its element classes
+// Regex from Google Analytics videojs plugin
+// https://github.com/mickey/videojs-ga
 const _adStateRegex = /(\s|^)vjs-ad-(playing|loading)(\s|$)/;
 const _isInAdState = () => {
     return _adStateRegex.test(player.el().className);
@@ -168,6 +172,7 @@ const _commonTrack = (neonEventType, eventDetails) => {
     }
 };
 
+// Extract video id from page state based on config
 const _extractVideoId = () => {
     // Extract the video id
     const idKey = neon.options.publisher.videoIdAttribute;
@@ -197,7 +202,8 @@ const _extractVideoId = () => {
     return videoId;
 };
 
-const trackPlay = (playerEvent, eventDetails) => {
+// Handle play event
+const onPlay = (playerEvent, eventDetails) => {
     if (_isInAdState()) {
         return;
     }
@@ -216,12 +222,13 @@ const trackPlay = (playerEvent, eventDetails) => {
     _commonTrack('play', eventDetails);
 };
 
+// Rough handle autoplay event
 const guessAutoplay = (e) => {
     // Autoplay emits no play event.
     // Thus if a player emits a timeUpdate without
     // a preceeding play, track this as an autoplay
     if (neon.playedVids.length === 0) {
-        trackPlay({type: 'autoplay'}, {aplay: true});
+        onPlay({type: 'autoplay'}, {aplay: true});
     }
 };
 
@@ -241,14 +248,15 @@ const _buildBnsParamFromList = (list) => {
     return values.join(',');
 };
 
-const _getImagesFromEvent = (details) => {
+// Thoughtfully get the images associated to the event
+const _getImagesForEvent = (playerEvent) => {
     let url;
     let width;
     let height;
     const values = [];
 
-    if (details.images !== undefined) {
-        details.images.forEach((image) => {
+    if (playerEvent.images !== undefined) {
+        playerEvent.images.forEach((image) => {
             values.push({url, width, height});
         });
     } else if (player.poster() !== undefined) {
@@ -260,9 +268,10 @@ const _getImagesFromEvent = (details) => {
     return values;
 };
 
-const trackImageLoad = (playerEvent, eventDetails) => {
+// Handle image load event
+const onImageLoad = (playerEvent, eventDetails) => {
     eventDetails = eventDetails || {};
-    const images = _getImagesFromEvent(eventDetails);
+    const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
         console.error('Abort log player image load event: not enough info to continue');
@@ -272,9 +281,10 @@ const trackImageLoad = (playerEvent, eventDetails) => {
     _commonTrack('imageLoad', eventDetails);
 };
 
-const trackImageView = (playerEvent, eventDetails) => {
+// Handle image view event
+const onImageView = (playerEvent, eventDetails) => {
     eventDetails = eventDetails || {};
-    const images = _getImagesFromEvent(eventDetails);
+    const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
         console.error('Abort log player image load event: not enough info to continue');
@@ -284,9 +294,10 @@ const trackImageView = (playerEvent, eventDetails) => {
     _commonTrack('imageView', eventDetails);
 };
 
-const trackImageClick = (playerEvent, eventDetails) => {
+// Handle image click event
+const onImageClick = (playerEvent, eventDetails) => {
     eventDetails = eventDetails || {};
-    const images = _getImagesFromEvent(eventDetails);
+    const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
         console.error('Abort log player image load event: not enough info to continue');
@@ -296,7 +307,10 @@ const trackImageClick = (playerEvent, eventDetails) => {
     _commonTrack('imageClick', eventDetails);
 };
 
-const trackAdPlay = (playerEvent, eventDetails) => {
+// Handle ad play event
+// Note there are various ad state models with different emitted events
+// See events.js for more
+const onAdPlay = (playerEvent, eventDetails) => {
     if (neon.hasAdPlayed) {
         return;
     }
@@ -304,7 +318,8 @@ const trackAdPlay = (playerEvent, eventDetails) => {
     _commonTrack('adPlay', {aplay: false});
 };
 
-const trackVideoViewPercent = (playerEvent) => {
+// Handle time update event; send once per interval per video
+const onTimeUpdate = (playerEvent) => {
 
     // Measure the play progress by interval set in options
     const interval = Math.min(100, neon.options.tracking.timeUpdateInterval);
@@ -324,6 +339,7 @@ const trackVideoViewPercent = (playerEvent) => {
     }
 };
 
+// Get a relatively unique random identifier
 const _uuid = () => {
     const randomString = (length, chars) => {
         let result = '';
@@ -340,11 +356,18 @@ const _uuid = () => {
     return randomString(16, _alphanum);
 };
 
-/**
- * @function onPlayerReady
- * @param    {Player} player
- * @param    {Object} [options={}]
- */
+// Handle the poster change event
+const onPosterChange = (playerEvent) => {
+
+    // Naively treat a change as a load and a view
+    onImageLoad(playerEvent);
+    onImageView(playerEvent);
+
+    // And first play event as a image click for the poster
+    player.one('play', onImageClick);
+};
+
+// Handle the video.js ready event
 const onPlayerReady = (player_, options) => {
 
     player = player_;
@@ -367,35 +390,23 @@ const onPlayerReady = (player_, options) => {
     neon.percentsPlayed = {};
     neon.hasAdPlayed = false;
 
-    player.on('image_load', trackImageLoad);
-    player.on('image_view', trackImageView);
-    player.on('image_click', trackImageClick);
-
-    let posterUrl = player.poster();
-
-    if (posterUrl !== undefined) {
-        trackImageLoad({type: 'imageLoad'});
-        trackImageView({type: 'imageView'});
-        // Treat a play event as a image click for the poster
-        player.one('play', trackImageClick);
+    // If the poster is set, track as though it had just changed
+    if (player.poster() !== undefined) {
+        onPosterChange();
     }
 
-    player.on('play', trackPlay);
-    player.on('ad-play', trackAdPlay);
-    player.on('ima3-started', trackAdPlay);
+    // Associate events to their track handlers
+    player.on('posterchange', onPosterChange);
+    player.on('play', onPlay);
+    player.on('ad-play', onAdPlay);
+    player.on('timeupdate', onTimeUpdate);
+    player.on(['adstart', 'ads-ad-started', 'ima3-started'], onAdPlay);
 
     // Use timeupdate for detecting autoplay
     player.one('timeupdate', guessAutoplay);
-
-    player.on('timeupdate', trackVideoViewPercent);
-    player.on(['adstart', 'ads-ad-started', 'ima3-started'], trackAdPlay);
 };
 
-/**
- * Defer setup to video player's ready event.
- *
- * @param    {Object} [options={}]
- */
+// Defer setup to video player's ready event.
 const neonTracker = function(options) {
     this.ready(() => {
         onPlayerReady(this, videojs.mergeOptions(defaults, options));
@@ -406,6 +417,7 @@ const neonTracker = function(options) {
 videojs.plugin('neon', neonTracker);
 
 // Include the version number
-neonTracker.VERSION = '__VERSION__';
+neonTracker.VERSION = '0.0.1';
 
+// Allow simple es6 import
 export default neonTracker;
