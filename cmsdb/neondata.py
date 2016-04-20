@@ -3341,7 +3341,7 @@ class ProcessingStrategy(DefaultedStoredObject):
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.02):
+                 filter_text_thresh=0.04):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
