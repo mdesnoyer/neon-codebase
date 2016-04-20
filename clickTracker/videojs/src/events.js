@@ -1,5 +1,37 @@
 // events.js
-// List of usable videojs events associated to a particular task
+// List of usable videojs events associated to a particular namespace
+
+// "Listen to all HTML5-defined events and trigger them on the player"
+exports.player = [
+    'abort',
+    'canplay',
+    'canplaythrough',
+    'durationchange',
+    'emptied',
+    'ended',
+    'error',
+    'firstplay',
+    'fullscreenchange',
+    'loadeddata',
+    'loadedmetadata',
+    'loadedmetadata',
+    'loadstart',
+    'pause',
+    'play',
+    'playing',
+    'posterchange'
+    'progress',
+    'ratechange',
+    'seeked',
+    'seeking',
+    'stalled',
+    'suspend',
+    'texttrackchange',
+    'timeupdate',
+    'volumechange',
+    'waiting',
+];
+
 exports.ads = [
     'ads-request',
     'ads-load',
