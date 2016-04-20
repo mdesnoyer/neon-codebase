@@ -1033,7 +1033,7 @@ class VideoHandler(APIV2Handler):
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
           'testing_enabled': Boolean(),
-          'title': Any(str, unicode, Length(min=1, max=1024)),
+          'title': Any(str, unicode, Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1061,11 +1061,25 @@ class VideoHandler(APIV2Handler):
         if not video: 
             raise NotFoundError('video does not exist with id: %s' % 
                 (args['video_id']))
-        
+
+        # we may need to update the request object as well
+        db2api_fields = ['testing_enabled', 'video_id'] 
+        api_request = None
+        if title is not None and video.job_id is not None:
+            def _update_request(r): 
+                r.video_title = title
+            
+            api_request = yield neondata.NeonApiRequest.modify(
+                video.job_id,
+                account_id, 
+                _update_request, 
+                async=True)
+
+            db2api_fields.append('title')
+            
         statemon.state.increment('put_video_oks')
-        output = yield self.db2api(video, None,
-                                   fields=['testing_enabled',
-                                           'video_id'])
+        output = yield self.db2api(video, api_request,
+                                   fields=db2api_fields)
         self.success(output)
 
     @classmethod
