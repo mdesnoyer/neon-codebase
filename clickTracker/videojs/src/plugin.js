@@ -133,7 +133,7 @@ const _sendToTracker = (eventType, eventDetails) => {
     ), _trackerAllowedParams);
 
     if (neon.options.showConsoleLogging) {
-        console.log(printf('%s -> %s', eventType, action), data);
+        console.info(printf('%s -> %s', eventType, action), data);
     }
 
     reqwest({
@@ -160,10 +160,9 @@ const trackPlay = (playerEvent, eventDetails) => {
     neon.currentVid = _extractVideoId();
     if(neon.playedVids.indexOf(neon.currentVid) < 0) {
         neon.playedVids.push(neon.currentVid);
-        neon.percentsPlayed[neon.currentVid] = {};
+        neon.percentsPlayed[neon.currentVid] = [];
     }
 
-    neon.hasVidPlayed = true;
     eventDetails = eventDetails || {};
     // Set no-autoplay flag
     eventDetails.aplay = false;
@@ -176,7 +175,7 @@ const guessAutoplay = (e) => {
     // Autoplay emits no play event.
     // Thus if a player emits a timeUpdate without
     // a preceeding play, track this as an autoplay
-    if (!neon.hasVidPlayed) {
+    if (neon.playedVids.length === 0) {
         trackPlay({type: 'autoplay'}, {aplay: true});
     }
 };
@@ -221,7 +220,7 @@ const trackImageLoad = (playerEvent, eventDetails) => {
     const images = _getImagesFromEvent(eventDetails);
 
     if (images.length === 0) {
-        console.log('Abort log player image load event: not enough info to continue');
+        console.error('Abort log player image load event: not enough info to continue');
         return;
     }
     eventDetails.bns = _buildBnsParamFromList(images);
@@ -233,7 +232,7 @@ const trackImageView = (playerEvent, eventDetails) => {
     const images = _getImagesFromEvent(eventDetails);
 
     if (images.length === 0) {
-        console.log('Abort log player image load event: not enough info to continue');
+        console.error('Abort log player image load event: not enough info to continue');
         return;
     }
     eventDetails.bns = _buildBnsParamFromList(images);
@@ -245,7 +244,7 @@ const trackImageClick = (playerEvent, eventDetails) => {
     const images = _getImagesFromEvent(eventDetails);
 
     if (images.length === 0) {
-        console.log('Abort log player image load event: not enough info to continue');
+        console.error('Abort log player image load event: not enough info to continue');
         return;
     }
     eventDetails.bn = _buildBnsParamFromList(images);
@@ -347,10 +346,9 @@ const onPlayerReady = (player_, options) => {
     };
 
     // Store state of videos played
-    neon.playedVids = [] 
+    neon.playedVids = []
     neon.percentsPlayed = {};
     neon.hasAdPlayed = false;
-    neon.hasVidPlayed = false;
 
     player.on('image_load', trackImageLoad);
     player.on('image_view', trackImageView);
