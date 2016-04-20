@@ -10,31 +10,47 @@ import _ from 'lodash';
 let neon;
 let player;
 
-// Runtime defaults for the plugin
+// Runtime options defaults
 const defaults = {
 
-    // Default Neon api endpoint
-    trackUrl: 'http://tracker.neon-images.com/v2/track',
+    // Publisher options defaults
+    publisher: {
 
-    // Default events to remote log to Neon
-    trackEvents: [
-        'imageLoad',
-        'imageView',
-        'imageClick',
-        'autoplay',
-        'play',
-        'adPlay',
-        'timeUpdate'
-    ],
+        // Set in html
+        // id: <your neon id>
 
-    // Resolution (in percent points) to track video play percent
-    timeUpdateInterval: 25,
+        // Default attribute of video tag that identifies the video content
+        // e.g., <video id="videojs" data-video-id=<video_id>/> uses data-video-id
+        videoIdAttribute: 'data-video-id',
+        // A regex to further extract the identifier
+        videoIdAttributeRegex: null
+    },
 
-    // Assume this is a Brightcove videojs context
-    trackingType: 'BRIGHTCOVE',
+    tracking: {
+        // Default Neon api endpoint
+        neonApiUrl: 'http://tracker.neon-images.com/v2/track',
 
-    // Show console logging {true|false}
-    showConsoleLogging: false
+        // Resolution (in percent points) to track video play percent
+        timeUpdateInterval: 25,
+
+        // Assume this is a Brightcove videojs context
+        type: 'BRIGHTCOVE',
+
+        // Default events to remote log to Neon
+        events: [
+            'imageLoad',
+            'imageView',
+            'imageClick',
+            'autoplay',
+            'play',
+            'adPlay',
+            'timeUpdate'
+        ]
+    },
+
+    dev: {
+        showConsoleLogging: false
+    }
 };
 
 // Mapping of event type to Neon Api endpoint shorthand
@@ -132,12 +148,12 @@ const _sendToTracker = (eventType, eventDetails) => {
         // And filter unrecognized params
     ), _trackerAllowedParams);
 
-    if (neon.options.showConsoleLogging) {
+    if (neon.options.dev.showConsoleLogging) {
         console.info(printf('%s -> %s', eventType, action), data);
     }
 
     reqwest({
-        url: neon.options.trackUrl,
+        url: neon.options.tracking.neonApiUrl,
         method: 'GET',
         crossOrigin: true,
         data
@@ -147,7 +163,7 @@ const _sendToTracker = (eventType, eventDetails) => {
 // Check if event needs remote tracking in configured trackEvents
 const _commonTrack = (neonEventType, eventDetails) => {
     eventDetails = eventDetails || {};
-    if (neon.options.trackEvents.indexOf(neonEventType) >= 0) {
+    if (neon.options.tracking.events.indexOf(neonEventType) >= 0) {
         _sendToTracker(neonEventType, eventDetails);
     }
 };
@@ -262,7 +278,7 @@ const trackAdPlay = (playerEvent, eventDetails) => {
 const trackVideoViewPercent = (playerEvent) => {
 
     // Measure the play progress by interval set in options
-    const interval = Math.min(100, neon.options.timeUpdateInterval);
+    const interval = Math.min(100, neon.options.tracking.timeUpdateInterval);
     const vid = neon.currentVid;
     // Begin at the first interval and not zero.
     let percent = interval;
@@ -297,7 +313,7 @@ const _uuid = () => {
 
 const _extractVideoId = () => {
     // Extract the video id
-    const idKey = neon.options.publisherIdAttribute;
+    const idKey = neon.options.publisher.videoIdAttribute;
     let videoId = player.el().getAttribute(idKey);
 
     if (videoId === null) {
@@ -305,7 +321,7 @@ const _extractVideoId = () => {
             'Fatal config error: player has no publisher id for key ' + idKey
         );
     }
-    const regex = neon.options.publisherIdAttributeRegex;
+    const regex = neon.options.publisher.videoIdAttributeRegex;
 
     // Check the usefulness of this regex code
     if (regex !== undefined && regex !== null) {
@@ -334,19 +350,20 @@ const onPlayerReady = (player_, options) => {
     player = player_;
     neon = player.neon;
 
-    neon.options = options || {};
+    neon.options = options
+
     neon.pageData = {
         // Fixed page idents
         pageid: _uuid(),
         page: _getPageUrl(),
         // Publisher id
-        tai: options.publisherId,
+        tai: options.publisher.id,
         // Tracking type
-        ttype: defaults.trackingType
+        ttype: options.tracking.type
     };
 
     // Store state of videos played
-    neon.playedVids = []
+    neon.playedVids = [];
     neon.percentsPlayed = {};
     neon.hasAdPlayed = false;
 
