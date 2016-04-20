@@ -1413,8 +1413,10 @@ class LocalSearcher(object):
             _log.info('Unknown percentage of video searched')
         results = []
         if not len(raw_results):
-            _log.warn('No suitable frames have been found for video %s!'
+            _log.debug('No suitable frames have been found for video %s!'
                       ' Will uniformly select frames', video_name)
+            # increment the statemon
+            statemone.stat.increment('all_frames_filtered')
             # select which frames to use
             frames = np.linspace(self.search_algo.buffer, 
                                  self.num_frames - self.search_algo.buffer, 
@@ -1425,7 +1427,7 @@ class LocalSearcher(object):
                                     frameno / float(fps))
                 results.append(formatted_result)
         else:
-            _log.info('%i thumbs found', len(raw_results))
+            _log.debug('%i thumbs found', len(raw_results))
             for rr in raw_results:
                 formatted_result = (rr[0], rr[1], rr[2], rr[2] / float(fps),
                                     '')
