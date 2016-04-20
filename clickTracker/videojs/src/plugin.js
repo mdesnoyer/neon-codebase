@@ -120,10 +120,10 @@ const _sendToTracker = (eventType, eventDetails) => {
     const action = constants.eventCodeMap[eventType];
     let pcount;
 
-    if(neon.currentVid === undefined) {
+    if (neon.currentVid === undefined) {
         pcount = null;
     } else {
-        pcount=  neon.playedVids.indexOf(neon.currentVid) + 1;
+        pcount = neon.playedVids.indexOf(neon.currentVid) + 1;
     }
     const data = _.pick(videojs.mergeOptions(
 
@@ -137,7 +137,7 @@ const _sendToTracker = (eventType, eventDetails) => {
             // Client's timestamp in localtime, in millis
             cts: (new Date()).getTime(),
             // 1-based index of video for videos in page
-            pcount: pcount,
+            pcount,
             ref: _getReferrer(),
             vid: neon.currentVid
         },
@@ -168,13 +168,42 @@ const _commonTrack = (neonEventType, eventDetails) => {
     }
 };
 
+const _extractVideoId = () => {
+    // Extract the video id
+    const idKey = neon.options.publisher.videoIdAttribute;
+    let videoId = player.el().getAttribute(idKey);
+
+    if (videoId === null) {
+        throw new Error(
+            'Fatal config error: player has no publisher id for key ' + idKey
+        );
+    }
+    const regex = neon.options.publisher.videoIdAttributeRegex;
+
+    // Check the usefulness of this regex code
+    if (regex !== undefined && regex !== null) {
+        const matches = videoId.match(regex);
+
+        if (matches !== null) {
+            videoId = matches[0];
+        } else {
+            throw new Error(printf(
+                'Fatal config error: video id %s does not match pattern %s',
+                videoId,
+                regex
+            ));
+        }
+    }
+    return videoId;
+};
+
 const trackPlay = (playerEvent, eventDetails) => {
     if (_isInAdState()) {
         return;
     }
 
     neon.currentVid = _extractVideoId();
-    if(neon.playedVids.indexOf(neon.currentVid) < 0) {
+    if (neon.playedVids.indexOf(neon.currentVid) < 0) {
         neon.playedVids.push(neon.currentVid);
         neon.percentsPlayed[neon.currentVid] = [];
     }
@@ -311,35 +340,6 @@ const _uuid = () => {
     return randomString(16, _alphanum);
 };
 
-const _extractVideoId = () => {
-    // Extract the video id
-    const idKey = neon.options.publisher.videoIdAttribute;
-    let videoId = player.el().getAttribute(idKey);
-
-    if (videoId === null) {
-        throw new Error(
-            'Fatal config error: player has no publisher id for key ' + idKey
-        );
-    }
-    const regex = neon.options.publisher.videoIdAttributeRegex;
-
-    // Check the usefulness of this regex code
-    if (regex !== undefined && regex !== null) {
-        const matches = videoId.match(regex);
-
-        if (matches !== null) {
-            videoId = matches[0];
-        } else {
-            throw new Error(printf(
-                'Fatal config error: video id %s does not match pattern %s',
-                videoId,
-                regex
-            ));
-        }
-    }
-    return videoId;
-};
-
 /**
  * @function onPlayerReady
  * @param    {Player} player
@@ -350,7 +350,7 @@ const onPlayerReady = (player_, options) => {
     player = player_;
     neon = player.neon;
 
-    neon.options = options
+    neon.options = options;
 
     neon.pageData = {
         // Fixed page idents
