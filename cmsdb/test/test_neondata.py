@@ -3623,6 +3623,31 @@ class TestPGNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         neondata.NeonUserAccount.modify_many([so.key], _m_me) 
         get_me = yield so.get(so.key, async=True)
         self.assertEquals('asdfaafds', get_me.neon_api_key)
+    
+    @tornado.testing.gen_test
+    def test_base_get_integrations(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True) 
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True)
+        oi = neondata.OoyalaIntegration('kevinacct')
+        yield oi.save(async=True)
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True)
+        integrations = yield so.get_integrations(async=True)
+
+        self.assertEquals(len(integrations), 3)  
+        # test order by 
+        self.assertEquals(type(integrations[2]), neondata.OoyalaIntegration) 
+        self.assertEquals(integrations[2].account_id, 'kevinacct')
+ 
+    @tornado.testing.gen_test
+    def test_empty_get_integrations(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True) 
+        integrations = yield so.get_integrations(async=True)
+        self.assertEquals(len(integrations), 0)  
+
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

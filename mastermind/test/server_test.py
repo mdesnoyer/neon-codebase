@@ -674,9 +674,6 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
                                      tids=['key1_vid2_t1'],
                                      i_id='i1')
         yield vid.save(async=True)
-        bp = yield neondata.BrightcovePlatform.modify(
-            'key1', 'i1', lambda x: x.add_video('vid2', vid.job_id), 
-            async=True)
         yield self.assertWaitForEquals(lambda: 
             len([x for x in self.mastermind.get_directives()]), 
               2, 
@@ -2535,10 +2532,6 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
                                           for j in range(2)],
                                     i_id='i1')
             yield vid.save(async=True)
-            yield neondata.BrightcovePlatform.modify(
-                'key1', 'i1', 
-                lambda x: x.add_video('vid%d' % i,
-                                      vid.job_id), async=True)
             thumbs =  [neondata.ThumbnailMetadata(
                 'key1_vid%d_t%d'% (i,j),
                 'key1_vid%d' % i,

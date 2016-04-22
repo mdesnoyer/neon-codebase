@@ -543,10 +543,10 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
 
     def test_brightcove_request(self):
 
-        i_id = "i125"
-        bp = neondata.BrightcovePlatform.modify(
-            self.api_key, i_id,
+        bp = neondata.BrightcoveIntegration.modify(
+            self.api_key,
             lambda x: x, create_missing=True)
+        i_id = bp.integration_id
 
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
@@ -582,10 +582,10 @@ class TestVideoServer(test_utils.neontest.AsyncHTTPTestCase):
     
     def test_brightcove_request_invalid(self):
 
-        i_id = "i125"
-        bp = neondata.BrightcovePlatform.modify(
-            self.api_key, i_id,
+        bp = neondata.BrightcoveIntegration.modify(
+            self.api_key,
             lambda x: x, create_missing=True)
+        i_id = bp.integration_id
         vals = {"api_key": self.api_key, 
                 "video_url": "http://testurl/video.mp4", 
                 "video_id": "testid123", "topn":2, 

@@ -886,8 +886,11 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testiid' 
-        defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.OoyalaIntegration.modify(
+            'acct1',
+            lambda x: x, 
+            create_missing=True) 
+        self.test_i_id = defop.integration_id
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
@@ -896,30 +899,31 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         super(TestOoyalaIntegrationHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestOoyalaIntegrationHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
         super(TestOoyalaIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
-        url = '/api/v2/%s/integrations/ooyala?publisher_id=123123abc' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/integrations/ooyala?publisher_id=123123abc' % ( 
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body) 
         platform = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
@@ -964,7 +968,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson.get('api_secret',None), None)
  
     def test_get_integration_dne(self):
-        url = '/api/v2/%s/integrations/ooyala?integration_id=idontexist' % (self.account_id_api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=idontexist' % (
+            self.account_id_api_key)
         self.http_client.fetch(self.get_url(url),
                                callback=self.stop, 
                                method='GET')
@@ -976,7 +981,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration(self):
         api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_key=%s' % ( 
+            self.account_id_api_key, self.test_i_id, api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -990,11 +996,15 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     def test_put_integration_dne(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             api_key = 'testapikey' 
-            url = '/api/v2/%s/integrations/ooyala?integration_id=nope&api_key=%s' % (self.account_id_api_key, api_key)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='',
-                                                    method='PUT', 
-                                                    allow_nonstandard_methods=True)
+            url = '/api/v2/%s/integrations/ooyala?integration_id=nope'\
+                  '&api_key=%s' % (self.account_id_api_key, api_key)
+
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='PUT', 
+                allow_nonstandard_methods=True)
+
         self.assertEquals(e.exception.code, 404)  
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'unable to find') 
@@ -1002,13 +1012,19 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_ensure_old_info_not_nulled(self):
         api_key = 'testapikey' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_key=%s' % (self.account_id_api_key, self.test_i_id, api_key)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s'\
+              '&api_key=%s' % (self.account_id_api_key, 
+                  self.test_i_id, 
+                  api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
                                                 allow_nonstandard_methods=True)
         api_secret = 'testapisecret' 
-        url = '/api/v2/%s/integrations/ooyala?integration_id=%s&api_secret=%s' % (self.account_id_api_key, self.test_i_id, api_secret)
+        url = '/api/v2/%s/integrations/ooyala?integration_id=%s'\
+              '&api_secret=%s' % (self.account_id_api_key, 
+                  self.test_i_id, 
+                  api_secret)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='PUT', 
@@ -1021,61 +1037,35 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         self.assertEquals(platform.api_secret, api_secret)
  
     def test_get_integration_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.get')
+        exception_mocker = patch(
+            'cmsapiv2.controllers.OoyalaIntegrationHandler.get')
 	url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.get_exceptions(url, exception_mocker)  
 
     def test_put_integration_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.put')
+        exception_mocker = patch(
+            'cmsapiv2.controllers.OoyalaIntegrationHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.put_exceptions(url, params, exception_mocker) 
  
     def test_post_integration_exceptions(self):
-        exception_mocker = patch('cmsapiv2.controllers.OoyalaIntegrationHandler.post')
+        exception_mocker = patch(
+            'cmsapiv2.controllers.OoyalaIntegrationHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
 	url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
-# TODO KF here until hot swap is done
-class TestOoyalaIntegrationHandlerPG(TestOoyalaIntegrationHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testiid' 
-        defop = neondata.OoyalaIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestOoyalaIntegrationHandler, self).setUp()
-
-    def tearDown(self): 
-        self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
-        super(TestOoyalaIntegrationHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestOoyalaIntegrationHandlerPG, cls).tearDownClass() 
- 
 class TestBrightcoveIntegrationHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testbciid' 
-        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
+        self.defop = neondata.BrightcoveIntegration.modify(
+            'acct1', 
+            lambda x: x, 
+            create_missing=True)
+        self.test_i_id = self.defop.integration_id 
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
@@ -3948,6 +3938,115 @@ class TestAccountLimitsHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_posts'], 0)
+
+class TestAccountIntegrationsHandler(TestControllersBase): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestAccountIntegrationsHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestAccountIntegrationsHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test 
+    def test_one_integration(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True) 
+        url = '/api/v2/%s/integrations' % (so.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['integration_count'], 1) 
+        self.assertEquals(len(rjson['integrations']), 1)
+        self.assertEquals(rjson['integrations'][0]['account_id'], 'kevinacct')
+
+    @tornado.testing.gen_test 
+    def test_two_integrations_one_type(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True) 
+        bi = neondata.BrightcoveIntegration('kevinacct')
+        yield bi.save(async=True) 
+        url = '/api/v2/%s/integrations' % (so.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['integration_count'], 2) 
+        self.assertEquals(len(rjson['integrations']), 2)
+        self.assertEquals(rjson['integrations'][0]['account_id'], 'kevinacct')
+        self.assertNotEqual(
+            rjson['integrations'][0]['integration_id'], 
+            rjson['integrations'][1]['integration_id'])
+
+    @tornado.testing.gen_test 
+    def test_wrong_account(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        url = '/api/v2/%s/integrations' % ('doesnotexist') 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                                          method='GET')
+
+        self.assertEquals(e.exception.code, 404)
+
+    @tornado.testing.gen_test 
+    def test_multiple_integrations_multiple_types(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+
+        yield neondata.BrightcoveIntegration('kevinacct').save(async=True)
+        yield neondata.OoyalaIntegration('kevinacct').save(async=True)
+        yield neondata.BrightcoveIntegration('kevinacct').save(async=True)
+        yield neondata.BrightcoveIntegration('kevinacct').save(async=True)
+        yield neondata.OoyalaIntegration('kevinacct').save(async=True)
+        yield neondata.BrightcoveIntegration('kevinacct').save(async=True)
+
+        url = '/api/v2/%s/integrations' % (so.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['integration_count'], 6) 
+        self.assertEquals(len(rjson['integrations']), 6)
+        # the first four intergrations should be type brightcove
+        self.assertEquals(rjson['integrations'][0]['type'], 'brightcove')
+        self.assertEquals(rjson['integrations'][1]['type'], 'brightcove')
+        self.assertEquals(rjson['integrations'][2]['type'], 'brightcove')
+        self.assertEquals(rjson['integrations'][3]['type'], 'brightcove')
+        # the last two intergrations should be type ooyala
+        self.assertEquals(rjson['integrations'][4]['type'], 'ooyala')
+        self.assertEquals(rjson['integrations'][5]['type'], 'ooyala')
+
+    @tornado.testing.gen_test 
+    def test_no_integrations_exist(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+
+        yield neondata.BrightcoveIntegration(
+            'differentaccount').save(async=True)
+        url = '/api/v2/%s/integrations' % (so.neon_api_key) 
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                method="GET")
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['integration_count'], 0) 
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

@@ -222,6 +222,40 @@ class IntegrationHelper():
         else: 
             raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
 
+    @staticmethod 
+    @tornado.gen.coroutine
+    def get_integrations(account_id):
+        """ gets all integrations for an account. 
+        
+        Keyword arguments 
+        account_id - the account_id that is associated with the integrations
+        """ 
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        integrations = yield user_account.get_integrations(async=True)
+        rv = {} 
+        rv['integrations'] = [] 
+        for i in integrations:
+           new_obj = None  
+           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+               new_obj['type'] = 'brightcove'
+           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA: 
+               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
+               new_obj['type'] = 'ooyala'
+           else: 
+               continue  
+
+           if new_obj: 
+               rv['integrations'].append(new_obj)
+
+        raise tornado.gen.Return(rv) 
+
 '''*********************************************************************
 OoyalaIntegrationHandler
 *********************************************************************'''
@@ -1441,14 +1475,52 @@ class ThumbnailSearchInternalHandler(APIV2Handler):
         self.success({}) 
 
 '''*********************************************************************
-ThumbnailSearchExternalHandler : class responsible for searching videos 
-                                 an external source 
+ThumbnailSearchExternalHandler : class responsible for searching thumbs 
+                                 from an external source 
    HTTP Verbs     : get
 *********************************************************************'''
 class ThumbnailSearchExternalHandler(APIV2Handler): 
     @tornado.gen.coroutine
     def get(self, account_id):
         self.success({}) 
+
+'''*****************************************************************
+AccountIntegrationHandler : class responsible for getting all 
+                            integrations, on a specific account 
+  HTTP Verbs      : get 
+*****************************************************************'''
+class AccountIntegrationHandler(APIV2Handler):
+    """This is a bit of a one-off API, it will return 
+          all integrations (regardless of type) for an 
+          individual account. 
+    """
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        rv = yield IntegrationHelper.get_integrations(account_id) 
+        rv['integration_count'] = len(rv['integrations']) 
+        self.success(rv) 
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required' : [HTTPVerbs.GET] 
+               }
+
 
 '''*****************************************************************
 UserHandler 
@@ -1555,6 +1627,8 @@ application = tornado.web.Application([
         BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', 
         OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$', 
+        AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
