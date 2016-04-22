@@ -182,13 +182,13 @@ const _extractVideoId = () => {
 
     if (videoId === null) {
         throw new Error(
-            'Fatal config error: player has no publisher id for key ' + idKey
+            'Fatal config error: player has no video id for key ' + idKey
         );
     }
     const regex = neon.options.publisher.videoIdAttributeRegex;
 
     // Check the usefulness of this regex code
-    if (regex !== undefined && regex !== null) {
+    if (!!regex) {
         const matches = videoId.match(regex);
 
         if (matches !== null) {
@@ -262,7 +262,7 @@ const _getImagesForEvent = (playerEvent) => {
         playerEvent.images.forEach((image) => {
             values.push({url, width, height});
         });
-    } else if (player.poster() !== undefined) {
+    } else if (!!player.poster()) {
         url = player.poster();
         width = player.posterImage.width();
         height = player.posterImage.height();
@@ -398,7 +398,7 @@ const onPlayerReady = (player_, options) => {
     neon.hasAdPlayed = false;
 
     // If the poster is set, track as though it had just changed
-    if (player.poster() !== undefined) {
+    if (!!player.poster()) {
         onPosterChange();
     }
 

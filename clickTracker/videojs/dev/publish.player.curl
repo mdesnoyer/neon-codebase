@@ -1,0 +1,7 @@
+source config
+
+curl \
+  --header "Content-Type: application/json" \
+  --user $EMAIL:$PASSWORD \
+  --request POST \
+  https://players.api.brightcove.com/v1/accounts/$ACCOUNT_ID/players/$PLAYER_ID/publish
