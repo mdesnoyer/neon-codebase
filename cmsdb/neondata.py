@@ -3939,8 +3939,7 @@ class AbstractIntegration(NamespacedStoredObject):
     def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
         
-        if integration_id is None: 
-            integration_id = uuid.uuid1().hex
+        integration_id = integration_id or uuid.uuid4().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -4614,7 +4613,7 @@ class OoyalaIntegration(AbstractIntegration):
     OOYALA Integration
     '''
     def __init__(self, 
-                 a_id='', 
+                 a_id='',
                  p_code=None, 
                  api_key=None, 
                  api_secret=None): 
