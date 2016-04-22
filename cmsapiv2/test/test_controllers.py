@@ -2146,7 +2146,43 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'vid_does_not_exist') 
+                                 'vid_does_not_exist')
+
+    @tornado.testing.gen_test
+    def test_update_video_title(self):  
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=vid1'\
+              '&title=kevinsvid&url=some_url' % (
+                  self.account_id_api_key, 
+                  self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
+        rjson = json.loads(response.body)
+        job_id = rjson['job_id'] 
+        url = '/api/v2/%s/videos?video_id=vid1&title=vidkevinnew' % (
+            self.account_id_api_key)
+
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT', 
+            allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body) 
+        self.assertEquals(rjson['title'], 'vidkevinnew')
+        request = yield neondata.NeonApiRequest.get(
+            job_id, 
+            self.account_id_api_key,
+            async=True)
+        self.assertEquals(request.video_title, 'vidkevinnew')
 
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')

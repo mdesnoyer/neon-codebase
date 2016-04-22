@@ -963,7 +963,7 @@ class VideoHandler(APIV2Handler):
           Optional('reprocess'): Boolean(),
           'integration_id' : Any(str, unicode, Length(min=1, max=256)),          
           'callback_url': Any(str, unicode, Length(min=1, max=512)), 
-          'title': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=1024)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
@@ -1066,28 +1066,50 @@ class VideoHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          'testing_enabled': All(Coerce(int), Range(min=0, max=1))
+          'testing_enabled': Boolean(),
+          'title': Any(str, unicode, Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
-        abtest = bool(int(args['testing_enabled']))
-        internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
+        title = args.get('title', None) 
+
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            args['video_id']) 
+
         def _update_video(v): 
-            v.testing_enabled = abtest
-        result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                        internal_video_id, 
-                                        _update_video)
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                       internal_video_id)
+            v.testing_enabled = Boolean()(
+                args.get('testing_enabled', v.testing_enabled))
+
+        video = yield neondata.VideoMetadata.modify(
+            internal_video_id, 
+            _update_video, 
+            async=True)
+
         if not video: 
-            raise NotFoundError('video does not exist with id: %s' % (args['video_id']))
-        
+            raise NotFoundError('video does not exist with id: %s' % 
+                (args['video_id']))
+
+        # we may need to update the request object as well
+        db2api_fields = ['testing_enabled', 'video_id'] 
+        api_request = None
+        if title is not None and video.job_id is not None:
+            def _update_request(r): 
+                r.video_title = title
+            
+            api_request = yield neondata.NeonApiRequest.modify(
+                video.job_id,
+                account_id, 
+                _update_request, 
+                async=True)
+
+            db2api_fields.append('title')
+            
         statemon.state.increment('put_video_oks')
-        output = yield self.db2api(video, None,
-                                   fields=['testing_enabled',
-                                           'video_id'])
+        output = yield self.db2api(video, api_request,
+                                   fields=db2api_fields)
         self.success(output)
 
     @classmethod
