@@ -228,11 +228,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['serving_enabled'], 0) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
+        self.assertEquals(account.serving_enabled, 0)
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
@@ -275,11 +277,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['serving_enabled'], 0) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
+        self.assertEquals(account.serving_enabled, 0)
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
@@ -513,6 +517,7 @@ class TestAccountHandler(TestControllersBase):
                                                 method="GET")
         rjson = json.loads(response.body) 
         self.assertEquals(self.user.neon_api_key, rjson['account_id']) 
+        self.assertEquals(0, rjson['serving_enabled']) 
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 

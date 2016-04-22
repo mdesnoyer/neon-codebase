@@ -480,7 +480,7 @@ class VerifyAccountHandler(APIV2Handler):
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
                 'integration_ids', 'created', 'updated', 'users', 
-                'email']
+                'serving_enabled', 'email']
     
     @classmethod
     def _get_passthrough_fields(cls):
@@ -488,7 +488,7 @@ class VerifyAccountHandler(APIV2Handler):
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
                 'created', 'updated', 'users', 
-                'email']
+                'serving_enabled', 'email']
 
     @classmethod
     @tornado.gen.coroutine
