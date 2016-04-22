@@ -1,0 +1,7 @@
+source config
+
+curl -s \
+  --user "$O_CLIENT_ID:$O_SECRET"\
+  --header "Content-Type: application/x-www-form-urlencoded" \
+  --data "grant_type=client_credentials" \
+  https://oauth.brightcove.com/v3/access_token

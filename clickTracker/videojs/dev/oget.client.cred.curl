@@ -1,0 +1,7 @@
+source config
+
+curl \
+  --header "Content-Type: application/json" \
+  --header "Authorization: BC_TOKEN $BC_TOKEN" \
+  --request GET \
+  https://oauth.brightcove.com/v3/client_credentials/$O_CLIENT_ID
