@@ -5,3 +5,8 @@ OAUTH_ACCESS_KEY=AEnTxTgjTP3rZfBMlz5FnlBQNi2C33ISbtDSGW3MnatHuuATVRMYa5waW2vq2GD
 PASSWORD=Neon-lab1
 PLAYER_ID=BkMO9qa8x
 SECRET=IV51KmX-eGgwvLXUIlbZr4aJIADyOgAd5Hb7TycFBekhHQhEmCJ-vjdQOXWXXQvJzKtvvd1O5vH1E9EoRb37Og
+BC_TOKEN=AEnTxTgrnkX-klpt_IZGM5pkWWyL0z34wvc1arlIVtxsLVL-lZ5etRB_cPzh2P-nYXWLZzUHZJ_3nEgeuwbTQgY7h4siGNhfo-6DqOReTIrrDYX538TYLJI
+
+O_SECRET=zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg
+O_CLIENT_ID=8b089370-ce31-4ecf-9c14-7ffc6ff492b9
+# TOKEN will need to be exported and updated since its expiry is five minutes after creation.
