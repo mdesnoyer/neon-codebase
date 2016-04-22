@@ -10,6 +10,7 @@ if sys.path[0] != __base_path__:
 from cmsdb import neondata
 from cmsdb.neondata import DBConnection, NeonUserAccount
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
+from cStringIO import StringIO
 from cvutils.imageutils import PILImageUtils
 import datetime
 from integrations.cnn import CNNIntegration
@@ -169,12 +170,12 @@ class TestParseFeed(test_utils.neontest.TestCase):
 
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
-
     def setUp(self):
         super(TestSubmitVideo, self).setUp()
         self.submit_mocker = patch(
             'integrations.ovp.OVPIntegration.submit_video')
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
+        self.submit_mock.return_value = {"job_id": "job1"}
 
         user_id = '134234adfs'
         self.user = NeonUserAccount(user_id, name='testingaccount')
@@ -351,6 +352,7 @@ class TestSubmitVideoPG(TestSubmitVideo):
         self.submit_mocker = patch(
             'integrations.ovp.OVPIntegration.submit_video')
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
+        self.submit_mock.return_value = {"job_id": "job1"}
 
         user_id = '134234adfs'
         self.user = NeonUserAccount(user_id, name='testingaccount')
