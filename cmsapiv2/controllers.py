@@ -118,7 +118,7 @@ class AccountHandler(APIV2Handler):
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
                 'integration_ids', 'created', 'updated', 'users',
-                'email']
+                'serving_enabled', 'email']
     
     @classmethod
     def _get_passthrough_fields(cls):
@@ -126,7 +126,7 @@ class AccountHandler(APIV2Handler):
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
                 'created', 'updated', 'users',
-                'email']
+                'serving_enabled', 'email']
 
     @classmethod
     @tornado.gen.coroutine
@@ -221,6 +221,40 @@ class IntegrationHelper():
             raise tornado.gen.Return(integration) 
         else: 
             raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
+
+    @staticmethod 
+    @tornado.gen.coroutine
+    def get_integrations(account_id):
+        """ gets all integrations for an account. 
+        
+        Keyword arguments 
+        account_id - the account_id that is associated with the integrations
+        """ 
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        integrations = yield user_account.get_integrations(async=True)
+        rv = {} 
+        rv['integrations'] = [] 
+        for i in integrations:
+           new_obj = None  
+           if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
+               new_obj = yield BrightcoveIntegrationHandler.db2api(i)
+               new_obj['type'] = 'brightcove'
+           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA: 
+               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
+               new_obj['type'] = 'ooyala'
+           else: 
+               continue  
+
+           if new_obj: 
+               rv['integrations'].append(new_obj)
+
+        raise tornado.gen.Return(rv) 
 
 '''*********************************************************************
 OoyalaIntegrationHandler
@@ -929,7 +963,7 @@ class VideoHandler(APIV2Handler):
           Optional('reprocess'): Boolean(),
           'integration_id' : Any(str, unicode, Length(min=1, max=256)),          
           'callback_url': Any(str, unicode, Length(min=1, max=512)), 
-          'title': Any(str, unicode, Length(min=1, max=256)),
+          'title': Any(str, unicode, Length(min=1, max=1024)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)), 
           'publish_date': All(CustomVoluptuousTypes.Date()), 
           'custom_data': All(CustomVoluptuousTypes.Dictionary()), 
@@ -1032,28 +1066,50 @@ class VideoHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          'testing_enabled': All(Coerce(int), Range(min=0, max=1))
+          'testing_enabled': Boolean(),
+          'title': Any(str, unicode, Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
 
-        abtest = bool(int(args['testing_enabled']))
-        internal_video_id = neondata.InternalVideoID.generate(account_id_api_key,args['video_id']) 
+        title = args.get('title', None) 
+
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            args['video_id']) 
+
         def _update_video(v): 
-            v.testing_enabled = abtest
-        result = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                        internal_video_id, 
-                                        _update_video)
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get, 
-                                       internal_video_id)
+            v.testing_enabled = Boolean()(
+                args.get('testing_enabled', v.testing_enabled))
+
+        video = yield neondata.VideoMetadata.modify(
+            internal_video_id, 
+            _update_video, 
+            async=True)
+
         if not video: 
-            raise NotFoundError('video does not exist with id: %s' % (args['video_id']))
-        
+            raise NotFoundError('video does not exist with id: %s' % 
+                (args['video_id']))
+
+        # we may need to update the request object as well
+        db2api_fields = ['testing_enabled', 'video_id'] 
+        api_request = None
+        if title is not None and video.job_id is not None:
+            def _update_request(r): 
+                r.video_title = title
+            
+            api_request = yield neondata.NeonApiRequest.modify(
+                video.job_id,
+                account_id, 
+                _update_request, 
+                async=True)
+
+            db2api_fields.append('title')
+            
         statemon.state.increment('put_video_oks')
-        output = yield self.db2api(video, None,
-                                   fields=['testing_enabled',
-                                           'video_id'])
+        output = yield self.db2api(video, api_request,
+                                   fields=db2api_fields)
         self.success(output)
 
     @classmethod
@@ -1441,14 +1497,52 @@ class ThumbnailSearchInternalHandler(APIV2Handler):
         self.success({}) 
 
 '''*********************************************************************
-ThumbnailSearchExternalHandler : class responsible for searching videos 
-                                 an external source 
+ThumbnailSearchExternalHandler : class responsible for searching thumbs 
+                                 from an external source 
    HTTP Verbs     : get
 *********************************************************************'''
 class ThumbnailSearchExternalHandler(APIV2Handler): 
     @tornado.gen.coroutine
     def get(self, account_id):
         self.success({}) 
+
+'''*****************************************************************
+AccountIntegrationHandler : class responsible for getting all 
+                            integrations, on a specific account 
+  HTTP Verbs      : get 
+*****************************************************************'''
+class AccountIntegrationHandler(APIV2Handler):
+    """This is a bit of a one-off API, it will return 
+          all integrations (regardless of type) for an 
+          individual account. 
+    """
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+
+        user_account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not user_account: 
+            raise NotFoundError()
+
+        rv = yield IntegrationHelper.get_integrations(account_id) 
+        rv['integration_count'] = len(rv['integrations']) 
+        self.success(rv) 
+
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required' : [HTTPVerbs.GET] 
+               }
+
 
 '''*****************************************************************
 UserHandler 
@@ -1555,6 +1649,8 @@ application = tornado.web.Application([
         BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', 
         OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$', 
+        AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),

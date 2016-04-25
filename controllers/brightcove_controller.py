@@ -17,7 +17,7 @@ if sys.path[0] != __base_path__:
 from api.brightcove_api import BrightcoveApi
 from boto.s3.connection import S3Connection
 from cmsdb.neondata import VideoMetadata, ThumbnailMetadata, \
-      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcovePlatform, \
+      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcoveIntegration, \
       NeonApiRequest
 import datetime
 from heapq import heappush, heappop
@@ -196,15 +196,14 @@ class ThumbnailCheckTask(AbstractTask):
         
     def execute(self):
         
-        # Get the BrightcovePlatform associated with this video id
+        # Get the BrightcoveIntegration associated with this video id
         video = VideoMetadata.get(self.video_id)
         if video is None:
             _log.error("key=ThumbnailCheckTask "
                        "msg=Could not find video id: %s" % self.video_id)
             statemon.state.increment('thumbchecktask_fail')
             return
-        platform = BrightcovePlatform.get(video.get_account_id(),
-                                                  video.integration_id)
+        platform = BrightcoveIntegration.get(video.integration_id)
         if platform is None:
             _log.error("key=ThumbnailCheckTask "
                        "msg=Could not find brightcove platform account for video: %s" 

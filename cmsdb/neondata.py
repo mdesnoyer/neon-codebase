@@ -1384,9 +1384,9 @@ class MetricType:
     PLAYS = 'plays'
 
 class IntegrationType(object): 
-    BRIGHTCOVE = 'brightcove'
-    OOYALA = 'ooyala'
-    OPTIMIZELY = 'optimizely'
+    BRIGHTCOVE = 'brightcoveintegration'
+    OOYALA = 'ooyalaintegration'
+    OPTIMIZELY = 'optimizelyintegration'
 
 class DefaultSizes(object): 
     WIDTH = 160 
@@ -2317,7 +2317,8 @@ class StoredObject(object):
                                      table_name=None, 
                                      wc_params=[],
                                      limit_clause=None,
-                                     order_clause=None,  
+                                     order_clause=None, 
+                                     group_clause=None,  
                                      cursor_factory=psycopg2.extensions.cursor): 
         ''' helper function to build up a select query
 
@@ -2358,7 +2359,10 @@ class StoredObject(object):
 
         if order_clause: 
             query += " " + order_clause
-   
+
+        if group_clause: 
+            query += " " + group_clause  
+ 
         if limit_clause: 
             query += " " + limit_clause 
  
@@ -3072,6 +3076,31 @@ class NeonUserAccount(NamespacedStoredObject):
         retval = yield calls
         raise tornado.gen.Return(retval)
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_integrations(self):
+        rv = [] 
+
+        # due to old data, these could either have account_id or api_key
+        # as account_id
+        results = yield self.get_and_execute_select_query(
+                    [ "_data", 
+                      "_type", 
+                      "created_time AS created_time_pg", 
+                      "updated_time AS updated_time_pg"], 
+                    "_data->>'account_id' IN(%s, %s)", 
+                    table_name='abstractintegration', 
+                    wc_params=[self.neon_api_key, 
+                               self.account_id],
+                    group_clause = "ORDER BY _type",  
+                    cursor_factory=psycopg2.extras.RealDictCursor)
+
+        for result in results:
+            obj = self._create(result['_data']['key'], result)
+            rv.append(obj)
+
+        raise tornado.gen.Return(rv) 
+
     @classmethod
     def get_ovp(cls):
         ''' ovp string '''
@@ -3341,7 +3370,7 @@ class ProcessingStrategy(DefaultedStoredObject):
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
                  filter_text=True, text_filter_params=None, 
-                 filter_text_thresh=0.02):
+                 filter_text_thresh=0.04):
         super(ProcessingStrategy, self).__init__(account_id)
 
         # The processing time ratio dictates the maximum amount of time the
@@ -3910,8 +3939,7 @@ class AbstractIntegration(NamespacedStoredObject):
     def __init__(self, integration_id=None, enabled=True, 
                        video_submit_retries=0):
         
-        if integration_id is None: 
-            integration_id = uuid.uuid1().hex
+        integration_id = integration_id or uuid.uuid4().hex
         super(AbstractIntegration, self).__init__(integration_id)
         self.integration_id = integration_id
         
@@ -4259,7 +4287,7 @@ class BrightcoveIntegration(AbstractIntegration):
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
     
-    def __init__(self, i_id=None, a_id='', p_id=None, 
+    def __init__(self, a_id='', p_id=None, 
                 rtoken=None, wtoken=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
@@ -4271,7 +4299,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         ''' On every request, the job id is saved '''
 
-        super(BrightcoveIntegration, self).__init__(i_id, enabled)
+        super(BrightcoveIntegration, self).__init__(None, enabled)
         self.account_id = a_id
         self.publisher_id = p_id
         self.read_token = rtoken
@@ -4312,7 +4340,7 @@ class BrightcoveIntegration(AbstractIntegration):
     def get_api(self, video_server_uri=None):
         '''Return the Brightcove API object for this platform integration.'''
         return api.brightcove_api.BrightcoveApi(
-            self.neon_api_key, self.publisher_id, 
+            self.account_id, self.publisher_id, 
             self.read_token, self.write_token) 
 
     def set_rendition_frame_width(self, f_width):
@@ -4585,8 +4613,7 @@ class OoyalaIntegration(AbstractIntegration):
     OOYALA Integration
     '''
     def __init__(self, 
-                 i_id=None, 
-                 a_id='', 
+                 a_id='',
                  p_code=None, 
                  api_key=None, 
                  api_secret=None): 
@@ -4597,7 +4624,7 @@ class OoyalaIntegration(AbstractIntegration):
         for api calls to ooyala 
 
         '''
-        super(OoyalaIntegration, self).__init__(i_id)
+        super(OoyalaIntegration, self).__init__(None, True)
         self.account_id = a_id
         self.partner_code = p_code
         self.api_key = api_key

@@ -76,15 +76,17 @@ class AuthenticateHandler(APIV2Handler):
  
         if api_accessor: 
             if sha256_crypt.verify(password, api_accessor.password_hash):
-                yield neondata.User.modify(username, 
+                user = yield neondata.User.modify(username, 
                     _update_tokens, 
                     async=True)
+                user_rv = yield self.db2api(user) 
                 account_ids = yield api_accessor.get_associated_account_ids(
                     async=True) 
                 result = {
                            'access_token' : access_token, 
                            'refresh_token' : refresh_token, 
-                           'account_ids' : account_ids 
+                           'account_ids' : account_ids, 
+                           'user_info' : user_rv  
                          } 
         if result: 
             statemon.state.increment('successful_authenticates')
@@ -92,6 +94,16 @@ class AuthenticateHandler(APIV2Handler):
         else: 
             statemon.state.increment('failed_authenticates')
             raise NotAuthorizedError('User is Not Authorized')
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['username', 'created', 'updated', 
+                'first_name', 'last_name', 'title' ]
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title' ]
 
     @classmethod
     def get_access_levels(self):
@@ -131,11 +143,9 @@ class LogoutHandler(APIV2Handler):
             statemon.state.increment('successful_logouts')
             self.success(json.dumps({'message' : 'successfully logged out user'})) 
         except jwt.ExpiredSignatureError:
-            # TODO debating if this is the right course of action... 
-            # should we always allow logout regardless of the access token state? 
             statemon.state.increment('token_expiration_logout')
-            raise NotAuthorizedError('access token has expired, please refresh the access token')
- 
+            self.success(json.dumps({'message' : 'logged out expired user'})) 
+
     @classmethod
     def get_access_levels(self):
         return { 
@@ -470,15 +480,15 @@ class VerifyAccountHandler(APIV2Handler):
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
                 'integration_ids', 'created', 'updated', 'users', 
-                'email']
+                'serving_enabled', 'email']
     
     @classmethod
     def _get_passthrough_fields(cls):
         return ['default_size',
                 'default_thumbnail_id', 'tracker_account_id',
                 'staging_tracker_account_id',
-                 'created', 'updated', 'users', 
-                 'email']
+                'created', 'updated', 'users', 
+                'serving_enabled', 'email']
 
     @classmethod
     @tornado.gen.coroutine
