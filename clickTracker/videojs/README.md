@@ -1,6 +1,8 @@
 # videojs-neon-tracker
 
-Brightcove player event tracking for the Neon API
+Brightcove player event tracking for the Neon API.
+
+Documentation is available http://docs.trackerneonlabcom.apiary.io/#reference/tracking-events/video-play
 
 ## Installation
 
@@ -20,9 +22,8 @@ This is the simplest case. Get the script in whatever way you prefer and include
 <script src="//path/to/video.min.js"></script>
 <script src="//path/to/videojs-neon-tracker.min.js"></script>
 <script>
-  var player = videojs('my-video');
-
-  player.neonTracker();
+    var player = videojs('my-video');
+    player.neonTracker();
 </script>
 ```
 
@@ -49,9 +50,9 @@ When using with RequireJS (or another AMD library), get the script in whatever w
 
 ```js
 require(['video.js', 'videojs-neon-tracker'], function(videojs) {
-  var player = videojs('my-video');
+    var player = videojs('my-video');
 
-  player.neonTracker();
+    player.neonTracker();
 });
 ```
 
