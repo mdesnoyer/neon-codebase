@@ -364,6 +364,65 @@ class OoyalaIntegrationHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+BrightcovePlayerHandler
+*********************************************************************'''
+class BrightcovePlayerHandler(APIV2Handler):
+    """Handle requests to Brightcove player endpoint"""
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        """Get the list of BrightcovePlayer for the given integration"""
+
+        schema = Schema({
+            Required('integration_id'): Any(str, unicode, Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        schema(args)
+
+        players = yield neondata.BrightcovePlayers.get_players(integration_id, async=True)
+        rv = map(self.db2api, players)
+        self.success(rv)
+
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        """Update a BrightcovePlayer and return it"""
+
+        # The only field that is set via public api is is_tracked.
+        schema = Schema({
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('player_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('is_tracked'): Boolean()
+        })
+        args = self.parse_args()
+        scheme(args)
+
+        player = yield neondata.BrightcovePlayer.get(args['player_id', async=True)
+        if not player:
+            raise NotFoundError('Player does not exist for id:%s', args['player_id'])
+        if player.account_id != account_id:
+            raise NotAuthorizedError('Player is not owned by this account')
+
+        def _update(p):
+            p.is_tracked = Boolean()(args['is_tracked'])
+
+        yield neondata.BrightcovePlayer.modify(args['player_id'], _update, async=True)
+
+        # If the player is tracked, then send a request to Brightcove's
+        # CMS Api to put the plugin in the player and publish the player.
+        if player.is_tracked:
+            publish_result, error = _publish_plugin_to_player(player)
+
+        player = yield neondata.BrightcovePlayer.get(args['player_id'])
+        rv = yield self.db2api(player)
+        self.success(rv)
+
+    @tornado.gen.corotune
+    def _publish_plugin_to_player
+        integration = yield neondata.BrightcoveIntegration.get(player.integration_id, async=True)
+        bc_api = BrightcovePlayerManagementApi(integration=integration)
+        return True, None
+
+'''*********************************************************************
 BrightcoveIntegrationHandler
 *********************************************************************'''
 class BrightcoveIntegrationHandler(APIV2Handler):
@@ -1664,6 +1723,8 @@ application = tornado.web.Application([
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
         BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
+        BrightcovePlayerHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$',
         OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',

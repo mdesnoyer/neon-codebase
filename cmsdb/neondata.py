@@ -4287,14 +4287,20 @@ class BrightcoveIntegration(AbstractIntegration):
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
     
-    def __init__(self, a_id='', p_id=None, 
+    def __init__(self, i_id=None, a_id='', p_id=None,
                 rtoken=None, wtoken=None,
+                application_client_id=None,
+                application_client_secret=None,
                 last_process_date=None, abtest=False, callback_url=None,
                 uses_batch_provisioning=False,
+                uses_bc_thumbnail_api=False,
+                uses_bc_videojs_player=True,
+                uses_bc_smart_player=False,
+                uses_bc_gallery=False,
                 id_field=BRIGHTCOVE_ID,
                 enabled=True,
                 serving_enabled=True,
-                oldest_video_allowed=None, 
+                oldest_video_allowed=None,
                 video_submit_retries=0):
 
         ''' On every request, the job id is saved '''
@@ -4304,8 +4310,10 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
+        self.application_client_id = application_client_id
+        self.application_client_secret = application_client_secret
         #The publish date of the last processed video - UTC timestamp seconds
-        self.last_process_date = last_process_date 
+        self.last_process_date = last_process_date
         self.linked_youtube_account = False
         self.account_created = time.time() #UTC timestamp of account creation
         self.rendition_frame_width = None #Resolution of video to process
@@ -4320,6 +4328,12 @@ class BrightcoveIntegration(AbstractIntegration):
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
         self.uses_batch_provisioning = uses_batch_provisioning
 
+        # Configuration for the Video.js player event tracking plugin
+        self.uses_bc_thumbnail_api = uses_bc_thumbnail_api
+        self.uses_bc_videojs_player = uses_bc_videojs_player
+        self.uses_bc_smart_player = uses_bc_smart_player
+        self.uses_bc_gallery = uses_bc_gallery
+
         # Which custom field to use for the video id. If it is
         # BrightcovePlatform.REFERENCE_ID, then the reference_id field
         # is used. If it is BRIGHTCOVE_ID, the 'id' field is used.
@@ -4331,6 +4345,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         # Amount of times we have retried a video submit 
         self.video_submit_retries = video_submit_retries 
+
 
     @classmethod
     def get_ovp(cls):
@@ -5110,6 +5125,44 @@ class NeonApiRequest(NamespacedStoredObject):
                     x.response = response.to_dict()
             yield tornado.gen.Task(self.modify, self.job_id, self.api_key,
                                    _mod_obj)
+
+class BrightcovePlayer(NamespacedStoredObject):
+    '''
+    Brightcove Player model
+    '''
+    def __init__(self, account_id, player_id, is_tracked=False):
+        super(BrightcovePlayer, self).__init__(player_id)
+        self.player_id = player_id
+        self.account_id = account_id
+        self.is_tracked = is_tracked
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_players(cls, integration_id):
+        '''Get all players associated to the integration'''
+
+        rv = []
+        results = yield self.get_and_execute_select_query(
+                    [ "_data",
+                      "_type",
+                      "created_time AS created_time_pg",
+                      "updated_time AS updated_time_pg"],
+                    "_data->>'integration_id' = '%s' ",
+                    table_name='abstractintegration',
+                    wc_params=[integration_id])
+
+
+        for result in results:
+            player = self._create(result['_data']['key'], result)
+            rv.append(player)
+
+        raise tornado.gen.Return(rv)
+
+    @classmethod
+    def _baseclass_name(cls):
+        return BrightcovePlayer.__name__
+
 
 class BrightcoveApiRequest(NeonApiRequest):
     '''
