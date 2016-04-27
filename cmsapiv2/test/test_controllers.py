@@ -4087,7 +4087,79 @@ class TestAccountIntegrationsHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 method="GET")
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['integration_count'], 0) 
+        self.assertEquals(rjson['integration_count'], 0)
+ 
+class TestBillingAccountHandler(TestControllersBase): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestBillingAccountHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestBillingAccountHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_post_billing_account(self): 
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/123/billing/account' 
+        params = json.dumps({'recurly_token_ref' : 'testa'})
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        print response
+
+class TestBillingSubscriptionHandler(TestControllersBase): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestBillingSubscriptionHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestBillingSubscriptionHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_post_billing_account(self): 
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/123/billing/subscription' 
+        params = json.dumps({'plan_code' : 'demo'})
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        print response
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

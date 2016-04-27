@@ -1638,6 +1638,118 @@ class UserHandler(APIV2Handler):
         return ['username', 'access_level', 'created', 'updated', 
                 'first_name', 'last_name', 'title' ]
 
+'''*****************************************************************
+BillingAccountHandler 
+*****************************************************************'''
+class BillingAccountHandler(APIV2Handler):
+    """This talks to recurly and creates a billing account with our 
+          recurly integration. 
+    """
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('recurly_token_ref') : All(
+              Coerce(str), 
+              Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        recurly_token_ref = args.get('recurly_token_ref')
+
+        recurly_account = recurly.Account(account_code=account_id)
+        recurly_account.email = 'test@test.invalid'
+        recurly_account.first_name = 'TestFirst' 
+        recurly_account.last_name = 'TestLast'
+        recurly_account.billing_info = recurly.BillingInfo(
+            token_id=recurly_token_ref)
+
+        try: 
+            recurly_account.save()
+        except Exception as e: 
+            _log.error('Unable to save billing info for account %s' % (
+                account_id))
+            raise
+
+        self.success({}) 
+
+    '''
+    TODO verify we need a PUT here or not, or just everything come 
+     through POST, and have it act as an upreate function
+    ''' 
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('recurly_token_ref') : All(
+              Coerce(str), Length(min=8, max=64))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.PUT] 
+               }
+
+'''*****************************************************************
+BillingSubscriptionHandler 
+*****************************************************************'''
+class BillingSubscriptionHandler(APIV2Handler):
+    """This talks to recurly and creates a billing subscription with our 
+          recurly integration. 
+    """
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('plan_code') : All(Coerce(str), Length(min=1, max=64))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        plan_code = args.get('plan_code') 
+
+        account = yield neondata.NeonUserAccount.get(
+                   account_id, 
+                   async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account was not found')
+
+        try: 
+            recurly_account = recurly.Account.get(account_id)
+        except recurly.NotFoundError:
+            raise NotFoundError('Recurly Account was not found') 
+        
+        subscription = recurly.Subscription()
+        subscription.plan_code = plan_code 
+        subscription.account = recurly_account
+
+        try: 
+            subscription.save() 
+        except Exception as e: 
+            _log.error('Unable to save subscription due to'\
+                       ' a recurly error %s' % (e))
+            raise
+
+        # will also need to update accountlimits at this point
+ 
+        self.success({})
+ 
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.PUT] 
+               }
+
 '''*********************************************************************
 Endpoints 
 *********************************************************************'''
@@ -1659,6 +1771,9 @@ application = tornado.web.Application([
         ThumbnailSearchExternalHandler),
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+        BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),

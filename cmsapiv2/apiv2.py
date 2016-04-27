@@ -16,6 +16,7 @@ import json
 import jwt 
 import logging
 import re
+import recurly
 import signal
 import tornado.httpserver
 import tornado.ioloop
@@ -59,6 +60,11 @@ define("frontend_base_url",
        default='https://app.neon-lab.com', 
        help="will default to this if the origin is null", 
        type=str)
+
+# recurly stuff
+recurly.SUBDOMAIN = 'neon-lab'
+recurly.API_KEY = 'd176808c783b4064a8a8d28a607d8f5a'
+recurly.DEFAULT_CURRENCY = 'USD'
 
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -248,6 +254,26 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         raise tornado.gen.Return(True)
 
     @tornado.gen.coroutine
+    def check_valid_subscription(request):
+        '''verifies we have a valid subscription and can make this call 
+
+           called in prepare, and will raise an exception if the subscription
+           is not valid for this account  
+        '''
+        if request.account is None:  
+            raise tornado.gen.Return(True)
+
+        subscription_state = request.account.subscription_state
+
+        # TODO check the expiry on the account to verify if we need 
+        # to talk to recurly or not 
+
+        if subscription_state == neondata.SubscriptionStates.ACTIVE:
+            raise tornado.gen.Return(True)
+
+        raise TooManyRequestsError('Your subscription is not valid') 
+
+    @tornado.gen.coroutine
     def check_account_limits(request, limit_list):
         ''' responsible for checking account limits 
              
@@ -422,7 +448,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
               on_finish will increase the values, if we successfully served 
                  the request 
         ''' 
-        return None 
+        return None
 
     def get_special_functions(self): 
         return []   
@@ -455,7 +481,13 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 yield self.check_account_limits(
                     limits_dict[self.request.method])
             except KeyError: 
-                pass 
+                pass
+
+        try: 
+            sub_required_list = access_level_dict['subscription_required']
+            yield self.check_valid_subscription() 
+        except KeyError:
+            pass  
  
     @tornado.gen.coroutine 
     def on_finish(self):
