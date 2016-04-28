@@ -24,6 +24,7 @@ import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import cv2
+import dateutil.parser
 import ffvideo
 import hashlib
 import json
@@ -338,8 +339,23 @@ class VideoProcessor(object):
                     
                 # Do the real download
                 video_info = ydl.extract_info(cur_url, download=True)
+
+                # Update some of our metadata if there's better info
+                # from the video
                 self.video_metadata.duration = video_info.get(
                     'duration', self.video_metadata.duration)
+                if video_info.get('upload_date', None) is not None:
+                    self.video_metadata.publish_date = \
+                      dateutil.parser.parse(video_info['upload_date']).isoformat()
+                
+                def _update_title(x):
+                    if x.video_title is None:
+                        x.video_title = video_info.get('title', None)
+                    if x.default_thumbnail is None:
+                        x.default_thumbnail = video_info.get('thumbnail', None)
+                neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'], self.job_params['api_key'] ,
+                    _update_title)
                                                               
 
             self.tempfile.flush()
@@ -664,6 +680,8 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.publish_date = (video_obj.publish_date or 
+                                      self.video_metadata.publish_date)
         try:
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,

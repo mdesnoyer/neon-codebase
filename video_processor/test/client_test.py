@@ -1223,8 +1223,8 @@ class SmokeTest(test_utils.neontest.TestCase):
 
         # Mock out the video download
         self.client_s3_patcher = patch('video_processor.client.S3Connection')
-        mock_conn2 = self.client_s3_patcher.start()
-        mock_conn2.return_value = self.s3conn
+        self.mock_conn2 = self.client_s3_patcher.start()
+        self.mock_conn2.return_value = self.s3conn
         self.test_video_file = os.path.join(os.path.dirname(__file__), 
         "test.mp4") 
         self.vid_bucket = self.s3conn.create_bucket('my-videos')
@@ -1437,8 +1437,8 @@ class SmokeTest(test_utils.neontest.TestCase):
         self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)
         
     def test_video_processing_error(self):
-        self.mock_conn.side_effect = [IOError('Oops')]
-
+        self.mock_conn2.side_effect = [IOError('Oops')]
+        
         self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
