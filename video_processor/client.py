@@ -108,7 +108,7 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 define('max_bandwidth_per_core', default=15500000.0,
-       help='Max bandwidth in MB/s')
+       help='Max bandwidth in bytes/s')
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
@@ -260,9 +260,7 @@ class VideoProcessor(object):
         '''
         Download the video file 
         '''
-        CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        ytre = re.compile('https?\:\/\/www\.?youtube\.com|youtu\.?be\/.+') 
 
         # Find out if we should throttle
         do_throttle = False
@@ -270,7 +268,6 @@ class VideoProcessor(object):
                            max(statemon.state.running_workers, 1))
         if frac_processing > options.min_load_to_throttle:
             do_throttle=True
-            chunk_time = float(CHUNK_SIZE) / options.max_bandwidth_per_core
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
@@ -284,6 +281,7 @@ class VideoProcessor(object):
                     key_name = s3match.group(5)
                     s3conn = S3Connection()
                     bucket = s3conn.get_bucket(bucket_name)
+                    _log.info(key_name)
                     key = bucket.get_key(key_name)
                     key.get_contents_to_file(self.tempfile)
                     self.tempfile.flush()
@@ -293,66 +291,65 @@ class VideoProcessor(object):
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
 
-            ytmatch = ytre.search(self.video_url) 
-            if ytmatch:
-                yturl = self.video_url
- 
-                def _finish_stuff(x): 
-                    if x['status'] == 'finished':
-                        shutil.move(x['filename'], self.tempfile.name)  
-                
-                ydl = youtube_dl.YoutubeDL({'format' : '0', 
-                          'progress_hooks' : [_finish_stuff], 
-                          'outtmpl' : unicode(str(
-                              '/tmp/%(title)s-%(id)s.%(ext)s')), 
-                          'restrictfilenames' : True})
-                for fq in [ '22', '35', '18', '34' ]:  
-                    ydl.params['format'] = fq 
-                    with ydl: 
-                        try: 
-                            result = ydl.extract_info(yturl, download=True)
-                            if not result: 
-                                msg = 'Could not find a downloadable\
-                                       YouTube video at %s' % yturl  
-                                _log.warning(msg)
-                                statemon.state.increment(
-                                    'youtube_video_not_found')
-                            else:  
-                                self.video_metadata.duration = result['duration']
-                            break
-                        except KeyError:
-                            # in case there is not a duration  
-                            pass
-                        except youtube_dl.utils.DownloadError as e:
-                            # let's try the next size 
-                            continue 
-                        except Exception as e:
-                            msg = 'Unexpected Error getting YouTube content : %s\
-                                   for %s' % (e, yturl)
-                            _log.error(msg)
-                            statemon.state.increment('youtube_video_download_error')
-                            return
-                return  
+            # Now try using youtube-dl to download the video. This can
+            # potentially handle a ton of different video sources.
+            def _handle_progress(x):
+                if x['status'] == 'finished':
+                    shutil.move(x['filename'], self.tempfile.name)
+                    
+            dl_params = {}
+            dl_params['ratelimit'] = (options.max_bandwidth_per_core 
+                                      if do_throttle else None)
+            dl_params['restrictfilenames'] = True
+            dl_params['progress_hooks'] = [_handle_progress]
+            dl_params['outtmpl'] = unicode(str(
+                os.path.join(options.video_temp_dir or '/tmp',
+                             '%s_%%(id)s.%%(ext)s' %
+                             self.job_params['api_key'])))
 
-            parsed_url = VideoProcessor.percent_encode_url_path(self.video_url)
-            req = urllib2.Request(parsed_url, headers=self.headers)
-            response = urllib2.urlopen(req, timeout=self.timeout)
-            last_time = time.time()
-            data = response.read(CHUNK_SIZE)
-            while data != '':
-                if do_throttle:
-                    time_spent = time.time() - last_time
-                    print 'sleep time: %f, %f' % (chunk_time, chunk_time-time_spent)
-                    time.sleep(max(0, chunk_time-time_spent))
-                self.tempfile.write(data)
-                self.tempfile.flush()
-                last_time = time.time()
-                data = response.read(CHUNK_SIZE)
+            # Specify for formats that we want in order of preference
+            dl_params['format'] = (
+                'best[ext=mp4][height<=720][protocol^=?http]/'
+                'best[ext=mp4][protocol^=?http]/'
+                'best[height<=720][protocol^=?http]/'
+                'best[protocol^=?http]/'
+                'best/'
+                'bestvideo')
+            dl_params['logger'] = _log
+            
+            with youtube_dl.YoutubeDL(dl_params) as ydl:
+                # Dig down to the real url
+                cur_url = self.video_url
+                found_video = False
+                while not found_video:
+                    video_info = ydl.extract_info(cur_url, download=False)
+                    result_type = video_info.get('_type', 'video')
+                    if result_type == 'url':
+                        # Need to step to the next url
+                        cur_url = video_info['url']
+                        continue
+                    elif result_type == 'video':
+                        found_video = True
+                    else:
+                        # They gave us a playlist or other type of url
+                        msg = ('Unhandled video type %s' %
+                               (result_type))
+                        raise youtube_dl.utils.DownloadError(msg)
+                    
+                # Do the real download
+                video_info = ydl.extract_info(cur_url, download=True)
+                self.video_metadata.duration = video_info.get(
+                    'duration', self.video_metadata.duration)
+                                                              
 
             self.tempfile.flush()
 
             _log.info('Finished downloading video %s' % self.video_url)
-        except urllib2.URLError as e:
+
+        except (youtube_dl.utils.DownloadError,
+                youtube_dl.utils.ExtractorError, 
+                youtube_dl.utils.UnavailableVideoError,
+                socket.error) as e:
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
@@ -368,12 +365,6 @@ class VideoProcessor(object):
         except boto.exception.BotoServerError as e:
             msg = ("Server error downloading video %s from S3: %s" %
                    (self.video_url, e))
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
-
-        except socket.error as e:
-            msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
