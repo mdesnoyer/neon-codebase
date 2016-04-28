@@ -16,7 +16,7 @@ import poster.encode
 from PIL import Image
 import re
 from StringIO import StringIO
-import cmsdb.neondata 
+import cmsdb.neondata
 import math
 import time
 import tornado.gen
@@ -30,6 +30,7 @@ import utils.logs
 import utils.neon
 from utils.http import RequestPool
 from cvutils.imageutils import PILImageUtils
+from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean
 
 import logging
 _log = logging.getLogger(__name__)
@@ -713,7 +714,7 @@ class BrightcoveOAuthApi(object):
 
         # Ensure the integration is set up and the client credential grant is valid
         if integration.client_id is None or integration.client_secret is None:
-            raise BadOAuthConfigException('Id or secret missing in integration {}'.format(integration.integration_id))
+            raise BcAuthConfigException('Id or secret missing in integration {}'.format(integration.integration_id))
         client = BackendApplicationClient(client_id=integration.client_id)
         self.oauth = OAuth2Session(client=client)
         self._fetch_token()
@@ -726,7 +727,7 @@ class BrightcoveOAuthApi(object):
 
             # Credential grant is misconfigured, the user needs to see this
             if e.status_code is 401:
-                raise OAuth2DeniedException(
+                raise BcAuthDeniedException(
                     'OAuth2 denied with code 401 {}'.format(type(e).__name__))
             else:
                 _log.error(e)
@@ -736,13 +737,8 @@ class BrightcoveOAuthApi(object):
             return None
 
     def is_authorized(self):
+
         '''Ask if session is authorized and ready to call out to the BC API'''
-
-        #TODO make actual api call?
-
-        if not self.oauth.authorized():
-            self._fetch_token()
-
         return self.oauth.authorzed()
 
     def _headers(self):
@@ -764,34 +760,56 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
 
     '''Encapsulate player manangement calls'''
 
-    players_url = 'https://players.api.brightcove.com/v1/accounts/{account_id}/players'
-    player_url = 'https://players.api.brightcove.com/v1/accounts/{account_id}/players/{player_id}'
-    publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_id}/players/{player_id}/publish'
-    config_url = 'https://players.api.brightcove.com/v1/accounts/{account_id}/players/{player_id}/configuration/{branch}'
-    patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_id}/players/{player_id}/configuration'
+    players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
+    player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
+    get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
+    patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
+
+    publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_player(self, player_id):
-        response = self.oauth.get(self.player_url.format(account_id=self.publisher_id, player_id=player_id))
-        return api2obj(response.json())
+    def is_authorized(self):
+
+        if not self.oauth.authorized():
+            return False
+
+        # Exercise read access
+        test_response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+
+        # Exercise write access
+        # TODO
+
+        return test_response.ok()
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_player(self, player_ref):
+        response = self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
+        return self.json_to_object(response.json())
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_players(self):
-        response = self.oauth.get(self.players_url.format(account_id=self.publisher_id))
-        return map(BrightcovePlayerManagementApi.api2obj, response.json())
+        response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        return map(BrightcovePlayerManagementApi.json_to_object, response.json())
 
     @tornado.gen.coroutine
-    def publish_player(self):
-        response = self.oauth.post(self.player_url.format(account_id=self.publisher_id)
-        return response.ok(), response.reason
+    def publish_player(self, player_ref):
+        response = self.oauth.post(self.publish_url.format(
+            account_ref=self.publisher_id,
+            player_ref=player_ref))
+        return response.ok()
 
     @tornado.gen.coroutine
-    def patch_player(self):
-        response = self.oauth.post(self.player_url.format(account_id=self.publisher_id)
+    def patch_player(self, player_ref, patch_json):
+        # TODO consider adding a voluptuous schema to define player fields
+        response = self.oauth.post(self.patch_config_url.format(
+                account_ref=self.publisher_id,
+                player_ref=player_ref),
+            data=patch_json)
         raise tornado.gen.Return(self._respond(response))
 
     @staticmethod
-    def json_to_object(player_json):
-        return neondata.BrightcovePlayer(player_id=5, account_id=1)
+    def json_to_object(bc_player_json):
+        return cmsdb.neondata.BrightcovePlayer(player_ref=5, account_ref=1)

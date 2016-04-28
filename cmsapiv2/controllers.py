@@ -402,25 +402,67 @@ class BrightcovePlayerHandler(APIV2Handler):
         if player.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
-        def _update(p):
-            p.is_tracked = Boolean()(args['is_tracked'])
+        # Modify the db if changed
+        is_tracked = Boolean()(args['is_tracked'])
+        if player.is_tracked is not is_tracked:
+            def _modify(p):
+                p.is_tracked = is_tracked
 
-        yield neondata.BrightcovePlayer.modify(args['player_id'], _update, async=True)
+                yield neondata.BrightcovePlayer.modify(
+                    player.player_id,
+                    lambda p: p.is_tracked = is_tracked,
+                    async=True)
 
         # If the player is tracked, then send a request to Brightcove's
         # CMS Api to put the plugin in the player and publish the player.
         if player.is_tracked:
-            publish_result, error = _publish_plugin_to_player(player)
+            publish_result, error = self.publish_plugin_to_player(player)
 
+        # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(args['player_id'])
-        rv = yield self.db2api(player)
+        rv = self.db2api(player)
         self.success(rv)
 
     @tornado.gen.corotune
-    def _publish_plugin_to_player
+    def publish_plugin_to_player(player):
+
         integration = yield neondata.BrightcoveIntegration.get(player.integration_id, async=True)
-        bc_api = BrightcovePlayerManagementApi(integration=integration)
-        return True, None
+        try:
+            bc = BrightcovePlayerManagementApi(integration=integration)
+            bc_player = bc.get_player(player.player_ref)
+            patch = _get_patch_string(bc_player, integration)
+            bc.patch_player(player.player_ref, patch)
+        except BcAuthConfigException as e:
+            return False, e.message
+
+    def _get_patch_json(current_bc_player, integration):
+        ''' Get a patch that replaces our js and json with the current version
+
+        Grabs the current values of the fields to patch, then add or replace
+        the js url and json values with current, valid ones.'''
+
+        # Remove any plugin named neon
+        plugins = [for plugin in current_bc_player.get('plugins')
+            if plugin['name'] is not 'neon']
+        plugins.append(self._get_current_tracking_json_string(integration))
+
+        # Remove any script like *neon-tracker*
+        # TODO is this safe
+        scripts = [for script in current_bc_player.get('scripts')
+            if script.find('neon-tracker') is -1]
+        scripts.append(self._get_current_tracking_url())
+
+        return {
+            'plugins': plugins,
+            'scripts': scripts
+        }
+
+    def _get_current_tracking_url(self):
+        return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
+
+    def _get_current_tracking_json(self, integration):
+        return '{"name":"neon","options":{"publisher":{"id":{account_id}}}}'.format(account_id=integration.account_id)
+
 
 '''*********************************************************************
 BrightcoveIntegrationHandler
