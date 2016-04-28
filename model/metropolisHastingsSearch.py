@@ -166,9 +166,10 @@ class MonteCarloMetropolisHastings(object):
         self.buffer = None
         self.results = []
         self.max_score = 0.
+        self.min_score = 0.
         self.n_samples = 0
         self.tot_score = 0.
-        self.mean = 1.
+        self.mean = 0.
         self.max_interval = (self.N, 0, self.N)
         self._l_bound = None
         self._r_bound = None
@@ -188,9 +189,10 @@ class MonteCarloMetropolisHastings(object):
                         self.search_interval)
         self.results = []
         self.max_score = 0.
+        self.min_score = 0.
         self.n_samples = 0
         self.tot_score = 0.
-        self.mean = 1.
+        self.mean = 0.
         # compute the buffer
         self.buffer = (elements - ((self.N - 1) * self.search_interval))/2
         # self.buffer = (((elements
@@ -262,6 +264,7 @@ class MonteCarloMetropolisHastings(object):
         else:
             res_obj.score = score
         self.max_score = max(self.max_score, score)
+        self.min_score = min(self.min_score, score)
         self.tot_score += score
         self.mean = self.tot_score / self.n_samples
 
@@ -398,14 +401,16 @@ class MonteCarloMetropolisHastings(object):
         is to be accepted.
         '''
         if not self.max_score:
-            # accept if the max score is unknown
+            # accept if the max score is unknown or 
+            # the max score is less than 0. 
             return True
         lt, gt = self._bounds(sample)
         pred_inp = [[lt.frameno, lt.score],
                     [gt.frameno, gt.score]]
         pred_score = self._predict_score(
                         pred_inp, sample)
-        score_prob = (pred_score / self.max_score)**0.5
+        score_prob = ((pred_score - self.min_score) / 
+                      (self.max_score - self.min_score))**0.5
         rdiff = gt.frameno - sample
         if lt.frameno == -1:
             ldiff = np.inf
