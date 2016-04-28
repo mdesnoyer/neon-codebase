@@ -1,11 +1,13 @@
-'''Predictory classes for the model
+'''
+Predictor classes for the model
 
 Note that as the code version changes, code may need to be added to
 deal with backwards compatibility when pickling/unpickling. See the
 Python pickling docs about those issues.
 
-Copyright: 2013 Neon Labs
+Copyright: 2016 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
+Author: Nick Dufour
 '''
 import hashlib
 import logging
@@ -14,6 +16,10 @@ import os
 import pyflann
 import tempfile
 import utils.obj
+import threading
+from grpc.beta import implementations
+import aquila_inference_pb2  # TODO: make sure this is correct.
+
 
 _log = logging.getLogger(__name__)
 
@@ -22,9 +28,10 @@ class Predictor(object):
 
     This class should be specialized for specific models
     '''
-    def __init__(self, feature_generator):
+    def __init__(self, feature_generator = None):
         self.feature_generator = feature_generator
-        self.__version__ = 2
+        self.__version__ = 3
+        self._async = False
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -64,8 +71,16 @@ class Predictor(object):
         '''Train on any images that were previously added to the predictor.'''
         raise NotImplementedError()
 
-    def predict(self, image):
-        '''Predicts the valence score of an image.
+
+    def predict(self, image, *args, **kwargs):
+        '''Wrapper for image valence prediction functions'''
+        if self._async:
+            return self._predict_async(image, *args, **kwargs)
+        else:
+            return self._predict(image, *args, **kwargs)
+
+    def _predict(self, image, *args, **kwargs):
+        '''Predicts the valence score of an image synchronously.
 
         Inputs:
         image - numpy array of the image
@@ -73,6 +88,19 @@ class Predictor(object):
         Returns: predicted valence score
 
         Raises: NotTrainedError if it has been called before train() has.
+        '''
+        raise NotImplementedError()
+
+    def _predict_async(self, image, *args, **kwargs):
+        '''
+        Asynchronous prediction using the deepnet Aquila's
+        server. 
+
+        Inputs:
+        image - numpy array of the image, as an N x M x 3
+        array of integers.
+
+        Returns: A prediction future.
         '''
         raise NotImplementedError()
 
@@ -84,6 +112,73 @@ class Predictor(object):
         '''Updates a hash object with data about the type.'''
         hashobj.update(self.__class__.__name__)
         self.feature_generator.hash_type(hashobj)
+
+    def complete(self):
+        '''
+        Returns True when all requests are complete.
+        '''
+        if not self._async:
+            # you are running synchronously, so it's fine.
+            return True
+        else:
+            raise NotImplementedError()
+
+
+class DeepnetPredictor(Predictor):
+    '''Prediction using the deepnet Aquila (or an arbitrary predictor). 
+    Note, this does not require you provision a feature generator for 
+    the predictor.'''
+
+    def __init__(self, concurrency=10, hostport='localhost:9000'):
+        '''
+        concurrency - The maximum number of simultaneous requests to 
+        submit.
+        hostport - The host:port of the Aquila server as a string, 
+        i.e., localhost:9000.
+        '''
+        super(AquilaPredictor, self).__init__()
+        self.concurrency = concurrency
+        host, port = hostport.split(':')
+        self.host = host
+        self.port = port
+        self.cv = threading.Condition()
+        self.channel = implementations.insecure_channel(host, int(port))
+        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(channel)
+        self.active = 0
+        self.done = 0
+
+    def _predict_async(self, image):
+        request = aquila_inference_pb2.AquilaRequest()
+        request.image_data.extend(image.flatten().tolist())
+        with self.cv:
+            while self.active == self.concurrency:
+                self.cv.wait()
+        self.active += 1
+        result_future = stub.Regress.future(request, 10.0)  # 10 second timeout
+        result_future.add_done_callback(
+            lambda result_future: self._async_cb_hand(result_future))
+        return result_future
+
+    def _async_cb_hand(self):
+        '''
+        Housekeeping handler for predictor to monitor the number of active
+        inference requests.
+
+        NOTE: This does not handle any errors, this is up to the true callback
+        function to handle.
+        '''
+        with cv:
+            self.done += 1
+            self.active -= 1
+            cv.notify()
+
+    def complete(self):
+        '''
+        Returns True when it is safe to terminate.
+        '''
+        with self.cv:
+            return self.active == 0
+
 
 class KFlannPredictor(Predictor):
     '''Approximate k nearest neighbour using flann.'''
@@ -141,7 +236,7 @@ class KFlannPredictor(Predictor):
         _log.info('Built index with parameters: %s' % self.params)
         self.is_trained = True
 
-    def predict(self, image, video_id=None):
+    def _predict(self, image, video_id=None):
         if not self.is_trained:
             raise NotTrainedError()
 
