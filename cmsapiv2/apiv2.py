@@ -263,12 +263,22 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if request.account is None:  
             raise tornado.gen.Return(True)
 
-        subscription_state = request.account.subscription_state
+        acct = request.account
+        subscription_state = acct.subscription_state
 
-        # TODO check the expiry on the account to verify if we need 
-        # to talk to recurly or not 
+        # TODO check the expiry on the accounts subscription 
+        # to verify if we need to talk to recurly or not
 
-        if subscription_state == neondata.SubscriptionStates.ACTIVE:
+        if datetime.utcnow() > acct.verify_account_expiry: 
+            recurly_account = recurly.Account.get(acct.neon_api_key)
+            if acct.verify_account_expiry <= datetime.utcnow(): 
+                new_date = (datetime.utcnow() + \
+                    timedelta(seconds=3600))
+                acct.verify_account_expiry = new_date
+            yield acct.save(async=True)  
+
+        if subscription_state in [ neondata.SubscriptionState.ACTIVE, 
+               neondata.SubscriptionState.IN_TRIAL ]:
             raise tornado.gen.Return(True)
 
         raise TooManyRequestsError('Your subscription is not valid') 

@@ -1643,7 +1643,11 @@ BillingAccountHandler
 *****************************************************************'''
 class BillingAccountHandler(APIV2Handler):
     """This talks to recurly and creates a billing account with our 
-          recurly integration. 
+          recurly integration.
+
+       This acts as an upreate function, essentially always call 
+        post, to save account information on the recurly side of 
+        things. 
     """
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1657,11 +1661,17 @@ class BillingAccountHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         recurly_token_ref = args.get('recurly_token_ref')
+        account = yield neondata.NeonUserAccount.get(
+                   account_id, 
+                   async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account was not found')
 
         recurly_account = recurly.Account(account_code=account_id)
-        recurly_account.email = 'test@test.invalid'
-        recurly_account.first_name = 'TestFirst' 
-        recurly_account.last_name = 'TestLast'
+        recurly_account.email = account.email
+        recurly_account.first_name = account.first_name
+        recurly_account.last_name = account.last_name
         recurly_account.billing_info = recurly.BillingInfo(
             token_id=recurly_token_ref)
 
@@ -1673,21 +1683,6 @@ class BillingAccountHandler(APIV2Handler):
             raise
 
         self.success({}) 
-
-    '''
-    TODO verify we need a PUT here or not, or just everything come 
-     through POST, and have it act as an upreate function
-    ''' 
-    @tornado.gen.coroutine
-    def put(self, account_id):
-        schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('recurly_token_ref') : All(
-              Coerce(str), Length(min=8, max=64))
-        })
-        args = self.parse_args()
-        args['account_id'] = str(account_id)
-        schema(args)
 
     @classmethod
     def get_access_levels(cls):
@@ -1746,8 +1741,7 @@ class BillingSubscriptionHandler(APIV2Handler):
     def get_access_levels(cls):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.PUT] 
+                 'account_required'  : [HTTPVerbs.POST] 
                }
 
 '''*********************************************************************

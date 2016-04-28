@@ -1395,11 +1395,17 @@ class DefaultSizes(object):
 class ServingControllerType(object): 
     IMAGEPLATFORM = 'imageplatform'
 
-class SubscriptionType(object): 
+class SubscriptionState(object): 
     ACTIVE = 'active' 
     CANCELED = 'canceled'
     FUTURE = 'future' 
-    EXPIRED = 'expired' 
+    EXPIRED = 'expired'
+    IN_TRIAL = 'in_trial'
+ 
+class PlanType(object): 
+    DEMO = 'demo' 
+    PRO = 'pro'
+    PREMIER = 'premier' 
 
 class AccessLevels(object):
     NONE = 0 
