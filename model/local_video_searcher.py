@@ -157,6 +157,7 @@ from collections import OrderedDict as odict
 from collections import defaultdict as ddict
 from random import getrandbits
 import shutil
+import threading
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -1200,6 +1201,9 @@ class LocalSearcher(object):
 
         '''
         self.predictor = predictor
+        if self.predictor.async:
+            # you're using an asynchronous predictor, so create a lock
+            self._result_lock = threading.Lock()
         self.processing_time_ratio = processing_time_ratio
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
@@ -1434,6 +1438,33 @@ class LocalSearcher(object):
                 results.append(formatted_result)
         return results
 
+    def _conduct_local_search_cb(self, result_future, **kwargs):
+        '''
+        Manages the callback for the frame score from a prediction from
+        the context of a local search.
+        '''
+        with self._result_lock:
+            exception = result_future.exception()
+            if exception: # there's been a problem scoring this frame
+                # TODO: does print x just call str(x) beforehand?
+                _log.error('Error sampling frame %i: %s', frameno, str(exception))
+                self.search_algo.update(frameno, bad=True)
+                return
+            result = result_future.result()
+            indi_framescore = result.valence[0]
+            inter_framescore = (start_score + end_score) / 2
+            flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
+            inter_framescore = (1 - flambda) * start_score + flambda * end_score
+            framescore = (indi_framescore + inter_framescore) / 2
+            _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
+                        ' is %i with interp score %.3f and with feature score '
+                        '%.3f') % (start_frame,
+                                   start_score, end_frame, end_score, best_frameno,
+                                   framescore, np.max(comb)))
+            self.results.accept_replace(best_frameno, framescore, best_gold,
+                                        np.max(comb), meta=meta,
+                                        feat_score_func=feat_score_func)
+
     def _conduct_local_search(self, start_frame, end_frame,
                               start_score, end_score, from_queue=False):
         '''
@@ -1542,12 +1573,6 @@ class LocalSearcher(object):
         best_feat_dict = {x: frame_feats[x][np.argmax(comb)] for x in
                           frame_feats.keys()}
         feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
-        indi_framescore = self.predictor.predict(best_frame)
-        inter_framescore = (start_score + end_score) / 2
-        # interpolate the framescore
-        flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
-        inter_framescore = (1 - flambda) * start_score + flambda * end_score
-        framescore = (indi_framescore + inter_framescore) / 2
         if self.use_all_data:
             # save the data from the analysis, for frames that were not
             # filtered out.
@@ -1566,28 +1591,59 @@ class LocalSearcher(object):
             # save the data from the best identified thumb
             for featName, featVal in best_feat_dict.iteritems():
                 self.stats[featName].push(featVal)
-
-        _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
-                    ' is %i with interp score %.3f and with feature score '
-                    '%.3f') % (start_frame,
-                               start_score, end_frame, end_score, best_frameno,
-                               framescore, np.max(comb)))
-        # the selected frame (whatever it may be) will be assigned
-        # the score equal to mean of its boundary frames.
-        # push the frame into the results object. Ensure that the analysis
-        # frame is not inserted, but rather the best "gold" frame (i.e., one
-        # that has not been cropped in accordance with analysis_crop)
-        # if best_frameno == 2353:
-        #     import ipdb
-        #     ipdb.set_trace()
         if TESTING:
             meta = [best_feat_dict,
                     self.combiner.get_indy_funcs(best_feat_dict)]
         else:
             meta = None
+
+        if self.predictor.async:
+            # assemble a kwarg dict
+            cb_dict = {'start_frame': start_frame,
+                       'start_score': start_score,
+                       'end_frame': end_frame,
+                       'end_score': end_score,
+                       'best_frameno': best_frameno,
+                       'comb': comb,
+                       'meta': meta,
+                       'best_gold': best_gold,
+                       'feat_score_func': feat_score_func}
+            result_future = self.predictor.predict(best_frame)
+            result_future.add_done_callback(
+                lambda result_future: self._conduct_local_search_cb(result_future, **cb_dict))
+            return
+        indi_framescore = self.predictor.predict(best_frame)
+        inter_framescore = (start_score + end_score) / 2
+        # interpolate the framescore
+        flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
+        inter_framescore = (1 - flambda) * start_score + flambda * end_score
+        framescore = (indi_framescore + inter_framescore) / 2
+        _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
+                    ' is %i with interp score %.3f and with feature score '
+                    '%.3f') % (start_frame,
+                               start_score, end_frame, end_score, best_frameno,
+                               framescore, np.max(comb)))
         self.results.accept_replace(best_frameno, framescore, best_gold,
                                     np.max(comb), meta=meta,
                                     feat_score_func=feat_score_func)
+
+    def _sample_cb(self, result_future, frameno):
+        '''
+        The callback for taking a sample.
+        '''
+        with self._result_lock:
+            exception = result_future.exception()
+            if exception: # there's been a problem scoring this frame
+                # TODO: does print x just call str(x) beforehand?
+                _log.error('Error sampling frame %i: %s', frameno, str(exception))
+                self.search_algo.update(frameno, bad=True)
+                return
+            result = result_future.result()
+            frame_score = result.valence[0]
+            self.stats['score'].push(frame_score)
+            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
+            # update the search algo's knowledge
+            self.search_algo.update(frameno, frame_score)
 
     def _take_sample(self, frameno):
         '''
@@ -1602,18 +1658,24 @@ class LocalSearcher(object):
             self.search_algo.update(frameno, bad=True)
             return
         frames = self._prep(frames)
-        # get the score the image.
-        frame_score = self.predictor.predict(frames[0])
+        # get the score the image (asynchronously).
+        cb = lambda result_future: self._sample_cb(result_future, frameno)
+        if self.predictor.async:
+            # get the score the image (asynchronously).
+            result_future = self.predictor.predict(frames[0])
+            result_future.add_done_callback(
+                lambda result_future: self._sample_cb(result_future, frameno))
+        else:
+            frame_Score = self.predictor.predict(frames[0])
+            self.stats['score'].push(frame_score)
+            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
+            self.search_algo.update(frameno, frame_score)
         # extract all the features we want to cache
         for n, f in self.feats_to_cache.iteritems():
             vals = f.generate_many(frames, fonly=True)
             self.stats[n].push(vals[0])
         # update the knowledge about its variance
         self.col_stat.push(frames[0])
-        self.stats['score'].push(frame_score)
-        _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
-        # update the search algo's knowledge
-        self.search_algo.update(frameno, frame_score)
 
     def _should_search(self, start_frame, end_frame, start_score, end_score):
         '''
