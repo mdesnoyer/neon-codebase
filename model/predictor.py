@@ -31,7 +31,7 @@ class Predictor(object):
     def __init__(self, feature_generator = None):
         self.feature_generator = feature_generator
         self.__version__ = 3
-        self._async = False
+        self.async = False
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -74,8 +74,8 @@ class Predictor(object):
 
     def predict(self, image, *args, **kwargs):
         '''Wrapper for image valence prediction functions'''
-        if self._async:
-            return self._predict_async(image, *args, **kwargs)
+        if self.async:
+            return self._predictasync(image, *args, **kwargs)
         else:
             return self._predict(image, *args, **kwargs)
 
@@ -91,7 +91,7 @@ class Predictor(object):
         '''
         raise NotImplementedError()
 
-    def _predict_async(self, image, *args, **kwargs):
+    def _predictasync(self, image, *args, **kwargs):
         '''
         Asynchronous prediction using the deepnet Aquila's
         server. 
@@ -117,7 +117,7 @@ class Predictor(object):
         '''
         Returns True when all requests are complete.
         '''
-        if not self._async:
+        if not self.async:
             # you are running synchronously, so it's fine.
             return True
         else:
@@ -147,7 +147,7 @@ class DeepnetPredictor(Predictor):
         self.active = 0
         self.done = 0
 
-    def _predict_async(self, image):
+    def _predictasync(self, image):
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
         with self.cv:
@@ -156,10 +156,10 @@ class DeepnetPredictor(Predictor):
         self.active += 1
         result_future = stub.Regress.future(request, 10.0)  # 10 second timeout
         result_future.add_done_callback(
-            lambda result_future: self._async_cb_hand(result_future))
+            lambda result_future: self.async_cb_hand(result_future))
         return result_future
 
-    def _async_cb_hand(self):
+    def async_cb_hand(self):
         '''
         Housekeeping handler for predictor to monitor the number of active
         inference requests.
