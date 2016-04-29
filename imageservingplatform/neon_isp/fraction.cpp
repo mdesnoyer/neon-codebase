@@ -149,52 +149,10 @@ Fraction::ProcessImages(const rapidjson::Value & imgs)
 
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
-// TODO Kevin this needs to be combined with DefaultThumbnail::GetScaledImage
 const ScaledImage*
-Fraction::GetScaledImage(int height, int width) const{
-
-    //static const int pixelRange = 6; 
-
-    unsigned numOfImages = images_.size();
-
-    if(numOfImages == 0)
-        return 0; 
-
-    // try to find an exact fit
-    for(unsigned i=0; i < numOfImages; i++){
-        if(images_[i].GetHeight() == height &&
-           images_[i].GetWidth() == width)
-             return &images_[i];
-    }
-
-    // otherwise try to find pick an approximate fit
-    /*
-    if (height == 0) { 
-        return 0; 
-    } 
-    double desiredAspectRatio = (double)width / (double)height; 
-    int image_index = -1;
-    long int min_matching_area = LONG_MAX; 
-    for(unsigned i=0; i < numOfImages; i++) {
-        int image_height = images_[i].GetHeight();
-        int image_width = images_[i].GetWidth();
-        if (ScaledImage::ApproxEqualAspectRatio(
-             image_height, 
-             image_width, 
-             desiredAspectRatio)) { 
-            long int matching_area = image_height*image_width; 
-            if (matching_area < min_matching_area) { 
-                image_index = i;
-                min_matching_area = matching_area;  
-            }
-        }
-    }
-    if (image_index > -1)
-        return &images_[image_index];
-    */
-    //boost::ptr_vector<ScaledImage>::const_iterator iter = images_.begin();
-    //images_[0].FindApproxAspectRatio(width, height); 
-    int image_index = ScaledImage::FindApproxAspectRatio(width, height, images_);
+Fraction::GetScaledImage(int height, int width) const
+{
+    int image_index = ScaledImage::FindBestSizeMatchImage(width, height, images_);
     if (image_index > -1)
         return &images_[image_index];
     // no fit found

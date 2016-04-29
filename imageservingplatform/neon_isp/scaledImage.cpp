@@ -43,34 +43,61 @@ ScaledImage::ApproxEqualAspectRatio(int width, int height, double aspectRatio)
 }
 
 int 
-ScaledImage::FindApproxAspectRatio(int width, int height, const boost::ptr_vector<ScaledImage>& imgs) 
-{ 
-    int image_index = -1;
+ScaledImage::FindBestSizeMatchImage(int width, int height, const boost::ptr_vector<ScaledImage>& imgs) 
+{
+    int pixel_window = 6;  
+    int exact_match_index = -1;
+    int near_match_index = -1; 
+    int aspect_match_index = -1;
+    int final_index = -1;
+      
     unsigned numOfImages = imgs.size();
      
     if(numOfImages == 0) {
-        return image_index;
+        return final_index;
     }
     if (height == 0) { 
-        return image_index; 
-    } 
+        return final_index; 
+    }
+ 
     double desiredAspectRatio = (double)width / (double)height; 
     long int min_matching_area = LONG_MAX; 
     for(unsigned i=0; i < numOfImages; i++) {
         int image_height = imgs[i].GetHeight();
         int image_width = imgs[i].GetWidth();
+        if( image_height ==  height && image_width == width ) {
+            exact_match_index = i; 
+        }
+        if (ScaledImage::ApproxEqual(image_height, height, pixel_window) && 
+             ScaledImage::ApproxEqual(image_width, width, pixel_window)) { 
+            near_match_index = i;
+        } 
         if (ScaledImage::ApproxEqualAspectRatio(
              image_width, 
              image_height, 
              desiredAspectRatio)) { 
             long int matching_area = image_height*image_width; 
             if (matching_area < min_matching_area) { 
-                image_index = i;
+                aspect_match_index = i;
                 min_matching_area = matching_area;  
             }
         }
+    }
+
+    // if we found an exaxt match return it, 
+    //  next see if we have a really close match, 
+    //  finally see if we have an aspect ratio match
+
+    if (exact_match_index > -1) {
+        final_index = exact_match_index; 
+    }
+    else if (near_match_index > -1) { 
+        final_index = near_match_index; 
     } 
-    return image_index; 
+    else if (aspect_match_index > -1) { 
+        final_index = aspect_match_index; 
+    } 
+    return final_index; 
 } 
 
 int
