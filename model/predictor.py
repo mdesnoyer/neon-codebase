@@ -239,7 +239,8 @@ class DeepnetPredictor(Predictor):
         self.port = port
         self.cv = threading.Condition()
         self.channel = implementations.insecure_channel(host, int(port))
-        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(channel)
+        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
+            self.channel)
         self.active = 0
         self.done = 0
 
