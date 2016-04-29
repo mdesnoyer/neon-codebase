@@ -1465,6 +1465,24 @@ class LocalSearcher(object):
                                         np.max(comb), meta=meta,
                                         feat_score_func=feat_score_func)
 
+    def _sample_cb(self, result_future, frameno):
+        '''
+        The callback for taking a sample.
+        '''
+        with self._result_lock:
+            exception = result_future.exception()
+            if exception: # there's been a problem scoring this frame
+                # TODO: does print x just call str(x) beforehand?
+                _log.error('Error sampling frame %i: %s', frameno, str(exception))
+                self.search_algo.update(frameno, bad=True)
+                return
+            result = result_future.result()
+            frame_score = result.valence[0]
+            self.stats['score'].push(frame_score)
+            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
+            # update the search algo's knowledge
+            self.search_algo.update(frameno, frame_score)
+            
     def _conduct_local_search(self, start_frame, end_frame,
                               start_score, end_score, from_queue=False):
         '''
@@ -1626,24 +1644,6 @@ class LocalSearcher(object):
         self.results.accept_replace(best_frameno, framescore, best_gold,
                                     np.max(comb), meta=meta,
                                     feat_score_func=feat_score_func)
-
-    def _sample_cb(self, result_future, frameno):
-        '''
-        The callback for taking a sample.
-        '''
-        with self._result_lock:
-            exception = result_future.exception()
-            if exception: # there's been a problem scoring this frame
-                # TODO: does print x just call str(x) beforehand?
-                _log.error('Error sampling frame %i: %s', frameno, str(exception))
-                self.search_algo.update(frameno, bad=True)
-                return
-            result = result_future.result()
-            frame_score = result.valence[0]
-            self.stats['score'].push(frame_score)
-            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
-            # update the search algo's knowledge
-            self.search_algo.update(frameno, frame_score)
 
     def _take_sample(self, frameno):
         '''
