@@ -1,6 +1,6 @@
 # let's try instantiating the predictor
 from model import predictor
-# import sys
+import sys
 # if '/repos/neon/model' not in sys.path:
 #     sys.path.insert(0, '/repos/neon/model')
 from model.features import (BlurGenerator, SADGenerator, FaceGenerator,
