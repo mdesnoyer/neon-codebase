@@ -12,6 +12,7 @@ Author: Nick Dufour
 import hashlib
 import logging
 import numpy as np
+from PIL import Image
 import os
 import pyflann
 import tempfile
@@ -22,6 +23,100 @@ import aquila_inference_pb2  # TODO: make sure this is correct.
 
 
 _log = logging.getLogger(__name__)
+
+
+def _resize_to(img, w=None, h=None):
+  '''
+  Resizes the image to a desired width and height. If either is undefined,
+  it resizes such that the defined argument is satisfied and preserves aspect
+  ratio. If both are defined, resizes to satisfy both arguments without
+  preserving aspect ratio.
+
+  Args:
+    img: A PIL image.
+    w: The desired width.
+    h: The desired height.
+  '''
+  ow, oh = img.size
+  asp = float(ow) / oh
+  if w is None and h is None:
+    # do nothing
+    return img
+  elif w is None:
+    # set the width
+    w = int(h * asp)
+  elif h is None:
+    h = int(w / asp)
+  return img.resize((w, h), Image.BILINEAR)
+
+
+def _center_crop_to(img, w, h):
+  '''
+  Center crops image to desired size. If either dimension of the image is
+  already smaller than the desired dimensions, the image is not cropped.
+
+  Args:
+    img: A PIL image.
+    w: The width desired.
+    h: The height desired.
+  '''
+  ow, oh = img.size
+  if ow < w or oh < h:
+    return img
+  upper = (oh - h) / 2
+  lower = upper + h
+  left = (ow - w) / 2
+  right = left + w
+  return img.crop((left, upper, right, lower))
+
+
+def _pad_to_asp(img, asp):
+  '''
+  Symmetrically pads an image to have the desired aspect ratio.
+
+  Args:
+    img: A PIL image.
+    asp: The aspect ratio, a float, as w / h
+  '''
+  ow, oh = img.size
+  oasp = float(ow) / oh
+  if asp > oasp:
+    # the image is too narrow. Pad out width.
+    nw = int(oh * asp)
+    left = (nw - ow) / 2
+    upper = 0
+    newsize = (nw, oh)
+  elif asp < oasp:
+    # the image is too short. Pad out height.
+    nh = int(ow / asp)
+    left = 0
+    upper = (nh - oh) / 2
+    newsize = (ow, nh)
+  else:
+    return img
+  nimg = Image.new(img.mode, newsize)
+  nimg.paste(img, box=(left, upper))
+  return nimg
+
+
+def _aquila_prep(image):
+    '''
+    Preprocesses an image so that it is appropriate
+    for input into Aquila. Aquila was trained on
+    images in RGB order, padded to an aspect ratio of
+    16:9 and then resized to 299 x 299. We will replicate
+    this here. For now, we assume the image provided has
+    been obtained from OpenCV (and so is BGR) and will use
+    PIL to prep the image.
+    '''
+    img = Image.fromarray(im[:,:,::-1])
+    img = _pad_to_asp(img, 16./9)
+    # resize the image to 299 x 299
+    img = _resize_to(img, w=314, h=314)
+    img = _center_crop_to(img, w=299, h=299)
+    return img
+
+
 
 class Predictor(object):
     '''An abstract valence predictor.
@@ -74,6 +169,7 @@ class Predictor(object):
 
     def predict(self, image, *args, **kwargs):
         '''Wrapper for image valence prediction functions'''
+        image = _aquila_prep(image)
         if self.async:
             return self._predictasync(image, *args, **kwargs)
         else:
