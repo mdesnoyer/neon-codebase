@@ -695,6 +695,7 @@ class Cluster():
                 cluster_found = cluster_info
             time.sleep(1) # Avoid AWS throttling
         
+        cluster_found = None
         if cluster_found is None:
             raise ClusterInfoError('Could not find a cluster of type %s'
                                    ' with name %s'
