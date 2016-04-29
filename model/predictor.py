@@ -245,9 +245,11 @@ class DeepnetPredictor(Predictor):
         self.done = 0
 
     def _predictasync(self, image):
+        _log.debug('Prediction request recieved')
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
         with self.cv:
+            _log.debug('Concurrent requests %i / %i', self.active, self.concurrency)
             while self.active == self.concurrency:
                 self.cv.wait()
         self.active += 1
@@ -268,6 +270,7 @@ class DeepnetPredictor(Predictor):
             self.done += 1
             self.active -= 1
             cv.notify()
+        _log.debug('Predictor request done callback activated, active threads %i', self.active)
 
     def complete(self):
         '''

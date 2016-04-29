@@ -1447,7 +1447,7 @@ class LocalSearcher(object):
             exception = result_future.exception()
             if exception: # there's been a problem scoring this frame
                 # TODO: does print x just call str(x) beforehand?
-                _log.error('Error sampling frame %i: %s', frameno, str(exception))
+                _log.error('Local search allback returned with exception frame %i: %s', frameno, str(exception))
                 self.search_algo.update(frameno, bad=True)
                 return
             result = result_future.result()
