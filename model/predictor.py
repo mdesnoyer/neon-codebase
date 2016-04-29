@@ -232,7 +232,7 @@ class DeepnetPredictor(Predictor):
         hostport - The host:port of the Aquila server as a string, 
         i.e., localhost:9000.
         '''
-        super(AquilaPredictor, self).__init__()
+        super(DeepnetPredictor, self).__init__()
         self.concurrency = concurrency
         host, port = hostport.split(':')
         self.host = host
