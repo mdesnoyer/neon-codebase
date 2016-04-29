@@ -124,18 +124,15 @@ _log.addHandler(ch)
                             ENDOF LOGGING
 =======================================================================
 '''
-_log.info('creating predictor')
-predictor = predictor.DeepnetPredictor(hostport='10.0.88.55:9000')
-
 valence_translator = {MINIMIZE:'MINIMIZE', MAXIMIZE:'MAXIMIZE',
                       NORMALIZE:'NORMALIZE', PEN_LOW_HALF:'PEN_LOW_HALF',
                       PEN_HIGH_HALF:'PEN_HIGH_HALF', PEN_ZERO:'PEN_ZERO'}
 
 _log.info('creating landmark detector')
-f_predictor_path = '/repos/dlib-18.17/shape_predictor_68_face_landmarks.dat'
+f_predictor_path = '/home/ubuntu/shape_predictor_68_face_landmarks.dat'
 f_predictor = dlib.shape_predictor(f_predictor_path)
 _log.info('loading closed eye classifier')
-classifier = joblib.load('/data/Faces/new_models/linear_model_scaler_compressed')
+classifier = joblib.load('/home/ubuntu/linear_model_scaler_compressed')
 _log.info('creating face finder')
 face_finder = MultiStageFaceParser(f_predictor)
 _log.info('instantiating closed eye class')
@@ -217,7 +214,8 @@ combiner_m = MultiplicativeCombiner(penalties=penalties,
 combiner_a = AdditiveCombiner(weight_valence=weight_valence,
                               weight_dict=weight_dict)
 
-
+_log.info('creating predictor')
+predictor = predictor.DeepnetPredictor(hostport='10.0.88.55:9000')
 #f = open(os.path.join(dest_folder, 'config'), 'w')
 def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
