@@ -856,7 +856,7 @@ class TestJobManager(test_utils.neontest.AsyncTestCase):
                                     url='http://somewhere.mp4')]
         neondata.NeonApiRequest.save_all(self.jobs)
 
-        self.base_time = 0.05
+        self.base_time = 0.1
         self.job_manager = video_processor.server.JobManager(
             job_check_interval=self.base_time / 10,
             base_time=self.base_time)
