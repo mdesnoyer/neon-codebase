@@ -16,12 +16,7 @@ from model.parse_faces import MultiStageFaceParser
 from model.score_eyes import ScoreEyes
 import dlib
 from sklearn.externals import joblib
-from local_video_searcher import (LocalSearcher, MultiplicativeCombiner,
-                                  AdditiveCombiner, MINIMIZE, MAXIMIZE,
-                                  NORMALIZE, PEN_LOW_HALF, PEN_HIGH_HALF,
-                                  PEN_ZERO)
-
-from local_video_searcher import (LocalSearcher, MultiplicativeCombiner,
+from modle.local_video_searcher import (LocalSearcher, MultiplicativeCombiner,
                                   AdditiveCombiner, MINIMIZE, MAXIMIZE,
                                   NORMALIZE, PEN_LOW_HALF, PEN_HIGH_HALF,
                                   PEN_ZERO)
