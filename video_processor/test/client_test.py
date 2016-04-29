@@ -30,8 +30,8 @@ import numpy as np
 import os
 import pickle
 from PIL import Image
+import psycopg2
 import re
-import redis
 import random
 import request_template
 import signal
@@ -45,7 +45,6 @@ import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
 import test_utils.postgresql
-import test_utils.redis
 from tornado.concurrent import Future
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 import tornado.ioloop
@@ -488,13 +487,9 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
 
         statemon.state._reset_values()
 
-        #Redis
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
-
         random.seed(984695198)
 
-        # Fill out redis
+        # populate some data
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
@@ -589,8 +584,19 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
         self.http_mocker.stop()
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
-        self.redis.stop()
+        self.postgresql.clear_all_tables()
         super(TestFinalizeResponse, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
     def test_default_process(self):
         self.vprocessor.finalize_response()
@@ -933,7 +939,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
     @patch('video_processor.client.neondata.ThumbnailMetadata.modify_many')
     def test_db_connection_error_thumb(self, modify_mock):
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             {}
             ]
 
@@ -953,7 +959,7 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
     @patch('video_processor.client.neondata.VideoMetadata.modify')
     def test_db_connection_error_video(self, modify_mock):
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             False
             ]
 
@@ -1001,12 +1007,12 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
     def test_api_request_update_fail(self, api_request_mock):
         api_request_mock.side_effect = [
             # Connection error on setting finalizing state
-            redis.ConnectionError("Connection Error"), 
+            psycopg2.Error("Connection Error"), 
             # Api request missing on setting finalizing state
             None,
             #  Connection error on setting finished state
             self.api_request,
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             # Api request missing on setting finished state
             self.api_request,
             None,
@@ -1059,127 +1065,6 @@ class TestFinalizeResponse(test_utils.neontest.TestCase):
             self.assertEquals(
                 neondata.NeonApiRequest.get('job1', self.api_key).state,
                 neondata.RequestState.FINISHED)
-
-# TODO delete/replace other class after postgres hot swap 
-class TestFinalizeResponsePG(TestFinalizeResponse):
-    ''' 
-    Test the cleanup and responding after the video has been processed
-    '''
-    def setUp(self):
-        super(TestFinalizeResponse, self).setUp()
-
-        statemon.state._reset_values()
-
-        random.seed(984695198)
-
-        # populate some data
-        na = neondata.NeonUserAccount('acct1')
-        self.api_key = na.neon_api_key
-        na.save()
-        neondata.NeonPlatform.modify(self.api_key, '0', 
-                                     lambda x: x, create_missing=True)
-
-        cdn = neondata.CDNHostingMetadataList(
-            neondata.CDNHostingMetadataList.create_key(self.api_key, '0'),
-            [neondata.NeonCDNHostingMetadata(rendition_sizes=[(160,90)])])
-        cdn.save()
-
-        self.video_id = '%s_vid1' % self.api_key
-        self.api_request = neondata.BrightcoveApiRequest(
-            'job1', self.api_key,
-            'vid1',
-            'some fun video',
-            'http://video.mp4',
-            None, None, 'pubid',
-            'http://callback.com',
-            '0',
-            'http://default_thumb.jpg')
-        self.api_request.api_param = '1'
-        self.api_request.api_method = 'topn'
-        self.api_request.state = neondata.RequestState.PROCESSING
-        self.api_request.save()
-
-        # Mock out s3
-        self.s3conn = boto_mock.MockConnection()
-        self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
-        self.mock_conn = self.s3_patcher.start()
-        self.mock_conn.return_value = self.s3conn
-        self.s3conn.create_bucket('host-thumbnails')
-        self.s3conn.create_bucket('n3.neon-images.com')
-
-        # Mock out the image download
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start(),
-            require_async_kw=True)
-        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock.return_value = self.random_image
-
-        # Mock out http callbacks
-        self.http_mocker = patch('video_processor.client.utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(self.http_mocker.start(),
-                                                require_async_kw=True)
-        self.http_mock.side_effect = lambda x, **kw: HTTPResponse(x, 200)
-
-        # Mock out cloudinary
-        self.cloudinary_patcher = patch('cmsdb.cdnhosting.CloudinaryHosting')
-        self.cloudinary_mock = self.cloudinary_patcher.start()
-        future = Future()
-        future.set_result(None)
-        self.cloudinary_mock().upload.return_value = future
-
-        # Setup the processor object
-        job = self.api_request.__dict__
-        self.vprocessor = video_processor.client.VideoProcessor(
-            job,
-            MagicMock(),
-            'test_version',
-            multiprocessing.BoundedSemaphore(1))
-        self.vprocessor.video_metadata.duration = 130.0
-        self.vprocessor.video_metadata.frame_size = (640, 480)
-
-        self.vprocessor.thumbnails = [
-            (neondata.ThumbnailMetadata(None,
-                                        ttype=neondata.ThumbnailType.NEON,
-                                        rank=0,
-                                        model_score=2.3,
-                                        model_version='model1',
-                                        frameno=6,
-                                        filtered=''),
-             imageutils.PILImageUtils.create_random_image(480, 640)),
-             (neondata.ThumbnailMetadata(None,
-                                         ttype=neondata.ThumbnailType.NEON,
-                                         rank=1,
-                                         model_score=2.1,
-                                         model_version='model1',
-                                         frameno=69),
-             imageutils.PILImageUtils.create_random_image(480, 640)),
-             (neondata.ThumbnailMetadata(None,
-                                         ttype=neondata.ThumbnailType.RANDOM,
-                                         rank=0,
-                                         frameno=67),
-              imageutils.PILImageUtils.create_random_image(480, 640))]
-
-        
-    def tearDown(self):
-        #self.s3_patcher.stop()
-        #self.http_mocker.stop()
-        #self.im_download_mocker.stop()
-        #self.cloudinary_patcher.stop()
-        self.postgresql.clear_all_tables() 
-        super(TestFinalizeResponse, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
         
 class SmokeTest(test_utils.neontest.TestCase):
     ''' 
@@ -1465,7 +1350,7 @@ class SmokeTest(test_utils.neontest.TestCase):
     @patch('video_processor.client.neondata.VideoMetadata.modify')
     def test_db_update_error(self, modify_mock):
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error")]
+            psycopg2.Error("Connection Error")]
 
         self._run_job({
             'api_key': self.api_key,
