@@ -21,11 +21,57 @@ ScaledImage::~ScaledImage()
 // check if a & b approx equal i.e in the range of the window size specified 
 bool
 ScaledImage::ApproxEqual(int a, int b, int window){
+
     if (abs(a - b) <= window)
         return true;
     else
         return false;
 }
+
+bool
+ScaledImage::ApproxEqualAspectRatio(int width, int height, double aspectRatio)
+{
+    if (height == 0) { 
+        return false; 
+    } 
+    if (((double)width / (double)height) == aspectRatio) {
+        return true; 
+    } 
+    else { 
+        return false; 
+    }
+}
+
+int 
+ScaledImage::FindApproxAspectRatio(int width, int height, const boost::ptr_vector<ScaledImage>& imgs) 
+{ 
+    int image_index = -1;
+    unsigned numOfImages = imgs.size();
+     
+    if(numOfImages == 0) {
+        return image_index;
+    }
+    if (height == 0) { 
+        return image_index; 
+    } 
+    double desiredAspectRatio = (double)width / (double)height; 
+    long int min_matching_area = LONG_MAX; 
+    for(unsigned i=0; i < numOfImages; i++) {
+        int image_height = imgs[i].GetHeight();
+        int image_width = imgs[i].GetWidth();
+        if (ScaledImage::ApproxEqualAspectRatio(
+             image_width, 
+             image_height, 
+             desiredAspectRatio)) { 
+            long int matching_area = image_height*image_width; 
+            if (matching_area < min_matching_area) { 
+                image_index = i;
+                min_matching_area = matching_area;  
+            }
+        }
+    } 
+    return image_index; 
+} 
 
 int
 ScaledImage::Init(const rapidjson::Value& img)

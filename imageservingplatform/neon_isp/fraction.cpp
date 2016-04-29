@@ -153,9 +153,8 @@ Fraction::ProcessImages(const rapidjson::Value & imgs)
 const ScaledImage*
 Fraction::GetScaledImage(int height, int width) const{
 
-    static const int pixelRange = 6; 
+    //static const int pixelRange = 6; 
 
-    // go through all images again and pick the first approximate fit
     unsigned numOfImages = images_.size();
 
     if(numOfImages == 0)
@@ -169,13 +168,35 @@ Fraction::GetScaledImage(int height, int width) const{
     }
 
     // otherwise try to find pick an approximate fit
-    for(unsigned i=0; i < numOfImages; i++){
-        if(ScaledImage::ApproxEqual(images_[i].GetHeight(), height, pixelRange) &&
-           ScaledImage::ApproxEqual(images_[i].GetWidth(), width, pixelRange)) { 
-            return &images_[i];
-        } 
+    /*
+    if (height == 0) { 
+        return 0; 
+    } 
+    double desiredAspectRatio = (double)width / (double)height; 
+    int image_index = -1;
+    long int min_matching_area = LONG_MAX; 
+    for(unsigned i=0; i < numOfImages; i++) {
+        int image_height = images_[i].GetHeight();
+        int image_width = images_[i].GetWidth();
+        if (ScaledImage::ApproxEqualAspectRatio(
+             image_height, 
+             image_width, 
+             desiredAspectRatio)) { 
+            long int matching_area = image_height*image_width; 
+            if (matching_area < min_matching_area) { 
+                image_index = i;
+                min_matching_area = matching_area;  
+            }
+        }
     }
-    
+    if (image_index > -1)
+        return &images_[image_index];
+    */
+    //boost::ptr_vector<ScaledImage>::const_iterator iter = images_.begin();
+    //images_[0].FindApproxAspectRatio(width, height); 
+    int image_index = ScaledImage::FindApproxAspectRatio(width, height, images_);
+    if (image_index > -1)
+        return &images_[image_index];
     // no fit found
     return 0;
 }
