@@ -123,7 +123,7 @@ class Postgresql(object):
 
         # initdb
         if not os.path.exists(os.path.join(self.base_dir, 'data', 'PG_VERSION')):
-            args = ([self.initdb, '-D', os.path.join(self.base_dir, 'data'), '--lc-messages=C'] +
+            args = ([self.initdb, '-D', os.path.join(self.base_dir, 'data'), '-E UTF8', '--lc-messages=C'] +
                     self.initdb_args.split())
 
             try:
@@ -179,7 +179,7 @@ class Postgresql(object):
                 with closing(conn.cursor()) as cursor:
                     cursor.execute("SELECT COUNT(*) FROM pg_database WHERE datname='%s'" % self.dbname)
                     if cursor.fetchone()[0] <= 0:
-                        cursor.execute('CREATE DATABASE %s' % self.dbname)
+                        cursor.execute("CREATE DATABASE %s WITH ENCODING 'UTF8'" % self.dbname)
                     if self.dump_file:
                         cmd = '/usr/bin/psql --quiet -p %d -h 127.0.0.1 --username=postgres %s < %s' % (self.port, self.dbname, os.path.join(os.getcwd(), self.dump_file))
                         call(cmd, shell=True)
