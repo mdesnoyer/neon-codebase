@@ -795,7 +795,7 @@ class Cluster():
             BootstrapAction(
                 'Configure Daemons',
                 's3://elasticmapreduce/bootstrap-actions/configure-daemons',
-                ['--client-opts','14000']),
+                ['--client-opts=-XX:MaxPermSize=14000m']),
             BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
