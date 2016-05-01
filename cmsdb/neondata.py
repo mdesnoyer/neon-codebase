@@ -5303,7 +5303,8 @@ class ThumbnailServingURLs(NamespacedStoredObject):
                 # TODO(mdesnoyer): once the db is cleaned, make this
                 # raise a ValueError
                 _log.warn_n('url %s does not conform to base %s' %
-                            (url, self.base_url))
+                            (url, self.base_url),
+                    50)
         self.size_map[(width, height)] = str(url)
 
     def get_serving_url(self, width, height):
