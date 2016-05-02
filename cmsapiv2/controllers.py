@@ -505,8 +505,8 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('url') : Any(str, unicode, Length(min=1, 
-                                                                    max=2048))
+          Required('url') : Any(str, unicode, Length(min=1, max=2048)),
+          'thumbnail_ref' : Any(str, unicode, Length(min=1, max=1024)) 
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -514,16 +514,24 @@ class ThumbnailHandler(APIV2Handler):
         video_id = args['video_id'] 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key, video_id)
+        external_thumbnail_id = args.get('thumbnail_ref', None) 
 
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       internal_video_id)
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id, 
+            async=True)
 
-        current_thumbnails = yield tornado.gen.Task(
-            neondata.ThumbnailMetadata.get_many, video.thumbnail_ids)
+        current_thumbnails = yield neondata.ThumbnailMetadata.get_many( 
+            video.thumbnail_ids, 
+            async=True)
+
         cdn_key = neondata.CDNHostingMetadataList.create_key(
-            account_id_api_key, video.integration_id)
-        cdn_metadata = yield tornado.gen.Task(
-            neondata.CDNHostingMetadataList.get, cdn_key)
+            account_id_api_key, 
+            video.integration_id)
+
+        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
+            cdn_key, 
+            async=True)
+
         # ranks can be negative 
         min_rank = 1
         for thumb in current_thumbnails:
@@ -535,21 +543,25 @@ class ThumbnailHandler(APIV2Handler):
         new_thumbnail = neondata.ThumbnailMetadata(
             None,
             internal_vid=internal_video_id, 
+            external_id=external_thumbnail_id,
             ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
             rank=cur_rank)
+
         # upload image to cdn 
-        yield video.download_and_add_thumbnail(new_thumbnail,
-                                               external_thumbnail_id=args['url'],
-                                               cdn_metadata=cdn_metadata,
-                                               async=True)
+        yield video.download_and_add_thumbnail(
+            new_thumbnail,
+            image_url=args['url'],
+            cdn_metadata=cdn_metadata,
+            async=True)
+
         #save the thumbnail
-        yield tornado.gen.Task(new_thumbnail.save)
+        yield new_thumbnail.save(async=True)
 
         # save the video 
-        new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                           internal_video_id, 
-                                           lambda x: x.thumbnail_ids.append(
-                                               new_thumbnail.key))
+        new_video = yield neondata.VideoMetadata.modify(
+            internal_video_id, 
+            lambda x: x.thumbnail_ids.append(new_thumbnail.key),
+            async=True) 
 
         if new_video: 
             statemon.state.increment('post_thumbnail_oks')
