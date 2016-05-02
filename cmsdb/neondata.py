@@ -2895,7 +2895,7 @@ class User(NamespacedStoredObject):
         self.user_id = uuid.uuid1().hex
 
         # the users username, chosen by them, redis key 
-        self.username = username
+        self.username = username.lower()
 
         # the users password_hash, we don't store plain text passwords 
         self.password_hash = sha256_crypt.encrypt(password)

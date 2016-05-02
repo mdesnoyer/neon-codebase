@@ -293,6 +293,53 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
+
+    @tornado.testing.gen_test 
+    def test_create_new_account_uppercase_username(self):
+        params = json.dumps({'customer_name': 'meisnew', 
+                             'email': 'a@a.bc', 
+                             'admin_user_username':'A@A.com', 
+                             'admin_user_password':'testacpas', 
+                             'admin_user_first_name':'kevin'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/accounts'
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+                                 'account verification email sent to')
+
+        # verifier row gets created 
+        verifier = yield neondata.Verification.get('a@a.bc', async=True)
+
+        url = '/api/v2/accounts/verify?token=%s' % verifier.token
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body='', 
+                                                method='POST', 
+                                                allow_nonstandard_methods=True)
+
+ 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['serving_enabled'], 0) 
+        account_id = rjson['account_id'] 
+        account = yield neondata.NeonUserAccount.get(account_id, 
+                      async=True)
+        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.email, 'a@a.bc')
+        self.assertEquals(account.serving_enabled, 0)
+
+        user = yield neondata.User.get('a@a.com', 
+                   async=True) 
+        self.assertEquals(user.username, 'a@a.com')
+        self.assertEquals(user.first_name, 'kevin')
+
+        limits = yield neondata.AccountLimits.get(account_id, async=True)
+        self.assertEquals(limits.key, account_id) 
+        self.assertEquals(limits.video_posts, 0)
           
     @tornado.testing.gen_test 
     def test_create_new_account_duplicate_users(self):
@@ -3360,6 +3407,32 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         url = '/api/v2/authenticate' 
         params = json.dumps({'username': TestAuthenticationHandler.username, 
                              'password': TestAuthenticationHandler.password }) 
+        header = { 'Content-Type':'application/json' }
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
+        user = yield neondata.User.get(
+            TestAuthenticationHandler.username, 
+            async=True)
+        self.assertEquals(user.access_token, rjson['access_token'])
+        self.assertEquals(user.refresh_token, rjson['refresh_token'])
+        user_info = rjson['user_info'] 
+        self.assertEquals(user_info['first_name'],
+            TestAuthenticationHandler.first_name) 
+        self.assertEquals(user_info['last_name'],
+            TestAuthenticationHandler.last_name) 
+        self.assertEquals(user_info['title'],
+            TestAuthenticationHandler.title)
+ 
+    @tornado.testing.gen_test
+    def test_token_returned_upper_case_username(self): 
+        url = '/api/v2/authenticate' 
+        params = json.dumps(
+            {'username': TestAuthenticationHandler.username.upper(), 
+             'password': TestAuthenticationHandler.password }) 
         header = { 'Content-Type':'application/json' }
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
