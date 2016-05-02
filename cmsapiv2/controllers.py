@@ -197,6 +197,7 @@ class IntegrationHelper():
                                                           integration.uses_bc_smart_player)))
             integration.uses_bc_gallery = bool(int(args.get('uses_bc_gallery',
                                                           integration.uses_bc_gallery)))
+            integration.save()
 
         result = yield tornado.gen.Task(acct.modify,
                                         acct.neon_api_key,
@@ -387,8 +388,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint post request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=512)),
           'write_token': Any(str, unicode, Length(min=1, max=512)),
           'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
