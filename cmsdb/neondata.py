@@ -4294,7 +4294,7 @@ class BrightcoveIntegration(AbstractIntegration):
                  last_process_date=None, abtest=False, callback_url=None,
                  uses_batch_provisioning=False,
                  uses_bc_thumbnail_api=False,
-                 uses_bc_videojs_player=True,
+                 uses_bc_videojs_player=False,
                  uses_bc_smart_player=False,
                  uses_bc_gallery=False,
                  id_field=BRIGHTCOVE_ID,
@@ -4343,8 +4343,8 @@ class BrightcoveIntegration(AbstractIntegration):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
-        # Amount of times we have retried a video submit 
-        self.video_submit_retries = video_submit_retries 
+        # Amount of times we have retried a video submit
+        self.video_submit_retries = video_submit_retries
 
     @classmethod
     def get_ovp(cls):

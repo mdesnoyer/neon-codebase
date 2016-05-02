@@ -388,24 +388,29 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint post request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=512)),
-          'write_token': Any(str, unicode, Length(min=1, max=512)),
-          'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
-          'application_client_secret': Any(str, unicode, Length(min=1, max=1024)),
-          'callback_url': Any(str, unicode, Length(min=1, max=1024)),
-          'id_field': Any(str, unicode, Length(min=1, max=32)),
-          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': Boolean(),
-          'uses_bc_thumbnail_api': Boolean(),
-          'uses_bc_videojs_player': Boolean(),
-          'uses_bc_smart_player': Boolean(),
-          'uses_bc_gallery': Boolean()
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
+            'read_token': Any(str, unicode, Length(min=1, max=512)),
+            'write_token': Any(str, unicode, Length(min=1, max=512)),
+            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
+            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
+            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
+            'id_field': Any(str, unicode, Length(min=1, max=32)),
+            'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+            'uses_batch_provisioning': Boolean(),
+            'uses_bc_thumbnail_api': Boolean(),
+            'uses_bc_videojs_player': Boolean(),
+            'uses_bc_smart_player': Boolean(),
+            'uses_bc_gallery': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
+
+        # Check credentials with Brightcove's CMS API.
+        self._validate_oauth_credentials(args.get('application_client_id'),
+                                         args.get('application_client_secret'))
+
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
         integration = yield IntegrationHelper.create_integration(
                 acct, args, neondata.IntegrationType.BRIGHTCOVE)
@@ -413,14 +418,22 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         rv = yield self.db2api(integration)
         self.success(rv)
 
+    def _validate_oauth_credentials(self, client_id, client_secret):
+        if client_id and not client_secret:
+            raise BadRequestError('App id cannot be valued if secret is not also valued')
+        if client_secret and not client_id:
+            raise BadRequestError('App secret cannot be valued if id is not also valued')
+        # TODO validate with BC that keys are valid and the granted permissions are as expected.
+        # (This is implemented in the Oauth feature branch. Need to invoke it here after merge)
+
     @tornado.gen.coroutine
     def get(self, account_id):
         """handles a brightcove endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -443,29 +456,34 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=1024)),
-          'write_token': Any(str, unicode, Length(min=1, max=1024)),
-          'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
-          'application_client_secret': Any(str, unicode, Length(min=1, max=1024)),
-          'callback_url': Any(str, unicode, Length(min=1, max=1024)),
-          'publisher_id': Any(str, unicode, Length(min=1, max=512)),
-          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': Boolean(),
-          'uses_bc_thumbnail_api': Boolean(),
-          'uses_bc_videojs_player': Boolean(),
-          'uses_bc_smart_player': Boolean(),
-          'uses_bc_gallery': Boolean()
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+            'read_token': Any(str, unicode, Length(min=1, max=1024)),
+            'write_token': Any(str, unicode, Length(min=1, max=1024)),
+            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
+            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
+            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
+            'publisher_id': Any(str, unicode, Length(min=1, max=512)),
+            'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+            'uses_batch_provisioning': Boolean(),
+            'uses_bc_thumbnail_api': Boolean(),
+            'uses_bc_videojs_player': Boolean(),
+            'uses_bc_smart_player': Boolean(),
+            'uses_bc_gallery': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
-        integration_id = args['integration_id'] 
+        integration_id = args['integration_id']
         schema(args)
 
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
+
+        # Check credentials with Brightcove's CMS API.
+        self._validate_oauth_credentials(
+            args.get('application_client_id', integration.application_client_id),
+            args.get('application_client_secret', integration.application_client_secret))
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
@@ -477,30 +495,30 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             if playlist_feed_ids:
                 p.playlist_feed_ids = playlist_feed_ids.split(',')
             p.uses_batch_provisioning = Boolean()(
-               args.get('uses_batch_provisioning',
-               integration.uses_batch_provisioning))
+                args.get('uses_batch_provisioning',
+                integration.uses_batch_provisioning))
             p.uses_bc_thumbnail_api = Boolean()(
-               args.get('uses_bc_thumbnail_api',
-               integration.uses_bc_thumbnail_api))
+                args.get('uses_bc_thumbnail_api',
+                integration.uses_bc_thumbnail_api))
             p.uses_bc_videojs_player = Boolean()(
-               args.get('uses_bc_videojs_player',
-               integration.uses_bc_videojs_player))
+                args.get('uses_bc_videojs_player',
+                integration.uses_bc_videojs_player))
             p.uses_bc_smart_player = Boolean()(
-               args.get('uses_bc_smart_player',
-               integration.uses_bc_smart_player))
+                args.get('uses_bc_smart_player',
+                integration.uses_bc_smart_player))
             p.uses_bc_gallery = Boolean()(
-               args.get('uses_bc_gallery',
-               integration.uses_bc_gallery))
- 
+                args.get('uses_bc_gallery',
+                integration.uses_bc_gallery))
+
         result = yield neondata.BrightcoveIntegration.modify(
-            integration_id, 
-            _update_integration, 
+            integration_id,
+            _update_integration,
             async=True)
 
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
- 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
+
         statemon.state.increment('put_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)

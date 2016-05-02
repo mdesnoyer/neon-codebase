@@ -1458,17 +1458,58 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                                                 body=params,
                                                 method='PUT',
                                                 headers=header)
-	self.assertEqual(response.code, 200)
+        self.assertEqual(response.code, 200)
         rjson = json.loads(response.body)
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
                                           rjson['integration_id'])
         self.assertEqual(platform.application_client_id, '6')
         self.assertEqual(platform.application_client_secret, 'another secret')
 
+    @tornado.testing.gen_test
+    def test_put_client_id_missing_secret(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'application_client_id': '5',
+                             'application_client_secret': 'some secret',
+                             'uses_bc_gallery': True})
+        header = {'Content-Type':'application/json'}
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url), body=params, method='POST', headers=header)
+
+        rjson = json.loads(response.body)
+        platform = yield tornado.gen.Task(
+            neondata.BrightcoveIntegration.get, rjson['integration_id'])
+        self.assertEqual(platform.application_client_id, '5')
+        self.assertEqual(platform.uses_bc_gallery, True)
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'application_client_id': 'not 5',
+                             'application_client_secret': None})
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url), body=params, method='PUT')
+        self.assertEqual(e.exception.code, 400, 'Bad parameters by client for PUT')
+        platform = yield tornado.gen.Task(
+            neondata.BrightcoveIntegration.get, rjson['integration_id'])
+        self.assertEqual(
+            platform.application_client_id, '5', 'A malformed PUT makes no change')
+
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'application_client_id': None,
+                             'application_client_secret': None,
+                             'uses_bc_gallery': False})
+        response = yield self.http_client.fetch(
+            self.get_url(url), body=params, method='PUT', headers=header)
+        self.assertEqual(response.code, 200)
+        platform = yield tornado.gen.Task(
+            neondata.BrightcoveIntegration.get, rjson['integration_id'])
+        self.assertEqual(platform.uses_bc_gallery, False, 'Valid PUT updates this field')
+
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
 	url = '/api/v2/%s/integrations/brightcove' % '1234234'
-        self.get_exceptions(url, exception_mocker)  
+        self.get_exceptions(url, exception_mocker)
 
     def test_put_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.put')
