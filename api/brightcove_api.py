@@ -30,15 +30,14 @@ import utils.logs
 import utils.neon
 from utils.http import RequestPool
 from cvutils.imageutils import PILImageUtils
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean
 
 import logging
 _log = logging.getLogger(__name__)
 
 from utils.options import define, options
-define('max_write_connections', default=1, type=int, 
+define('max_write_connections', default=1, type=int,
        help='Maximum number of write connections to Brightcove')
-define('max_read_connections', default=20, type=int, 
+define('max_read_connections', default=20, type=int,
        help='Maximum number of read connections to Brightcove')
 define('max_retries', default=5, type=int,
        help='Maximum number of retries when sending a Brightcove error')
@@ -47,7 +46,7 @@ class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 
-class BrightcoveApi(object): 
+class BrightcoveApi(object):
 
     ''' Brighcove API Interface class
     All video ids used in the class refer to the Brightcove platform VIDEO ID
@@ -58,7 +57,7 @@ class BrightcoveApi(object):
     read_connection = RequestPool(options.max_read_connections)
     READ_URL = "http://api.brightcove.com/services/library"
     WRITE_URL = "http://api.brightcove.com/services/post"
-    
+
     def __init__(self, neon_api_key, publisher_id=0, read_token=None,
                  write_token=None):
         self.publisher_id = publisher_id
@@ -75,7 +74,7 @@ class BrightcoveApi(object):
     def add_image(self, video_id, tid, image=None, remote_url=None,
                   atype='thumbnail', reference_id=None):
         '''Add Image brightcove api helper method
-        
+
         #NOTE: When uploading an image with a reference ID that already
         #exists, the image is not
         updated. Although other metadata like displayName is updated.
@@ -92,32 +91,32 @@ class BrightcoveApi(object):
         dictionary of the JSON of the brightcove response
         '''
         #help.brightcove.com/developer/docs/mediaapi/add_image.cfm
-        
+
         if reference_id:
             reference_id = "v2_%s" %reference_id #V2 ref ID
 
-        im = image            
-        image_fname = 'neontn%s.jpg' % (tid) 
+        im = image
+        image_fname = 'neontn%s.jpg' % (tid)
 
         outer = {}
         params = {}
-        params["token"] = self.write_token 
+        params["token"] = self.write_token
         params["video_id"] = video_id
         params["filename"] = image_fname
         params["resize"] = False
-        image = {} 
+        image = {}
         if reference_id is not None:
             image["referenceId"] = reference_id
-        
-        if atype == 'thumbnail':    
+
+        if atype == 'thumbnail':
             image["type"] = "THUMBNAIL"
             image["displayName"] = str(self.publisher_id) + \
                     'neon-thumbnail-for-video-%s'%video_id
         else:
             image["type"] = "VIDEO_STILL"
             image["displayName"] = str(self.publisher_id) + \
-                    'neon-video-still-for-video-%s'%video_id 
-        
+                    'neon-video-still-for-video-%s'%video_id
+
         if remote_url:
             image["remoteUrl"] = remote_url
 
@@ -151,11 +150,11 @@ class BrightcoveApi(object):
             post_param.append(fileparam)
             datagen, headers = multipart_encode(post_param)
             body = "".join([data for data in datagen])
-        
+
         #send request
         req = tornado.httpclient.HTTPRequest(url=BrightcoveApi.WRITE_URL,
                                              method="POST",
-                                             headers=headers, 
+                                             headers=headers,
                                              body=body,
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
@@ -190,9 +189,9 @@ class BrightcoveApi(object):
                                         image=None,
                                         remote_url=None,
                                         thumb_size=None,
-                                        still_size=None): 
-    
-        ''' add thumbnail and videostill in to brightcove account.  
+                                        still_size=None):
+
+        ''' add thumbnail and videostill in to brightcove account.
 
         Inputs:
         video_id - brightcove video id
@@ -229,7 +228,7 @@ class BrightcoveApi(object):
                                               atype='videostill',
                                               reference_id='still-%s'%tid)]
             raise tornado.gen.Return([x['id'] for x in responses])
-        
+
         elif remote_url is not None:
             # Set the thumbnail as a remote url. If it is a neon
             # serving url, then add the requested size to the url
@@ -238,7 +237,7 @@ class BrightcoveApi(object):
             thumb_reference_id = tid
             if is_thumb_neon_url:
                 thumb_reference_id = 'thumbservingurl-%s' % video_id
-                
+
             still_url, is_still_neon_url = self._build_remote_url(
                 remote_url, still_size)
             still_reference_id = tid
@@ -255,14 +254,14 @@ class BrightcoveApi(object):
                                               remote_url=still_url,
                                               atype='videostill',
                                               reference_id=still_reference_id)]
-            
+
             raise tornado.gen.Return([x['id'] for x in responses])
 
         else:
             raise TypeError('Either image or remote_url must be set')
 
     def _build_remote_url(self, url_base, size):
-        '''Create a remote url. 
+        '''Create a remote url.
 
         If the base is a neon serving url, tack on the size params.
 
@@ -283,7 +282,7 @@ class BrightcoveApi(object):
     @tornado.gen.coroutine
     def get_current_thumbnail_url(self, video_id):
         '''Method to retrieve the current thumbnail url on Brightcove
-        
+
         Used by AB Test to keep track of any uploaded image to
         brightcove, its URL
 
@@ -293,19 +292,19 @@ class BrightcoveApi(object):
         Returns thumb_url, still_url
 
         If there is an error, (None, None) is returned
-        
+
         '''
         thumb_url = None
         still_url = None
 
-        url = ('http://api.brightcove.com/services/library?' 
+        url = ('http://api.brightcove.com/services/library?'
                 'command=find_video_by_id&token=%s&media_delivery=http'
                 '&output=json&video_id=%s'
                 '&video_fields=videoStillURL%%2CthumbnailURL' %
                 (self.read_token, video_id))
 
         req = tornado.httpclient.HTTPRequest(url=url,
-                                             method="GET", 
+                                             method="GET",
                                              request_timeout=60.0,
                                              connect_timeout=10.0)
         response = yield BrightcoveApi.read_connection.send_request(
@@ -337,7 +336,7 @@ class BrightcoveApi(object):
                            custom_fields=None,
                            media_delivery='http'):
         '''Finds many videos by brightcove id.
-        
+
         Inputs:
         video_ids - list of brightcove video ids to get info for
         video_fields - list of video fields to populate
@@ -350,7 +349,7 @@ class BrightcoveApi(object):
         results = []
 
         MAX_VIDS_PER_REQUEST = 50
-        
+
         for i in range(0, len(video_ids), MAX_VIDS_PER_REQUEST):
             url_params = {
                 'command' : 'find_videos_by_ids',
@@ -370,7 +369,7 @@ class BrightcoveApi(object):
                 '%s?%s' % (BrightcoveApi.READ_URL,
                            urllib.urlencode(url_params)),
                 request_timeout = 60.0)
-            
+
             response = yield BrightcoveApi.read_connection.send_request(
                 request, ntries=options.max_retries, async=True)
 
@@ -382,7 +381,7 @@ class BrightcoveApi(object):
     @tornado.gen.coroutine
     def search_videos(self, _all=None, _any=None, none=None, sort_by=None,
                       exact=False, page_size=100,
-                      video_fields=None, custom_fields=None, 
+                      video_fields=None, custom_fields=None,
                       media_delivery='http', page=None):
         '''Search for videos based on some criteria.
 
@@ -418,17 +417,17 @@ class BrightcoveApi(object):
             }
         if _all is not None:
             url_params['all'] = ','.join(
-                ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                ['%s:%s' % x if x[0] is not None else str(x[1])
                  for x in _all])
 
         if _any is not None:
             url_params['any'] = ','.join(
-                ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                ['%s:%s' % x if x[0] is not None else str(x[1])
                  for x in _any])
 
         if none is not None:
             url_params['none'] = ','.join(
-                ['%s:%s' % x if x[0] is not None else str(x[1]) 
+                ['%s:%s' % x if x[0] is not None else str(x[1])
                  for x in none])
 
         if sort_by is not None:
@@ -480,7 +479,7 @@ class BrightcoveApi(object):
 
         Inputs:
         from_date - A datetime object for when to get videos
-        _filter - List of categories that should be returned. 
+        _filter - List of categories that should be returned.
                   Can be PLAYABLE, UNSCHEDULED, INACTIVE, DELETED
         page_size - Max page size
         page - The page number to get
@@ -494,9 +493,9 @@ class BrightcoveApi(object):
         list of video objects
         '''
         from_date_mins = int(math.floor(
-            (from_date - datetime.datetime(1970, 1, 1)).total_seconds() / 
+            (from_date - datetime.datetime(1970, 1, 1)).total_seconds() /
             60.0))
-        
+
         # Build the request
         url_params = {
             'command' : 'find_modified_videos',
@@ -591,7 +590,7 @@ class BrightcoveApi(object):
         results = _handle_response(response)
 
         raise tornado.gen.Return(results)
-        
+
 
 def _handle_response(response):
     '''Handles the response from Brightcove
@@ -607,7 +606,7 @@ def _handle_response(response):
                 raise BrightcoveApiClientError(json_data)
         except ValueError:
             # It's not JSON data so there was some other error
-            pass    
+            pass
         except KeyError:
             # It may be valid json but doesn't have a code
             pass
@@ -637,7 +636,7 @@ class BrightcoveFeedIterator(object):
     Note, in the asynchronous case, you have to catch the special
     api.brightcove_api.FeedStopIteration because StopIteration is
     dealt with specially by the tornado framework
-    
+
     '''
     def __init__(self, func, page_size=100, max_results=None, **kwargs):
         '''Create an iterator
@@ -664,12 +663,12 @@ class BrightcoveFeedIterator(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def next(self):
-        if (self.max_results is not None and 
+        if (self.max_results is not None and
             self.items_returned >= self.max_results):
             e = StopIteration()
             e.value = StopIteration()
             raise e
-        
+
         if len(self.page_data) == 0:
             # Get more entries
             self.page_data = yield self.func(async=True, **self.args)
@@ -767,28 +766,25 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
 
     publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def is_authorized(self):
 
         if not self.oauth.authorized():
             return False
 
-        # Exercise read access
+        # Confirm read access
         test_response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
 
-        # Exercise write access
+        # Confirm write access
         # TODO
 
         return test_response.ok()
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_player(self, player_ref):
         response = self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
         return self.json_to_object(response.json())
 
-    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_players(self):
         response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))

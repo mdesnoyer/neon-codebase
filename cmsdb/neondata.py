@@ -5130,11 +5130,18 @@ class BrightcovePlayer(NamespacedStoredObject):
     '''
     Brightcove Player model
     '''
-    def __init__(self, account_id, player_id, is_tracked=False):
-        super(BrightcovePlayer, self).__init__(player_id)
-        self.player_id = player_id
+    def __init__(self, account_id, player_id, name,
+                 is_tracked=False, publish_date=None,
+                 published_plugin_version=None, last_attempt_result=None):
+        super(BrightcovePlayer, self).__init__(uuid)
+        self.player_ref = player_ref
         self.account_id = account_id
+        self.integration_id = integration_id
         self.is_tracked = is_tracked
+        self.name = name
+        self.publish_date = publish_date
+        self.published_plugin_version = published_plugin_version
+        self.last_attempt_result = last_attempt_result
 
     @classmethod
     @utils.sync.optional_sync
