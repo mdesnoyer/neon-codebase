@@ -505,7 +505,8 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('url') : Any(str, unicode, Length(min=1, max=2048))
+          Required('url') : Any(str, unicode, Length(min=1, max=2048)),
+          'thumbnail_ref' : Any(str, unicode, Length(min=1, max=1024)) 
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -513,6 +514,7 @@ class ThumbnailHandler(APIV2Handler):
         video_id = args['video_id'] 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key, video_id)
+        external_thumbnail_id = args.get('thumbnail_ref', None) 
 
         video = yield neondata.VideoMetadata.get(
             internal_video_id, 
@@ -541,6 +543,7 @@ class ThumbnailHandler(APIV2Handler):
         new_thumbnail = neondata.ThumbnailMetadata(
             None,
             internal_vid=internal_video_id, 
+            external_id=external_thumbnail_id,
             ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
             rank=cur_rank)
 
@@ -548,7 +551,6 @@ class ThumbnailHandler(APIV2Handler):
         yield video.download_and_add_thumbnail(
             new_thumbnail,
             image_url=args['url'],
-            external_thumbnail_id=args['url'],
             cdn_metadata=cdn_metadata,
             async=True)
 
