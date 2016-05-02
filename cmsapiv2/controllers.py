@@ -47,7 +47,7 @@ class AccountHandler(APIV2Handler):
         """handles account endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
 
@@ -73,7 +73,7 @@ class AccountHandler(APIV2Handler):
         """handles account endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)),
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048))
@@ -107,9 +107,9 @@ class AccountHandler(APIV2Handler):
     @classmethod
     def get_access_levels(cls):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT]
                }
 
     @classmethod
@@ -171,6 +171,7 @@ class IntegrationHelper():
             integration.save()
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
+            #TODO Nate add fields
             integration = neondata.BrightcoveIntegration()
             integration.account_id = acct.neon_api_key
             integration.publisher_id = args['publisher_id']
@@ -192,10 +193,10 @@ class IntegrationHelper():
         # ensure the integration made it to the database by executing a get
         if integration_type == neondata.IntegrationType.OOYALA:
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                              integration.integration_id)
+                                                 integration.integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                              integration.integration_id)
+                                                 integration.integration_id)
         if integration:
             raise tornado.gen.Return(integration)
         else:
@@ -212,10 +213,10 @@ class IntegrationHelper():
         """
         if integration_type == neondata.IntegrationType.OOYALA:
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                              integration_id)
+                                                 integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                              integration_id)
+                                                 integration_id)
         if integration:
             raise tornado.gen.Return(integration)
         else:
@@ -267,8 +268,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         Keyword arguments:
         """
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
           'api_key': Any(str, unicode, Length(min=1, max=1024)),
           'api_secret': Any(str, unicode, Length(min=1, max=1024)),
         })
@@ -286,8 +287,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         """handles an ooyala endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -312,8 +313,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         """handles an ooyala endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
           'api_key': Any(str, unicode, Length(min=1, max=1024)),
           'api_secret': Any(str, unicode, Length(min=1, max=1024)),
           'publisher_id': Any(str, unicode, Length(min=1, max=1024))
@@ -355,10 +356,10 @@ class OoyalaIntegrationHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET,
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET,
                                         HTTPVerbs.PUT,
                                         HTTPVerbs.POST]
                }
@@ -368,6 +369,25 @@ BrightcovePlayerHandler
 *********************************************************************'''
 class BrightcovePlayerHandler(APIV2Handler):
     """Handle requests to Brightcove player endpoint"""
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET,
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST]
+               }
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated', 'publish_date']
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated', 'publish_date']
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -438,24 +458,31 @@ class BrightcovePlayerHandler(APIV2Handler):
     def _get_patch_json(current_bc_player, integration):
         ''' Get a patch that replaces our js and json with the current version
 
-        Grabs the current values of the fields to patch, then add or replace
-        the js url and json values with current, valid ones.'''
+        Brightcove player's configuration api allows PUT to replace the entire
+        configuration branch (master or preview). It allows and recommends PATCH
+        to set any subset of fields. For our purpose, the "plugins" field is a list
+        that will be changed to a json payload that includes the Neon account id
+        for tracking. The "scripts" field is a list that includes a url that has
+        our minified javascript tracker.
 
-        # Remove any plugin named neon
+        Grabs the current values of the lists to change, then add or replace
+        the Neon js url and json values with current ones.'''
+
+        # Remove any plugin named neon, and append the current one
         plugins = [for plugin in current_bc_player.get('plugins')
             if plugin['name'] is not 'neon']
         plugins.append(self._get_current_tracking_json_string(integration))
 
-        # Remove any script like *neon-tracker*
-        # TODO is this safe
+        # Remove any script like *neon-tracker*, and append the current
         scripts = [for script in current_bc_player.get('scripts')
             if script.find('neon-tracker') is -1]
         scripts.append(self._get_current_tracking_url())
 
-        return {
+        # Return a JSON-string
+        return json.dumps({
             'plugins': plugins,
             'scripts': scripts
-        }
+        })
 
     def _get_current_tracking_url(self):
         return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
@@ -474,8 +501,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint post request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=512)),
           'write_token': Any(str, unicode, Length(min=1, max=512)),
           'callback_url': Any(str, unicode, Length(min=1, max=1024)),
@@ -499,8 +526,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -524,8 +551,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=1024)),
           'write_token': Any(str, unicode, Length(min=1, max=1024)),
           'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
@@ -594,7 +621,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return [ 'integration_id', 'read_token', 'account_id',
+        return [ 'integration_id', 'account_id', 'read_token',
                  'write_token', 'last_process_date', 'publisher_id',
                  'callback_url', 'enabled', 'playlist_feed_ids',
                  'uses_batch_provisioning', 'id_field',
@@ -603,10 +630,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET,
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET,
                                         HTTPVerbs.PUT,
                                         HTTPVerbs.POST]
                }
@@ -621,10 +648,9 @@ class ThumbnailHandler(APIV2Handler):
         """handles a thumbnail endpoint post request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('url') : Any(str, unicode, Length(min=1,
-                                                                    max=2048))
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('url'): Any(str, unicode, Length(min=1, max=2048))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -684,8 +710,8 @@ class ThumbnailHandler(APIV2Handler):
         """handles a thumbnail endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('thumbnail_id'): Any(str, unicode, Length(min=1, max=512)),
           'enabled': Boolean()
         })
         args = self.parse_args()
@@ -709,8 +735,8 @@ class ThumbnailHandler(APIV2Handler):
         """handles a thumbnail endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('thumbnail_id') : Any(str, unicode, Length(min=1, max=512)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('thumbnail_id'): Any(str, unicode, Length(min=1, max=512)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -732,10 +758,10 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET,
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET,
                                         HTTPVerbs.PUT,
                                         HTTPVerbs.POST]
                }
@@ -967,8 +993,8 @@ class VideoHelper(object):
                            async=True)
             for video, request in zip(videos, requests):
                 if video is None or request is None and video_ids:
-                    new_videos.append({'error' : 'video does not exist',
-                                       'video_id' : video_ids[index] })
+                    new_videos.append({'error': 'video does not exist',
+                                       'video_id': video_ids[index] })
                     index += 1
                     continue
 
@@ -1075,11 +1101,11 @@ class VideoHandler(APIV2Handler):
     def post(self, account_id):
         """handles a Video endpoint post request"""
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('external_video_ref') : Any(str, unicode, Length(min=1, max=512)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('external_video_ref'): Any(str, unicode, Length(min=1, max=512)),
           Optional('url'): Any(str, unicode, Length(min=1, max=512)),
           Optional('reprocess'): Boolean(),
-          'integration_id' : Any(str, unicode, Length(min=1, max=256)),
+          'integration_id': Any(str, unicode, Length(min=1, max=256)),
           'callback_url': Any(str, unicode, Length(min=1, max=512)),
           'title': Any(str, unicode, Length(min=1, max=1024)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)),
@@ -1140,8 +1166,8 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint get request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id'): Any(
               CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -1182,8 +1208,8 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
           'testing_enabled': Boolean(),
           'title': Any(str, unicode, Length(min=1, max=1024))
         })
@@ -1233,29 +1259,29 @@ class VideoHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET,
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required': [HTTPVerbs.GET,
                                         HTTPVerbs.PUT,
                                         HTTPVerbs.POST]
                }
 
     @classmethod
     def get_limits(self):
-        post_list = [{ 'left_arg' : 'video_posts',
-                       'right_arg' : 'max_video_posts',
-                       'operator' : '<',
-                       'timer_info' : {
-                           'refresh_time' : 'refresh_time_video_posts',
-                           'add_to_refresh_time' : 'seconds_to_refresh_video_posts',
-                           'timer_resets' : [ ('video_posts', 0) ]
+        post_list = [{ 'left_arg': 'video_posts',
+                       'right_arg': 'max_video_posts',
+                       'operator': '<',
+                       'timer_info': {
+                           'refresh_time': 'refresh_time_video_posts',
+                           'add_to_refresh_time': 'seconds_to_refresh_video_posts',
+                           'timer_resets': [ ('video_posts', 0) ]
                        },
                        'values_to_increase': [ ('video_posts', 1) ],
                        'values_to_decrease': []
         }]
         return {
-                   HTTPVerbs.POST : post_list
+                   HTTPVerbs.POST: post_list
                }
 
     @staticmethod
@@ -1273,8 +1299,8 @@ class VideoStatsHandler(APIV2Handler):
         """gets the video statuses of 1 -> n videos"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('video_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -1303,8 +1329,8 @@ class VideoStatsHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'account_required'  : [HTTPVerbs.GET]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'account_required': [HTTPVerbs.GET]
                }
 
     @classmethod
@@ -1341,9 +1367,9 @@ class ThumbnailStatsHandler(APIV2Handler):
         """
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Optional('thumbnail_id') : Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          Optional('video_id') : Any(CustomVoluptuousTypes.CommaSeparatedList(20)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Optional('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          Optional('video_id'): Any(CustomVoluptuousTypes.CommaSeparatedList(20)),
           Optional('fields'): Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -1395,8 +1421,8 @@ class ThumbnailStatsHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'account_required'  : [HTTPVerbs.GET]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'account_required': [HTTPVerbs.GET]
                }
 
     @classmethod
@@ -1449,7 +1475,7 @@ class HealthCheckHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.NONE
+                 HTTPVerbs.GET: neondata.AccessLevels.NONE
                }
 
 '''*********************************************************************
@@ -1461,7 +1487,7 @@ class AccountLimitsHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1480,8 +1506,8 @@ class AccountLimitsHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'account_required' : [HTTPVerbs.GET]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'account_required': [HTTPVerbs.GET]
                }
 
     @classmethod
@@ -1522,12 +1548,12 @@ class VideoSearchInternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         schema = Schema({
-          'limit' : All(Coerce(int), Range(min=1, max=100)),
-          'account_id' : All(Coerce(str), Length(min=1, max=256)),
-          'query' : All(Coerce(str), Length(min=1, max=256)),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(float)),
-          'until': All(Coerce(float))
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'account_id': All(Coerce(str), Length(min=1, max=256)),
+            'query': All(Coerce(str), Length(min=1, max=256)),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'since': All(Coerce(float)),
+            'until': All(Coerce(float))
         })
         args = self.parse_args()
         schema(args)
@@ -1553,9 +1579,9 @@ class VideoSearchInternalHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'internal_only' : True,
-                 'account_required' : []
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'internal_only': True,
+                 'account_required': []
                }
 
 '''*********************************************************************
@@ -1567,9 +1593,9 @@ class VideoSearchExternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
-          'limit' : All(Coerce(int), Range(min=1, max=100)),
-          'query' : All(Coerce(str), Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+          'limit': All(Coerce(int), Range(min=1, max=100)),
+          'query': All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
           'until': All(Coerce(float))
@@ -1600,8 +1626,8 @@ class VideoSearchExternalHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'account_required' : [HTTPVerbs.GET]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'account_required': [HTTPVerbs.GET]
                }
 
 '''*********************************************************************
@@ -1637,7 +1663,7 @@ class AccountIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -1657,8 +1683,8 @@ class AccountIntegrationHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 'account_required' : [HTTPVerbs.GET]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 'account_required': [HTTPVerbs.GET]
                }
 
 
@@ -1672,8 +1698,8 @@ class UserHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('username'): All(Coerce(str), Length(min=8, max=64)),
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -1698,9 +1724,9 @@ class UserHandler(APIV2Handler):
     @tornado.gen.coroutine
     def put(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Optional('access_level') : All(Coerce(int), Range(min=1, max=63)),
+          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('username'): All(Coerce(str), Length(min=8, max=64)),
+          Optional('access_level'): All(Coerce(int), Range(min=1, max=63)),
           'first_name': Any(str, unicode, Length(min=1, max=256)),
           'last_name': Any(str, unicode, Length(min=1, max=256)),
           'title': Any(str, unicode, Length(min=1, max=32))
@@ -1741,9 +1767,9 @@ class UserHandler(APIV2Handler):
     @classmethod
     def get_access_levels(cls):
         return {
-                 HTTPVerbs.GET : neondata.AccessLevels.READ,
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, HTTPVerbs.PUT]
+                 HTTPVerbs.GET: neondata.AccessLevels.READ,
+                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                 'account_required' : [HTTPVerbs.GET, HTTPVerbs.PUT]
                }
 
     @classmethod
