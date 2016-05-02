@@ -171,12 +171,17 @@ class IntegrationHelper():
             integration.save()
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            #TODO Nate add fields
             integration = neondata.BrightcoveIntegration()
             integration.account_id = acct.neon_api_key
             integration.publisher_id = args['publisher_id']
             integration.read_token = args.get('read_token', integration.read_token)
             integration.write_token = args.get('write_token', integration.write_token)
+            integration.application_client_id = args.get(
+                    'application_client_id',
+                    integration.application_client_id)
+            integration.application_client_secret = args.get(
+                    'application_client_secret',
+                    integration.application_client_secret)
             integration.callback_url = args.get('callback_url', integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
             if playlist_feed_ids:
@@ -184,7 +189,14 @@ class IntegrationHelper():
             integration.id_field = args.get('id_field', integration.id_field)
             integration.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning',
                                                           integration.uses_batch_provisioning)))
-            integration.save()
+            integration.uses_bc_thumbnail_api = bool(int(args.get('uses_bc_thumbnail_api',
+                                                          integration.uses_bc_thumbnail_api)))
+            integration.uses_bc_videojs_player = bool(int(args.get('uses_bc_videojs_player',
+                                                          integration.uses_bc_videojs_player)))
+            integration.uses_bc_smart_player = bool(int(args.get('uses_bc_smart_player',
+                                                          integration.uses_bc_smart_player)))
+            integration.uses_bc_gallery = bool(int(args.get('uses_bc_gallery',
+                                                          integration.uses_bc_gallery)))
 
         result = yield tornado.gen.Task(acct.modify,
                                         acct.neon_api_key,
@@ -505,10 +517,16 @@ class BrightcoveIntegrationHandler(APIV2Handler):
           Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
           'read_token': Any(str, unicode, Length(min=1, max=512)),
           'write_token': Any(str, unicode, Length(min=1, max=512)),
+          'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
+          'application_client_secret': Any(str, unicode, Length(min=1, max=1024)),
           'callback_url': Any(str, unicode, Length(min=1, max=1024)),
           'id_field': Any(str, unicode, Length(min=1, max=32)),
           'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': Boolean()
+          'uses_batch_provisioning': Boolean(),
+          'uses_bc_thumbnail_api': Boolean(),
+          'uses_bc_videojs_player': Boolean(),
+          'uses_bc_smart_player': Boolean(),
+          'uses_bc_gallery': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -614,17 +632,21 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @classmethod
     def _get_default_returned_fields(cls):
         return [ 'integration_id', 'account_id', 'read_token',
-                 'write_token', 'last_process_date', 'publisher_id',
-                 'callback_url', 'enabled', 'playlist_feed_ids',
-                 'uses_batch_provisioning', 'id_field',
+                 'write_token', 'last_process_date', 'application_client_id',
+                 'application_client_secret', 'publisher_id', 'callback_url',
+                 'enabled', 'playlist_feed_ids', 'uses_batch_provisioning',
+                 'uses_bc_thumbnail_api', 'uses_bc_videojs_player',
+                 'uses_bc_smart_player', 'uses_bc_gallery', 'id_field',
                  'created', 'updated' ]
 
     @classmethod
     def _get_passthrough_fields(cls):
         return [ 'integration_id', 'account_id', 'read_token',
-                 'write_token', 'last_process_date', 'publisher_id',
-                 'callback_url', 'enabled', 'playlist_feed_ids',
-                 'uses_batch_provisioning', 'id_field',
+                 'write_token', 'last_process_date', 'application_client_id',
+                 'application_client_secret', 'publisher_id', 'callback_url',
+                 'enabled', 'playlist_feed_ids', 'uses_batch_provisioning',
+                 'uses_bc_thumbnail_api', 'uses_bc_videojs_player',
+                 'uses_bc_smart_player', 'uses_bc_gallery', 'id_field',
                  'created', 'updated' ]
 
     @classmethod
