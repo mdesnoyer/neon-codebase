@@ -430,10 +430,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        integration_id = args['integration_id'] 
+        integration_id = args['integration_id']
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('get_brightcove_oks')
         rv = yield self.db2api(integration, fields=fields)
         self.success(rv)
@@ -445,11 +445,11 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=1024)), 
-          'write_token': Any(str, unicode, Length(min=1, max=1024)), 
+          'read_token': Any(str, unicode, Length(min=1, max=1024)),
+          'write_token': Any(str, unicode, Length(min=1, max=1024)),
           'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
           'application_client_secret': Any(str, unicode, Length(min=1, max=1024)),
-          'callback_url': Any(str, unicode, Length(min=1, max=1024)), 
+          'callback_url': Any(str, unicode, Length(min=1, max=1024)),
           'publisher_id': Any(str, unicode, Length(min=1, max=512)),
           'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
           'uses_batch_provisioning': Boolean(),
@@ -470,6 +470,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
             p.write_token = args.get('write_token', integration.write_token)
+            p.application_client_id = args.get('application_client_id', integration.application_client_id)
+            p.application_client_secret= args.get('application_client_secret', integration.application_client_secret)
             p.publisher_id = args.get('publisher_id', integration.publisher_id)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
             if playlist_feed_ids:
