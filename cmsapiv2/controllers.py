@@ -381,15 +381,15 @@ class OoyalaIntegrationHandler(APIV2Handler):
 BrightcoveIntegrationHandler
 *********************************************************************'''
 class BrightcoveIntegrationHandler(APIV2Handler):
-    """handles all requests to the brightcove endpoint within the v2 API"""  
+    """handles all requests to the brightcove endpoint within the v2 API"""
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles a brightcove endpoint post request""" 
+        """handles a brightcove endpoint post request"""
 
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=512)), 
+          'read_token': Any(str, unicode, Length(min=1, max=512)),
           'write_token': Any(str, unicode, Length(min=1, max=512)),
           'application_client_id': Any(str, unicode, Length(min=1, max=1024)),
           'application_client_secret': Any(str, unicode, Length(min=1, max=1024)),
@@ -406,17 +406,16 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-        integration = yield IntegrationHelper.create_integration(acct, 
-                                                             args, 
-                                                             neondata.IntegrationType.BRIGHTCOVE)
+        integration = yield IntegrationHelper.create_integration(
+                acct, args, neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('post_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
 
     @tornado.gen.coroutine
-    def get(self, account_id):  
+    def get(self, account_id):
         """handles a brightcove endpoint get request"""
- 
+
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
