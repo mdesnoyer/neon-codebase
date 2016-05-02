@@ -4287,21 +4287,21 @@ class BrightcoveIntegration(AbstractIntegration):
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
 
-    def __init__(self, i_id=None, a_id='', p_id=None,
+    def __init__(self, a_id='', p_id=None,
                  rtoken=None, wtoken=None,
-                 application_client_id=None,
-                 application_client_secret=None,
                  last_process_date=None, abtest=False, callback_url=None,
                  uses_batch_provisioning=False,
-                 uses_bc_thumbnail_api=False,
-                 uses_bc_videojs_player=False,
-                 uses_bc_smart_player=False,
-                 uses_bc_gallery=False,
                  id_field=BRIGHTCOVE_ID,
                  enabled=True,
                  serving_enabled=True,
                  oldest_video_allowed=None,
-                 video_submit_retries=0):
+                 video_submit_retries=0,
+                 application_client_id=None,
+                 application_client_secret=None,
+                 uses_bc_thumbnail_api=False,
+                 uses_bc_videojs_player=False,
+                 uses_bc_smart_player=False,
+                 uses_bc_gallery=False):
 
         ''' On every request, the job id is saved '''
 
