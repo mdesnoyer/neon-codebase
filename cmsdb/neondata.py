@@ -4286,8 +4286,8 @@ class BrightcoveIntegration(AbstractIntegration):
 
     REFERENCE_ID = '_reference_id'
     BRIGHTCOVE_ID = '_bc_id'
-    
-    def __init__(self, i_id=None, a_id='', p_id=None,
+
+    def __init__(self, a_id='', p_id=None,
                 rtoken=None, wtoken=None,
                 application_client_id=None,
                 application_client_secret=None,
@@ -5130,17 +5130,29 @@ class BrightcovePlayer(NamespacedStoredObject):
     '''
     Brightcove Player model
     '''
-    def __init__(self, account_id, player_id, name,
+    def __init__(self, player_ref, integration_id, name=None,
                  is_tracked=False, publish_date=None,
                  published_plugin_version=None, last_attempt_result=None):
-        super(BrightcovePlayer, self).__init__(uuid)
+
+        super(BrightcovePlayer, self).__init__(player_ref)
+
+        # The Brightcove ID for the player
         self.player_ref = player_ref
-        self.account_id = account_id
+        # The Neon integration that has this player
         self.integration_id = integration_id
+        # The Neon account that owns this player
+        self.account_id = account_id
+        # Set if publisher needs the Neon event tracking plugin published to this
         self.is_tracked = is_tracked
+        # Descriptive name of the plugin
         self.name = name
+
+        # Properties to track publishing
         self.publish_date = publish_date
+        # Version is an increasing integer
         self.published_plugin_version = published_plugin_version
+        # Descriptive string of last failed attempt to publish.
+        # Set to None when last attempt was successful
         self.last_attempt_result = last_attempt_result
 
     @classmethod
@@ -5156,14 +5168,11 @@ class BrightcovePlayer(NamespacedStoredObject):
                       "created_time AS created_time_pg",
                       "updated_time AS updated_time_pg"],
                     "_data->>'integration_id' = '%s' ",
-                    table_name='abstractintegration',
+                    table_name='brightcoveplayer',
                     wc_params=[integration_id])
-
-
         for result in results:
             player = self._create(result['_data']['key'], result)
             rv.append(player)
-
         raise tornado.gen.Return(rv)
 
     @classmethod

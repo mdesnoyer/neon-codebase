@@ -385,21 +385,20 @@ class BrightcovePlayerHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET: neondata.AccessLevels.READ,
-                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                 'account_required': [HTTPVerbs.GET,
-                                        HTTPVerbs.PUT,
-                                        HTTPVerbs.POST]
-               }
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 'created', 'updated', 'publish_date']
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
+                'publish_date', 'published_plugin_version', 'last_attempt_result']
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 'created', 'updated', 'publish_date']
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
+                'publish_date', 'published_plugin_version', 'last_attempt_result']
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -417,20 +416,20 @@ class BrightcovePlayerHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
-        """Update a BrightcovePlayer and return it"""
+        """Update a BrightcovePlayer tracking status and return it"""
 
         # The only field that is set via public api is is_tracked.
         schema = Schema({
             Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-            Required('player_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('player_ref'): Any(str, unicode, Length(min=1, max=256)),
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
         scheme(args)
 
-        player = yield neondata.BrightcovePlayer.get(args['player_id', async=True)
+        player = yield neondata.BrightcovePlayer.get(args['player_ref'], async=True)
         if not player:
-            raise NotFoundError('Player does not exist for id:%s', args['player_id'])
+            raise NotFoundError('Player does not exist for reference:%s', args['player_ref'])
         if player.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
@@ -447,38 +446,56 @@ class BrightcovePlayerHandler(APIV2Handler):
 
         # If the player is tracked, then send a request to Brightcove's
         # CMS Api to put the plugin in the player and publish the player.
+        # We do this anytime the user calls this API with is_tracked=True
+        # because they are likely to be troubleshooting their setup.
+        # TODO try limiting this based on time difference with now and last run.
         if player.is_tracked:
-            publish_result, error = self.publish_plugin_to_player(player)
+            publish_result, error = BrightcoePlayer.publish_plugin_to_player(player)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(args['player_id'])
         rv = self.db2api(player)
         self.success(rv)
 
+class BrightcovePlayerHelper()
+
     @tornado.gen.corotune
     def publish_plugin_to_player(player):
+        """Internal api method to publish the current plugin to BC's player"""
 
-        integration = yield neondata.BrightcoveIntegration.get(player.integration_id, async=True)
+        integration = yield neondata.BrightcoveIntegration.get(
+            player.integration_id, async=True)
         try:
-            bc = BrightcovePlayerManagementApi(integration=integration)
-            bc_player = bc.get_player(player.player_ref)
-            patch = _get_patch_string(bc_player, integration)
-            bc.patch_player(player.player_ref, patch)
-        except BcAuthConfigException as e:
-            return False, e.message
+            bc = yield BrightcovePlayerManagementApi(integration)
+            # Get the player JSON data from BC's API
+            bc_player = yield bc.get_player(player.player_ref)
+            patch = self._get_patch_string(bc_player, integration)
+            result = yield bc.patch_player(player.player_ref, patch)
+            # Success. Update the player with the date and version
+            def _modify(p):
+                p.publish_date = datetime.now().isoformat()
+                p.published_plugin_version = self._get_current_tracking_version()
 
+        except Exception as e:
+            # TODO what would be better stored for troubleshooting a problem after the fact.
+            def _modify(p):
+                p.last_attempt_result = e.message
+
+        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+
+    @staticmethod
     def _get_patch_json(current_bc_player, integration):
-        ''' Get a patch that replaces our js and json with the current version
+        """Get a patch that replaces our js and json with the current version
 
         Brightcove player's configuration api allows PUT to replace the entire
         configuration branch (master or preview). It allows and recommends PATCH
-        to set any subset of fields. For our purpose, the "plugins" field is a list
+        to set any subset of fields. For our goal, the "plugins" field is a list
         that will be changed to a json payload that includes the Neon account id
-        for tracking. The "scripts" field is a list that includes a url that has
-        our minified javascript tracker.
+        for tracking. The "scripts" field is a list of urls that includes our
+        our minified javascript tracker url.
 
-        Grabs the current values of the lists to change, then add or replace
-        the Neon js url and json values with current ones.'''
+        Grabs the current values of the lists to change, removes any Neon info,
+        then addends the Neon js url and json values with current ones."""
 
         # Remove any plugin named neon, and append the current one
         plugins = [for plugin in current_bc_player.get('plugins')
@@ -496,12 +513,24 @@ class BrightcovePlayerHandler(APIV2Handler):
             'scripts': scripts
         })
 
-    def _get_current_tracking_url(self):
+    @staticmethod
+    def _get_current_tracking_version():
+        """Get the version of the current tracking plugin."""
+        return '0.0.1'
+
+    @staticmethod
+    def _get_current_tracking_url():
         return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
 
-    def _get_current_tracking_json(self, integration):
-        return '{"name":"neon","options":{"publisher":{"id":{account_id}}}}'.format(account_id=integration.account_id)
+    @staticmethod
+    def _get_current_tracking_json(integration):
+        """Get JSON string that configures the plugin given the integration
 
+        These are options that injected into the plugin environment and override
+        its defaults. { name, options { publisher { id }}} are required. Other
+        flags can be in the neon-videojs-plugin js."""
+
+        return '{"name":"neon","options":{"publisher":{"id":{account_id}}}}'.format(account_id=integration.account_id)
 
 '''*********************************************************************
 BrightcoveIntegrationHandler
@@ -1824,6 +1853,8 @@ application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
+        BrightcovePlayerHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
         BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
