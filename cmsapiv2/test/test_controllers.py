@@ -1159,9 +1159,15 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['playlist_feed_ids'], self.defop.playlist_feed_ids) 
         self.assertEquals(rjson['read_token'], self.defop.read_token) 
         self.assertEquals(rjson['write_token'], self.defop.write_token) 
+        self.assertEquals(rjson['application_client_id'], self.defop.application_client_id)
+        self.assertEquals(rjson['application_client_secret'], self.defop.application_client_secret)
         self.assertEquals(rjson['callback_url'], self.defop.callback_url) 
         self.assertEquals(rjson['uses_batch_provisioning'], self.defop.uses_batch_provisioning)
         self.assertEquals(rjson['id_field'], self.defop.id_field)
+        self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
+        self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
+        self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
+        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
  
     @tornado.testing.gen_test 
     def test_post_integration_body_params(self):
@@ -1184,9 +1190,15 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['playlist_feed_ids'], self.defop.playlist_feed_ids) 
         self.assertEquals(rjson['read_token'], self.defop.read_token) 
         self.assertEquals(rjson['write_token'], self.defop.write_token) 
+        self.assertEquals(rjson['application_client_id'], self.defop.application_client_id)
+        self.assertEquals(rjson['application_client_secret'], self.defop.application_client_secret)
         self.assertEquals(rjson['callback_url'], self.defop.callback_url) 
         self.assertEquals(rjson['uses_batch_provisioning'], self.defop.uses_batch_provisioning)
         self.assertEquals(rjson['id_field'], self.defop.id_field)
+        self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
+        self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
+        self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
+        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
  
     @tornado.testing.gen_test 
     def test_get_integration(self):
@@ -1204,16 +1216,22 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['playlist_feed_ids'], platform.playlist_feed_ids) 
         self.assertEquals(rjson['read_token'], platform.read_token) 
         self.assertEquals(rjson['write_token'], platform.write_token) 
+        self.assertEquals(rjson['application_client_id'], platform.application_client_id)
+        self.assertEquals(rjson['application_client_secret'], platform.application_client_secret)
         self.assertEquals(rjson['callback_url'], platform.callback_url) 
         self.assertEquals(rjson['uses_batch_provisioning'], platform.uses_batch_provisioning)
         self.assertEquals(rjson['id_field'], platform.id_field)
+        self.assertEquals(rjson['uses_bc_thumbnail_api'], platform.uses_bc_thumbnail_api)
+        self.assertEquals(rjson['uses_bc_videojs_player'], platform.uses_bc_videojs_player)
+        self.assertEquals(rjson['uses_bc_smart_player'], platform.uses_bc_smart_player)
+        self.assertEquals(rjson['uses_bc_gallery'], platform.uses_bc_gallery)
 
     @tornado.testing.gen_test 
     def test_get_integration_with_fields(self):
         url = '/api/v2/%s/integrations/brightcove?integration_id=%s'\
               '&fields=%s' % (
             self.account_id_api_key, 
-            self.test_i_id, 'read_token,write_token,callback_url')
+            self.test_i_id, 'read_token,write_token,application_client_id,callback_url')
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         self.assertEquals(response.code, 200)
@@ -1223,6 +1241,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
         self.assertEquals(rjson['read_token'], platform.read_token) 
         self.assertEquals(rjson['write_token'], platform.write_token) 
+        self.assertEquals(rjson['application_client_id'], platform.application_client_id)
         self.assertEquals(rjson['callback_url'], platform.callback_url) 
         self.assertEquals(rjson.get('uses_batch_provisioning', None), None)
         self.assertEquals(rjson.get('id_field', None), None)
@@ -1412,11 +1431,85 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
                                           rjson['integration_id'])
         self.assertEquals(platform.uses_batch_provisioning, False)
-    
+
+    @tornado.testing.gen_test
+    def test_put_integration_client_id_and_secret(self):
+
+        params = json.dumps({'publisher_id': '123123abc',
+                             'application_client_id': '5',
+                             'application_client_secret': 'some secret'})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='POST',
+                                                headers=header)
+
+        rjson = json.loads(response.body)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertEqual(platform.application_client_id, '5')
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'application_client_id': '6',
+                             'application_client_secret': 'another secret'})
+
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body=params,
+                                                method='PUT',
+                                                headers=header)
+        self.assertEqual(response.code, 200)
+        rjson = json.loads(response.body)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertEqual(platform.application_client_id, '6')
+        self.assertEqual(platform.application_client_secret, 'another secret')
+
+    @tornado.testing.gen_test
+    def test_put_client_id_missing_secret(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'application_client_id': '5',
+                             'application_client_secret': 'some secret',
+                             'uses_bc_gallery': True})
+        header = {'Content-Type':'application/json'}
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url), body=params, method='POST', headers=header)
+
+        rjson = json.loads(response.body)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertEqual(platform.application_client_id, '5')
+        self.assertEqual(platform.uses_bc_gallery, True)
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'application_client_id': 'not 5',
+                             'application_client_secret': None})
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self.http_client.fetch(
+                self.get_url(url), body=params, method='PUT')
+        self.assertEqual(e.exception.code, 400, 'Bad parameters by client for PUT')
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertEqual(
+            platform.application_client_id, '5', 'A malformed PUT makes no change')
+
+        params = json.dumps({'integration_id': rjson['integration_id'],
+                             'application_client_id': None,
+                             'application_client_secret': None,
+                             'uses_bc_gallery': False})
+        response = yield self.http_client.fetch(
+            self.get_url(url), body=params, method='PUT', headers=header)
+        self.assertEqual(response.code, 200)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertEqual(platform.uses_bc_gallery, False, 'Valid PUT updates this field')
+
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
 	url = '/api/v2/%s/integrations/brightcove' % '1234234'
-        self.get_exceptions(url, exception_mocker)  
+        self.get_exceptions(url, exception_mocker)
 
     def test_put_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.put')
