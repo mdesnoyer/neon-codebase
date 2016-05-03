@@ -151,29 +151,40 @@ IntegrationHelper
 *********************************************************************'''
 class IntegrationHelper():
     """Class responsible for helping the integration handlers."""
-    @staticmethod 
+
+    @staticmethod
     @tornado.gen.coroutine
     def create_integration(acct, args, integration_type):
-        """Creates an integration for any integration type. 
-        
-        Keyword arguments: 
-        acct - a NeonUserAccount object 
-        args - the args sent in via the API request 
-        integration_type - the type of integration to create 
-        """ 
-             
-        if integration_type == neondata.IntegrationType.OOYALA: 
+        """Creates an integration for any integration type.
+
+        Keyword arguments:
+        acct - a NeonUserAccount object
+        args - the args sent in via the API request
+        integration_type - the type of integration to create
+        """
+
+        schema = Schema({
+            Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
+            'uses_batch_provisioning': Boolean(),
+            'uses_bc_thumbnail_api': Boolean(),
+            'uses_bc_videojs_player': Boolean(),
+            'uses_bc_smart_player': Boolean(),
+            'uses_bc_gallery': Boolean()
+        })
+        schema(args)
+
+        if integration_type == neondata.IntegrationType.OOYALA:
             integration = neondata.OoyalaIntegration()
             integration.account_id = acct.neon_api_key
-            integration.partner_code = args['publisher_id'] 
+            integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
             integration.api_secret = args.get('api_secret', integration.api_secret)
-            integration.save()
+            yield integration.save(async=True)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
             integration.account_id = acct.neon_api_key
-            integration.publisher_id = args['publisher_id'] 
+            integration.publisher_id = args['publisher_id']
             integration.read_token = args.get('read_token', integration.read_token)
             integration.write_token = args.get('write_token', integration.write_token)
             integration.application_client_id = args.get(
@@ -184,35 +195,35 @@ class IntegrationHelper():
                     integration.application_client_secret)
             integration.callback_url = args.get('callback_url', integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
-            if playlist_feed_ids: 
+            if playlist_feed_ids:
                 integration.playlist_feed_ids = playlist_feed_ids.split(',')
-            integration.id_field = args.get('id_field', integration.id_field) 
-            integration.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
-                                                          integration.uses_batch_provisioning)))
-            integration.uses_bc_thumbnail_api = bool(int(args.get('uses_bc_thumbnail_api',
-                                                          integration.uses_bc_thumbnail_api)))
-            integration.uses_bc_videojs_player = bool(int(args.get('uses_bc_videojs_player',
-                                                          integration.uses_bc_videojs_player)))
-            integration.uses_bc_smart_player = bool(int(args.get('uses_bc_smart_player',
-                                                          integration.uses_bc_smart_player)))
-            integration.uses_bc_gallery = bool(int(args.get('uses_bc_gallery',
-                                                          integration.uses_bc_gallery)))
-            integration.save()
+            integration.id_field = args.get('id_field', integration.id_field)
+            integration.uses_batch_provisioning = args.get('uses_batch_provisioning',
+                                                          integration.uses_batch_provisioning)
+            integration.uses_bc_thumbnail_api = args.get('uses_bc_thumbnail_api',
+                                                          integration.uses_bc_thumbnail_api)
+            integration.uses_bc_videojs_player = args.get('uses_bc_videojs_player',
+                                                          integration.uses_bc_videojs_player)
+            integration.uses_bc_smart_player = args.get('uses_bc_smart_player',
+                                                          integration.uses_bc_smart_player)
+            integration.uses_bc_gallery = args.get('uses_bc_gallery',
+                                                          integration.uses_bc_gallery)
+            yield integration.save(async=True)
 
         result = yield tornado.gen.Task(acct.modify,
                                         acct.neon_api_key,
                                         lambda p: p.add_platform(integration))
-        
+
         # ensure the integration made it to the database by executing a get
-        if integration_type == neondata.IntegrationType.OOYALA: 
+        if integration_type == neondata.IntegrationType.OOYALA:
             integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
                                               integration.integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
                                               integration.integration_id)
-        if integration: 
+        if integration:
             raise tornado.gen.Return(integration)
-        else: 
+        else:
             raise SaveError('unable to save the integration')
 
     @staticmethod 
