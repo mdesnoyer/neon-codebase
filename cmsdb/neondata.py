@@ -4310,8 +4310,13 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
+
+        # The application settings allow the publisher to grant
+        # Neon access via OAuth2 to the BC Player Management API
+        # These are made in the API access page in Video Cloud.
         self.application_client_id = application_client_id
         self.application_client_secret = application_client_secret
+
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date
         self.linked_youtube_account = False
@@ -4329,9 +4334,16 @@ class BrightcoveIntegration(AbstractIntegration):
         self.uses_batch_provisioning = uses_batch_provisioning
 
         # Configuration for the Video.js player event tracking plugin
+        # The more Neon knows about how the publisher's images are placed
+        # on the page, the more accurately we can capture tracking info.
+
+        # Does publisher use BC's CMS to manage their video thumbnails
         self.uses_bc_thumbnail_api = uses_bc_thumbnail_api
+        # Does publisher use BC's player based on html5 library named video.js
         self.uses_bc_videojs_player = uses_bc_videojs_player
+        # Does publisher use the older Flash-based player
         self.uses_bc_smart_player = uses_bc_smart_player
+        # Does publisher use BC's gallery product to display many videos on a page
         self.uses_bc_gallery = uses_bc_gallery
 
         # Which custom field to use for the video id. If it is
