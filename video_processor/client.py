@@ -336,6 +336,16 @@ class VideoProcessor(object):
                         msg = ('Unhandled video type %s' %
                                (result_type))
                         raise youtube_dl.utils.DownloadError(msg)
+
+                # Update information about the video before we download it
+                def _update_title(x):
+                    if x.video_title is None:
+                        x.video_title = video_info.get('title', None)
+                    if x.default_thumbnail is None:
+                        x.default_thumbnail = video_info.get('thumbnail', None)
+                neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'], self.job_params['api_key'] ,
+                    _update_title)
                     
                 # Do the real download
                 video_info = ydl.extract_info(cur_url, download=True)
@@ -347,15 +357,6 @@ class VideoProcessor(object):
                 if video_info.get('upload_date', None) is not None:
                     self.video_metadata.publish_date = \
                       dateutil.parser.parse(video_info['upload_date']).isoformat()
-                
-                def _update_title(x):
-                    if x.video_title is None:
-                        x.video_title = video_info.get('title', None)
-                    if x.default_thumbnail is None:
-                        x.default_thumbnail = video_info.get('thumbnail', None)
-                neondata.NeonApiRequest.modify(
-                    self.job_params['job_id'], self.job_params['api_key'] ,
-                    _update_title)
                                                               
 
             self.tempfile.flush()

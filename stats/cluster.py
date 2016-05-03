@@ -793,6 +793,10 @@ class Cluster():
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
             BootstrapAction(
+                'Configure Daemons',
+                's3://elasticmapreduce/bootstrap-actions/configure-daemons',
+                ['--client-opts=-Xmx14000m']),
+            BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
                 ['--hdfs-key-value', 'io.file.buffer.size=65536',

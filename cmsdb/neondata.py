@@ -4288,20 +4288,20 @@ class BrightcoveIntegration(AbstractIntegration):
     BRIGHTCOVE_ID = '_bc_id'
 
     def __init__(self, a_id='', p_id=None,
-                rtoken=None, wtoken=None,
-                application_client_id=None,
-                application_client_secret=None,
-                last_process_date=None, abtest=False, callback_url=None,
-                uses_batch_provisioning=False,
-                uses_bc_thumbnail_api=False,
-                uses_bc_videojs_player=True,
-                uses_bc_smart_player=False,
-                uses_bc_gallery=False,
-                id_field=BRIGHTCOVE_ID,
-                enabled=True,
-                serving_enabled=True,
-                oldest_video_allowed=None,
-                video_submit_retries=0):
+                 rtoken=None, wtoken=None,
+                 last_process_date=None, abtest=False, callback_url=None,
+                 uses_batch_provisioning=False,
+                 id_field=BRIGHTCOVE_ID,
+                 enabled=True,
+                 serving_enabled=True,
+                 oldest_video_allowed=None,
+                 video_submit_retries=0,
+                 application_client_id=None,
+                 application_client_secret=None,
+                 uses_bc_thumbnail_api=False,
+                 uses_bc_videojs_player=False,
+                 uses_bc_smart_player=False,
+                 uses_bc_gallery=False):
 
         ''' On every request, the job id is saved '''
 
@@ -4310,8 +4310,13 @@ class BrightcoveIntegration(AbstractIntegration):
         self.publisher_id = p_id
         self.read_token = rtoken
         self.write_token = wtoken
+
+        # The application settings allow the publisher to grant
+        # Neon access via OAuth2 to the BC Player Management API
+        # These are made in the API access page in Video Cloud.
         self.application_client_id = application_client_id
         self.application_client_secret = application_client_secret
+
         #The publish date of the last processed video - UTC timestamp seconds
         self.last_process_date = last_process_date
         self.linked_youtube_account = False
@@ -4320,7 +4325,7 @@ class BrightcoveIntegration(AbstractIntegration):
         self.video_still_width = 480 #default brightcove still width
         # the ids of playlist to create video requests from
         self.playlist_feed_ids = []
-        # the url that will be called when a video is finished processing 
+        # the url that will be called when a video is finished processing
         self.callback_url = callback_url
 
         # Does the customer use batch provisioning (i.e. FTP
@@ -4328,10 +4333,15 @@ class BrightcoveIntegration(AbstractIntegration):
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
         self.uses_batch_provisioning = uses_batch_provisioning
 
-        # Configuration for the Video.js player event tracking plugin
+        # The more Neon knows about how the publisher's images are placed
+        # on the page, the more accurately we can capture tracking info.
+        # Does publisher use BC's CMS to manage their video thumbnails
         self.uses_bc_thumbnail_api = uses_bc_thumbnail_api
+        # Does publisher use BC's player based on html5 library named video.js
         self.uses_bc_videojs_player = uses_bc_videojs_player
+        # Does publisher use the older Flash-based player
         self.uses_bc_smart_player = uses_bc_smart_player
+        # Does publisher use BC's gallery product to display many videos on a page
         self.uses_bc_gallery = uses_bc_gallery
 
         # Which custom field to use for the video id. If it is
@@ -4343,8 +4353,8 @@ class BrightcoveIntegration(AbstractIntegration):
         # ingest even if is updated in Brightcove.
         self.oldest_video_allowed = oldest_video_allowed
 
-        # Amount of times we have retried a video submit 
-        self.video_submit_retries = video_submit_retries 
+        # Amount of times we have retried a video submit
+        self.video_submit_retries = video_submit_retries
 
 
     @classmethod
