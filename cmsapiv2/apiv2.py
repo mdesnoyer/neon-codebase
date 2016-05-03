@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 import ast
 import boto
 from cmsdb import neondata
+import concurrent.futures
 from datetime import datetime, timedelta
 import dateutil.parser
 from functools import wraps
@@ -16,8 +17,8 @@ import json
 import jwt 
 import logging
 import re
-import recurly
 import signal
+import stripe 
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -61,10 +62,8 @@ define("frontend_base_url",
        help="will default to this if the origin is null", 
        type=str)
 
-# recurly stuff
-recurly.SUBDOMAIN = 'neon-lab'
-recurly.API_KEY = 'd176808c783b4064a8a8d28a607d8f5a'
-recurly.DEFAULT_CURRENCY = 'USD'
+# stripe stuff 
+stripe.api_key = 'sk_test_mOzHk0K8yKfe57T63jLhfCa8'
 
 class ResponseCode(object): 
     HTTP_OK = 200
@@ -113,6 +112,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.account_limits = None
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
+        self.executor = concurrent.futures.ThreadPoolExecutor(5)
+
     
     def set_access_token_information(self): 
         """Helper function to get the access token 
@@ -263,21 +264,34 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if request.account is None:  
             raise tornado.gen.Return(True)
 
+        # this account isn't billed through this integration (older account) 
+        # just return true 
+        if request.account.billed_elsewhere: 
+            raise tornado.gen.Return(True)
+
         acct = request.account
-        subscription_state = acct.subscription_state
+        acct_subscription_status = acct.subscription_state
 
-        # TODO check the expiry on the accounts subscription 
-        # to verify if we need to talk to recurly or not
-
+        # should we check stripe for updated subscription state?
         if datetime.utcnow() > acct.verify_account_expiry: 
-            recurly_account = recurly.Account.get(acct.neon_api_key)
-            if acct.verify_account_expiry <= datetime.utcnow(): 
-                new_date = (datetime.utcnow() + \
-                    timedelta(seconds=3600))
-                acct.verify_account_expiry = new_date
+            stripe_customer = stripe.Customer.retrieve(acct.neon_api_key)
+            # returns the most active subscriptions up to 10 
+            cust_subs = stripe_customer.subscriptions.all()  
+            for cs in cust_subs:
+                acct_subscription_status = cs.status  
+                if acct_subscription_status in [ 
+                    neondata.SubscriptionState.ACTIVE,
+                    neondata.SubscriptionState.IN_TRIAL ]:
+                    # if we find a subscription in active/trial we are good 
+                    # break out of the for loop
+                    break
+                   
+            new_date = (datetime.utcnow() + timedelta(seconds=3600))
+            acct.verify_account_expiry = new_date
+            acct.subscription_state = acct_subscription_status
             yield acct.save(async=True)  
 
-        if subscription_state in [ neondata.SubscriptionState.ACTIVE, 
+        if acct_subscription_status in [ neondata.SubscriptionState.ACTIVE, 
                neondata.SubscriptionState.IN_TRIAL ]:
             raise tornado.gen.Return(True)
 
@@ -757,6 +771,15 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Date():
         return lambda v: dateutil.parser.parse(v)
+
+    @staticmethod
+    def PlanType(): 
+        def f(v): 
+            for pt in neondata.PlanType: 
+                if str(v).lower() == pt: 
+                    return str(v) 
+            raise Invalid("%s is not a valid plan type" % str(v)) 
+        return f      
 
     @staticmethod
     def CommaSeparatedList(limit=100):

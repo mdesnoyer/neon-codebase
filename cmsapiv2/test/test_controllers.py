@@ -4116,8 +4116,10 @@ class TestBillingAccountHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_billing_account(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
         header = { 'Content-Type':'application/json' }
-        url = '/api/v2/123/billing/account' 
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
         params = json.dumps({'recurly_token_ref' : 'testa'})
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 

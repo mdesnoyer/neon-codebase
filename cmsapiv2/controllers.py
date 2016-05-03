@@ -1642,8 +1642,8 @@ class UserHandler(APIV2Handler):
 BillingAccountHandler 
 *****************************************************************'''
 class BillingAccountHandler(APIV2Handler):
-    """This talks to recurly and creates a billing account with our 
-          recurly integration.
+    """This talks to a sevice and creates a billing account with our 
+          external billing integration (currently stripe).
 
        This acts as an upreate function, essentially always call 
         post, to save account information on the recurly side of 
@@ -1653,42 +1653,53 @@ class BillingAccountHandler(APIV2Handler):
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('recurly_token_ref') : All(
+          Required('billing_token_ref') : All(
               Coerce(str), 
-              Length(min=1, max=256))
+              Length(min=1, max=512))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        recurly_token_ref = args.get('recurly_token_ref')
+        billing_token_ref = args.get('billing_token_ref')
         account = yield neondata.NeonUserAccount.get(
                    account_id, 
                    async=True)
 
         if not account: 
-            raise NotFoundError('Neon Account was not found')
-
-        recurly_account = recurly.Account(account_code=account_id)
-        recurly_account.email = account.email
-        recurly_account.first_name = account.first_name
-        recurly_account.last_name = account.last_name
-        recurly_account.billing_info = recurly.BillingInfo(
-            token_id=recurly_token_ref)
+            raise NotFoundError('Neon Account required.')
 
         try: 
-            recurly_account.save()
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account_id)
+            customer.email = account.email or customer.email 
+            customer.source = billing_token_ref
+            yield self.executor.submit(customer.save)
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                customer = yield self.executor.submit(
+                    stripe.Customer.create,
+                    email=account.email)
+                    # TODO add back in source
+                    #source=billing_token_ref)
+                import pdb; pdb.set_trace()
+                account.billed_elsewhere = False
+                account.billing_provider_ref = customer['id']
+                yield account.save(async=True) 
+                _log.info('New Stripe customer %s created' % email)
+            else:
+                _log.error('Invalid request error we do not handle %s' % e)
+                raise 
         except Exception as e: 
-            _log.error('Unable to save billing info for account %s' % (
-                account_id))
-            raise
-
-        self.success({}) 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise  
+        
+        self.success(json.dumps({'message' : 'successfully created user'})) 
 
     @classmethod
     def get_access_levels(cls):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
                  'account_required'  : [HTTPVerbs.POST, HTTPVerbs.PUT] 
                }
 
@@ -1703,38 +1714,47 @@ class BillingSubscriptionHandler(APIV2Handler):
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('plan_code') : All(Coerce(str), Length(min=1, max=64))
+          Required('plan_type'): Any(CustomVoluptuousTypes.PlanType())
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
-        plan_code = args.get('plan_code') 
+        plan_type = args.get('plan_type') 
 
         account = yield neondata.NeonUserAccount.get(
-                   account_id, 
-                   async=True)
+            account_id, 
+            async=True)
 
         if not account: 
             raise NotFoundError('Neon Account was not found')
 
-        try: 
-            recurly_account = recurly.Account.get(account_id)
-        except recurly.NotFoundError:
-            raise NotFoundError('Recurly Account was not found') 
-        
-        subscription = recurly.Subscription()
-        subscription.plan_code = plan_code 
-        subscription.account = recurly_account
+        if not account.billing_provider_ref: 
+            raise NotFoundError(
+                'There is not a billing account set up for this account')
 
         try: 
-            subscription.save() 
-        except Exception as e: 
-            _log.error('Unable to save subscription due to'\
-                       ' a recurly error %s' % (e))
-            raise
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+            subscription = yield self.executor.submit(
+                customer.subscriptions.create, 
+                plan=plan_type)
 
-        # will also need to update accountlimits at this point
- 
+            account.verify_subscription_expiry = datetime.utcnow() 
+            account.subscription_state = subscription.status
+            account.subscription_plan_type = plan_type.lower()
+            yield account.save(async=True) 
+             
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                _log.error('Billing mismatch for account %s' % account.email)
+                raise NotFoundError('No billing account found in Stripe') 
+            raise 
+        except Exception as e:  
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise  
+
+        # TODO update accountlimits based on plan type 
         self.success({})
  
     @classmethod
