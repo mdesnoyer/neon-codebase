@@ -127,6 +127,7 @@ class Predictor(object):
         self.feature_generator = feature_generator
         self.__version__ = 3
         self.async = False
+        self.concurrency = 1
 
     def __str__(self):
         return utils.obj.full_object_str(self)
