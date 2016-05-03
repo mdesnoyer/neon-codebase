@@ -1688,10 +1688,10 @@ class UserHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
+        # TODO give ability to modify access_level
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Optional('access_level') : All(Coerce(int), Range(min=1, max=63)),
           'first_name': Any(str, unicode, Length(min=1, max=256)),
           'last_name': Any(str, unicode, Length(min=1, max=256)),
           'title': Any(str, unicode, Length(min=1, max=32))
@@ -1700,19 +1700,13 @@ class UserHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         username = args.get('username') 
-        new_access_level = args.get('access_level')
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username: 
                 raise NotAuthorizedError('Can not update another\
                                users account')
  
-            if new_access_level > self.user.access_level:
-                raise NotAuthorizedError('Can not set access_level above\
-                               requesting users access level')
-
         def _update_user(u): 
-            u.access_level = new_access_level 
             u.first_name = args.get('first_name', u.first_name) 
             u.last_name = args.get('last_name', u.last_name) 
             u.title = args.get('title', u.title) 
