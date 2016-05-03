@@ -244,7 +244,11 @@ class DeepnetPredictor(Predictor):
         self.active = 0
         self.done = 0
 
-    def _predictasync(self, image):
+    def _predictasync(self, image, timeout=10.0):
+        '''
+        image: The image to be scored, as a OpenCV-style numpy array.
+        timeout: How long the request lasts for before expiring. 
+        '''
         _log.debug('Prediction request recieved')
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
@@ -253,7 +257,7 @@ class DeepnetPredictor(Predictor):
             while self.active == self.concurrency:
                 self.cv.wait()
         self.active += 1
-        result_future = stub.Regress.future(request, 10.0)  # 10 second timeout
+        result_future = stub.Regress.future(request, timeout)  # 10 second timeout
         result_future.add_done_callback(
             lambda result_future: self.async_cb_hand(result_future))
         return result_future
