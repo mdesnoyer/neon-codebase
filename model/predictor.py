@@ -109,7 +109,7 @@ def _aquila_prep(image):
     been obtained from OpenCV (and so is BGR) and will use
     PIL to prep the image.
     '''
-    img = Image.fromarray(im[:,:,::-1])
+    img = Image.fromarray(image[:,:,::-1])
     img = _pad_to_asp(img, 16./9)
     # resize the image to 299 x 299
     img = _resize_to(img, w=314, h=314)
@@ -170,7 +170,6 @@ class Predictor(object):
 
     def predict(self, image, *args, **kwargs):
         '''Wrapper for image valence prediction functions'''
-        image = _aquila_prep(image)
         if self.async:
             return self._predictasync(image, *args, **kwargs)
         else:
@@ -250,6 +249,7 @@ class DeepnetPredictor(Predictor):
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring. 
         '''
+        image = _aquila_prep(image)
         if not self._open:
             # for testing purposes, only open a channel once we actually get an async
             # prediction request.
