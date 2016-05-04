@@ -478,8 +478,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         rv = self.db2api(player)
         self.success(rv)
 
-class BrightcovePlayerHelper()
-
+class BrightcovePlayerHelper():
     @tornado.gen.corotune
     def publish_plugin_to_player(player):
         """Internal api method to publish the current plugin to BC's player"""
