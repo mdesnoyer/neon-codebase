@@ -271,7 +271,7 @@ class DeepnetPredictor(Predictor):
             lambda result_future: self.async_cb_hand(result_future))
         return result_future
 
-    def async_cb_hand(self):
+    def async_cb_hand(self, result_future):
         '''
         Housekeeping handler for predictor to monitor the number of active
         inference requests.
