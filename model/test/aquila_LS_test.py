@@ -1,7 +1,7 @@
 # let's try instantiating the predictor
 import sys
-if '/repos/neon/model' not in sys.path:
-    sys.path.insert(0, '/repos/neon/model')
+if '/opt/neon/neon-codebase/core/model' not in sys.path:
+    sys.path.insert(0, '/opt/neon/neon-codebase/core/model')
 from model.features import (BlurGenerator, SADGenerator, FaceGenerator,
                             ClosedEyeGenerator,
                             PixelVarGenerator, VibranceGenerator,
