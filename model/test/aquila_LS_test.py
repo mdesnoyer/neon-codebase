@@ -237,7 +237,19 @@ def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
                    n_thumbs=n_thumbs,
                    startend_clip=startend_clip)
 
-LS = getLS(feature_generators, combiner_m, filters, feats_to_cache, testing,
+combiner = combiner_m
+testing = False
+feat_score_weight=3.0
+local_search_width=32
+local_search_step=2
+processing_time_ratio=2.5
+adapt_improve=True,
+use_best_data=True
+use_all_data=False
+testing_dir=''
+n_thumbs=40,
+startend_clip=0.025
+LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip)
