@@ -1701,7 +1701,7 @@ class LocalSearcher(object):
         Takes a single step in the search. If force_sample is
         True, then it will force it to take a sample.
         '''
-        if force_sample 
+        if force_sample: 
             if not self.done_sampling:
                 frameno = self.search_algo.get_sample()
                 if frameno is not None:
