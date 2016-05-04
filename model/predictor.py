@@ -266,7 +266,7 @@ class DeepnetPredictor(Predictor):
             while self.active == self.concurrency:
                 self.cv.wait()
         self.active += 1
-        result_future = stub.Regress.future(request, timeout)  # 10 second timeout
+        result_future = self.stub.Regress.future(request, timeout)  # 10 second timeout
         result_future.add_done_callback(
             lambda result_future: self.async_cb_hand(result_future))
         return result_future
