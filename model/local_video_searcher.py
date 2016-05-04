@@ -1459,19 +1459,25 @@ class LocalSearcher(object):
         local search. The args are provided directly to the corresponding
         functions.
         '''
+        if workerno is None:
+            workerno = 'N/A'
+        else:
+            workerno = str(workerno)
         while True:
             item = self._inq.get()
             if item is None:
                 # terminate
-                _log.debug('Terminating: Worker ' + str(workerno))
+                _log.debug('Worker %s', workerno)
                 return
             req_type, args = item
             if req_type == 'samp':
+                _log.debug('Worker %s taking sample', workerno)
                 try:
                     self._take_sample(*args)
                 except Exception, e:
                     _log.warn('Problem sampling frame %i: %s', args, e.message)
             elif req_type == 'srch':
+                _log.debug('Worker %s performing search', workerno)
                 try:
                     self._conduct_local_search(*args)
                 except Exception, e:
@@ -1703,7 +1709,9 @@ class LocalSearcher(object):
         Takes a single step in the search. If force_sample is
         True, then it will force it to take a sample.
         '''
+
         if force_sample: 
+            _log.debug('Taking sample [Forced]')
             if not self.done_sampling:
                 frameno = self.search_algo.get_sample()
                 if frameno is not None:
@@ -1715,6 +1723,7 @@ class LocalSearcher(object):
             return
         if ((not self.done_sampling) and 
             (np.random.rand() < self.explore_cef)):
+            _log.debug('Taking sample.')
             frameno = self.search_algo.get_sample()
             if frameno is not None:
                 # then there are still samples to be taken
@@ -1724,6 +1733,7 @@ class LocalSearcher(object):
                 self.done_sampling = True
                 _log.info('Finished sampling')
         # okay, let's get a search frame instead.
+        _log.debug('Performing search')
         srch_info = self.search_algo.get_search()
         if srch_info is None:
             if self.done_sampling:
