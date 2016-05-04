@@ -68,6 +68,7 @@ class MCMH(object):
         search_frames = np.arange(start, stop, intr + 1).astype(int)
 
         self._tot = 0.  # sum of scores
+        self.n_samples = 0.
         self._n = 0.  # total scored
 
         self._first = search_frames[0]
@@ -99,11 +100,11 @@ class MCMH(object):
         sf = self._fno2sf.get(frameno, None)
         if sf is None:
             # That is not a valid search frame.
-            print 'Invalid search frame.'
+            _log.warn('Invalid search frame.')
             return
         if self._scored[sf]:
             # you've already sampled this frame.
-            print 'Sample has already been scored.'
+            _log.debug('Sample has already been scored.')
             return 
         insort(self._scores, (sf, score))
         # we have to keep track of which scores were actually
@@ -115,17 +116,18 @@ class MCMH(object):
                 # add it to the search queue
                 est = (self._get_score(sf) + self._get_score(sf + 1)) * 0.5
                 self._search_queue.put((-est, sf))
-                print 'Obtained new search region: %i to %i' % (sf, sf + 1)
+                _log.debug('Obtained new search region: %i to %i' % (sf, sf + 1))
         if frameno > self._first:
             if self._scored[sf - 1]:
                 # then you can search it!
                 # add it to the search queue
                 est = (self._get_score(sf - 1) + self._get_score(sf)) * 0.5
                 self._search_queue.put((-est, sf - 1))
-                print 'Obtained new search region: %i to %i' % (sf - 1, sf)
+                _log.debug('Obtained new search region: %i to %i' % (sf - 1, sf))
         insort(self._srt_scores, score)
         self._tot += score
         self._n += 1
+        self.n_samples += 1
 
     def get_search(self):
         '''
