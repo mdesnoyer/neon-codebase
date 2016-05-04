@@ -163,6 +163,7 @@ from collections import defaultdict as ddict
 from random import getrandbits
 import shutil
 import threading
+from Queue import Queue
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
