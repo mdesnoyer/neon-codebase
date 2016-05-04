@@ -1404,7 +1404,8 @@ class SubscriptionState(object):
  
 class PlanType(object): 
     DEMO = 'demo' 
-    PRO = 'pro'
+    PRO_MONTHLY = 'pro_monthly'
+    PRO_YEARLY = 'pro_yearly'
     PREMIER = 'premier' 
 
 class AccessLevels(object):
@@ -5735,10 +5736,11 @@ class AccountLimits(StoredObject):
  
         super(AccountLimits, self).__init__(account_id)
         
-        # the number of video posts this account has made 
+        # the number of video posts this account has made in the time window 
         self.video_posts = video_posts 
          
-        # the maximum amount of video posts the account is allowed 
+        # the maximum amount of video posts the account is allowed in a time 
+        # window 
         self.max_video_posts = max_video_posts 
 
         # when the video_posts counter will be reset 
@@ -5750,12 +5752,60 @@ class AccountLimits(StoredObject):
 
         # maximum video length we will process in seconds 
         self.max_video_size = max_video_size 
+
+    def populate_with_billing_plan(self, bp): 
+        '''helper that takes a billing plan and populates the object 
+              with the plan information. 
+         
+        '''
+        sref = bp.seconds_to_refresh_video_posts
+
+        self.max_video_posts = bp.max_video_posts
+        self.seconds_to_refresh_video_posts = sref
+        self.max_video_size = bp.max_video_size 
+        self.refresh_time_video_posts = \
+            (datetime.datetime.utcnow() +\
+             datetime.timedelta(seconds=sref)).strftime(
+                 "%Y-%m-%d %H:%M:%S.%f")
  
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return AccountLimits.__name__
+
+class BillingPlans(StoredObject):
+    '''
+    Class schema for BillingPlans
+
+    Keyed by plan_type, these correspond to the plan_types 
+      we have defined in our external billing integration.
+      This defines the limits that the billing plans will 
+      have.  
+    '''
+    def __init__(self, 
+                 plan_type, 
+                 max_video_posts=None, 
+                 seconds_to_refresh_video_posts=None,
+                 max_video_size=None):
+ 
+        super(BillingPlans, self).__init__(plan_type)
+        
+        # the max number of video posts that are allowed  
+        self.max_video_posts = max_video_posts
+         
+        # this will take now() and add this to it, for when the next 
+        # refresh will happen
+        self.seconds_to_refresh_video_posts = seconds_to_refresh_video_posts
+
+        # maximum video length we will process in seconds 
+        self.max_video_size = max_video_size 
+ 
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return BillingPlans.__name__
 
 class VideoMetadata(StoredObject):
     '''

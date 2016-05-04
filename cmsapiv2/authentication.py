@@ -454,7 +454,13 @@ class VerifyAccountHandler(APIV2Handler):
             yield tracker_p_aid_mapper.save(async=True)
             yield tracker_s_aid_mapper.save(async=True)
 
+            # create every new account with the demo billing plan
+            billing_plan = yield neondata.BillingPlans.get(
+                neondata.PlanType.DEMO, 
+                async=True) 
+            
             account_limits = neondata.AccountLimits(account.neon_api_key)
+            account_limits.populate_with_billing_plan(billing_plan)
             yield account_limits.save(async=True)  
     
             account = yield self.db2api(account)

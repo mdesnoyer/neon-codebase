@@ -1786,7 +1786,6 @@ class TestNeondata(test_utils.neontest.AsyncTestCase):
         self.assertEquals(events[-1], ('acct1_vid2', new_vid, 'set'))
 
     def test_subscribe_api_request_changes(self):
-        #import pdb; pdb.set_trace()
         bc_trap = TestNeondata.ChangeTrap()
         generic_trap = TestNeondata.ChangeTrap()
 
@@ -3320,11 +3319,12 @@ class BasePGNormalObject(object):
     @tornado.testing.gen_test 
     def test_get_many_with_key_like_objects(self):    
         key1 = uuid.uuid1().hex 
-        #key2 = uuid.uuid1().hex
+        key2 = uuid.uuid1().hex
         so1 = self._get_object_type()(key1, 'testabcdef')
-        so2 = self._get_object_type()(key1, 'testfedcba')
+        so2 = self._get_object_type()(key2, 'testfedcba')
         yield self._get_object_type().save_all([so1, so2], async=True)
-        results = yield so1.get_many_with_key_like(so1.key, async=True) 
+        results = yield so1.get_many_with_key_like(so1.key, async=True)
+        #import pdb; pdb.set_trace() 
         self.assertEquals(len(results), 1)
         results = yield so1.get_many_with_key_like(so2.key, async=True) 
         self.assertEquals(len(results), 1)
@@ -3471,6 +3471,30 @@ class TestPGAccountLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     @classmethod 
     def _get_object_type(cls): 
         return neondata.AccountLimits
+
+class TestPGBillingPlans(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self): 
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')] 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+    
+    @classmethod 
+    def _get_object_type(cls): 
+        return neondata.BillingPlans
 
 class TestPGNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 

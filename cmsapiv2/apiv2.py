@@ -271,22 +271,30 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         acct = request.account
         acct_subscription_status = acct.subscription_state
+        current_plan_type = acct.subscription_plan_type
 
         # should we check stripe for updated subscription state?
-        if datetime.utcnow() > acct.verify_account_expiry: 
-            stripe_customer = stripe.Customer.retrieve(acct.neon_api_key)
+        if datetime.utcnow() > dateutil.parser.parse(
+             acct.verify_account_expiry): 
+            stripe_customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                acct.billing_provider_ref)
             # returns the most active subscriptions up to 10 
-            cust_subs = stripe_customer.subscriptions.all()  
+            cust_subs = yield self.executor.submit(
+                stripe_customer.subscriptions.all) 
             for cs in cust_subs:
                 acct_subscription_status = cs.status  
                 if acct_subscription_status in [ 
                     neondata.SubscriptionState.ACTIVE,
-                    neondata.SubscriptionState.IN_TRIAL ]:
+                    neondata.SubscriptionState.IN_TRIAL ] and\
+                    current_plan_type == cs.plan.id:
                     # if we find a subscription in active/trial we are good 
-                    # break out of the for loop
+                    # break out of the for loop, and on the current plan type 
                     break
                    
-            new_date = (datetime.utcnow() + timedelta(seconds=3600))
+            new_date = (datetime.utcnow() + timedelta(seconds=3600)).strftime(
+                "%Y-%m-%d %H:%M:%S.%f")
+
             acct.verify_account_expiry = new_date
             acct.subscription_state = acct_subscription_status
             yield acct.save(async=True)  
@@ -774,11 +782,12 @@ class CustomVoluptuousTypes():
 
     @staticmethod
     def PlanType(): 
-        def f(v): 
-            for pt in neondata.PlanType: 
-                if str(v).lower() == pt: 
-                    return str(v) 
-            raise Invalid("%s is not a valid plan type" % str(v)) 
+        def f(v):
+            try:
+                getattr(neondata.PlanType, str(v).upper())
+                return str(v)   
+            except Exception: 
+                raise Invalid("%s is not a valid plan type" % str(v)) 
         return f      
 
     @staticmethod

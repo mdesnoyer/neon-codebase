@@ -4154,9 +4154,11 @@ class TestBillingSubscriptionHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_billing_account(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
         header = { 'Content-Type':'application/json' }
-        url = '/api/v2/123/billing/subscription' 
-        params = json.dumps({'plan_code' : 'demo'})
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key 
+        params = json.dumps({'plan_type' : neondata.PlanType.PRO_MONTHLY})
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 

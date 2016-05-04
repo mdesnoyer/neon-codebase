@@ -1732,6 +1732,8 @@ class BillingSubscriptionHandler(APIV2Handler):
             raise NotFoundError(
                 'There is not a billing account set up for this account')
 
+        original_plan_type = account.subscription_plan_type 
+
         try: 
             customer = yield self.executor.submit(
                 stripe.Customer.retrieve, 
@@ -1740,7 +1742,9 @@ class BillingSubscriptionHandler(APIV2Handler):
                 customer.subscriptions.create, 
                 plan=plan_type)
 
-            account.verify_subscription_expiry = datetime.utcnow() 
+            account.verify_subscription_expiry = \
+                (datetime.utcnow() + timedelta(seconds=3600)).strftime(
+                    "%Y-%m-%d %H:%M:%S.%f") 
             account.subscription_state = subscription.status
             account.subscription_plan_type = plan_type.lower()
             yield account.save(async=True) 
@@ -1754,7 +1758,16 @@ class BillingSubscriptionHandler(APIV2Handler):
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise  
 
-        # TODO update accountlimits based on plan type 
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type.lower(), 
+            async=True) 
+       
+        # only update limits if we have actually changed the plan type 
+        if original_plan_type != plan_type.lower():     
+            account_limits = neondata.AccountLimits(account.neon_api_key)  
+            account_limits.populate_with_billing_plan(billing_plan)
+            yield account_limits.save(async=True)
+ 
         self.success({})
  
     @classmethod
