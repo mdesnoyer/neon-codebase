@@ -239,17 +239,24 @@ class DeepnetPredictor(Predictor):
         self.host = host
         self.port = port
         self.cv = threading.Condition()
-        self.channel = implementations.insecure_channel(host, int(port))
-        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
-            self.channel)
         self.active = 0
         self.done = 0
+        self.channel = None
+        self.stub = None
+        self._open = False
 
     def _predictasync(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring. 
         '''
+        if not self._open:
+            # for testing purposes, only open a channel once we actually get an async
+            # prediction request.
+            self.channel = implementations.insecure_channel(host, int(port))
+            self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
+                self.channel)
+            self._open = True
         _log.debug('Prediction request recieved')
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
