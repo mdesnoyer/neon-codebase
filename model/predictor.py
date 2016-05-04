@@ -279,10 +279,10 @@ class DeepnetPredictor(Predictor):
         NOTE: This does not handle any errors, this is up to the true callback
         function to handle.
         '''
-        with cv:
+        with self.cv:
             self.done += 1
             self.active -= 1
-            cv.notify()
+            self.cv.notify()
         _log.debug('Predictor request done callback activated, active threads %i', self.active)
 
     def complete(self):
