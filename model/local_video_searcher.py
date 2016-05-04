@@ -1510,7 +1510,7 @@ class LocalSearcher(object):
                     result_status['error'] = True
                 else:
                     result = result_future.result()
-                    result_status.append(result.valence[0])
+                    inference_result.append(result.valence[0])
                 result_status['done'] = True
                 result_status['active'] = False
                 cv.notify()
