@@ -215,7 +215,7 @@ combiner_a = AdditiveCombiner(weight_valence=weight_valence,
                               weight_dict=weight_dict)
 
 _log.info('creating predictor')
-predictor = predictor.DeepnetPredictor(hostport='10.0.88.55:9000')
+predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000')
 #f = open(os.path.join(dest_folder, 'config'), 'w')
 def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
