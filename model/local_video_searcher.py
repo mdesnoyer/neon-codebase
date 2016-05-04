@@ -1351,6 +1351,8 @@ class LocalSearcher(object):
         self._inq = Queue(maxsize=2)
         threads = [threading.Thread(target=self._worker, args=(n,)) 
                    for n in range(self.num_workers)]
+        for t in threads:
+            t.start()
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
