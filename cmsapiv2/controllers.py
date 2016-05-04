@@ -449,7 +449,10 @@ class BrightcovePlayerHandler(APIV2Handler):
         player = yield neondata.BrightcovePlayer.get(args['player_ref'], async=True)
         if not player:
             raise NotFoundError('Player does not exist for reference:%s', args['player_ref'])
-        if player.account_id != account_id:
+        integration = yield neondata.BrightcoveIntegration.get(player.integration_id, async=True)
+        if not integration:
+            raise NotFoundError('BrighcoveIntegration does not exist for player reference:%s', args['player_ref'])
+        if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
         # Modify the db if changed
@@ -474,7 +477,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         self.success(rv)
 
 class BrightcovePlayerHelper():
-    @tornado.gen.corotune
+    @tornado.gen.coroutine
     def publish_plugin_to_player(player):
         """Internal api method to publish the current plugin to BC's player"""
 

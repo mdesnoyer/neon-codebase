@@ -3613,6 +3613,7 @@ class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject
 
     @classmethod
     def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')]
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)

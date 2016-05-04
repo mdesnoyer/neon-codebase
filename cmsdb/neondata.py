@@ -5140,7 +5140,7 @@ class BrightcovePlayer(NamespacedStoredObject):
     '''
     Brightcove Player model
     '''
-    def __init__(self, player_ref, integration_id, name=None,
+    def __init__(self, player_ref, integration_id=None, name=None,
                  is_tracked=False, publish_date=None,
                  published_plugin_version=None, last_attempt_result=None):
 
@@ -5150,8 +5150,6 @@ class BrightcovePlayer(NamespacedStoredObject):
         self.player_ref = player_ref
         # The Neon integration that has this player
         self.integration_id = integration_id
-        # The Neon account that owns this player
-        self.account_id = account_id
         # Set if publisher needs the Neon event tracking plugin published to this
         self.is_tracked = is_tracked
         # Descriptive name of the plugin
