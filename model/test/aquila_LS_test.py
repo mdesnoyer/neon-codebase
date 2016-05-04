@@ -243,4 +243,4 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip)
 
-video = None
+video = '/home/ubuntu/vid/targ.mp4'
