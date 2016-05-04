@@ -1463,6 +1463,7 @@ class LocalSearcher(object):
             workerno = 'N/A'
         else:
             workerno = str(workerno)
+        _log.debug('Worker %s starting', workerno)
         while True:
             item = self._inq.get()
             if item is None:
@@ -1716,7 +1717,9 @@ class LocalSearcher(object):
                 frameno = self.search_algo.get_sample()
                 if frameno is not None:
                     # then there are still samples to be taken
+                    _log.debug('Acquired sample %i', frameno)
                     self._inq.put(('samp', frameno))
+                    _log.debug('Sample %i placed in queue', frameno)
                 else:
                     self.done_sampling = True
                     _log.info('Finished sampling')
