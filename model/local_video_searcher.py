@@ -1476,7 +1476,7 @@ class LocalSearcher(object):
             if req_type == 'samp':
                 _log.debug('Worker %s taking sample', workerno)
                 try:
-                    self._take_sample(*args)
+                    self._take_sample(*(args,))
                 except Exception, e:
                     _log.warn('Problem sampling frame %i: %s', args, e.message)
             elif req_type == 'srch':
@@ -1727,7 +1727,7 @@ class LocalSearcher(object):
                     _log.info('Finished sampling')
             return
         if ((not self.done_sampling) and 
-            (np.random.rand() < self.explore_cef)):
+            (np.random.rand() < self.explore_coef)):
             _log.debug('Taking sample.')
             frameno = self.search_algo.get_sample()
             if frameno is not None:
