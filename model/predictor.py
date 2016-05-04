@@ -254,7 +254,7 @@ class DeepnetPredictor(Predictor):
         if not self._open:
             # for testing purposes, only open a channel once we actually get an async
             # prediction request.
-            self.channel = implementations.insecure_channel(host, int(port))
+            self.channel = implementations.insecure_channel(self.host, int(self.port))
             self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
                 self.channel)
             self._open = True
