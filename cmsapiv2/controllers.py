@@ -99,7 +99,7 @@ class AccountHandler(APIV2Handler):
                 'default_thumbnail_id',
                 acct_internal.default_thumbnail_id)
 
-        result = yield tornado.gen.Task(neondata.NeonUserAccount.modify,
+        yield tornado.gen.Task(neondata.NeonUserAccount.modify,
                                         acct_internal.key, _update_account)
         statemon.state.increment('put_account_oks')
         self.success(acct_for_return)
@@ -201,9 +201,8 @@ class IntegrationHelper():
                 'uses_bc_gallery', integration.uses_bc_gallery)
             yield integration.save(async=True)
 
-        #TODO replace with new style
-        result = yield tornado.gen.Task(
-            acct.modify, acct.neon_api_key, lambda p: p.add_platform(integration))
+        yield neondata.NeonUserAccount.modify(
+            acct.neon_api_key, lambda p: p.add_platform(integration), async=True)
 
         # ensure the integration made it to the database by executing a get
         if integration_type == neondata.IntegrationType.OOYALA:
@@ -357,20 +356,19 @@ class OoyalaIntegrationHandler(APIV2Handler):
         schema(args)
         integration_id = args['integration_id']
 
-        integration = yield IntegrationHelper.get_integration(integration_id,
-                                                     neondata.IntegrationType.OOYALA)
+        integration = yield IntegrationHelper.get_integration(
+            integration_id, neondata.IntegrationType.OOYALA)
 
         def _update_integration(p):
             p.api_key = args.get('api_key', integration.api_key)
             p.api_secret = args.get('api_secret', integration.api_secret)
             p.partner_code = args.get('publisher_id', integration.partner_code)
 
-        result = yield tornado.gen.Task(neondata.OoyalaIntegration.modify,
-                                        integration_id,
-                                        _update_integration)
+        yield neondata.OoyalaIntegration.modify(
+            integration_id, _update_integration, async=True)
 
-        ooyala_integration = yield IntegrationHelper.get_integration(integration_id,
-                                                            neondata.IntegrationType.OOYALA)
+        yield IntegrationHelper.get_integration(
+            integration_id, neondata.IntegrationType.OOYALA)
 
         statemon.state.increment('put_ooyala_oks')
         rv = yield self.db2api(integration)
@@ -446,7 +444,7 @@ class BrightcovePlayerHandler(APIV2Handler):
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
-        scheme(args)
+        schema(args)
 
         player = yield neondata.BrightcovePlayer.get(args['player_ref'], async=True)
         if not player:
@@ -459,11 +457,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         if player.is_tracked is not is_tracked:
             def _modify(p):
                 p.is_tracked = is_tracked
-
                 yield neondata.BrightcovePlayer.modify(
-                    player.player_id,
-                    lambda p: p.is_tracked = is_tracked,
-                    async=True)
+                    player.player_ref, _modify, async=True)
 
         # If the player is tracked, then send a request to Brightcove's
         # CMS Api to put the plugin in the player and publish the player.
@@ -474,7 +469,7 @@ class BrightcovePlayerHandler(APIV2Handler):
             publish_result, error = BrightcovePlayer.publish_plugin_to_player(player)
 
         # Finally, respond with the current version of the player
-        player = yield neondata.BrightcovePlayer.get(args['player_id'])
+        player = yield neondata.BrightcovePlayer.get(args['player_ref'])
         rv = self.db2api(player)
         self.success(rv)
 
@@ -490,7 +485,7 @@ class BrightcovePlayerHelper():
             # Get the player JSON data from BC's API
             bc_player = yield bc.get_player(player.player_ref)
             patch = self._get_patch_string(bc_player, integration)
-            result = yield bc.patch_player(player.player_ref, patch)
+            yield bc.patch_player(player.player_ref, patch)
             # Success. Update the player with the date and version
             def _modify(p):
                 p.publish_date = datetime.now().isoformat()
@@ -518,12 +513,12 @@ class BrightcovePlayerHelper():
         then addends the Neon js url and json values with current ones."""
 
         # Remove any plugin named neon, and append the current one
-        plugins = [for plugin in current_bc_player.get('plugins')
+        plugins = [plugin for plugin in current_bc_player.get('plugins')
             if plugin['name'] is not 'neon']
         plugins.append(self._get_current_tracking_json_string(integration))
 
         # Remove any script like *neon-tracker*, and append the current
-        scripts = [for script in current_bc_player.get('scripts')
+        scripts = [script for script in current_bc_player.get('scripts')
             if script.find('neon-tracker') is -1]
         scripts.append(self._get_current_tracking_url())
 
@@ -679,10 +674,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 args.get('uses_bc_gallery',
                 integration.uses_bc_gallery))
 
-        result = yield neondata.BrightcoveIntegration.modify(
-            integration_id,
-            _update_integration,
-            async=True)
+        yield neondata.BrightcoveIntegration.modify(
+            integration_id, _update_integration, async=True)
 
         integration = yield IntegrationHelper.get_integration(
             integration_id,
@@ -784,7 +777,7 @@ class ThumbnailHandler(APIV2Handler):
             cdn_metadata=cdn_metadata,
             async=True)
 
-        #save the thumbnail
+        # save the thumbnail
         yield new_thumbnail.save(async=True)
 
         # save the video 
@@ -813,7 +806,7 @@ class ThumbnailHandler(APIV2Handler):
           'enabled': Boolean()
         })
         args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
+        args['account_id'] = str(account_id)
         schema(args)
         thumbnail_id = args['thumbnail_id']
 
@@ -838,7 +831,7 @@ class ThumbnailHandler(APIV2Handler):
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
+        args['account_id'] = str(account_id)
         schema(args)
         thumbnail_id = args['thumbnail_id']
         thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get,
@@ -909,7 +902,6 @@ class VideoHelper(object):
         args -- the args sent to the api endpoint
         account_id_api_key -- the account_id/api_key
         """
-        user_account = yield tornado.gen.Task(neondata.NeonUserAccount.get, account_id_api_key)
         job_id = uuid.uuid1().hex
         integration_id = args.get('integration_id', None)
 
@@ -1278,7 +1270,6 @@ class VideoHandler(APIV2Handler):
             fields = set(fields.split(','))
 
         vid_dict = {}
-        output_list = []
         internal_video_ids = []
         video_ids = args['video_id'].split(',')
         for v_id in video_ids:
@@ -1472,7 +1463,7 @@ class ThumbnailStatsHandler(APIV2Handler):
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
-        data = schema(args)
+        schema(args)
         thumbnail_ids = args.get('thumbnail_id', None)
         video_ids = args.get('video_id', None)
         if not video_ids and not thumbnail_ids:
@@ -1588,6 +1579,7 @@ class AccountLimitsHandler(APIV2Handler):
           Required('account_id'): Any(str, unicode, Length(min=1, max=256))
         })
         args = self.parse_args()
+        schema(args)
         args['account_id'] = account_id_api_key = str(account_id)
 
         acct_limits = yield neondata.AccountLimits.get(

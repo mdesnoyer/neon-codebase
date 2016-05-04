@@ -49,3 +49,5 @@ xlwt==1.0.0
 dill==0.2.4
 passlib==1.6.5
 youtube_dl
+oauthlib==1.0.3
+requests-oauthlib==0.6.1

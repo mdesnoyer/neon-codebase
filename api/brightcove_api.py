@@ -9,12 +9,14 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import base64
 import datetime
 import json
+from oauthlib.oauth2 import BackendApplicationClient
 from poster.encode import multipart_encode
 import poster.encode
-from PIL import Image
 import re
+from requests_oauthlib import OAuth2Error, OAuth2Session
 from StringIO import StringIO
 import cmsdb.neondata
 import math
@@ -226,7 +228,7 @@ class BrightcoveApi(object):
                                               tid,
                                               image=still,
                                               atype='videostill',
-                                              reference_id='still-%s'%tid)]
+                                              reference_id='still-%s' % tid)]
             raise tornado.gen.Return([x['id'] for x in responses])
 
         elif remote_url is not None:
@@ -271,8 +273,8 @@ class BrightcoveApi(object):
         neon_url_re = re.compile('/neonvid_[0-9a-zA-Z_\.]+$')
         is_neon_serving = neon_url_re.search(url_base) is not None
         if is_neon_serving:
-            arams = zip(('width', 'height'), size)
-            param_str = '&'.join(['%s=%i' % x for x in params if x[1]])
+            params = zip(('width', 'height'), size)
+            params_str = '&'.join(['%s=%i' % x for x in params if x[1]])
             if params_str:
                 remote_url = '%s?%s' % (url_base, params_str)
 
@@ -319,7 +321,7 @@ class BrightcoveApi(object):
             result = tornado.escape.json_decode(response.body)
             thumb_url = result['thumbnailURL'].split('?')[0]
             still_url = result['videoStillURL'].split('?')[0]
-        except ValueError as e:
+        except ValueError:
             _log.error('key=get_current_thumbnail_url '
                        'msg=Invalid JSON response from %s' % url)
             raise tornado.gen.Return((None, None))
@@ -354,10 +356,10 @@ class BrightcoveApi(object):
             url_params = {
                 'command' : 'find_videos_by_ids',
                 'token' : self.read_token,
-                'video_ids' : ','.join(video_ids[i:(i+MAX_VIDS_PER_REQUEST)]),
+                'video_ids' : ','.join(video_ids[i:(i + MAX_VIDS_PER_REQUEST)]),
                 'media_delivery' : media_delivery,
                 'output' : 'json'
-                }
+            }
             if video_fields is not None:
                 video_fields.append('id')
                 url_params['video_fields'] = ','.join(set(video_fields))
@@ -435,7 +437,6 @@ class BrightcoveApi(object):
 
         if exact:
             url_params['exact'] = 'true'
-
 
         if video_fields is not None:
             video_fields.append('id')
@@ -684,7 +685,10 @@ class BrightcoveFeedIterator(object):
         self.items_returned += 1
         raise tornado.gen.Return(self.page_data.pop())
 
-class BadOAuthConfigException(Exception):
+class BrightcoveOAuthConfigException(Exception):
+    pass
+
+class BrightcoveAuthDeniedException(Exception):
     pass
 
 class BrightcoveOAuthApi(object):
@@ -713,7 +717,7 @@ class BrightcoveOAuthApi(object):
 
         # Ensure the integration is set up and the client credential grant is valid
         if integration.client_id is None or integration.client_secret is None:
-            raise BcAuthConfigException('Id or secret missing in integration {}'.format(integration.integration_id))
+            raise BrightcoveOAuthConfigException('Id or secret missing in integration {}'.format(integration.integration_id))
         client = BackendApplicationClient(client_id=integration.client_id)
         self.oauth = OAuth2Session(client=client)
         self._fetch_token()
@@ -726,7 +730,7 @@ class BrightcoveOAuthApi(object):
 
             # Credential grant is misconfigured, the user needs to see this
             if e.status_code is 401:
-                raise BcAuthDeniedException(
+                raise BrightcoveAuthDeniedException(
                     'OAuth2 denied with code 401 {}'.format(type(e).__name__))
             else:
                 _log.error(e)
@@ -763,7 +767,6 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
     player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
     get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
     patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
-
     publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
     @tornado.gen.coroutine
@@ -782,12 +785,12 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
 
     @tornado.gen.coroutine
     def get_player(self, player_ref):
-        response = self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
+        response = self.oauth.get(self.get_player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
         return self.json_to_object(response.json())
 
     @tornado.gen.coroutine
     def get_players(self):
-        response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        response = self.oauth.get(self.get_players_url.format(account_ref=self.publisher_id))
         return map(BrightcovePlayerManagementApi.json_to_object, response.json())
 
     @tornado.gen.coroutine
