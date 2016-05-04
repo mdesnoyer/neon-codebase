@@ -1489,7 +1489,7 @@ class LocalSearcher(object):
                     _log.warn('Problem local searching %i <---> %i: %s', 
                         start, stop, e.message)
 
-    def _get_score(self, frame, frameno=None, numretry=None, timeout=10.):
+    def _get_score(self, frame, frameno=None, numretry=1, timeout=10.):
         '''
         Acquires the score for a frame.
 
@@ -1517,7 +1517,7 @@ class LocalSearcher(object):
         rem_try = numretry
         if numretry is None:
             rem_try = -1
-        while num_try != 0:
+        while rem_try != 0:
             with cv:
                 result_status = {'active': True, 'error': False, 'done': False}
                 result_future = self.predictor.predict(frame, timeout=timeout)
@@ -1529,7 +1529,7 @@ class LocalSearcher(object):
                     return inference_result[0]
                 elif result_status['error']:
                     # one attempt has been made, but there was an issue.
-                    num_try -= 1
+                    rem_try -= 1
         if frameno is None:
             fno = 'N/A'
         else:
