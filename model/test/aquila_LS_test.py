@@ -2,6 +2,7 @@
 import sys
 if '/opt/neon/neon-codebase/core/model' not in sys.path:
     sys.path.insert(0, '/opt/neon/neon-codebase/core/model')
+    sys.path.insert(0, '/opt/neon/neon-codebase/core')
 from model.features import (BlurGenerator, SADGenerator, FaceGenerator,
                             ClosedEyeGenerator,
                             PixelVarGenerator, VibranceGenerator,

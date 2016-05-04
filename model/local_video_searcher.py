@@ -1419,13 +1419,15 @@ class LocalSearcher(object):
         try:
             perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
             _log.info('%.2f%% of video sampled' % perc_samp)
-        except:
+        except Exception, e:
             _log.info('Unknown percentage of video sampled')
+            _log.debug('Exception: %s', e.message)
         try:
             perc_srch = self._searched * 100. / (self.search_algo.N - 1)
             _log.info('%.2f%% of video searched' % perc_srch)
-        except:
+        except Exception, e:
             _log.info('Unknown percentage of video searched')
+            _log.debug('Exception: %s', e.message)
         results = []
         if not len(raw_results):
             _log.debug('No suitable frames have been found for video %s!'
@@ -1470,7 +1472,7 @@ class LocalSearcher(object):
             item = self._inq.get()
             if item is None:
                 # terminate
-                _log.debug('Worker %s', workerno)
+                _log.debug('Worker %s terminating.', workerno)
                 return
             req_type, args = item
             if req_type == 'samp':
@@ -1580,38 +1582,38 @@ class LocalSearcher(object):
                 frames = [frames[x] for x in acc_idxs]
                 gold = [gold[x] for x in acc_idxs]
             # ---------- START OF TEXT PROCESSING
-            if self.filter_text:
-                lower_crop_frac = 0.2  # how much of the lower portion of the
-                # image to crop out
-                text_d = []
-                for cframe in frames:
-                    # Cut out the bottom 20% of the image because it often has 
-                    # tickers
-                    text_det_out = cv2.text.textDetect(
-                        cframe[0:int(cframe.shape[0]*.82), :, :],
-                        *self.text_filter_params)
-                    text_d.append(text_det_out)
-                masks = [x[1] for x in text_d]
-                # accept only those where tet occupies a sufficiently small amount 
-                # of the image.
-                accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
-                            for x in masks]
-                n_rej = np.sum(np.logical_not(accepted))
-                n_acc = np.sum(accepted)
-                _log.debug(('Filter for feature %s has '
-                            'has rejected %i frames, %i remain' % (
-                                'fancy text detect', n_rej, n_acc)))
-                if not np.any(accepted):
-                    _log.debug('No frames accepted by filters')
-                    return
-                # filter the current features across all feature
-                # dicts, as well as the framenos
-                acc_idxs = list(np.nonzero(accepted)[0])
-                for k in frame_feats.keys():
-                    frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
-                framenos = [framenos[x] for x in acc_idxs]
-                frames = [frames[x] for x in acc_idxs]
-                gold = [gold[x] for x in acc_idxs]
+            # if self.filter_text:
+            #     lower_crop_frac = 0.2  # how much of the lower portion of the
+            #     # image to crop out
+            #     text_d = []
+            #     for cframe in frames:
+            #         # Cut out the bottom 20% of the image because it often has 
+            #         # tickers
+            #         text_det_out = cv2.text.textDetect(
+            #             cframe[0:int(cframe.shape[0]*.82), :, :],
+            #             *self.text_filter_params)
+            #         text_d.append(text_det_out)
+            #     masks = [x[1] for x in text_d]
+            #     # accept only those where tet occupies a sufficiently small amount 
+            #     # of the image.
+            #     accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
+            #                 for x in masks]
+            #     n_rej = np.sum(np.logical_not(accepted))
+            #     n_acc = np.sum(accepted)
+            #     _log.debug(('Filter for feature %s has '
+            #                 'has rejected %i frames, %i remain' % (
+            #                     'fancy text detect', n_rej, n_acc)))
+            #     if not np.any(accepted):
+            #         _log.debug('No frames accepted by filters')
+            #         return
+            #     # filter the current features across all feature
+            #     # dicts, as well as the framenos
+            #     acc_idxs = list(np.nonzero(accepted)[0])
+            #     for k in frame_feats.keys():
+            #         frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+            #     framenos = [framenos[x] for x in acc_idxs]
+            #     frames = [frames[x] for x in acc_idxs]
+            #     gold = [gold[x] for x in acc_idxs]
             # ---------- END OF TEXT PROCESSING
             for k, f in self.generators.iteritems():
                 if k in frame_feats:
@@ -1625,6 +1627,22 @@ class LocalSearcher(object):
             best_frameno = framenos[np.argmax(comb)]
             best_frame = frames[np.argmax(comb)]
             best_gold = gold[np.argmax(comb)]
+            # ---------- START OF TEXT PROCESSING
+            if self.filter_text:
+                # check if the gold version of the best frame has too much text
+                lower_crop_frac = 0.2  # how much of the lower portion of the
+                # image to crop out
+                text_d = []
+                # Cut out the bottom 20% of the image because it often has 
+                # tickers
+                text_det_out = cv2.text.textDetect(
+                    best_gold[0:int(best_gold.shape[0]*.82), :, :],
+                    *self.text_filter_params)
+                mask = text_det_out[1]
+                if (np.sum(mask > 0) * 1./mask.size) < self.filter_text_thresh:
+                    _log.debug('Best frame rejected by text filtering.')
+                    return
+            # ---------- END OF TEXT PROCESSING
             best_feat_dict = {x: frame_feats[x][np.argmax(comb)] for x in
                               frame_feats.keys()}
             feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
