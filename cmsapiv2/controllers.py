@@ -725,29 +725,6 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                }
 
 '''*********************************************************************
-BrightcovePlayerHandler
-*********************************************************************'''
-class BrightcovePlayerHandler(APIV2Handler):
-    """Handle requests to Brightcove player endpoint"""
-
-    @classmethod
-    def get_access_levels(self):
-        return {HTTPVerbs.GET: neondata.AccessLevels.READ,
-                HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
-
-    @tornado.gen.coroutine
-    def get(self, account_id):
-        """Get the list of BrightcovePlayer for the given integration"""
-        self.success([])
-
-    @tornado.gen.coroutine
-    def put(self, account_id):
-        """Update a BrightcovePlayer and return it"""
-        self.success({})
-
-'''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
