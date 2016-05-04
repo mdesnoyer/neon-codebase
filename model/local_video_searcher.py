@@ -1349,7 +1349,8 @@ class LocalSearcher(object):
     def choose_thumbnails_impl(self, video, n=None, video_name=''):
         # start up the threads
         self._inq = Queue(maxsize=2)
-        threads = [threading.Thread(target=self._worker, args=(n,)) for n in self.num_workers]
+        threads = [threading.Thread(target=self._worker, args=(n,)) 
+                   for n in range(self.num_workers)]
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
