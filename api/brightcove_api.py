@@ -12,11 +12,11 @@ if sys.path[0] != __base_path__:
 import base64
 import datetime
 import json
-from oauthlib.oauth2 import BackendApplicationClient
+from oauthlib.oauth2 import BackendApplicationClient, OAuth2Error
 from poster.encode import multipart_encode
 import poster.encode
 import re
-from requests_oauthlib import OAuth2Error, OAuth2Session
+from requests_oauthlib import OAuth2Session
 from StringIO import StringIO
 import cmsdb.neondata
 import math
