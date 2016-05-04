@@ -243,6 +243,7 @@ class DeepnetPredictor(Predictor):
         self.channel = None
         self.stub = None
         self._open = False
+        self.async = True
 
     def _predictasync(self, image, timeout=10.0):
         '''
