@@ -1,14 +1,13 @@
 # let's try instantiating the predictor
-from model import predictor
 import sys
-# if '/repos/neon/model' not in sys.path:
-#     sys.path.insert(0, '/repos/neon/model')
+if '/repos/neon/model' not in sys.path:
+    sys.path.insert(0, '/repos/neon/model')
 from model.features import (BlurGenerator, SADGenerator, FaceGenerator,
                             ClosedEyeGenerator,
                             PixelVarGenerator, VibranceGenerator,
                             EntropyGenerator, FacialBlurGenerator,
                             BrightnessGenerator, SaturationGenerator)
-
+from model import predictor
 import cv2
 import numpy as np
 from cPickle import load
