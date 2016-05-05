@@ -30,7 +30,7 @@ def done(result_future, frameno):
             print 'Exception!', exception.message
             return
         else:
-            result = result_future.result().
+            result = result_future.result()
         with open('/tmp/lemonade_results', 'a') as f:
             f.write('%i %f\n' % (frameno, result.valence[0]))
         res.append((frameno, result.valence[0]))
