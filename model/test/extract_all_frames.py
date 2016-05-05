@@ -32,7 +32,7 @@ def done(result_future, frameno):
         else:
             result = result_future.result()
         res.append((frameno, result.valence[0]))
-        print frameno
+        print 'finished',frameno
 
 a = True
 a, b = vid.read()
@@ -42,6 +42,7 @@ while a:
     result_future = predictor.predict(b)
     result_future.add_done_callback(
                     lambda result_future: done(result_future, frameno))
+    print 'Added',frameno
     tot += 1
     a, b = vid.read()
     des_fno = frameno + fpsi
