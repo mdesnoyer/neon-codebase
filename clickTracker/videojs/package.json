@@ -12,7 +12,6 @@
       "url": "git://github.com/neon-lab/neon-codebase.git"
   },
   "scripts": {
-    "prebuild": "npm run clean",
     "build": "npm-run-all -p build:*",
     "build:js": "npm-run-all build:js:babel build:js:browserify build:js:bannerize build:js:uglify",
     "build:js:babel": "babel src -d es5",
@@ -38,7 +37,8 @@
     "videojs",
     "videojs-plugin"
   ],
-  "author": "Nate Kresge <kresge@neon-lab.com>",
+  "author": "Neon Lab, Inc.",
+  "email": "Nate Kresge <kresge@neon-lab.com>",
   "license": "MIT",
   "browserify": {
     "transform": [

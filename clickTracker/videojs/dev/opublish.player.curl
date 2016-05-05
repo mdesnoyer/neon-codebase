@@ -1,7 +1,0 @@
-source config
-
-curl \
-  --header "Content-Type: application/json" \
-  --header "Authorization: Bearer $TOKEN" \
-  --request POST \
-  https://players.api.brightcove.com/v1/accounts/$ACCOUNT_ID/players/$PLAYER_ID/publish
