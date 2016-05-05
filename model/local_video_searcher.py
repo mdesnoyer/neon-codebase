@@ -1859,3 +1859,7 @@ class LocalSearcher(object):
 
     def get_name(self):
         return 'LocalSearcher'
+
+    def exit(self):
+        _log.info('Exiting...')
+        del(self.predictor)
