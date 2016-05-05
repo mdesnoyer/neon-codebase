@@ -275,27 +275,34 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         # should we check stripe for updated subscription state?
         if datetime.utcnow() > dateutil.parser.parse(
-             acct.verify_account_expiry): 
-            stripe_customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
-                acct.billing_provider_ref)
-            # returns the most active subscriptions up to 10 
-            cust_subs = yield self.executor.submit(
-                stripe_customer.subscriptions.all) 
+             acct.verify_subscription_expiry):
+            try:  
+                stripe_customer = yield request.executor.submit(
+                    stripe.Customer.retrieve, 
+                    acct.billing_provider_ref)
+    
+                # returns the most active subscriptions up to 10 
+                cust_subs = yield request.executor.submit(
+                    stripe_customer.subscriptions.all)
+            except Exception as e: 
+                _log.error('Unknown error occurred talking to Stripe %s' % e)
+                raise 
+ 
             for cs in cust_subs:
                 acct_subscription_status = cs.status  
                 if acct_subscription_status in [ 
                     neondata.SubscriptionState.ACTIVE,
                     neondata.SubscriptionState.IN_TRIAL ] and\
                     current_plan_type == cs.plan.id:
-                    # if we find a subscription in active/trial we are good 
-                    # break out of the for loop, and on the current plan type 
+                    # if we find a subscription in active/trial we 
+                    # are good break out of the for loop, and 
+                    # on the current plan type 
                     break
                    
             new_date = (datetime.utcnow() + timedelta(seconds=3600)).strftime(
                 "%Y-%m-%d %H:%M:%S.%f")
 
-            acct.verify_account_expiry = new_date
+            acct.verify_subscription_expiry = new_date
             acct.subscription_state = acct_subscription_status
             yield acct.save(async=True)  
 
@@ -516,8 +523,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 pass
 
         try: 
-            sub_required_list = access_level_dict['subscription_required']
-            yield self.check_valid_subscription() 
+            sub_required = access_level_dict['subscription_required']
+            if self.request.method in sub_required: 
+                yield self.check_valid_subscription() 
         except KeyError:
             pass  
  

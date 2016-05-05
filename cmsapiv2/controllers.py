@@ -1120,7 +1120,8 @@ class VideoHandler(APIV2Handler):
                  HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
                  'account_required'  : [HTTPVerbs.GET, 
                                         HTTPVerbs.PUT,
-                                        HTTPVerbs.POST] 
+                                        HTTPVerbs.POST],
+                 'subscription_required' : [HTTPVerbs.POST]  
                }
 
     @classmethod
@@ -1662,31 +1663,42 @@ class BillingAccountHandler(APIV2Handler):
         schema(args)
         billing_token_ref = args.get('billing_token_ref')
         account = yield neondata.NeonUserAccount.get(
-                   account_id, 
-                   async=True)
+            account_id, 
+            async=True)
 
         if not account: 
             raise NotFoundError('Neon Account required.')
+      
+        customer_id = None
 
-        try: 
+        @tornado.gen.coroutine
+        def _create_account():
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
-                account_id)
-            customer.email = account.email or customer.email 
-            customer.source = billing_token_ref
-            yield self.executor.submit(customer.save)
+                stripe.Customer.create,
+                email=account.email,
+                source=billing_token_ref)
+            cid = customer.id
+            _log.info('New Stripe customer %s created with id %s' % (
+                account.email, cid))
+            raise tornado.gen.Return(cid) 
+
+        try:
+            if account.billing_provider_ref: 
+                customer = yield self.executor.submit(
+                    stripe.Customer.retrieve, 
+                    account.billing_provider_ref)
+             
+                customer.email = account.email or customer.email 
+                customer.source = billing_token_ref
+                customer_id = customer.id 
+                yield self.executor.submit(customer.save)
+            else:
+                yield _create_account() 
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
-                customer = yield self.executor.submit(
-                    stripe.Customer.create,
-                    email=account.email)
-                    # TODO add back in source
-                    #source=billing_token_ref)
-                import pdb; pdb.set_trace()
-                account.billed_elsewhere = False
-                account.billing_provider_ref = customer['id']
-                yield account.save(async=True) 
-                _log.info('New Stripe customer %s created' % email)
+                # this is here just in case the ref got 
+                # screwed up, it should rarely if ever happen
+                customer_id = yield _create_account() 
             else:
                 _log.error('Invalid request error we do not handle %s' % e)
                 raise 
@@ -1694,7 +1706,12 @@ class BillingAccountHandler(APIV2Handler):
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise  
         
-        self.success(json.dumps({'message' : 'successfully created user'})) 
+        account.billed_elsewhere = False
+        account.billing_provider_ref = customer_id
+        yield account.save(async=True) 
+
+        self.success(json.dumps(
+            {'message' : 'successfully created billing account'})) 
 
     @classmethod
     def get_access_levels(cls):
@@ -1741,7 +1758,6 @@ class BillingSubscriptionHandler(APIV2Handler):
             subscription = yield self.executor.submit(
                 customer.subscriptions.create, 
                 plan=plan_type)
-
             account.verify_subscription_expiry = \
                 (datetime.utcnow() + timedelta(seconds=3600)).strftime(
                     "%Y-%m-%d %H:%M:%S.%f") 
@@ -1752,7 +1768,10 @@ class BillingSubscriptionHandler(APIV2Handler):
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
                 _log.error('Billing mismatch for account %s' % account.email)
-                raise NotFoundError('No billing account found in Stripe') 
+                raise NotFoundError('No billing account found in Stripe')
+ 
+            _log.error('Unhandled InvalidRequestError\
+                 occurred talking to Stripe %s' % e)
             raise 
         except Exception as e:  
             _log.error('Unknown error occurred talking to Stripe %s' % e)

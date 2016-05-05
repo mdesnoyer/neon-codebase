@@ -26,7 +26,6 @@ from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.postgresql
-import test_utils.redis
 import time
 import tornado.gen
 import tornado.ioloop
