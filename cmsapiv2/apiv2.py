@@ -58,9 +58,13 @@ define("access_token_exp", default=720, help="user access token expiration in se
 define("refresh_token_exp", default=1209600, help="user refresh token expiration in seconds", type=int)
 define("verify_token_exp", default=86400, help="account verify token expiration in seconds", type=int)
 define("frontend_base_url",
-       default='https://app.neon-lab.com',
-       help="will default to this if the origin is null",
-       type=str)
+    default='https://app.neon-lab.com',
+    help="will default to this if the origin is null",
+    type=str)
+define("check_subscription_interval", 
+    default=3600, 
+    help="how many seconds in between checking the billing integration", 
+    type=int)
 
 # stripe stuff 
 stripe.api_key = 'sk_test_mOzHk0K8yKfe57T63jLhfCa8'
@@ -300,12 +304,17 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     # on the current plan type 
                     break
                    
-            new_date = (datetime.utcnow() + timedelta(seconds=3600)).strftime(
-                "%Y-%m-%d %H:%M:%S.%f")
+            new_date = (datetime.utcnow() + timedelta(
+                seconds=options.check_subscription_interval)).strftime(
+                    "%Y-%m-%d %H:%M:%S.%f")
 
-            acct.verify_subscription_expiry = new_date
-            acct.subscription_state = acct_subscription_status
-            yield acct.save(async=True)  
+            def _modify_account(a):
+                a.verify_subscription_expiry = new_date
+                a.subscription_state = acct_subscription_status 
+
+            #acct.verify_subscription_expiry = new_date
+            #acct.subscription_state = acct_subscription_status
+            yield (async=True)  
 
         if acct_subscription_status in [ neondata.SubscriptionState.ACTIVE, 
                neondata.SubscriptionState.IN_TRIAL ]:
