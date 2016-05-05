@@ -1,5 +1,5 @@
 '''
-The script extracts all frames of a video and associates them with scores.
+This script extracts one frame per second from a video.
 '''
 import threading
 import sys
@@ -18,6 +18,10 @@ predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
 video = '/home/ubuntu/lemonade.m4v'
 vid = cv2.VideoCapture(video)
 
+fps = vid.get(cv2.CAP_PROP_FPS)
+fpsi = int(np.round(fps))
+cur = vid.get(cv2.CV_CAP_PROP_POS_FRAMES)
+
 app_lock = threading.Lock()
 res = []
 def done(result_future, frameno):
@@ -29,19 +33,21 @@ def done(result_future, frameno):
         else:
             result = result_future.result()
         res.append((frameno, result.valence[0]))
+        print frameno
 
 a = True
-frameno = 0
 a, b = vid.read()
+tot = 0
 while a:
+    frameno = vid.get(cv2.CV_CAP_PROP_POS_FRAMES)
     result_future = predictor.predict(b)
     result_future.add_done_callback(
                     lambda result_future: done(result_future, frameno))
-    print frameno
-    frameno += 1
+    tot += 1
     a, b = vid.read()
+    vid.set(cv2.CAP_PROP_POS_FRAMES, frameno + fpsi)
 
-while len(res) < frameno:
+while len(res) < tot:
     print 'Waiting for results to finish'
     sleep(2)
 
