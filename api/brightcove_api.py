@@ -708,24 +708,42 @@ class BrightcoveOAuthApi(object):
     '''
 
     token_url = 'https://oauth.brightcove.com/v3/access_token'
-    # todo look at schemadefinition
-    # todo switch to test environment
 
-    def __init__(self, integration):
+    def __init__(self, client_id=None, client_secret=None, publisher_id=None, integration=None):
+        '''Ensure integration is set up and the client credential is valued'''
 
-        self.integration = integration
+        # Use the specific parameters if they're set, but fall back to integration
+        if integration:
+            self.integration = integration
+            self.client_id = client_id or integration.application_client_id
+            self.client_secret = client_secret or integration.application_client_secret
+            self.publisher_id = publisher_id or integration.publisher_id
+        # Assert the minimum of settings are set
+        if self.client_id is None:
+            raise BrightcoveOAuthConfigException('BcOauthApi id missing in publisher {}'.format(publisher_id))
+        if self.client_secret is None:
+            raise BrightcoveOAuthConfigException('BcOauthApi secret missing in publisher {}'.format(publisher_id))
+        if self.publisher_id is None:
+            raise BrightcoveOAuthConfigException('BcOauthApi publisher id missing in publisher {}'.format(publisher_id))
 
-        # Ensure the integration is set up and the client credential grant is valid
-        if integration.client_id is None or integration.client_secret is None:
-            raise BrightcoveOAuthConfigException('Id or secret missing in integration {}'.format(integration.integration_id))
-        client = BackendApplicationClient(client_id=integration.client_id)
+        # Initialize but do not yet get an access token; defer to the first request.
+        client = BackendApplicationClient(client_id=client_id)
         self.oauth = OAuth2Session(client=client)
-        self._fetch_token()
 
+    @tornado.gen.coroutine
+    def is_authorized(self):
+        '''Ask if session is authorized and ready to call out to the BC API
+
+        Subclasses can extend this with a test of the specific OAuth operation set
+        they rely on.
+        '''
+        raise tornado.gen.Return(self.oauth.authorized())
+
+    @tornado.gen.coroutine
     def _fetch_token(self):
         # Fetch an OAuth token
         try:
-            self.oauth.fetch_token(token_url=self.token_url, headers=self._headers())
+            yield self.oauth.fetch_token(token_url=self.token_url, headers=self._headers())
         except OAuth2Error as e:
 
             # Credential grant is misconfigured, the user needs to see this
@@ -734,15 +752,15 @@ class BrightcoveOAuthApi(object):
                     'OAuth2 denied with code 401 {}'.format(type(e).__name__))
             else:
                 _log.error(e)
-                return None
         except Exception as e:
             _log.error(e)
-            return None
 
-    def is_authorized(self):
-
-        '''Ask if session is authorized and ready to call out to the BC API'''
-        return self.oauth.authorzed()
+    @tornado.gen.coroutine
+    def _ready(self):
+        '''Ready the session by fetching a token if none exists'''
+        if self.oauth.token:
+            return
+        yield self._fetch_token()
 
     def _headers(self):
         '''Build a dictionary with a Authorization header
@@ -751,64 +769,85 @@ class BrightcoveOAuthApi(object):
         where the default location to send is in the POST body.
         '''
 
-        auth_string = base64.b64encode('%s:%s' % (
-            self.integration.client_id, self.integration.client_secret))
+        auth_string = base64.b64encode('%s:%s' % (self.client_id, self.client_secret))
         return {'Authorization': 'Basic %s' % auth_string}
-
-    def _respond(self, response):
-        return BrightcovePlayerManagementApi.json_to_object(response.json())
 
 
 class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
 
     '''Encapsulate player manangement calls'''
 
+    # account_ref is Brightcove's user id, or our publisher_id
     players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
+    # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
     player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
+    # branch is either "master" or "preview"; patched changes to a player are in preview
+    # until publish is called on their player.
     get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
     patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
     publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
     @tornado.gen.coroutine
     def is_authorized(self):
+        '''Test access token for read and write operations'''
 
-        if not self.oauth.authorized():
-            return False
+        self._ready()
+
+        if not super(BrightcovePlayerManagementApi, self).is_authorized():
+            raise tornado.gen.Return(False)
 
         # Confirm read access
-        test_response = self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        if not response.ok:
+            raise tornado.gen.Return(False)
 
-        # Confirm write access
-        # TODO
+        # The only write operations available require player ids, but we might not have one.
+        # So let's botch a request and expect a 404 and not a 401.
+        # @TODO consider removing this.
+        bad_response = yield self.oauth.get(self.patch_config_url.format(
+            account_ref=self.publisher_id, player_ref='not a valid player'))
+        if bad_response.status_code != 404:
+            import pdb; pdb.set_trace()
+            raise tornado.gen.Return(False)
 
-        return test_response.ok()
+        raise tornado.gen.Return(True)
 
     @tornado.gen.coroutine
     def get_player(self, player_ref):
-        response = self.oauth.get(self.get_player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
-        return self.json_to_object(response.json())
+        self._ready()
+        response = yield self.oauth.get(self.get_player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
+        rv = self.json_to_object(response.json())
+        raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def get_players(self):
+        self._ready()
         response = self.oauth.get(self.get_players_url.format(account_ref=self.publisher_id))
-        return map(BrightcovePlayerManagementApi.json_to_object, response.json())
+        rv = map(BrightcovePlayerManagementApi.json_to_object, response.json())
+        raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def publish_player(self, player_ref):
+        self._ready()
         response = self.oauth.post(self.publish_url.format(
             account_ref=self.publisher_id,
             player_ref=player_ref))
-        return response.ok()
+        rv = test_response.ok()
+        raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def patch_player(self, player_ref, patch_json):
-        # TODO consider adding a voluptuous schema to define player fields
+        self._ready()
         response = self.oauth.post(self.patch_config_url.format(
                 account_ref=self.publisher_id,
                 player_ref=player_ref),
             data=patch_json)
         raise tornado.gen.Return(self._respond(response))
 
-    @staticmethod
-    def json_to_object(bc_player_json):
-        return cmsdb.neondata.BrightcovePlayer(player_ref=5, account_ref=1)
+    def json_to_object(self, bc_player_json):
+        '''Reformat the BC json-formatted data to a BrightcovePlayer instance'''
+
+        return cmsdb.neondata.BrightcovePlayer(
+            player_ref=bc_player_json['id'],
+            integration_id=self.integration.integration_id,
+            name=bc_player_json['name'])

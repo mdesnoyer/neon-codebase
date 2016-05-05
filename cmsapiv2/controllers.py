@@ -435,7 +435,7 @@ class BrightcovePlayerHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
-        """Update a BrightcovePlayer tracking status and return it"""
+        """Update a BrightcovePlayer tracking status and return the player"""
 
         # The only field that is set via public api is is_tracked.
         schema = Schema({
@@ -455,7 +455,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
-        # Modify the db if changed
+        # Modify the db if flag changed
         is_tracked = Boolean()(args['is_tracked'])
         if player.is_tracked is not is_tracked:
             def _modify(p):
@@ -467,7 +467,6 @@ class BrightcovePlayerHandler(APIV2Handler):
         # CMS Api to put the plugin in the player and publish the player.
         # We do this anytime the user calls this API with is_tracked=True
         # because they are likely to be troubleshooting their setup.
-        # TODO try limiting this based on time difference with now and last run.
         if player.is_tracked:
             publish_result, error = BrightcovePlayer.publish_plugin_to_player(player)
 
@@ -479,13 +478,13 @@ class BrightcovePlayerHandler(APIV2Handler):
 class BrightcovePlayerHelper():
     @tornado.gen.coroutine
     def publish_plugin_to_player(player):
-        """Internal api method to publish the current plugin to BC's player"""
+        """Set and publish the current plugin to Brightcove's player"""
 
         integration = yield neondata.BrightcoveIntegration.get(
             player.integration_id, async=True)
         try:
             bc = yield BrightcovePlayerManagementApi(integration)
-            # Get the player JSON data from BC's API
+            # Get the player JSON data from Brightcove's API
             bc_player = yield bc.get_player(player.player_ref)
             patch = self._get_patch_string(bc_player, integration)
             yield bc.patch_player(player.player_ref, patch)
@@ -493,13 +492,18 @@ class BrightcovePlayerHelper():
             def _modify(p):
                 p.publish_date = datetime.now().isoformat()
                 p.published_plugin_version = self._get_current_tracking_version()
+                p.last_attempt_result = None
 
         except Exception as e:
-            # TODO what would be better stored for troubleshooting a problem after the fact.
+            # TODO What would be better stored for troubleshooting a problem?
             def _modify(p):
                 p.last_attempt_result = e.message
 
         yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+
+        # Signal success or failure to the caller
+        rv = yield not p.last_attempt_result, p.last_attempt_result
+        raise tornado.gen.Return(rv)
 
     @staticmethod
     def _get_patch_json(current_bc_player, integration):
@@ -580,10 +584,16 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         schema(args)
 
         # Check credentials with Brightcove's CMS API.
+        client_id = args.get('application_client_id')
+        client_secret = args.get('application_client_secret')
         IntegrationHelper.validate_oauth_credentials(
-            client_id=args.get('application_client_id'),
-            client_secret=args.get('application_client_secret'),
+            client_id=client_id,
+            client_secret=client_secret,
             integration_type=neondata.IntegrationType.BRIGHTCOVE)
+
+        # Retrieve Brightcove Players from their Api if oauth is set
+        if()
+
 
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
         integration = yield IntegrationHelper.create_integration(

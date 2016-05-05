@@ -4148,14 +4148,16 @@ class TestAccountLimitsHandler(TestControllersBase):
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
 
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test
     def test_search_with_limit(self):
         limits = neondata.AccountLimits(self.user.neon_api_key)
         yield limits.save(async=True)
- 
-        url = '/api/v2/%s/limits' % (self.user.neon_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                method="GET")
+
+        url = '/api/v2/%s/limits' % (self.user.neon_api_key)
+        params = {'account_id': 'test'}
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                method="GET",
+                                                body=params)
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_posts'], 0)

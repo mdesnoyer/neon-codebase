@@ -5141,7 +5141,7 @@ class BrightcovePlayer(NamespacedStoredObject):
     Brightcove Player model
     '''
     def __init__(self, player_ref, integration_id=None, name=None,
-                 is_tracked=False, publish_date=None,
+                 is_tracked=None, publish_date=None,
                  published_plugin_version=None, last_attempt_result=None):
 
         super(BrightcovePlayer, self).__init__(player_ref)

@@ -31,6 +31,9 @@ import urlparse
 import unittest
 from cvutils.imageutils import PILImageUtils
 import utils.neon
+from cmsdb.neondata import BrightcoveIntegration
+from collections import OrderedDict
+from requests.models import Response
 
 _log = logging.getLogger(__name__)
 
@@ -304,6 +307,54 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR, 'server slow'):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
                 self.api.find_videos_by_ids(['vid1'])
+
+class TestBrightcovePlayerManagementApi(test_utils.neontest.AsyncTestCase):
+
+    def setUp(self):
+        super(TestBrightcovePlayerManagementApi, self).setUp()
+        self.mocks = OrderedDict()
+
+        # Set up an Api instance to use for each test
+        integ = BrightcoveIntegration('test_integration')
+        integ.application_client_id = 'test_client_id'
+        integ.application_client_secret = 'test_client_secret'
+        self.mocks['fetch_token'] = patch('requests_oauthlib.OAuth2Session.fetch_token').start()
+        self.mocks['authorized'] = patch('requests_oauthlib.OAuth2Session.authorized').start()
+        self.mocks['authorized'].side_effect = [True]
+        self.api = api.brightcove_api.BrightcovePlayerManagementApi(integ)
+
+    def tearDown(self):
+        # Unmock from the outside in
+        for mock in self.mocks.values()[::-1]:
+            mock.stop()
+        super(TestBrightcovePlayerManagementApi, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_is_authorized(self):
+
+        r200 = Response()
+        r200.status_code = 200
+        r404 = Response()
+        r404.status_code = 404
+
+        with patch('requests_oauthlib.OAuth2Session.get') as get:
+            get2 = self._future_wrap_mock(get)
+            get2.side_effect = [r200, r404]
+            rv = yield self.api.is_authorized()
+
+        self.assertTrue(rv)
+
+    def test_get_player(self):
+        pass
+
+    def test_get_players(self):
+        pass
+
+    def test_publish_player(self):
+        pass
+
+    def test_patch_player(self):
+        pass
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
