@@ -44,7 +44,13 @@ while a:
                     lambda result_future: done(result_future, frameno))
     tot += 1
     a, b = vid.read()
-    vid.set(cv2.CAP_PROP_POS_FRAMES, frameno + fpsi)
+    des_fno = frameno + fpsi
+    while True:
+        vid.set(cv2.CAP_PROP_POS_FRAMES, des_fno)
+        frameno = vid.get(cv2.CAP_PROP_POS_FRAMES)
+        if abs(frameno - des_fno) <= 1:
+            break
+
 
 while len(res) < tot:
     print 'Waiting for results to finish'
