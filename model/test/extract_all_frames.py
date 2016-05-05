@@ -20,6 +20,7 @@ vid = cv2.VideoCapture(video)
 
 fps = vid.get(cv2.CAP_PROP_FPS)
 fpsi = int(np.round(fps))
+nframes = vid.get(cv2.CAP_PROP_FRAME_COUNT)
 
 app_lock = threading.Lock()
 res = []
@@ -46,13 +47,15 @@ while a:
         lambda result_future, frameno=frameno: done(result_future, frameno))
     #print 'Added',frameno
     tot += 1
-    a, b = vid.read()
     des_fno = frameno + fpsi
+    if des_fno > frameno:
+        break
     while True:
         vid.set(cv2.CAP_PROP_POS_FRAMES, des_fno)
         frameno = vid.get(cv2.CAP_PROP_POS_FRAMES)
         if abs(frameno - des_fno) <= 1:
             break
+    a, b = vid.read()
 
 
 while len(res) < tot:
