@@ -24,7 +24,7 @@ def done(result_future, frameno):
     with app_lock:
         exception = result_future.exception()
         if exception:
-            print 'Exception!'
+            print 'Exception!', exception.message
             return
         else:
             result = result_future.result()
@@ -48,4 +48,4 @@ while len(res) < frameno:
 with open('/tmp/lemonade_results', 'w') as f:
     f.write(str(res))
 
-
+predictor.exit()
