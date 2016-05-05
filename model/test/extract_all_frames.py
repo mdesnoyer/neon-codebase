@@ -38,7 +38,7 @@ a = True
 a, b = vid.read()
 tot = 0
 while a:
-    frameno = vid.get(cv2.CV_CAP_PROP_POS_FRAMES)
+    frameno = vid.get(cv2.CAP_PROP_POS_FRAMES)
     result_future = predictor.predict(b)
     result_future.add_done_callback(
                     lambda result_future: done(result_future, frameno))
