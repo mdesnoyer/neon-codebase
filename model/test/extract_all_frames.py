@@ -41,8 +41,8 @@ while a:
     frameno = vid.get(cv2.CAP_PROP_POS_FRAMES)
     result_future = predictor.predict(b)
     result_future.add_done_callback(
-                    lambda result_future: done(result_future, frameno))
-    print 'Added',frameno
+        lambda result_future, frameno=frameno: done(result_future, frameno))
+    #print 'Added',frameno
     tot += 1
     a, b = vid.read()
     des_fno = frameno + fpsi
