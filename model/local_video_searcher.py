@@ -1371,9 +1371,12 @@ class LocalSearcher(object):
 
     def choose_thumbnails(self, video, n=None, video_name='',):
         self._reset()
+        if n is None:
+            n = self.n_thumbs
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
-                  'for this run is %i', video_name, rand_seed)
+                  'for this run is %i with max thumbs %i', video_name, 
+                  rand_seed, n)
         np.random.seed(rand_seed)
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
@@ -1420,7 +1423,8 @@ class LocalSearcher(object):
         f_max_var_rej = lambda: min(0.1,
                                     self.col_stat.percentile(
                                             100. / self.n_thumbs))
-        self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
+        self.results = ResultsList(n_thumbs=self.n_thumbs, 
+                           min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
                            adapt_improve=self.adapt_improve,
