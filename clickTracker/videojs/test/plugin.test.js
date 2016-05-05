@@ -51,24 +51,4 @@ QUnit.test('registers itself with video.js', function(assert) {
   // Tick the clock forward enough to trigger the player to be "ready".
   this.clock.tick(1);
 
-  /*
-  assert.ok(
-    this.player.hasClass('vjs-neon-tracker'),
-    'the plugin adds a class to the player'
-  );
-  */
-
 });
-
-/*
-QUnit.test('util functions behave as expected', function(assert) {
-  // This is a unit not a browser one, so it should go somewhere else
-  let given = 'http://neonimage.com/here/123f34rfj/super%20space.jpg?andparams=true';
-  let want = 'super%20space';
-  assert.strictEqual(
-      want,
-      this.player.neon._getBasenameOf(given),
-      'basename is filename without path or protocol or param'
-  );
-});
-*/
