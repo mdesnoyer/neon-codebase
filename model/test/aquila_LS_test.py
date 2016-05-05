@@ -38,6 +38,7 @@ import os
 
 from time import time
 import datetime
+import dill
 
 '''
 =======================================================================
@@ -215,8 +216,10 @@ combiner_a = AdditiveCombiner(weight_valence=weight_valence,
                               weight_dict=weight_dict)
 
 _log.info('creating predictor')
-predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
-                                       concurrency=21)
+# predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
+#                                        concurrency=21)
+with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
+
 #f = open(os.path.join(dest_folder, 'config'), 'w')
 def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
@@ -252,7 +255,7 @@ use_all_data=False
 testing_dir=''
 n_thumbs=40,
 startend_clip=0.025
-non_locking = True
+non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
             processing_time_ratio, adapt_improve, use_best_data,
