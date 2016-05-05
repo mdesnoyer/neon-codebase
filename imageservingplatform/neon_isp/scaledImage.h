@@ -26,7 +26,6 @@ public:
     int GetHeight() const;
     int GetWidth () const;
     static bool ApproxEqual(int a, int b, int window);
-    //static bool ApproxEqualAspectRatio(int width, int height, double aspectRatio);
     static bool ApproxEqualAspectRatio(int widthone, int heightone, int widthtwo, int heighttwo);
     int FindApproxAspectRatio(int width, int height) const; 
     static int FindBestSizeMatchImage(int width, int height, const boost::ptr_vector<ScaledImage>& imgs); 
