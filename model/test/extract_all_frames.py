@@ -18,8 +18,6 @@ predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
 video = '/home/ubuntu/lemonade.m4v'
 vid = cv2.VideoCapture(video)
 
-scores = np.zeros(num_frames)
-
 app_lock = threading.Lock()
 res = []
 def done(result_future, frameno):
