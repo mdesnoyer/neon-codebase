@@ -16,6 +16,13 @@ On Brightcove Cloud Studio CMS, you can choose js and json to be bundled into th
 npm install --save
 ```
 
+## Building for distribution
+
+```sh
+npm build
+```
+Look in dist/ for the full and minified versions of the bundled plugin javascript.
+
 ## Examples
 
 Run the dev web server.
