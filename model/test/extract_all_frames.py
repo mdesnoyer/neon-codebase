@@ -19,7 +19,7 @@ video = '/home/ubuntu/lemonade.m4v'
 vid = cv2.VideoCapture(video)
 
 fps = vid.get(cv2.CAP_PROP_FPS)
-fpsi = int(np.round(fps))
+fpsi = int(np.round(fps)/3)
 nframes = vid.get(cv2.CAP_PROP_FRAME_COUNT)
 
 app_lock = threading.Lock()
