@@ -48,7 +48,7 @@ while a:
     #print 'Added',frameno
     tot += 1
     des_fno = frameno + fpsi
-    if des_fno > frameno:
+    if des_fno > nframes:
         break
     while True:
         vid.set(cv2.CAP_PROP_POS_FRAMES, des_fno)
@@ -62,4 +62,4 @@ while len(res) < tot:
     print 'Waiting for results to finish'
     sleep(2)
 
-predictor.exit()
+predictor.shutdown()
