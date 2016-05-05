@@ -1435,8 +1435,8 @@ class LocalSearcher(object):
             # increment the statemon
             statemon.state.increment('all_frames_filtered')
             # select which frames to use
-            frames = np.linspace(self.search_algo.buffer, 
-                                 self.num_frames - self.search_algo.buffer, 
+            frames = np.linspace(int(self.num_frames * self.startend_clip),
+                                 int(self.num_frames * (1 - self.startend_clip)),
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
@@ -1639,7 +1639,7 @@ class LocalSearcher(object):
                     best_gold[0:int(best_gold.shape[0]*.82), :, :],
                     *self.text_filter_params)
                 mask = text_det_out[1]
-                if (np.sum(mask > 0) * 1./mask.size) < self.filter_text_thresh:
+                if (np.sum(mask > 0) * 1./mask.size) > self.filter_text_thresh:
                     _log.debug('Best frame rejected by text filtering.')
                     return
             # ---------- END OF TEXT PROCESSING
