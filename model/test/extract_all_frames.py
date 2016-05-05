@@ -32,13 +32,14 @@ def done(result_future, frameno):
 
 a = True
 frameno = 0
+a, b = vid.read()
 while a:
-    a, b = vid.read()
     result_future = predictor.predict(b)
     result_future.add_done_callback(
                     lambda result_future: done(result_future, frameno))
     print frameno
     frameno += 1
+    a, b = vid.read()
 
 while len(res) < frameno:
     print 'Waiting for results to finish'
@@ -46,5 +47,5 @@ while len(res) < frameno:
 
 with open('/tmp/lemonade_results', 'w') as f:
     f.write(str(res))
-    
+
 
