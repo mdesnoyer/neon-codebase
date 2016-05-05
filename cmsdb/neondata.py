@@ -3151,12 +3151,7 @@ class NeonUserAccount(NamespacedStoredObject):
     
     def to_json(self):
         ''' to json '''
-        #def json_serial(obj):
-        #    if isinstance(obj, datetime.datetime):
-        #        serial = obj.isoformat()
-        #        return serial
         return json.dumps(self, default=lambda o: o.__dict__)
-        #return json.dumps(self, default=json_serial)
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
