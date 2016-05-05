@@ -260,3 +260,4 @@ video = '/home/ubuntu/vid/targ.mp4'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
 LS.choose_thumbnails(vid, 5, video_name='test')
+LS.exit()

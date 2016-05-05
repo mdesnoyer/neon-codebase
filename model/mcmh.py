@@ -70,6 +70,7 @@ class MCMH(object):
         self._tot = 0.  # sum of scores
         self.n_samples = 0.
         self._n = 0.  # total scored
+        self.N = N
 
         self._first = search_frames[0]
         self._last = search_frames[-1]
@@ -204,6 +205,10 @@ class MCMH(object):
         x3 = sf
         m = float(y2 - y1) / float(x2 - x1)
         return m * (x3 - x1) + y1
+
+    def exit(self):
+        _log.info('Exiting...')
+        del(self.predictor)
 
 
 
