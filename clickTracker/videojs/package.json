@@ -26,8 +26,7 @@
     "test:chrome": "npm run pretest && karma start test/karma.conf.js --browsers Chrome",
     "test:firefox": "npm run pretest && karma start test/karma.conf.js --browsers Firefox",
     "test:ie": "npm run pretest && karma start test/karma.conf.js --browsers IE",
-    "test:safari": "npm run pretest && karma start test/karma.conf.js --browsers Safari",
-    "prepublish": "npm run build"
+    "test:safari": "npm run pretest && karma start test/karma.conf.js --browsers Safari"
   },
   "keywords": [
     "videojs",
