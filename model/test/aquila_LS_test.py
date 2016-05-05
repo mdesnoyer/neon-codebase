@@ -1,4 +1,4 @@
-# let's try instantiating the predictor
+# for testing Aquila
 import sys
 if '/opt/neon/neon-codebase/core/model' not in sys.path:
     sys.path.insert(0, '/opt/neon/neon-codebase/core/model')
