@@ -20,7 +20,6 @@ vid = cv2.VideoCapture(video)
 
 fps = vid.get(cv2.CAP_PROP_FPS)
 fpsi = int(np.round(fps))
-cur = vid.get(cv2.CV_CAP_PROP_POS_FRAMES)
 
 app_lock = threading.Lock()
 res = []
