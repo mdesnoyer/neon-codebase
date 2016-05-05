@@ -295,7 +295,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
 
     #for event in ['ImageLoad', 'AdPlay', 'VideoPlay', 'VideoViewPercentage',
     #              'EventSequence']:
-    for event in ['EventSequence']:
+    for event in ['EventSequence', 'VideoPlay']:
         thread = ImpalaTableBuilder(input_path, cluster, event)
         thread.start()
         threads.append(thread)

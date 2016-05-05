@@ -144,117 +144,146 @@ class AccountHandler(APIV2Handler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
-         
+
 
 '''*********************************************************************
-IntegrationHelper 
+IntegrationHelper
 *********************************************************************'''
 class IntegrationHelper():
     """Class responsible for helping the integration handlers."""
-    @staticmethod 
+
+    @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type):
-        """Creates an integration for any integration type. 
-        
-        Keyword arguments: 
-        acct - a NeonUserAccount object 
-        args - the args sent in via the API request 
-        integration_type - the type of integration to create 
-        """ 
-             
-        if integration_type == neondata.IntegrationType.OOYALA: 
+    def create_integration(acct, args, integration_type, schema):
+        """Creates an integration for any integration type.
+
+        Keyword arguments:
+        acct - a NeonUserAccount object
+        args - the args sent in via the API request
+        integration_type - the type of integration to create
+        schema - validate args with this Voluptuous schema
+        """
+
+        schema(args)
+
+        if integration_type == neondata.IntegrationType.OOYALA:
             integration = neondata.OoyalaIntegration()
             integration.account_id = acct.neon_api_key
-            integration.partner_code = args['publisher_id'] 
+            integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
             integration.api_secret = args.get('api_secret', integration.api_secret)
-            integration.save()
+            yield integration.save(async=True)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
             integration.account_id = acct.neon_api_key
-            integration.publisher_id = args['publisher_id'] 
+            integration.publisher_id = args['publisher_id']
             integration.read_token = args.get('read_token', integration.read_token)
             integration.write_token = args.get('write_token', integration.write_token)
+            integration.application_client_id = args.get(
+                'application_client_id', integration.application_client_id)
+            integration.application_client_secret = args.get(
+                'application_client_secret', integration.application_client_secret)
             integration.callback_url = args.get('callback_url', integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
-            if playlist_feed_ids: 
+            if playlist_feed_ids:
                 integration.playlist_feed_ids = playlist_feed_ids.split(',')
-            integration.id_field = args.get('id_field', integration.id_field) 
-            integration.uses_batch_provisioning = bool(int(args.get('uses_batch_provisioning', 
-                                                          integration.uses_batch_provisioning)))
-            integration.save()
-        
-        result = yield tornado.gen.Task(acct.modify, 
-                                        acct.neon_api_key, 
-                                        lambda p: p.add_platform(integration))
-        
+            integration.id_field = args.get('id_field', integration.id_field)
+            integration.uses_batch_provisioning = args.get(
+                'uses_batch_provisioning', integration.uses_batch_provisioning)
+            integration.uses_bc_thumbnail_api = args.get(
+                'uses_bc_thumbnail_api', integration.uses_bc_thumbnail_api)
+            integration.uses_bc_videojs_player = args.get(
+                'uses_bc_videojs_player', integration.uses_bc_videojs_player)
+            integration.uses_bc_smart_player = args.get(
+                'uses_bc_smart_player', integration.uses_bc_smart_player)
+            integration.uses_bc_gallery = args.get(
+                'uses_bc_gallery', integration.uses_bc_gallery)
+            yield integration.save(async=True)
+
+        result = yield tornado.gen.Task(
+            acct.modify, acct.neon_api_key, lambda p: p.add_platform(integration))
+
         # ensure the integration made it to the database by executing a get
-        if integration_type == neondata.IntegrationType.OOYALA: 
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
-                                              integration.integration_id)
+        if integration_type == neondata.IntegrationType.OOYALA:
+            integration = yield tornado.gen.Task(
+                neondata.OoyalaIntegration.get, integration.integration_id)
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
-                                              integration.integration_id)
-        if integration: 
+            integration = yield tornado.gen.Task(
+                neondata.BrightcoveIntegration.get, integration.integration_id)
+        if integration:
             raise tornado.gen.Return(integration)
-        else: 
+        else:
             raise SaveError('unable to save the integration')
 
-    @staticmethod 
+    @staticmethod
     @tornado.gen.coroutine
-    def get_integration(integration_id, integration_type): 
-        """Gets an integration based on integration_id, account_id, and type.  
-        
-        Keyword arguments: 
-        account_id - the account_id that owns the integration 
+    def get_integration(integration_id, integration_type):
+        """Gets an integration based on integration_id, account_id, and type.
+
+        Keyword arguments:
+        account_id - the account_id that owns the integration
         integration_id - the integration_id of the integration we want
-        integration_type - the type of integration to create 
-        """ 
-        if integration_type == neondata.IntegrationType.OOYALA: 
-            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get, 
+        integration_type - the type of integration to create
+        """
+        if integration_type == neondata.IntegrationType.OOYALA:
+            integration = yield tornado.gen.Task(neondata.OoyalaIntegration.get,
                                               integration_id)
-        elif integration_type == neondata.IntegrationType.BRIGHTCOVE: 
-            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
+        elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
+            integration = yield tornado.gen.Task(neondata.BrightcoveIntegration.get,
                                               integration_id)
         if integration:
-            raise tornado.gen.Return(integration) 
-        else: 
+            raise tornado.gen.Return(integration)
+        else:
             raise NotFoundError('%s %s' % ('unable to find the integration for id:',integration_id))
 
-    @staticmethod 
+    @staticmethod
     @tornado.gen.coroutine
     def get_integrations(account_id):
-        """ gets all integrations for an account. 
-        
-        Keyword arguments 
+        """ gets all integrations for an account.
+
+        Keyword arguments
         account_id - the account_id that is associated with the integrations
-        """ 
+        """
         user_account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not user_account: 
+        if not user_account:
             raise NotFoundError()
 
         integrations = yield user_account.get_integrations(async=True)
-        rv = {} 
-        rv['integrations'] = [] 
+        rv = {}
+        rv['integrations'] = []
         for i in integrations:
-           new_obj = None  
+           new_obj = None
            if type(i).__name__.lower() == neondata.IntegrationType.BRIGHTCOVE:
                new_obj = yield BrightcoveIntegrationHandler.db2api(i)
                new_obj['type'] = 'brightcove'
-           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA: 
-               new_obj = yield OoyalaIntegrationHandler.db2api(i) 
+           elif type(i).__name__.lower() == neondata.IntegrationType.OOYALA:
+               new_obj = yield OoyalaIntegrationHandler.db2api(i)
                new_obj['type'] = 'ooyala'
-           else: 
-               continue  
+           else:
+               continue
 
-           if new_obj: 
+           if new_obj:
                rv['integrations'].append(new_obj)
 
-        raise tornado.gen.Return(rv) 
+        raise tornado.gen.Return(rv)
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def validate_oauth_credentials(client_id, client_secret, integration_type):
+        if integration_type is neondata.IntegrationType.BRIGHTCOVE:
+            if client_id and not client_secret:
+                raise BadRequestError('App id cannot be valued if secret is not also valued')
+            if client_secret and not client_id:
+                raise BadRequestError('App secret cannot be valued if id is not also valued')
+            # TODO validate with BC that keys are valid and the granted permissions are as expected.
+            # (This is implemented in the Oauth feature branch. Need to invoke it here after merge)
+        elif integration_type is neondata.IntegrationType.OOYALA:
+            # Implement for Ooyala
+            pass
 
 '''*********************************************************************
 OoyalaIntegrationHandler
@@ -263,25 +292,28 @@ class OoyalaIntegrationHandler(APIV2Handler):
     """Handles get,put,post requests to the ooyala endpoint within the v2 api."""
     @tornado.gen.coroutine
     def post(self, account_id):
-        """Handles an ooyala endpoint post request 
-        
+        """Handles an ooyala endpoint post request
+
         Keyword arguments:
-        """ 
+        """
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'api_key': Any(str, unicode, Length(min=1, max=1024)), 
-          'api_secret': Any(str, unicode, Length(min=1, max=1024)), 
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
+            'api_key': Any(str, unicode, Length(min=1, max=1024)),
+            'api_secret': Any(str, unicode, Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
+
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-        integration = yield tornado.gen.Task(IntegrationHelper.create_integration, acct, args, neondata.IntegrationType.OOYALA)
+        integration = yield tornado.gen.Task(
+            IntegrationHelper.create_integration, acct, args,
+            neondata.IntegrationType.OOYALA, schema=schema)
         statemon.state.increment('post_ooyala_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
- 
+
     @tornado.gen.coroutine
     def get(self, account_id):
         """handles an ooyala endpoint get request"""
@@ -368,40 +400,52 @@ class OoyalaIntegrationHandler(APIV2Handler):
 BrightcoveIntegrationHandler
 *********************************************************************'''
 class BrightcoveIntegrationHandler(APIV2Handler):
-    """handles all requests to the brightcove endpoint within the v2 API"""  
+    """handles all requests to the brightcove endpoint within the v2 API"""
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles a brightcove endpoint post request""" 
+        """handles a brightcove endpoint post request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=512)), 
-          'write_token': Any(str, unicode, Length(min=1, max=512)),
-          'callback_url': Any(str, unicode, Length(min=1, max=1024)), 
-          'id_field': Any(str, unicode, Length(min=1, max=32)),
-          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': Boolean()
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
+            'read_token': Any(str, unicode, Length(min=1, max=512)),
+            'write_token': Any(str, unicode, Length(min=1, max=512)),
+            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
+            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
+            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
+            'id_field': Any(str, unicode, Length(min=1, max=32)),
+            'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+            'uses_batch_provisioning': Boolean(),
+            'uses_bc_thumbnail_api': Boolean(),
+            'uses_bc_videojs_player': Boolean(),
+            'uses_bc_smart_player': Boolean(),
+            'uses_bc_gallery': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
+
+        # Check credentials with Brightcove's CMS API.
+        IntegrationHelper.validate_oauth_credentials(
+            client_id=args.get('application_client_id'),
+            client_secret=args.get('application_client_secret'),
+            integration_type=neondata.IntegrationType.BRIGHTCOVE)
+
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
-        integration = yield IntegrationHelper.create_integration(acct, 
-                                                             args, 
-                                                             neondata.IntegrationType.BRIGHTCOVE)
+        integration = yield IntegrationHelper.create_integration(
+            acct, args, neondata.IntegrationType.BRIGHTCOVE, schema=schema)
         statemon.state.increment('post_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
 
     @tornado.gen.coroutine
-    def get(self, account_id):  
+    def get(self, account_id):
         """handles a brightcove endpoint get request"""
- 
+
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -411,10 +455,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        integration_id = args['integration_id'] 
+        integration_id = args['integration_id']
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
         statemon.state.increment('get_brightcove_oks')
         rv = yield self.db2api(integration, fields=fields)
         self.success(rv)
@@ -424,62 +468,92 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint put request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-          'read_token': Any(str, unicode, Length(min=1, max=1024)), 
-          'write_token': Any(str, unicode, Length(min=1, max=1024)), 
-          'callback_url': Any(str, unicode, Length(min=1, max=1024)), 
-          'publisher_id': Any(str, unicode, Length(min=1, max=512)),
-          'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
-          'uses_batch_provisioning': Boolean()
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+            'read_token': Any(str, unicode, Length(min=1, max=1024)),
+            'write_token': Any(str, unicode, Length(min=1, max=1024)),
+            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
+            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
+            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
+            'publisher_id': Any(str, unicode, Length(min=1, max=512)),
+            'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
+            'uses_batch_provisioning': Boolean(),
+            'uses_bc_thumbnail_api': Boolean(),
+            'uses_bc_videojs_player': Boolean(),
+            'uses_bc_smart_player': Boolean(),
+            'uses_bc_gallery': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
-        integration_id = args['integration_id'] 
+        integration_id = args['integration_id']
         schema(args)
 
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
+
+        # Check credentials with Brightcove's CMS API.
+        IntegrationHelper.validate_oauth_credentials(
+            args.get('application_client_id', integration.application_client_id),
+            args.get('application_client_secret', integration.application_client_secret),
+            neondata.IntegrationType.BRIGHTCOVE)
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
             p.write_token = args.get('write_token', integration.write_token)
+            p.application_client_id = args.get('application_client_id', integration.application_client_id)
+            p.application_client_secret= args.get('application_client_secret', integration.application_client_secret)
             p.publisher_id = args.get('publisher_id', integration.publisher_id)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
-            if playlist_feed_ids: 
+            if playlist_feed_ids:
                 p.playlist_feed_ids = playlist_feed_ids.split(',')
             p.uses_batch_provisioning = Boolean()(
-               args.get('uses_batch_provisioning', 
-               integration.uses_batch_provisioning))
- 
+                args.get('uses_batch_provisioning',
+                integration.uses_batch_provisioning))
+            p.uses_bc_thumbnail_api = Boolean()(
+                args.get('uses_bc_thumbnail_api',
+                integration.uses_bc_thumbnail_api))
+            p.uses_bc_videojs_player = Boolean()(
+                args.get('uses_bc_videojs_player',
+                integration.uses_bc_videojs_player))
+            p.uses_bc_smart_player = Boolean()(
+                args.get('uses_bc_smart_player',
+                integration.uses_bc_smart_player))
+            p.uses_bc_gallery = Boolean()(
+                args.get('uses_bc_gallery',
+                integration.uses_bc_gallery))
+
         result = yield neondata.BrightcoveIntegration.modify(
-            integration_id, 
-            _update_integration, 
+            integration_id,
+            _update_integration,
             async=True)
 
         integration = yield IntegrationHelper.get_integration(
-            integration_id,  
-            neondata.IntegrationType.BRIGHTCOVE) 
- 
+            integration_id,
+            neondata.IntegrationType.BRIGHTCOVE)
+
         statemon.state.increment('put_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return [ 'integration_id', 'account_id', 'read_token', 
-                 'write_token', 'last_process_date', 'publisher_id',
-                 'callback_url', 'enabled', 'playlist_feed_ids',
-                 'uses_batch_provisioning', 'id_field', 
+        return [ 'integration_id', 'account_id', 'read_token',
+                 'write_token', 'last_process_date', 'application_client_id',
+                 'application_client_secret', 'publisher_id', 'callback_url',
+                 'enabled', 'playlist_feed_ids', 'uses_batch_provisioning',
+                 'uses_bc_thumbnail_api', 'uses_bc_videojs_player',
+                 'uses_bc_smart_player', 'uses_bc_gallery', 'id_field',
                  'created', 'updated' ]
     
     @classmethod
     def _get_passthrough_fields(cls):
-        return [ 'integration_id', 'read_token', 'account_id', 
-                 'write_token', 'last_process_date', 'publisher_id',
-                 'callback_url', 'enabled', 'playlist_feed_ids', 
-                 'uses_batch_provisioning', 'id_field', 
+        return [ 'integration_id', 'account_id', 'read_token',
+                 'write_token', 'last_process_date', 'application_client_id',
+                 'application_client_secret', 'publisher_id', 'callback_url',
+                 'enabled', 'playlist_feed_ids', 'uses_batch_provisioning',
+                 'uses_bc_thumbnail_api', 'uses_bc_videojs_player',
+                 'uses_bc_smart_player', 'uses_bc_gallery', 'id_field',
                  'created', 'updated' ]
 
     @classmethod
@@ -494,6 +568,29 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                }  
 
 '''*********************************************************************
+BrightcovePlayerHandler
+*********************************************************************'''
+class BrightcovePlayerHandler(APIV2Handler):
+    """Handle requests to Brightcove player endpoint"""
+
+    @classmethod
+    def get_access_levels(self):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ,
+                HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        """Get the list of BrightcovePlayer for the given integration"""
+        self.success([])
+
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        """Update a BrightcovePlayer and return it"""
+        self.success({})
+
+'''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
@@ -505,8 +602,8 @@ class ThumbnailHandler(APIV2Handler):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('url') : Any(str, unicode, Length(min=1, 
-                                                                    max=2048))
+          Required('url') : Any(str, unicode, Length(min=1, max=2048)),
+          'thumbnail_ref' : Any(str, unicode, Length(min=1, max=1024)) 
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -514,16 +611,24 @@ class ThumbnailHandler(APIV2Handler):
         video_id = args['video_id'] 
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key, video_id)
+        external_thumbnail_id = args.get('thumbnail_ref', None) 
 
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       internal_video_id)
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id, 
+            async=True)
 
-        current_thumbnails = yield tornado.gen.Task(
-            neondata.ThumbnailMetadata.get_many, video.thumbnail_ids)
+        current_thumbnails = yield neondata.ThumbnailMetadata.get_many( 
+            video.thumbnail_ids, 
+            async=True)
+
         cdn_key = neondata.CDNHostingMetadataList.create_key(
-            account_id_api_key, video.integration_id)
-        cdn_metadata = yield tornado.gen.Task(
-            neondata.CDNHostingMetadataList.get, cdn_key)
+            account_id_api_key, 
+            video.integration_id)
+
+        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
+            cdn_key, 
+            async=True)
+
         # ranks can be negative 
         min_rank = 1
         for thumb in current_thumbnails:
@@ -535,21 +640,25 @@ class ThumbnailHandler(APIV2Handler):
         new_thumbnail = neondata.ThumbnailMetadata(
             None,
             internal_vid=internal_video_id, 
+            external_id=external_thumbnail_id,
             ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
             rank=cur_rank)
+
         # upload image to cdn 
-        yield video.download_and_add_thumbnail(new_thumbnail,
-                                               external_thumbnail_id=args['url'],
-                                               cdn_metadata=cdn_metadata,
-                                               async=True)
+        yield video.download_and_add_thumbnail(
+            new_thumbnail,
+            image_url=args['url'],
+            cdn_metadata=cdn_metadata,
+            async=True)
+
         #save the thumbnail
-        yield tornado.gen.Task(new_thumbnail.save)
+        yield new_thumbnail.save(async=True)
 
         # save the video 
-        new_video = yield tornado.gen.Task(neondata.VideoMetadata.modify, 
-                                           internal_video_id, 
-                                           lambda x: x.thumbnail_ids.append(
-                                               new_thumbnail.key))
+        new_video = yield neondata.VideoMetadata.modify(
+            internal_video_id, 
+            lambda x: x.thumbnail_ids.append(new_thumbnail.key),
+            async=True) 
 
         if new_video: 
             statemon.state.increment('post_thumbnail_oks')
@@ -1580,10 +1689,10 @@ class UserHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
+        # TODO give ability to modify access_level
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          Optional('access_level') : All(Coerce(int), Range(min=1, max=63)),
           'first_name': Any(str, unicode, Length(min=1, max=256)),
           'last_name': Any(str, unicode, Length(min=1, max=256)),
           'title': Any(str, unicode, Length(min=1, max=32))
@@ -1592,19 +1701,13 @@ class UserHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         username = args.get('username') 
-        new_access_level = args.get('access_level')
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username: 
                 raise NotAuthorizedError('Can not update another\
                                users account')
  
-            if new_access_level > self.user.access_level:
-                raise NotAuthorizedError('Can not set access_level above\
-                               requesting users access level')
-
         def _update_user(u): 
-            u.access_level = new_access_level 
             u.first_name = args.get('first_name', u.first_name) 
             u.last_name = args.get('last_name', u.last_name) 
             u.title = args.get('title', u.title) 
@@ -1805,6 +1908,8 @@ application = tornado.web.Application([
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$', 
         BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
+        BrightcovePlayerHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$', 
         OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$', 

@@ -56,7 +56,7 @@ class AuthenticateHandler(APIV2Handler):
         })
         args = self.parse_args()
         schema(args)
-        username = args.get('username') 
+        username = args.get('username').lower() 
         password = args.get('password')
  
         api_accessor = yield neondata.User.get(username, async=True) 
@@ -133,7 +133,7 @@ class LogoutHandler(APIV2Handler):
         try: 
             access_token = args.get('token') 
             payload = JWTHelper.decode_token(access_token) 
-            username = payload['username'] 
+            username = payload['username'].lower() 
             
             def _update_user(u): 
                 u.access_token = None
@@ -195,7 +195,7 @@ class RefreshTokenHandler(APIV2Handler):
         try: 
             payload = JWTHelper.decode_token(refresh_token) 
     
-            username = payload['username']
+            username = payload['username'].lower()
             user = yield neondata.User.get(username, async=True)
             account_ids = yield user.get_associated_account_ids(async=True)
 
@@ -271,7 +271,7 @@ class NewAccountHandler(APIV2Handler):
         account.default_thumbnail_id = args.get('default_thumbnail_id', None)
         account.email = args.get('email') 
         
-        username = args.get('admin_user_username') 
+        username = args.get('admin_user_username').lower() 
         password = args.get('admin_user_password')
 
         # verify there isn't already an user with this email
