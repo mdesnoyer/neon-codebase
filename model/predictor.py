@@ -219,6 +219,16 @@ class Predictor(object):
         else:
             raise NotImplementedError()
 
+    def shutdown(self):
+        '''
+        There is currently a bug in the gRPC garbage collection,
+        so this function is useful to disable stubs and channels
+        that are not created within the frame of a function (i.e.,
+        if the stub / channel is created in __main__, or as the
+        attribute of a class, as in DeepnetPredictor).
+        '''
+        pass
+
 
 class DeepnetPredictor(Predictor):
     '''Prediction using the deepnet Aquila (or an arbitrary predictor). 
@@ -291,6 +301,10 @@ class DeepnetPredictor(Predictor):
         '''
         with self.cv:
             return self.active == 0
+
+    def shutdown(self):
+        del self.channel
+        del self.stub
 
 
 class KFlannPredictor(Predictor):

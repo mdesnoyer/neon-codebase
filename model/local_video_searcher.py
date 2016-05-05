@@ -1417,13 +1417,13 @@ class LocalSearcher(object):
         raw_results = self.results.get_results()
         # format it into the expected format
         try:
-            perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
+            perc_samp = self.search_algo.n_samples * 100. / self.search_algo.max_samps
             _log.info('%.2f%% of video sampled' % perc_samp)
         except Exception, e:
             _log.info('Unknown percentage of video sampled')
             _log.debug('Exception: %s', e.message)
         try:
-            perc_srch = self._searched * 100. / (self.search_algo.N - 1)
+            perc_srch = self._searched * 100. / (self.search_algo.max_samps - 1)
             _log.info('%.2f%% of video searched' % perc_srch)
         except Exception, e:
             _log.info('Unknown percentage of video searched')
@@ -1862,4 +1862,4 @@ class LocalSearcher(object):
 
     def exit(self):
         _log.info('Exiting...')
-        del(self.predictor)
+        self.predictor.shutdown()
