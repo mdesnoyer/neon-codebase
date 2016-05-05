@@ -29,12 +29,12 @@ ScaledImage::ApproxEqual(int a, int b, int window){
 }
 
 bool
-ScaledImage::ApproxEqualAspectRatio(int width, int height, double aspectRatio)
+ScaledImage::ApproxEqualAspectRatio(int widthone, int heightone, int widthtwo, int heighttwo)
 {
-    if (height == 0) { 
+    if (heightone == 0 || heighttwo == 0) { 
         return false; 
-    } 
-    if (((double)width / (double)height) == aspectRatio) {
+    }
+    if (widthone * heighttwo == heightone * widthtwo) {  
         return true; 
     } 
     else { 
@@ -60,7 +60,6 @@ ScaledImage::FindBestSizeMatchImage(int width, int height, const boost::ptr_vect
         return final_index; 
     }
  
-    double desiredAspectRatio = (double)width / (double)height; 
     long int min_matching_area = LONG_MAX; 
     for(unsigned i=0; i < numOfImages; i++) {
         int image_height = imgs[i].GetHeight();
@@ -75,7 +74,8 @@ ScaledImage::FindBestSizeMatchImage(int width, int height, const boost::ptr_vect
         if (ScaledImage::ApproxEqualAspectRatio(
              image_width, 
              image_height, 
-             desiredAspectRatio)) { 
+             width, 
+             height)) { 
             long int matching_area = image_height*image_width; 
             if (matching_area < min_matching_area) { 
                 aspect_match_index = i;
