@@ -1416,7 +1416,7 @@ class LocalSearcher(object):
             _log.debug('No suitable frames have been found for video %s!'
                       ' Will uniformly select frames', video_name)
             # increment the statemon
-            statemone.stat.increment('all_frames_filtered')
+            statemon.state.increment('all_frames_filtered')
             # select which frames to use
             frames = np.linspace(self.search_algo.buffer, 
                                  self.num_frames - self.search_algo.buffer, 

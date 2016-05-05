@@ -258,6 +258,7 @@ class Cluster():
             'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
             'mapreduce.task.timeout' : 1800000,
             'mapreduce.reduce.speculative': 'false',
+            'mapreduce.map.speculative': 'false',
             'io.file.buffer.size': 65536
         }
 
@@ -791,6 +792,10 @@ class Cluster():
                 's3://elasticmapreduce/libs/impala/setup-impala',
                 ['--base-path', 's3://elasticmapreduce',
                  '--impala-version', '1.2.4']),
+            BootstrapAction(
+                'Configure Daemons',
+                's3://elasticmapreduce/bootstrap-actions/configure-daemons',
+                ['--client-opts=-Xmx14000m']),
             BootstrapAction(
                 'Configure Hadoop',
                 's3://elasticmapreduce/bootstrap-actions/configure-hadoop',
