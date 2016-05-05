@@ -4,6 +4,8 @@ The script extracts all frames of a video and associates them with scores.
 import threading
 import sys
 from time import sleep
+import cv2
+import numpy as np
 if '/opt/neon/neon-codebase/core/model' not in sys.path:
     sys.path.insert(0, '/opt/neon/neon-codebase/core/model')
     sys.path.insert(0, '/opt/neon/neon-codebase/core')
