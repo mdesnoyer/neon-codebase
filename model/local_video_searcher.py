@@ -920,6 +920,8 @@ class ResultsList(object):
         if n_thumbs is not None:
             self.n_thumbs = n_thumbs
         self.results = [_Result() for x in range(self.n_thumbs)]
+        import ipdb
+        ipdb.set_trace()
         self.min = self.results[0].score
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
 
