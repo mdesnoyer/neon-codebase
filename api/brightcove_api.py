@@ -709,24 +709,37 @@ class BrightcoveOAuthApi(object):
 
     token_url = 'https://oauth.brightcove.com/v3/access_token'
 
-    def __init__(self, client_id=None, client_secret=None, publisher_id=None, integration=None):
-        '''Ensure integration is set up and the client credential is valued'''
+    def __init__(self, integration=None, client_id=None, client_secret=None, publisher_id=None):
+        '''Ensure integration is set up and the client credential is valued
 
-        # Use the specific parameters if they're set, but fall back to integration
+        Either client_id/secret/publisher_id or integration needs to be set.
+        '''
+
+        # Prefer integration if passed
         if integration:
             self.integration = integration
-            self.client_id = client_id or integration.application_client_id
-            self.client_secret = client_secret or integration.application_client_secret
-            self.publisher_id = publisher_id or integration.publisher_id
+            self.client_id = integration.application_client_id
+            self.client_secret = integration.application_client_secret
+            self.publisher_id = integration.publisher_id
+        else:
+            self.integration = None
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.publisher_id = publisher_id
+
         # Assert the minimum of settings are set
         if self.client_id is None:
-            raise BrightcoveOAuthConfigException('BcOauthApi id missing in publisher {}'.format(publisher_id))
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi id missing in publisher {}'.format(publisher_id))
         if self.client_secret is None:
-            raise BrightcoveOAuthConfigException('BcOauthApi secret missing in publisher {}'.format(publisher_id))
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi secret missing in publisher {}'.format(publisher_id))
         if self.publisher_id is None:
-            raise BrightcoveOAuthConfigException('BcOauthApi publisher id missing in publisher {}'.format(publisher_id))
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi publisher id missing in publisher {}'.format(publisher_id))
 
-        # Initialize but do not yet get an access token; defer to the first request.
+        # Initialize but do not yet get an access token.
+        # Defer that to the first request.
         client = BackendApplicationClient(client_id=client_id)
         self.oauth = OAuth2Session(client=client)
 
@@ -815,15 +828,17 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
     @tornado.gen.coroutine
     def get_player(self, player_ref):
         self._ready()
-        response = yield self.oauth.get(self.get_player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
-        rv = self.json_to_object(response.json())
+        response = yield self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
+        item = json.loads(response.json())
+        rv = self.dict_to_object(item)
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def get_players(self):
         self._ready()
-        response = self.oauth.get(self.get_players_url.format(account_ref=self.publisher_id))
-        rv = map(BrightcovePlayerManagementApi.json_to_object, response.json())
+        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        items = json.loads(response.json())['items']
+        rv = map(self.dict_to_object, items)
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
@@ -844,10 +859,14 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
             data=patch_json)
         raise tornado.gen.Return(self._respond(response))
 
-    def json_to_object(self, bc_player_json):
-        '''Reformat the BC json-formatted data to a BrightcovePlayer instance'''
+    def dict_to_object(self, data):
+        '''Reformat the raw dictionary data to a BrightcovePlayer instance'''
+
+        player_ref = data.get('id')
+        if player_ref:
+            player = cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
 
         return cmsdb.neondata.BrightcovePlayer(
-            player_ref=bc_player_json['id'],
+            player_ref=player_ref,
             integration_id=self.integration.integration_id,
-            name=bc_player_json['name'])
+            name=data['name'])

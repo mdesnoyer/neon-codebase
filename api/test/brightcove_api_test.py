@@ -318,6 +318,7 @@ class TestBrightcovePlayerManagementApi(test_utils.neontest.AsyncTestCase):
         integ = BrightcoveIntegration('test_integration')
         integ.application_client_id = 'test_client_id'
         integ.application_client_secret = 'test_client_secret'
+        integ.publisher_id = 12345
         self.mocks['fetch_token'] = patch('requests_oauthlib.OAuth2Session.fetch_token').start()
         self.mocks['authorized'] = patch('requests_oauthlib.OAuth2Session.authorized').start()
         self.mocks['authorized'].side_effect = [True]
@@ -331,24 +332,74 @@ class TestBrightcovePlayerManagementApi(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_is_authorized(self):
-
         r200 = Response()
         r200.status_code = 200
         r404 = Response()
         r404.status_code = 404
 
-        with patch('requests_oauthlib.OAuth2Session.get') as get:
-            get2 = self._future_wrap_mock(get)
-            get2.side_effect = [r200, r404]
+        with patch('requests_oauthlib.OAuth2Session.get') as _get:
+            get = self._future_wrap_mock(_get)
+            get.side_effect = [r200, r404]
             rv = yield self.api.is_authorized()
-
+            # Called with..
         self.assertTrue(rv)
 
+    @tornado.testing.gen_test
     def test_get_player(self):
-        pass
 
+        given_ref = 'BkMO9qa8x'
+        given_name = 'neon player'
+        given_account = 12345
+
+        response = Response()
+        response.status_code = 200
+        response.json = MagicMock(name="json")
+        response.json.side_effect = [json.dumps({
+            'id': given_ref,
+            'name': given_name,
+            'accountId': given_account
+        })]
+        with patch('requests_oauthlib.OAuth2Session.get') as _get:
+            get = self._future_wrap_mock(_get)
+            get.side_effect = [response]
+            player = yield self.api.get_player(given_ref)
+        self.assertEqual(player.player_ref, given_ref)
+        self.assertEqual(player.name, given_name)
+
+    @tornado.testing.gen_test
     def test_get_players(self):
-        pass
+        given_ref = 'BkMO9qa8x'
+        given_name = 'neon player'
+        given_ref_2 = 'h9fO9qa8x'
+        given_name_2 = 'alternate player'
+        given_account = 12345
+
+        response = Response()
+        response.status_code = 200
+        response.json = MagicMock(name="json")
+        response.json.side_effect = [json.dumps({
+            "items": [
+                {
+                    'id': given_ref,
+                    'name': given_name,
+                    'accountId': given_account
+                }, {
+                    'id': given_ref_2,
+                    'name': given_name_2,
+                    'accountId': given_account
+                }
+            ]
+        })]
+        with patch('requests_oauthlib.OAuth2Session.get') as _get:
+            get = self._future_wrap_mock(_get)
+            get.side_effect = [response]
+            players = yield self.api.get_players()
+        self.assertEqual(2, len(players))
+        self.assertEqual(players[0].player_ref, given_ref)
+        self.assertEqual(players[0].name, given_name)
+        self.assertEqual(players[1].player_ref, given_ref_2)
+        self.assertEqual(players[1].name, given_name_2)
+
 
     def test_publish_player(self):
         pass
