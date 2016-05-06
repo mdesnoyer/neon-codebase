@@ -416,6 +416,7 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
     def test_patch_player(self):
         pass
 
+    @unittest.skip('live integration test')
     @tornado.testing.gen_test
     def test_real_client_credential(self):
         '''Exercise the code with a test Brightcove account'''
