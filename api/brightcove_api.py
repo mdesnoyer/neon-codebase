@@ -858,7 +858,7 @@ class BrightcoveOAuthApi(object):
 
         # Confirm read access
         response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
-        if not response.ok:
+        if not response.code == 200:
             raise tornado.gen.Return(False)
 
         # The only write operations available require player ids, but we might not have one.
@@ -866,7 +866,7 @@ class BrightcoveOAuthApi(object):
         # So let's botch a request and expect a 404 and not a 401.
         bad_response = yield self.oauth.get(self.patch_config_url.format(
             account_ref=self.publisher_id, player_ref='not a valid player'))
-        if bad_response.status_code != 404:
+        if bad_response.error.code != 404:
             raise tornado.gen.Return(False)
 
         raise tornado.gen.Return(True)

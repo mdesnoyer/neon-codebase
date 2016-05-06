@@ -17,7 +17,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
-from api.brightcove_api import BrightcoveOAuthApi
+from api.brightcove_api import BrightcoveOAuthApi, BrightcoveOAuth2Session
 import bcove_responses
 from cmsdb import neondata
 import json
@@ -320,13 +320,9 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         integ.application_client_id = 'test_client_id'
         integ.application_client_secret = 'test_client_secret'
         integ.publisher_id = 12345
-#        self.mocks['fetch_token'] = patch('requests_oauthlib.OAuth2Session.fetch_token').start()
-#        self.mocks['authorized'] = patch('requests_oauthlib.OAuth2Session.authorized').start()
-#        self.mocks['authorized'].side_effect = [True]
         self.api = BrightcoveOAuthApi(integ)
 
     def tearDown(self):
-        self.api.oauth.token = None
         # Unmock from the outside in
         for mock in self.mocks.values()[::-1]:
             mock.stop()
@@ -335,23 +331,27 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_is_authorized(self):
 
+        rv = yield self.api.is_authorized()
+        self.assertFalse(rv)
+
         self.api.oauth.token = 'set'
-        responses = {
-            self.api._get_players_url(): 1,
-            self.api._get_player_url('not a valid player'): 2,
-        }
-
-        r200 = Response()
-        r200.status_code = 200
-        r404 = Response()
-        r404.status_code = 404
-
-        with patch('requests_oauthlib.OAuth2Session.get') as _get:
+        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
             get = self._future_wrap_mock(_get)
-            get.side_effect = [r200, r404]
-            #rv = yield self.api.is_authorized()
-            # Called with..
-        #self.assertTrue(rv)
+            side_effect = [HTTPResponse(HTTPRequest('http://test.com'), 401)]
+            get.side_effect = side_effect
+            rv = yield self.api.is_authorized()
+        self.assertFalse(rv)
+
+        # Both authorize api calls pass
+        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
+            get = self._future_wrap_mock(_get)
+            side_effect = [
+                HTTPResponse(HTTPRequest('http://test.com'), 200),
+                HTTPResponse(HTTPRequest('http://test.com'), 404),
+            ]
+            get.side_effect = side_effect
+            rv = yield self.api.is_authorized()
+        self.assertTrue(rv)
 
     @tornado.testing.gen_test
     def test_get_player(self):
