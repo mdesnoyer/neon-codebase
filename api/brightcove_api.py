@@ -743,7 +743,7 @@ class BrightcoveOAuth2Session(OAuth2Session):
         if response.error:
             raise Exception('Cannot get token for client id {}'.format(self.client_id))
         self.token = self._extract_token(response)
-        tornado.gen.Return(self.token)
+        raise tornado.gen.Return(self.token)
 
     def _extract_token(self, response):
         return json.loads(response.body)['access_token']
