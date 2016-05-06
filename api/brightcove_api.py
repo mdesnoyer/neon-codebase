@@ -812,7 +812,10 @@ class BrightcoveOAuthApi(object):
         '''Get a single Brightcove player for the give player_ref'''
         response = yield self.oauth.get(self._get_player_url(player_ref))
         item = json.loads(response.body)
-        rv = self.dict_to_object(item) if return_neon_object else item
+        if return_neon_object:
+            rv = yield self.dict_to_object(item)
+        else:
+            rv = item
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
@@ -821,7 +824,10 @@ class BrightcoveOAuthApi(object):
         response = yield self.oauth.get(self._get_players_url())
         items = [i for i in json.loads(response.body)['items']
                  if i['id'] != u'default'] # Remove the "default" player
-        rv = map(self.dict_to_object, items) if return_neon_object else items
+        if return_neon_object:
+            rv = yield map(self.dict_to_object, items)
+        else:
+            rv = items
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
@@ -841,13 +847,19 @@ class BrightcoveOAuthApi(object):
         response = yield self.oauth.post(url, data=patch_json)
         raise tornado.gen.Return(self._respond(response))
 
+    @tornado.gen.coroutine
     def dict_to_object(self, data):
-        '''Convert the raw dictionary data to a BrightcovePlayer instance'''
-        player_ref = data.get('id')
+        '''Convert the raw dictionary data to a BrightcovePlayer instance
 
-        return cmsdb.neondata.BrightcovePlayer(
+        Reads from the database. Returns a mostly empty Player if missing.
+        '''
+        player_ref = data.get('id')
+        player = yield cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
+        if player:
+            raise tornado.gen.Return(player)
+        raise tornado.gen.Return(cmsdb.neondata.BrightcovePlayer(
             player_ref=player_ref,
-            name=data['name'])
+            name=data['name']))
 
     @tornado.gen.coroutine
     def is_authorized(self):
