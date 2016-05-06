@@ -28,8 +28,9 @@ import urllib
 import utils.http
 import utils.logs
 import utils.neon
-from utils.http import RequestPool
+from cmsapiv2.apiv2 import ResponseCode
 from cvutils.imageutils import PILImageUtils
+from utils.http import RequestPool
 from tornado.httpclient import HTTPResponse
 
 import logging
@@ -707,10 +708,11 @@ class OAuth2Session(object):
         self.client_secret = client_secret
 
     @tornado.gen.coroutine
-    def get(self, url, method='GET', params={}):
+    def get(self, url, method='GET', params={}, retrying=False):
         '''Get a http request by method with OAuth2 authentication
 
         params- dictionary
+        retrying- bool- if true, this is the last attempt at this call
         '''
         if not self.token:
             yield self._fetch_token()
@@ -721,7 +723,30 @@ class OAuth2Session(object):
         }
         body = json.dumps(params) if method in ['POST', 'PATCH'] else None
         request = tornado.httpclient.HTTPRequest(url, method, headers, body)
+
         response = yield utils.http.send_request(request, async=True)
+
+        if response.error:
+            # Attempt to recover from expired access token
+            if response.error.code == 401 and not retrying:
+
+                # Examples of 401 accompanying authenticate header
+                # WWW-Authenticate: Basic realm="Authorization Required"
+                # WWW-Authenticate: Bearer error="insufficient_scope"
+
+                # If the scope of the credentials is incorrect, the user
+                # will need to update their config and give us new credentials
+                if response.headers.has_key('Www-Authenticate'):
+                    if response.headers('Www-Authenticate').find('scope') > -1:
+                        raise tornado.httpclient.HTTPError(
+                            401, 'insufficient scope for method:{}, url:{}'.format(
+                                method, url))
+
+                # Reset access token
+                self.token = None
+                self._fetch_token()
+                self.get(url, method, params, retrying=True)
+
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
@@ -739,11 +764,17 @@ class BrightcoveOAuth2Session(OAuth2Session):
     @tornado.gen.coroutine
     def _fetch_token(self):
         '''Fetch a new OAuth2 token from auth provider given client id, secret'''
+
+        # Api seems to require application/x-www-form-urlencoded
+        # body parameters for this call.
         body = urllib.urlencode({'grant_type': 'client_credentials'})
+
         request = tornado.httpclient.HTTPRequest(
             self.token_url, 'POST', self._headers(), body)
-        response = yield utils.http.send_request(request, async=True)
+        response = yield utils.http.send_request(
+            request, async=True, no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED])
         if response.error:
+            import pdb; pdb.set_trace()
             raise Exception('Cannot get token for client id {}'.format(self.client_id))
         self.token = self._extract_token(response)
         raise tornado.gen.Return(self.token)
@@ -758,8 +789,11 @@ class BrightcoveOAuth2Session(OAuth2Session):
         where the default location to send is in the POST body.
         '''
 
-        auth_string = base64.b64encode('%s:%s' % (self.client_id, self.client_secret))
-        return {'Authorization': 'Basic %s' % auth_string}
+        auth_string = base64.b64encode('{}:{}'.format(
+            self.client_id, self.client_secret))
+        return {
+            'Authorization': 'Basic {}'.format(auth_string)
+        }
 
 class BrightcoveOAuthApi(object):
 
@@ -870,46 +904,47 @@ class BrightcoveOAuthApi(object):
             raise tornado.gen.Return(False)
 
         # Confirm read access
-        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        response = yield self.oauth.get(self._get_players_url())
         if not response.code == 200:
             raise tornado.gen.Return(False)
 
         # The only write operations available require player ids, but we might not have one.
         # Request a unauthorized resource is a 401 even if it's an invalid resource.
         # So let's botch a request and expect a 404 and not a 401.
-        bad_response = yield self.oauth.get(self.patch_config_url.format(
-            account_ref=self.publisher_id, player_ref='not a valid player'))
+        bad_response = yield self.oauth.get(self._get_patch_url('invalid ref'))
         if bad_response.error.code != 404:
             raise tornado.gen.Return(False)
+
+        # TODO: test the other operations: thumbnail write, video read/write
 
         raise tornado.gen.Return(True)
 
     # Url config and methods
     # account_ref is Brightcove's user id, or our publisher_id
-    players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
     # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
-    player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
     # branch is either "master" or "preview"; patched changes to a player are in preview
     # until publish is called on their player.
-    get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
-    patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
-    publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
+    PLAYERS_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
+    PLAYER_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
+    GET_CONFIG_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
+    PATCH_CONFIG_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
+    PUBLISH_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
     def _get_players_url(self):
-        return self.players_url.format(account_ref=self.publisher_id)
+        return self.PLAYERS_URL.format(account_ref=self.publisher_id)
 
     def _get_player_url(self, player_ref):
-        return self.player_url.format(
+        return self.PLAYER_URL.format(
             account_ref=self.publisher_id, player_ref=player_ref)
 
-    def _get_config_url(self, player_ref):
-        return self.get_config_url.format(
-            account_ref=self.publisher_id, player_ref=player_ref, branch='master')
+    def _get_config_url(self, player_ref, branch='master'):
+        return self.GET_CONFIG_URL.format(
+            account_ref=self.publisher_id, player_ref=player_ref, branch=branch)
 
     def _get_patch_url(self, player_ref):
-        return self.patch_config_url.format(
+        return self.PATCH_CONFIG_URL.format(
             account_ref=self.publisher_id, player_ref=player_ref)
 
     def _get_publish_url(self, player_ref):
-        return self.publish_url.format(
+        return self.PUBLISH_URL.format(
             account_ref=self.publisher_id, player_ref=player_ref)

@@ -416,12 +416,13 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(json_players[1]['id'], given_ref_2)
         self.assertEqual(json_players[1]['name'], given_name_2)
 
-    @tornado.testing.gen_test
     def test_patch_player(self):
         # This is exercised in the integration test
+        # TODO !
         pass
 
     def test_publish_player(self):
+        # TODO !
         pass
 
 class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
@@ -437,7 +438,6 @@ class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
 
     def tearDown(self):
         super(TestBrightcoveOAuthApiIntegration, self).tearDown()
-
 
     def _get_integration_api(self):
         return BrightcoveOAuthApi(

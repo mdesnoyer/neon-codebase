@@ -67,6 +67,7 @@ class ResponseCode(object):
     HTTP_UNAUTHORIZED = 401
     # should be a 429, but tornado does not like that
     HTTP_TOO_MANY_REQUESTS = 402
+    HTTP_FORBIDDEN = 403
     HTTP_NOT_FOUND = 404
     HTTP_CONFLICT = 409
     HTTP_INTERNAL_SERVER_ERROR = 500
