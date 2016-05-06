@@ -707,7 +707,7 @@ class OAuth2Session(object):
         self.client_secret = client_secret
 
     @tornado.gen.coroutine
-    def get(self, url, method='GET', params=None):
+    def get(self, url, method='GET', params={}):
         '''Get a http request by method with OAuth2 authentication
 
         params- dictionary
@@ -715,8 +715,11 @@ class OAuth2Session(object):
         if not self.token:
             yield self._fetch_token()
 
-        headers = {'Authorization': 'Bearer {}'.format(self.token)}
-        body = json.dumps(params) if method is 'POST' else None
+        headers = {
+            'Authorization': 'Bearer {}'.format(self.token),
+            'Content-Type': 'application/json'
+        }
+        body = json.dumps(params) if method in ['POST', 'PATCH'] else None
         request = tornado.httpclient.HTTPRequest(url, method, headers, body)
         response = yield utils.http.send_request(request, async=True)
         raise tornado.gen.Return(response)
@@ -833,19 +836,16 @@ class BrightcoveOAuthApi(object):
     @tornado.gen.coroutine
     def publish_player(self, player_ref):
         '''Publish a player, copying its "preview" branch to the "master" branch'''
-        response = yield self.oauth.post(self.publish_url.format(
-            account_ref=self.publisher_id,
-            player_ref=player_ref))
-        rv = test_response.ok()
-        raise tornado.gen.Return(rv)
+        response = yield self.oauth.get(
+            self._get_publish_url(player_ref), method='POST')
+        raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
     def patch_player(self, player_ref, patch_json):
-        '''Merge the contents of patch_json over player'''
-        url = self.patch_config_url.format(
-            account_ref=self.publisher_id, player_ref=player_ref)
-        response = yield self.oauth.post(url, data=patch_json)
-        raise tornado.gen.Return(self._respond(response))
+        '''Merge the contents of patch_json string over player'''
+        response = yield self.oauth.get(
+            self._get_patch_url(player_ref), method='PATCH', params=patch_json)
+        raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
     def dict_to_object(self, data):
@@ -854,6 +854,7 @@ class BrightcoveOAuthApi(object):
         Reads from the database. Returns a mostly empty Player if missing.
         '''
         player_ref = data.get('id')
+        print(player_ref)
         player = yield cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
         if player:
             raise tornado.gen.Return(player)

@@ -313,7 +313,6 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
 
     def setUp(self):
         super(TestBrightcoveOAuthApi, self).setUp()
-        self.mocks = OrderedDict()
 
         # Set up an Api instance to use for each test
         integ = BrightcoveIntegration('test_integration')
@@ -323,9 +322,7 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         self.api = BrightcoveOAuthApi(integ)
 
     def tearDown(self):
-        # Unmock from the outside in
-        for mock in self.mocks.values()[::-1]:
-            mock.stop()
+        self.api = None
         super(TestBrightcoveOAuthApi, self).tearDown()
 
     @tornado.testing.gen_test
@@ -419,31 +416,72 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         self.assertEqual(json_players[1]['id'], given_ref_2)
         self.assertEqual(json_players[1]['name'], given_name_2)
 
+    @tornado.testing.gen_test
+    def test_patch_player(self):
+        # This is exercised in the integration test
+        pass
+
     def test_publish_player(self):
         pass
 
-    def test_patch_player(self):
-        pass
+class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
+
+    # Test integration config
+    client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
+    client_secret = 'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg'
+    publisher_id = 2294876105001
+    player_id = 'BkMO9qa8x'
+
+    def setUp(self):
+        super(TestBrightcoveOAuthApiIntegration, self).setUp()
+
+    def tearDown(self):
+        super(TestBrightcoveOAuthApiIntegration, self).tearDown()
+
+
+    def _get_integration_api(self):
+        return BrightcoveOAuthApi(
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            publisher_id=self.publisher_id)
 
     @tornado.testing.gen_test
     def test_integration_client_credential(self):
         '''Exercise the code with a test Brightcove account'''
-        client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
-        client_secret = 'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg'
-        publisher_id = 2294876105001
 
-        api = BrightcoveOAuthApi(
-            client_id=client_id, client_secret=client_secret, publisher_id=publisher_id)
+        api = self._get_integration_api()
         is_auth = yield api.is_authorized()
         self.assertFalse(is_auth)
-        players = yield api.get_players(True)
+        players = yield api.get_players()
 
         # As a side effect, the api was authorized
         self.assertTrue(api.is_authorized())
 
-        search_ref = players[0].player_ref
-        player = yield api.get_player(search_ref, True)
-        self.assertEqual(search_ref, player.player_ref)
+        search_ref = players[0]['id']
+        player = yield api.get_player(search_ref)
+        self.assertEqual(search_ref, player['id'])
+
+    @tornado.testing.gen_test
+    def test_patch_and_publish_flow(self):
+        '''Exercise the patch, publish apis with real data'''
+
+        api = self._get_integration_api()
+        # Let's flip the autoplay flag
+        player = yield api.get_player(self.player_id)
+        orig_autoplay = player['branches']['master']['configuration']['autoplay']
+        new_autoplay = not orig_autoplay
+        patch = {'autoplay': new_autoplay}
+        yield api.patch_player(self.player_id, patch)
+
+        # Confirm that the preview config is altered, master is unchanged
+        patched_player = yield api.get_player(self.player_id)
+        self.assertEqual(orig_autoplay, patched_player['branches']['master']['configuration']['autoplay'])
+        self.assertEqual(new_autoplay, patched_player['branches']['preview']['configuration']['autoplay'])
+
+        # Publish the player and check the master value for autoplay
+        yield api.publish_player(self.player_id)
+        published_player = yield api.get_player(self.player_id)
+        self.assertEqual(new_autoplay, published_player['branches']['master']['configuration']['autoplay'])
 
 
 if __name__ == "__main__" :
