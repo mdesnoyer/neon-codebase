@@ -203,6 +203,7 @@ TEST_F(FractionsTest, test_generate_url_without_slashes_in_base_url)
     f.Init(0,frac);
     ASSERT_EQ("http://kevin_test/neontnthumb1_w800_h700.jpg", *f.default_url());
 }  
+
 // JIRA NEON-240
 TEST_F(FractionsTest, test_exact_size_image_returned){
     rapidjson::Document testDoc;
