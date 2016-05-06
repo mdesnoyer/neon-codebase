@@ -25,7 +25,7 @@ public:
     void Shutdown();
     
     const char * GetAccountId() const;
-    
+   
     const std::string & GetAccountIdRef() const;
     const std::string & default_url() const;
 
@@ -45,6 +45,7 @@ protected:
 
 private: 
     std::string default_url_;
+    boost::ptr_vector<ScaledImage> images_; 
 };
 
 
