@@ -2332,8 +2332,12 @@ class TestVideoHandler(TestControllersBase):
         pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
-        so.subscription_state = 'active'
-        so.plan_type = 'pro_monthly'
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'active'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
         so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
             "%Y-%m-%d %H:%M:%S.%f")
         yield so.save(async=True)
@@ -2368,8 +2372,12 @@ class TestVideoHandler(TestControllersBase):
         pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
-        so.subscription_state = 'trialing'
-        so.plan_type = 'pro_monthly'
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'trialing'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
         so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
             "%Y-%m-%d %H:%M:%S.%f")
         yield so.save(async=True)
@@ -2403,8 +2411,12 @@ class TestVideoHandler(TestControllersBase):
         pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
-        so.subscription_state = 'unpaid'
-        so.plan_type = 'pro_monthly'
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'unpaid'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
         so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
             "%Y-%m-%d %H:%M:%S.%f")
         yield so.save(async=True)
@@ -2430,8 +2442,11 @@ class TestVideoHandler(TestControllersBase):
         pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
-        so.subscription_state = 'unpaid'
-        so.subscription_plan_type = 'pro_monthly'
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'unpaid'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
         so.verify_subscription_expiry = datetime(2000, 10, 1).strftime(
             "%Y-%m-%d %H:%M:%S.%f")
 
@@ -2477,7 +2492,9 @@ class TestVideoHandler(TestControllersBase):
         self.assertTrue(
             dateutil.parser.parse(
                 acct.verify_subscription_expiry) > datetime.utcnow())
-        self.assertEquals(acct.subscription_state, 'active') 
+        self.assertEquals(
+            acct.subscription_info['status'], 
+            'active') 
  
         # video should be posted with no issues 
         video = yield neondata.VideoMetadata.get(
@@ -2490,8 +2507,12 @@ class TestVideoHandler(TestControllersBase):
         pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
-        so.subscription_state = 'unpaid'
-        so.subscription_plan_type = 'pro_monthly'
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'trialing'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+        
         so.verify_subscription_expiry = datetime(2000, 10, 1).strftime(
             "%Y-%m-%d %H:%M:%S.%f")
 
@@ -4539,6 +4560,26 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'No billing account found in Stripe')
 
     @tornado.testing.gen_test
+    def test_post_billing_subscription_no_billing_plan(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'proe_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing plan for that plan_type')
+
+    @tornado.testing.gen_test
     def test_post_billing_subscription_invalid_request_error_not_known(self):
         so = neondata.NeonUserAccount('kevinacct')
         so.billing_provider_ref = '123' 
@@ -4602,6 +4643,7 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         }, 'api_key')
         sub_return = stripe.Subscription()
         sub_return.status = 'active'
+        sub_return.plan = stripe.Plan(id='pro_monthly')
         with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
             sr.return_value.subscriptions.create.return_value = sub_return
             yield self.http_client.fetch(self.get_url(url), 
@@ -4616,8 +4658,10 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         self.assertTrue(current_time < dateutil.parser.parse(
             acct.verify_subscription_expiry))
         self.assertEquals(acct.billing_provider_ref, '123')
-        self.assertEquals(acct.subscription_state, 'active')
-        self.assertEquals(acct.subscription_plan_type, 'pro_monthly')
+        self.assertEquals(acct.subscription_information['status'], 'active')
+        self.assertEquals(
+            acct.subscription_information['plan']['id'], 
+            'pro_monthly')
 
         acct_limits = yield neondata.AccountLimits.get(
             so.neon_api_key,

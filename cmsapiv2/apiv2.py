@@ -274,9 +274,12 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if request.account.billed_elsewhere: 
             raise tornado.gen.Return(True)
 
+        current_subscription = None 
+
         acct = request.account
-        acct_subscription_status = acct.subscription_state
-        current_plan_type = acct.subscription_plan_type
+        subscription_info = acct.subscription_information
+        current_plan_type = subscription_info['plan']['id'] 
+        acct_subscription_status = subscription_info['status']
 
         # should we check stripe for updated subscription state?
         if datetime.utcnow() > dateutil.parser.parse(
@@ -301,7 +304,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     current_plan_type == cs.plan.id:
                     # if we find a subscription in active/trial we 
                     # are good break out of the for loop, and 
-                    # on the current plan type 
+                    # on the current plan type
+                    current_subscription = cs 
                     break
                    
             new_date = (datetime.utcnow() + timedelta(
@@ -310,11 +314,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
             def _modify_account(a):
                 a.verify_subscription_expiry = new_date
-                a.subscription_state = acct_subscription_status 
+                if current_subscription is None: 
+                    a.subscription_info = cust_subs[0]
+                else: 
+                    a.subscription_info = current_subscription
 
-            #acct.verify_subscription_expiry = new_date
-            #acct.subscription_state = acct_subscription_status
-            yield (async=True)  
+            yield neondata.NeonUserAccount.modify(
+                acct.neon_api_key,
+                _modify_account, 
+                async=True)  
 
         if acct_subscription_status in [ neondata.SubscriptionState.ACTIVE, 
                neondata.SubscriptionState.IN_TRIAL ]:
@@ -796,16 +804,6 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Date():
         return lambda v: dateutil.parser.parse(v)
-
-    @staticmethod
-    def PlanType(): 
-        def f(v):
-            try:
-                getattr(neondata.PlanType, str(v).upper())
-                return str(v)   
-            except Exception: 
-                raise Invalid("%s is not a valid plan type" % str(v)) 
-        return f      
 
     @staticmethod
     def CommaSeparatedList(limit=100):

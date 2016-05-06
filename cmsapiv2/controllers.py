@@ -1834,7 +1834,7 @@ class BillingSubscriptionHandler(APIV2Handler):
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('plan_type'): Any(CustomVoluptuousTypes.PlanType())
+          Required('plan_type'): Any(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -1844,15 +1844,24 @@ class BillingSubscriptionHandler(APIV2Handler):
         account = yield neondata.NeonUserAccount.get(
             account_id, 
             async=True)
+       
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type, 
+            async=True)
 
+        if not billing_plan: 
+            raise NotFoundError('No billing plan for that plan_type')       
+  
         if not account: 
             raise NotFoundError('Neon Account was not found')
 
         if not account.billing_provider_ref: 
             raise NotFoundError(
                 'There is not a billing account set up for this account')
-
-        original_plan_type = account.subscription_plan_type 
+        try: 
+            original_plan_type = account.subscription_information['plan']['id']
+        except TypeError: 
+            original_plan_type = None 
 
         try: 
             customer = yield self.executor.submit(
@@ -1861,12 +1870,17 @@ class BillingSubscriptionHandler(APIV2Handler):
             subscription = yield self.executor.submit(
                 customer.subscriptions.create, 
                 plan=plan_type)
-            account.verify_subscription_expiry = \
-                (datetime.utcnow() + timedelta(seconds=3600)).strftime(
-                    "%Y-%m-%d %H:%M:%S.%f") 
-            account.subscription_state = subscription.status
-            account.subscription_plan_type = plan_type.lower()
-            yield account.save(async=True) 
+ 
+            def _modify_account(a): 
+                a.subscription_information = subscription
+                a.verify_subscription_expiry = \
+                  (datetime.utcnow() + timedelta(seconds=3600)).strftime(
+                    "%Y-%m-%d %H:%M:%S.%f")           
+ 
+            yield neondata.NeonUserAccount.modify(
+                account.neon_api_key, 
+                _modify_account, 
+                async=True)             
              
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
@@ -1878,8 +1892,8 @@ class BillingSubscriptionHandler(APIV2Handler):
             raise 
         except Exception as e:  
             _log.error('Unknown error occurred talking to Stripe %s' % e)
-            raise  
-
+            raise 
+ 
         billing_plan = yield neondata.BillingPlans.get(
             plan_type.lower(), 
             async=True) 

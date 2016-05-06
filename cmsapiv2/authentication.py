@@ -456,9 +456,9 @@ class VerifyAccountHandler(APIV2Handler):
 
             # create every new account with the demo billing plan
             billing_plan = yield neondata.BillingPlans.get(
-                neondata.PlanType.DEMO, 
+                'demo', 
                 async=True) 
-            
+           
             account_limits = neondata.AccountLimits(account.neon_api_key)
             account_limits.populate_with_billing_plan(billing_plan)
             yield account_limits.save(async=True)  

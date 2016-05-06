@@ -1402,12 +1402,6 @@ class SubscriptionState(object):
     PAST_DUE = 'past_due' 
     IN_TRIAL = 'trialing'
  
-class PlanType(object): 
-    DEMO = 'demo' 
-    PRO_MONTHLY = 'pro_monthly'
-    PRO_YEARLY = 'pro_yearly'
-    PREMIER = 'premier' 
-
 class AccessLevels(object):
     NONE = 0 
     READ = 1 
@@ -2974,8 +2968,7 @@ class NeonUserAccount(NamespacedStoredObject):
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
                  users=None, 
                  email=None, 
-                 subscription_plan_type=None, 
-                 subscription_state=None, 
+                 subscription_information=None, 
                  verify_subscription_expiry=datetime.datetime(1970,1,1), 
                  billed_elsewhere=True, 
                  billing_provider_ref=None):
@@ -3026,11 +3019,13 @@ class NeonUserAccount(NamespacedStoredObject):
         # email address associated with this account 
         self.email = email
 
+        # most recent subscription from recurly
+        self.subscription_information = subscription_information
         # what plan is this user on, currently corresponds to plans in recurly
-        self.subscription_plan_type = subscription_plan_type
+        #self.subscription_plan_type = subscription_plan_type
 
         # local copy of the subscription state, defined in SubscriptionState
-	self.subscription_state = subscription_state 
+	#self.subscription_state = subscription_state 
 
         # we want to cache some information on subscription info, this is when we should 
         # next check the service for updates to the subscription
