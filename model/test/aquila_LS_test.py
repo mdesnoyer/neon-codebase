@@ -216,9 +216,9 @@ combiner_a = AdditiveCombiner(weight_valence=weight_valence,
                               weight_dict=weight_dict)
 
 _log.info('creating predictor')
-# predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
-#                                        concurrency=21)
-with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
+predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
+                                       concurrency=22)
+# with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
 
 #f = open(os.path.join(dest_folder, 'config'), 'w')
 def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
@@ -245,15 +245,15 @@ def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 
 combiner = combiner_m
 testing = False
-feat_score_weight=3.0
+feat_score_weight=2.0
 local_search_width=32
 local_search_step=2
-processing_time_ratio=1.0
+processing_time_ratio=3.0
 adapt_improve=True,
 use_best_data=True
 use_all_data=False
 testing_dir=''
-n_thumbs=40,
+n_thumbs=100
 startend_clip=0.025
 non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
@@ -261,8 +261,10 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip, non_locking)
 
-video = '/home/ubuntu/vid/targ.mp4'
+video = '/home/ubuntu/lemonade.m4v'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
-LS.choose_thumbnails(vid, 5, video_name='test')
+res = LS.choose_thumbnails(vid, 100, video_name='test')
 LS.exit()
+with open('/tmp/LS_results', 'w') as f:
+  dill.dump(res, f)
