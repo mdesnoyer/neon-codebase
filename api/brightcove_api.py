@@ -12,11 +12,9 @@ if sys.path[0] != __base_path__:
 import base64
 import datetime
 import json
-from oauthlib.oauth2 import BackendApplicationClient, OAuth2Error
 from poster.encode import multipart_encode
 import poster.encode
 import re
-from requests_oauthlib import OAuth2Session
 from StringIO import StringIO
 import cmsdb.neondata
 import math
@@ -32,6 +30,7 @@ import utils.logs
 import utils.neon
 from utils.http import RequestPool
 from cvutils.imageutils import PILImageUtils
+from tornado.httpclient import HTTPResponse
 
 import logging
 _log = logging.getLogger(__name__)
@@ -457,7 +456,7 @@ class BrightcoveApi(object):
 
         raise tornado.gen.Return(results)
 
-    def search_videos_iter(self, page_size=100, max_results=None, **kwargs):
+    def search_videos_iter(self, page_size=100, max_results=None):
         '''Shortcut to return an iterator for a search_videos call.
 
         Uses all the same arguments as search_videos
@@ -691,6 +690,96 @@ class BrightcoveOAuthConfigException(Exception):
 class BrightcoveAuthDeniedException(Exception):
     pass
 
+class OAuth2Error(Exception):
+    pass
+
+class OAuth2Session(object):
+    '''Store OAuth2 token lookup and storage; provide general wrapper to request
+
+    Handle errors similiar to utils.http.send_request
+    '''
+
+    token_url = None
+
+    def __init__(self, client_id, client_secret):
+        self.token = None # Defer to first request
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+    @tornado.gen.coroutine
+    def get(self, url, method='GET', params=None):
+        '''Get a http request by method with OAuth2 authentication
+
+        params- dictionary
+        '''
+        if not self.token:
+            yield self._fetch_token()
+
+        headers = {'Authorization': 'Bearer {}'.format(self.token)}
+        body = json.dumps(params) if method is 'POST' else None
+        request = tornado.httpclient.HTTPRequest(url, method, headers, body)
+        response = yield utils.http.send_request(request, async=True)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _fetch_token(self):
+        '''Fetch a new OAuth2 token from auth provider given client id, secret'''
+        raise NotImplementedError('Until generic written, implement _fetch_token')
+
+    def is_authorized(self):
+        return self.token == True
+
+class BrightcoveOAuth2Session(OAuth2Session):
+
+    token_url = 'https://oauth.brightcove.com/v3/access_token'
+
+    @tornado.gen.coroutine
+    def _fetch_token(self):
+        '''Fetch a new OAuth2 token from auth provider given client id, secret'''
+        body = urllib.urlencode({'grant_type': 'client_credentials'})
+        request = tornado.httpclient.HTTPRequest(
+            self.token_url, 'POST', self._headers(), body)
+        response = yield utils.http.send_request(request, async=True)
+        if response.error:
+            raise Exception('Cannot get token for client id {}'.format(self.client_id))
+        self.token = self._extract_token(response)
+        tornado.gen.Return(self.token)
+
+    def _extract_token(self, response):
+        return json.loads(response.body)['access_token']
+
+    @tornado.gen.coroutine
+    def is_authorized(self):
+        '''Test access token for read and write operations'''
+
+        if not super(BrightcovePlayerManagementApi, self).is_authorized():
+            raise tornado.gen.Return(False)
+
+        # Confirm read access
+        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        if not response.ok:
+            raise tornado.gen.Return(False)
+
+        # The only write operations available require player ids, but we might not have one.
+        # Request a unauthorized resource is a 401 even if it's an invalid resource.
+        # So let's botch a request and expect a 404 and not a 401.
+        bad_response = yield self.oauth.get(self.patch_config_url.format(
+            account_ref=self.publisher_id, player_ref='not a valid player'))
+        if bad_response.status_code != 404:
+            raise tornado.gen.Return(False)
+
+        raise tornado.gen.Return(True)
+
+    def _headers(self):
+        '''Build a dictionary with a Authorization header
+
+        Brightcove's API requires an Authorization header
+        where the default location to send is in the POST body.
+        '''
+
+        auth_string = base64.b64encode('%s:%s' % (self.client_id, self.client_secret))
+        return {'Authorization': 'Basic %s' % auth_string}
+
 class BrightcoveOAuthApi(object):
 
     '''Allow calls to the Brightcove Api
@@ -707,89 +796,6 @@ class BrightcoveOAuthApi(object):
     support, and Brightcove says it does not rate limit.
     '''
 
-    token_url = 'https://oauth.brightcove.com/v3/access_token'
-
-    def __init__(self, integration=None, client_id=None, client_secret=None, publisher_id=None):
-        '''Ensure integration is set up and the client credential is valued
-
-        Either client_id/secret/publisher_id or integration needs to be set.
-        '''
-
-        # Prefer integration if passed
-        if integration:
-            self.integration = integration
-            self.client_id = integration.application_client_id
-            self.client_secret = integration.application_client_secret
-            self.publisher_id = integration.publisher_id
-        else:
-            self.integration = None
-            self.client_id = client_id
-            self.client_secret = client_secret
-            self.publisher_id = publisher_id
-
-        # Assert the minimum of settings are set
-        if self.client_id is None:
-            raise BrightcoveOAuthConfigException(
-                'BcOauthApi id missing in publisher {}'.format(publisher_id))
-        if self.client_secret is None:
-            raise BrightcoveOAuthConfigException(
-                'BcOauthApi secret missing in publisher {}'.format(publisher_id))
-        if self.publisher_id is None:
-            raise BrightcoveOAuthConfigException(
-                'BcOauthApi publisher id missing in publisher {}'.format(publisher_id))
-
-        # Initialize but do not yet get an access token.
-        # Defer that to the first request.
-        client = BackendApplicationClient(client_id=client_id)
-        self.oauth = OAuth2Session(client=client)
-
-    @tornado.gen.coroutine
-    def is_authorized(self):
-        '''Ask if session is authorized and ready to call out to the BC API
-
-        Subclasses can extend this with a test of the specific OAuth operation set
-        they rely on.
-        '''
-        raise tornado.gen.Return(self.oauth.authorized())
-
-    @tornado.gen.coroutine
-    def _fetch_token(self):
-        # Fetch an OAuth token
-        try:
-            yield self.oauth.fetch_token(token_url=self.token_url, headers=self._headers())
-        except OAuth2Error as e:
-
-            # Credential grant is misconfigured, the user needs to see this
-            if e.status_code is 401:
-                raise BrightcoveAuthDeniedException(
-                    'OAuth2 denied with code 401 {}'.format(type(e).__name__))
-            else:
-                _log.error(e)
-        except Exception as e:
-            _log.error(e)
-
-    @tornado.gen.coroutine
-    def _ready(self):
-        '''Ready the session by fetching a token if none exists'''
-        if self.oauth.token:
-            return
-        yield self._fetch_token()
-
-    def _headers(self):
-        '''Build a dictionary with a Authorization header
-
-        Brightcove's API requires an Authorization header
-        where the default location to send is in the POST body.
-        '''
-
-        auth_string = base64.b64encode('%s:%s' % (self.client_id, self.client_secret))
-        return {'Authorization': 'Basic %s' % auth_string}
-
-
-class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
-
-    '''Encapsulate player manangement calls'''
-
     # account_ref is Brightcove's user id, or our publisher_id
     players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
     # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
@@ -800,51 +806,61 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
     patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
     publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
-    @tornado.gen.coroutine
-    def is_authorized(self):
-        '''Test access token for read and write operations'''
+    def __init__(self, integration=None, client_id=None, client_secret=None, publisher_id=None):
+        '''Ensure integration is set up and the client credential is valued
 
-        self._ready()
+        Either client_id/secret/publisher_id or integration needs to be set.
+        '''
 
-        if not super(BrightcovePlayerManagementApi, self).is_authorized():
-            raise tornado.gen.Return(False)
+        # Prefer integration if passed
+        if integration:
+            self.integration = integration
+            self.publisher_id = integration.publisher_id
+            client_id = integration.application_client_id
+            client_secret = integration.application_client_secret
+        else:
+            self.integration = None
+            self.publisher_id = publisher_id
+            client_id = client_id
+            client_secret = client_secret
 
-        # Confirm read access
-        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
-        if not response.ok:
-            raise tornado.gen.Return(False)
+        # Assert the minimum of settings are set
+        if client_id is None:
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi id missing in publisher {}'.format(self.publisher_id))
+        if client_secret is None:
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi secret missing in publisher {}'.format(self.publisher_id))
+        if self.publisher_id is None:
+            raise BrightcoveOAuthConfigException(
+                'BcOauthApi publisher id missing in client {}'.format(client_id))
 
-        # The only write operations available require player ids, but we might not have one.
-        # So let's botch a request and expect a 404 and not a 401.
-        # @TODO consider removing this.
-        bad_response = yield self.oauth.get(self.patch_config_url.format(
-            account_ref=self.publisher_id, player_ref='not a valid player'))
-        if bad_response.status_code != 404:
-            import pdb; pdb.set_trace()
-            raise tornado.gen.Return(False)
-
-        raise tornado.gen.Return(True)
+        # Initialize but do not yet get an access token.
+        # Defer that to the first request.
+        self.oauth = BrightcoveOAuth2Session(client_id, client_secret)
 
     @tornado.gen.coroutine
     def get_player(self, player_ref):
-        self._ready()
+        '''Get a single Brightcove player for the give player_ref'''
         response = yield self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
-        item = json.loads(response.json())
+        item = json.loads(response.body)
         rv = self.dict_to_object(item)
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def get_players(self):
-        self._ready()
-        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
-        items = json.loads(response.json())['items']
+        '''Get all Brightcove players for the instance's publisher id'''
+        url = self.players_url.format(account_ref=self.publisher_id)
+        response = yield self.oauth.get(url)
+        items = [i for i in json.loads(response.body)['items']
+                 if i['id'] != u'default'] # Remove the "default" player
         rv = map(self.dict_to_object, items)
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
     def publish_player(self, player_ref):
-        self._ready()
-        response = self.oauth.post(self.publish_url.format(
+        '''Publish a player, copying its "preview" branch to the "master" branch'''
+        response = yield self.oauth.post(self.publish_url.format(
             account_ref=self.publisher_id,
             player_ref=player_ref))
         rv = test_response.ok()
@@ -852,21 +868,16 @@ class BrightcovePlayerManagementApi(BrightcoveOAuthApi):
 
     @tornado.gen.coroutine
     def patch_player(self, player_ref, patch_json):
-        self._ready()
-        response = self.oauth.post(self.patch_config_url.format(
-                account_ref=self.publisher_id,
-                player_ref=player_ref),
-            data=patch_json)
+        '''Merge the contents of patch_json over player'''
+        url = self.patch_config_url.format(
+            account_ref=self.publisher_id, player_ref=player_ref)
+        response = yield self.oauth.post(url, data=patch_json)
         raise tornado.gen.Return(self._respond(response))
 
     def dict_to_object(self, data):
-        '''Reformat the raw dictionary data to a BrightcovePlayer instance'''
-
+        '''Convert the raw dictionary data to a BrightcovePlayer instance'''
         player_ref = data.get('id')
-        if player_ref:
-            player = cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
 
         return cmsdb.neondata.BrightcovePlayer(
             player_ref=player_ref,
-            integration_id=self.integration.integration_id,
             name=data['name'])
