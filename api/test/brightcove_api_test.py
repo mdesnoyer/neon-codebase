@@ -326,6 +326,7 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         self.api = BrightcoveOAuthApi(integ)
 
     def tearDown(self):
+        self.api.oauth.token = None
         # Unmock from the outside in
         for mock in self.mocks.values()[::-1]:
             mock.stop()
@@ -333,17 +334,24 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_is_authorized(self):
+
+        self.api.oauth.token = 'set'
+        responses = {
+            self.api._get_players_url(): 1,
+            self.api._get_player_url('not a valid player'): 2,
+        }
+
         r200 = Response()
         r200.status_code = 200
         r404 = Response()
         r404.status_code = 404
 
-#        with patch('requests_oauthlib.OAuth2Session.get') as _get:
-#            get = self._future_wrap_mock(_get)
-#            get.side_effect = [r200, r404]
-#            rv = yield self.api.is_authorized()
-#            # Called with..
-#        self.assertTrue(rv)
+        with patch('requests_oauthlib.OAuth2Session.get') as _get:
+            get = self._future_wrap_mock(_get)
+            get.side_effect = [r200, r404]
+            #rv = yield self.api.is_authorized()
+            # Called with..
+        #self.assertTrue(rv)
 
     @tornado.testing.gen_test
     def test_get_player(self):
@@ -416,10 +424,13 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         publisher_id = 2294876105001
         api = BrightcoveOAuthApi(
             client_id=client_id, client_secret=client_secret, publisher_id=publisher_id)
-        players = yield api.get_players()
-        # Try to find the player found in players
+        is_auth = yield api.is_authorized()
+        self.assertFalse(is_auth)
+        players = yield api.get_players(True)
+        # As a side effect, the api was authorized
+        self.assertTrue(api.is_authorized())
         search_ref = players[0].player_ref
-        player = yield api.get_player(search_ref)
+        player = yield api.get_player(search_ref, True)
         self.assertEqual(search_ref, player.player_ref)
 
 

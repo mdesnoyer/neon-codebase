@@ -748,28 +748,6 @@ class BrightcoveOAuth2Session(OAuth2Session):
     def _extract_token(self, response):
         return json.loads(response.body)['access_token']
 
-    @tornado.gen.coroutine
-    def is_authorized(self):
-        '''Test access token for read and write operations'''
-
-        if not super(BrightcovePlayerManagementApi, self).is_authorized():
-            raise tornado.gen.Return(False)
-
-        # Confirm read access
-        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
-        if not response.ok:
-            raise tornado.gen.Return(False)
-
-        # The only write operations available require player ids, but we might not have one.
-        # Request a unauthorized resource is a 401 even if it's an invalid resource.
-        # So let's botch a request and expect a 404 and not a 401.
-        bad_response = yield self.oauth.get(self.patch_config_url.format(
-            account_ref=self.publisher_id, player_ref='not a valid player'))
-        if bad_response.status_code != 404:
-            raise tornado.gen.Return(False)
-
-        raise tornado.gen.Return(True)
-
     def _headers(self):
         '''Build a dictionary with a Authorization header
 
@@ -795,16 +773,6 @@ class BrightcoveOAuthApi(object):
     are not saved.) This is because the token expiry is 300 seconds, there is no refresh token
     support, and Brightcove says it does not rate limit.
     '''
-
-    # account_ref is Brightcove's user id, or our publisher_id
-    players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
-    # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
-    player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
-    # branch is either "master" or "preview"; patched changes to a player are in preview
-    # until publish is called on their player.
-    get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
-    patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
-    publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
 
     def __init__(self, integration=None, client_id=None, client_secret=None, publisher_id=None):
         '''Ensure integration is set up and the client credential is valued
@@ -840,21 +808,20 @@ class BrightcoveOAuthApi(object):
         self.oauth = BrightcoveOAuth2Session(client_id, client_secret)
 
     @tornado.gen.coroutine
-    def get_player(self, player_ref):
+    def get_player(self, player_ref, return_neon_object=False):
         '''Get a single Brightcove player for the give player_ref'''
-        response = yield self.oauth.get(self.player_url.format(account_ref=self.publisher_id, player_ref=player_ref))
+        response = yield self.oauth.get(self._get_player_url(player_ref))
         item = json.loads(response.body)
-        rv = self.dict_to_object(item)
+        rv = self.dict_to_object(item) if return_neon_object else item
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
-    def get_players(self):
+    def get_players(self, return_neon_object=False):
         '''Get all Brightcove players for the instance's publisher id'''
-        url = self.players_url.format(account_ref=self.publisher_id)
-        response = yield self.oauth.get(url)
+        response = yield self.oauth.get(self._get_players_url())
         items = [i for i in json.loads(response.body)['items']
                  if i['id'] != u'default'] # Remove the "default" player
-        rv = map(self.dict_to_object, items)
+        rv = map(self.dict_to_object, items) if return_neon_object else items
         raise tornado.gen.Return(rv)
 
     @tornado.gen.coroutine
@@ -881,3 +848,55 @@ class BrightcoveOAuthApi(object):
         return cmsdb.neondata.BrightcovePlayer(
             player_ref=player_ref,
             name=data['name'])
+
+    @tornado.gen.coroutine
+    def is_authorized(self):
+        '''Test access token for read and write operations'''
+
+        if not self.oauth.token:
+            raise tornado.gen.Return(False)
+
+        # Confirm read access
+        response = yield self.oauth.get(self.players_url.format(account_ref=self.publisher_id))
+        if not response.ok:
+            raise tornado.gen.Return(False)
+
+        # The only write operations available require player ids, but we might not have one.
+        # Request a unauthorized resource is a 401 even if it's an invalid resource.
+        # So let's botch a request and expect a 404 and not a 401.
+        bad_response = yield self.oauth.get(self.patch_config_url.format(
+            account_ref=self.publisher_id, player_ref='not a valid player'))
+        if bad_response.status_code != 404:
+            raise tornado.gen.Return(False)
+
+        raise tornado.gen.Return(True)
+
+    # Url config and methods
+    # account_ref is Brightcove's user id, or our publisher_id
+    players_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
+    # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
+    player_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
+    # branch is either "master" or "preview"; patched changes to a player are in preview
+    # until publish is called on their player.
+    get_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
+    patch_config_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
+    publish_url = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
+
+    def _get_players_url(self):
+        return self.players_url.format(account_ref=self.publisher_id)
+
+    def _get_player_url(self, player_ref):
+        return self.player_url.format(
+            account_ref=self.publisher_id, player_ref=player_ref)
+
+    def _get_config_url(self, player_ref):
+        return self.get_config_url.format(
+            account_ref=self.publisher_id, player_ref=player_ref, branch='master')
+
+    def _get_patch_url(self, player_ref):
+        return self.patch_config_url.format(
+            account_ref=self.publisher_id, player_ref=player_ref)
+
+    def _get_publish_url(self, player_ref):
+        return self.publish_url.format(
+            account_ref=self.publisher_id, player_ref=player_ref)

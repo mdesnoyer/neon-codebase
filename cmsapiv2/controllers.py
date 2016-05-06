@@ -468,7 +468,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # We do this anytime the user calls this API with is_tracked=True
         # because they are likely to be troubleshooting their setup.
         if player.is_tracked:
-            publish_result, error = BrightcovePlayer.publish_plugin_to_player(player)
+            publish_result, error = BrightcovePlayerHelper.publish_plugin_to_player(player)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(args['player_ref'])
@@ -483,10 +483,10 @@ class BrightcovePlayerHelper():
         integration = yield neondata.BrightcoveIntegration.get(
             player.integration_id, async=True)
         try:
-            bc = yield BrightcovePlayerManagementApi(integration)
+            bc = yield BrightcoveOAuthApi(integration)
             # Get the player JSON data from Brightcove's API
             bc_player = yield bc.get_player(player.player_ref)
-            patch = self._get_patch_string(bc_player, integration)
+            patch = self._get_patch_json(bc_player, integration)
             yield bc.patch_player(player.player_ref, patch)
             # Success. Update the player with the date and version
             def _modify(p):
@@ -1892,8 +1892,6 @@ application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
-        BrightcovePlayerHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
         BrightcoveIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
