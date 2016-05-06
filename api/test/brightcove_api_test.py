@@ -445,7 +445,7 @@ class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
             client_secret=self.client_secret,
             publisher_id=self.publisher_id)
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=15)
     def test_integration_client_credential(self):
         '''Exercise the code with a test Brightcove account'''
 
@@ -461,7 +461,7 @@ class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
         player = yield api.get_player(search_ref)
         self.assertEqual(search_ref, player['id'])
 
-    @tornado.testing.gen_test
+    @tornado.testing.gen_test(timeout=15)
     def test_patch_and_publish_flow(self):
         '''Exercise the patch, publish apis with real data'''
 
