@@ -14,6 +14,7 @@ if sys.path[0] != __base_path__:
 
 from api import brightcove_api
 from cmsdb import neondata
+from cvutils.imageutils import PILImageUtils
 import json
 import logging
 import signal
@@ -42,18 +43,52 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
         if not bc_integration.uses_bc_thumbnail_api:
             # Nothing to do because they don't use the BC thumbnails
+            self.write({'message': ('No change because account does not use '
+                                    'the Brightcove thumbnails')})
             self.set_status(200)
             return
 
-        data = json.loads(self.request.body)
+        try:
+            data = json.loads(self.request.body)
+        except Exception:
+            raise tornado.web.HTTPError(400, 'Invalid JSON received')
 
-        if (bc_integration.application_client_id is None or
-            bc_integration.application_client_secret is None):
-            yield self.handle_callback_with_media_api(data, integration)
-        else:
-            yield self.handle_callback_with_cms_api(data, integration)
+        try:
 
-        self.set_status(200)
+            if (bc_integration.application_client_id is not None and
+                bc_integration.application_client_secret is not None):
+                try:
+                    yield self.handle_callback_with_cms_api(data, integration)
+                    self.write({'message': ('Brightcove thumbnail successfuly '
+                                            'updated')})
+                    self.set_status(200)
+                    return
+                except api.brightcove_api.BrightcoveApiNotAuthorizedError as e:
+                    # Try with the media API
+                    pass
+
+            if (bc_integration.read_token is not None and
+                bc_integration.write_token is not None):
+                yield self.handle_callback_with_media_api(data, integration)
+                self.write({'message': ('Brightcove thumbnail successfuly '
+                                        'updated')})
+                self.set_status(200)
+                return
+
+            msg = ('No valid Brightcove tokens for integration %s' %
+                   integration_id)
+            _log.warn_n(msg)
+            raise tornado.web.HTTPError(500, msg)
+
+        except api.brightcove_api.BrightcoveApiServerError as e:
+            msg = 'Error with the Brightcove API: %s' % e
+            _log.error(msg)
+            raise tornado.web.HTTPError(500, msg)
+        except Exception as e:
+            msg = 'Unexpected Error with request %s: %s' % (data, e)
+            _log.exception(msg)
+            raise tornado.web.HTTPError(500, msg)
+        
 
     @tornado.gen.coroutine
     def handle_callback_with_cms_api(self, data, integration):
@@ -69,10 +104,11 @@ class ServingURLHandler(tornado.web.RequestHandler):
         elif data['processing_state'] == 'processed' and len(images) > 0:
             # Replace the original image if our serving url was there before
             cur_img = images.values()[0]
-            if (cur_img['remote'] and 'neon-images.com' in cur_img['src']):
-                # It's not our image. JUMP
+            if (cur_img['remote'] and 'neonvid_' not in cur_img['src']):
+                # It's not our image. JUMP!
                 return
-            turls = yield self._choose_replacement_thumb(data, integration)
+            tmeta, turls = yield self._choose_replacement_thumb(data,
+                                                                integration)
             yield self._push_static_url_cms(api, integration, turls,
                                             'poster', images)
             yield self._push_static_url_cms(api, integration, turls,
@@ -108,8 +144,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def _choose_replacement_thumb(data, integration):
-        '''Get the ThumbnailServingURL object for the thumbnail to put back 
-        in Brightcove'''
+        '''Get the thumbnail to put back into Brightcove.
+
+        Returns (ThumbnailMetadata, ThumbnailServingURL)
+        '''
 
         # First choose the thumbnail by getting a default, followed by
         # the best Neon one if a default doesn't exist.
@@ -122,7 +160,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         thumbs = yield neondata.ThumbnailMetadata.get_many(
             video.thumbnail_ids, async=True)
         valid_thumbs = sorted([x for x in thumbs if 
-                               x.type==neondata.ThumbnailType.DEFAULT],
+                               x and x.type==neondata.ThumbnailType.DEFAULT],
                                key=lambda x: x.rank)
         if len(valid_thumbs) == 0:
             valid_thumbs = sorted([x for x in thumbs if 
@@ -133,15 +171,20 @@ class ServingURLHandler(tornado.web.RequestHandler):
         tmeta = valid_thumbs[0]
 
         turls = yield neondata.ThumbnailServingURL.get(tmeta.key, async=True)
-        raise tornado.gen.Return(turls)
+        if turls is None:
+            raise tornado.web.HTTPError(500, 'No thumbnail serving URLs known')
+        raise tornado.gen.Return((tmeta, turls))
 
     @tornado.gen.coroutine
     def _push_static_url_cms(api, integration, turls, asset_name, images):
         '''Push our desired url into Brightcove.'''
         cur_image = cur_images.get(asset_name, {})
         width, height = self._find_image_size(cur_image)
+        if width is None or height is None:
+            width, height = api.brightcove_api.DEFAULT_IMAGE_SIZES[asset_name]
 
         if len(cur_image) == 0:
+            # No image of this type to update
             return
         
         try:
@@ -149,7 +192,19 @@ class ServingURLHandler(tornado.web.RequestHandler):
         except KeyError:
             _log.warn_n('Could not find serving url of size %s,%s for '
                         'thumb %s' % (width, height, turls.get_id()))
-            # TODO(mdesnoyer): Pick a size
+            # Pick the best size we can get
+            desired_size = (width, height)
+            valid_sizes = turls.sizes.union(turls.size_map.iterkeys())
+            if len(valid_sizes) == 0:
+                _log.warn('No valid sizes for thumb %s' % turls.get_id())
+                raise KeyError('No valid sizes to serve')
+            mindiff = min([abs(x[0] - desired_size[0]) +
+                           abs(x[1] - desired_size[1]) 
+                           for x in valid_sizes])
+            closest_size = [x for x in valid_sizes if
+                        (abs(x[0] - desired_size[0]) +
+                         abs(x[1] - desired_size[1])) == mindiff][0]
+            new_url = turls.get_serving_url(*closest_size)
 
         update_func = api.get_attr('update_%s' % asset_name)
         yield update_func(cur_image['asset_id'], new_url)
@@ -177,7 +232,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
             thumbs = yield neondata.ThumbnailMetadata.get_many(
                 video.thumbnail_ids, async=True)
             min_rank = min([x.rank for x in thumbs if 
-                            x.type == neondata.ThumbnailType.DEFAULT])
+                            x and x.type == neondata.ThumbnailType.DEFAULT])
 
             if min_rank is None:
                 # ingest the image
@@ -205,9 +260,12 @@ class ServingURLHandler(tornado.web.RequestHandler):
                yield delete_func(data['video_id'], cur_image['asset_id'])
 
         # Add a new thumbnail with a remote url
+        reference_id = ('thumbservingurl-%s' if asset_name == 'thumbnail' 
+                        else 'stillservingurl-%s') % data['video_id']
         add_func = api.get_attr('add_%s' % asset_name)
         yield add_func(self.build_serving_url(data['serving_url'], height,
-                                              width))
+                                              width),
+                                              reference_id)
 
     def build_serving_url(self, base_url, height=None, width=None):
         parsed_url = list(urlparse.urlparse(base_url))
@@ -226,14 +284,33 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                            integration.read_token,
                                            integration.write_token)
         if data['processing_state'] == 'serving':
-            # First 
+            # Push in the servering url
+            yield api.update_thumbnail_and_videostill(
+                data['video_id'],
+                None,
+                remote_url=data['serving_url'])
         elif data['processing_state'] == 'processed':
-            # Replace the original image
-            pass
-    
+            # Put the original image page
+            tmeta, turls = yield self._choose_replacement_thumb(data,
+                                                                integration)
+            cur_error = None
+            for url in tmeta.urls:
+                try:
+                    image = yield PILImageUtils.download_image(url, async=True)
+                    cur_error = None
+                    break
+                except Exception as e:
+                    cur_error = e
+            if cur_error is not None:
+                msg = 'Error while downloading thumbnail %s: %s' % (tmeta.key,
+                                                                    cur_error)
+                _log.warn(msg)
+                raise tornado.web.HTTPError(500, msg)
 
-
-   
+            yield api.update_thumbnail_and_videostill(
+                data['video_id'],
+                tmeta.key,
+                image=image)
         
 
 class HealthCheckHandler(tornado.web.RequestHandler):

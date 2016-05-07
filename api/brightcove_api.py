@@ -44,6 +44,7 @@ define('max_retries', default=5, type=int,
 
 class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
+class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 
 DEFAULT_IMAGES_SIZES = {
@@ -170,6 +171,9 @@ class BrightcoveApi(object):
                 raise BrightcoveApiServerError(
                     'Internal Brightcove error when uploading %s for tid %s %s'
                     % (atype, tid, response.error))
+            elif response.error.code == 401:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to upload thumbnail to media API')
             elif response.error.code >= 400:
                 raise BrightcoveApiClientError(
                     'Client error when uploading %s for tid %s %s'
@@ -607,7 +611,10 @@ def _handle_response(response):
                    response.body)
         try:
             json_data = json.load(response.buffer)
-            if json_data['code'] >= 200:
+            if json_data['code'] == 210:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to read the media API')
+            elif json_data['code'] >= 200:
                 raise BrightcoveApiClientError(json_data)
         except ValueError:
             # It's not JSON data so there was some other error
