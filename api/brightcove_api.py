@@ -46,6 +46,11 @@ class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 
+DEFAULT_IMAGES_SIZES = {
+    'thumbnail' : (120, 90),
+    'poster' : (480, 360)
+}
+
 class BrightcoveApi(object): 
 
     ''' Brighcove API Interface class
