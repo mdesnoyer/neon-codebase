@@ -1783,7 +1783,7 @@ class BillingAccountHandler(APIV2Handler):
             cid = customer.id
             _log.info('New Stripe customer %s created with id %s' % (
                 account.email, cid))
-            raise tornado.gen.Return(cid) 
+            raise tornado.gen.Return(customer) 
 
         try:
             if account.billing_provider_ref: 
@@ -1796,12 +1796,12 @@ class BillingAccountHandler(APIV2Handler):
                 customer_id = customer.id 
                 yield self.executor.submit(customer.save)
             else:
-                yield _create_account() 
+                customer = yield _create_account() 
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
                 # this is here just in case the ref got 
                 # screwed up, it should rarely if ever happen
-                customer_id = yield _create_account() 
+                customer = yield _create_account() 
             else:
                 _log.error('Invalid request error we do not handle %s' % e)
                 raise 
@@ -1810,17 +1810,72 @@ class BillingAccountHandler(APIV2Handler):
             raise  
         
         account.billed_elsewhere = False
-        account.billing_provider_ref = customer_id
-        yield account.save(async=True) 
+        account.billing_provider_ref = customer.id
+        yield account.save(async=True)
+ 
+        result = yield self.db2api(customer)
 
-        self.success(json.dumps(
-            {'message' : 'successfully created billing account'})) 
+        self.success(result) 
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+        }) 
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account required.')
+
+        if not account.billing_provider_ref: 
+            raise NotFoundError('No billing account found - no ref.')     
+
+        try:
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                raise NotFoundError('No billing account found - not in stripe') 
+            else: 
+                _log.error('Unknown invalid error occurred talking'\
+                           ' to Stripe %s' % e)
+                raise Exception('Unknown Stripe Error')  
+        except Exception as e: 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise
+
+        result = yield self.db2api(customer)
+
+        self.success(result) 
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['id', 'account_balance', 'created', 'currency', 
+                'default_source', 'delinquent', 'description', 
+                'discount', 'email', 'livemode', 'metadata', 
+                'sources', 'subscriptions']
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['id', 'account_balance', 'created', 'currency', 
+                'default_source', 'delinquent', 'description', 
+                'discount', 'email', 'livemode', 'metadata', 
+                'sources', 'subscriptions']
 
     @classmethod
     def get_access_levels(cls):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.PUT] 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET] 
                }
 
 '''*****************************************************************
@@ -1867,10 +1922,21 @@ class BillingSubscriptionHandler(APIV2Handler):
             customer = yield self.executor.submit(
                 stripe.Customer.retrieve, 
                 account.billing_provider_ref)
+
+            # get all subscriptions, they are sorted 
+            # by most recent, if there are not any, just 
+            # submit the new one, otherwise cancel the most
+            # recent and submit the new one 
+            cust_subs = yield self.executor.submit(
+                customer.subscriptions.all)
+            
+            if len(cust_subs['data']) > 0:
+                cancel_me = cust_subs['data'][0]
+                yield self.executor.submit(cancel_me.delete)
+
             subscription = yield self.executor.submit(
                 customer.subscriptions.create, 
                 plan=plan_type)
- 
             def _modify_account(a): 
                 a.subscription_information = subscription
                 a.verify_subscription_expiry = \
@@ -1880,7 +1946,10 @@ class BillingSubscriptionHandler(APIV2Handler):
             yield neondata.NeonUserAccount.modify(
                 account.neon_api_key, 
                 _modify_account, 
-                async=True)             
+                async=True)
+
+            _log.info('New subscription created for account %s' % 
+                account.neon_api_key)
              
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
@@ -1904,12 +1973,74 @@ class BillingSubscriptionHandler(APIV2Handler):
             account_limits.populate_with_billing_plan(billing_plan)
             yield account_limits.save(async=True)
  
-        self.success({})
+        result = yield self.db2api(subscription)
+
+        self.success(result) 
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+        }) 
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account required.')
+
+        if not account.billing_provider_ref: 
+            raise NotFoundError('No billing account found - no ref.')     
+
+        try:
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+
+            cust_subs = yield self.executor.submit(
+                customer.subscriptions.all)
+
+            most_recent_sub = cust_subs['data'][0] 
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                raise NotFoundError('No billing account found - not in stripe')
+            else: 
+                _log.error('Unknown invalid error occurred talking'\
+                           ' to Stripe %s' % e)
+                raise Exception('Unknown Stripe Error')  
+        except Exception as e: 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise
+
+        result = yield self.db2api(most_recent_sub)
+
+        self.success(result) 
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+                'canceled_at', 'current_period_end', 'current_period_start',
+                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
+                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'trial_start'] 
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+                'canceled_at', 'current_period_end', 'current_period_start',
+                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
+                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'trial_start'] 
  
     @classmethod
     def get_access_levels(cls):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
                  'account_required'  : [HTTPVerbs.POST] 
                }
 

@@ -290,8 +290,10 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                     acct.billing_provider_ref)
     
                 # returns the most active subscriptions up to 10 
-                cust_subs = yield request.executor.submit(
+                cust_sub_obj = yield request.executor.submit(
                     stripe_customer.subscriptions.all)
+                cust_subs = cust_sub_obj['data']
+
             except Exception as e: 
                 _log.error('Unknown error occurred talking to Stripe %s' % e)
                 raise 
@@ -679,10 +681,13 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         passthrough_fields = set(cls._get_passthrough_fields())
 
         for field in fields:
-            if field in passthrough_fields:
-                retval[field] = getattr(obj, field)
-            else:
-                retval[field] = yield cls._convert_special_field(obj, field)
+            try: 
+                if field in passthrough_fields:
+                    retval[field] = getattr(obj, field)
+                else:
+                    retval[field] = yield cls._convert_special_field(obj, field)
+            except AttributeError: 
+                pass 
         raise tornado.gen.Return(retval)
 
     @classmethod

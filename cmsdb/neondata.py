@@ -1507,7 +1507,7 @@ class StoredObject(object):
         def json_serial(obj):
             if isinstance(obj, datetime.datetime):
                 serial = obj.isoformat()
-            return serial
+                return serial
         return json.dumps(obj, default=json_serial)
 
     @utils.sync.optional_sync
@@ -1952,7 +1952,7 @@ class StoredObject(object):
                     def json_serial(obj):
                         if isinstance(obj, datetime.datetime):
                             serial = obj.isoformat()
-                        return serial
+                            return serial
                     # hack we need two copies of the object, copy won't work here
                     item_one = json.loads(json.dumps(item, default=json_serial))
                     cur_obj = create_class._create(key, item_one)
@@ -3000,7 +3000,8 @@ class NeonUserAccount(NamespacedStoredObject):
         # under this account.
         self.default_thumbnail_id = None
          
-        # create on account creation this gives access to the API, passed via header
+        # create on account creation this gives access to the API, 
+        # passed via header
         self.api_v2_key = NeonApiKey.id_generator()
         
         # Boolean on wether AB tests can run
@@ -3009,36 +3010,33 @@ class NeonUserAccount(NamespacedStoredObject):
         # Will thumbnails be served by our system?
         self.serving_enabled = serving_enabled
 
-        # What controller is used to serve the image? Default to imageplatform
+        # What controller is used to serve the image? 
+        # Default to imageplatform
         self.serving_controller = serving_controller
 
-        # What users are privy to the information assoicated to this NeonUserAccount
-        # simply a list of usernames 
+        # What users are privy to the information assoicated to this 
+        # NeonUserAccount simply a list of usernames 
         self.users = users or [] 
 
         # email address associated with this account 
         self.email = email
 
-        # most recent subscription from recurly
+        # most recent subscription from stripe
         self.subscription_information = subscription_information
-        # what plan is this user on, currently corresponds to plans in recurly
-        #self.subscription_plan_type = subscription_plan_type
 
-        # local copy of the subscription state, defined in SubscriptionState
-	#self.subscription_state = subscription_state 
-
-        # we want to cache some information on subscription info, this is when we should 
-        # next check the service for updates to the subscription
+        # we want to cache some information on subscription info, 
+        # this is when we should next check the service for updates 
+        # to the subscription
         self.verify_subscription_expiry = verify_subscription_expiry.strftime(
             "%Y-%m-%d %H:%M:%S.%f")
 
-        # this relates to our billing provider, we default this to True, but all new 
-        # accounts that need to be billed through our provider should set this to 
-        # False 
+        # this relates to our billing provider, we default this to True, 
+        # but all new accounts that need to be billed through our provider 
+        # should set this to False 
         self.billed_elsewhere = billed_elsewhere
 
-        # the key on the billing site that we need to get information about this 
-        # customer 
+        # the key on the billing site that we need to get information 
+        # about this customer 
         self.billing_provider_ref = billing_provider_ref  
         
     @classmethod
