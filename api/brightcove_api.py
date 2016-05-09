@@ -28,9 +28,10 @@ import urllib
 import utils.http
 import utils.logs
 import utils.neon
+from cmsapiv2.apiv2 import ResponseCode
 from cvutils.imageutils import PILImageUtils
 from utils.http import RequestPool
-from tornado.httpclient import HTTPResponse
+from tornado.httpclient import HTTPRequest, HTTPResponse
 
 import logging
 _log = logging.getLogger(__name__)
@@ -690,9 +691,6 @@ class BrightcoveOAuthConfigException(Exception):
 class BrightcoveAuthDeniedException(Exception):
     pass
 
-class OAuth2Error(Exception):
-    pass
-
 class OAuth2Session(object):
     '''Store OAuth2 token lookup and storage; provide general wrapper to request
 
@@ -707,7 +705,7 @@ class OAuth2Session(object):
         self.client_secret = client_secret
 
     @tornado.gen.coroutine
-    def get(self, url, method='GET', params={}, retrying=False):
+    def _send_request(request):
         '''Get a http request by method with OAuth2 authentication
 
         params- dictionary
@@ -716,10 +714,6 @@ class OAuth2Session(object):
         if not self.token:
             yield self._fetch_token()
 
-        headers = {
-            'Authorization': 'Bearer {}'.format(self.token),
-            'Content-Type': 'application/json'
-        }
         body = json.dumps(params) if method in ['POST', 'PATCH'] else None
         request = tornado.httpclient.HTTPRequest(url, method, headers, body)
 
@@ -761,36 +755,104 @@ class OAuth2Session(object):
     def is_authorized(self):
         return self.token == True
 
-class BrightcoveOAuth2Session(OAuth2Session):
+class BrightcoveOAuth2Session(object):
+    '''Manage Brightcove API session authenticated by OAuth2
 
-    token_url = 'https://oauth.brightcove.com/v3/access_token'
+    Uses send_request(HTTPRequest) as the interface to Brightcove. Manages
+    access token request and refresh implicitly. Raises
+    BrightcoveApiClientError in case of 400 status code, raises
+    BrightcoveApiServerError on 500. Parses response body and returns
+    dictionary of the response.
+    '''
+
+    TOKEN_URL = 'https://oauth.brightcove.com/v3/access_token'
+
+    def __init__(self, client_id, client_secret):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._token = None # Defer to first request
 
     @tornado.gen.coroutine
-    def _fetch_token(self):
-        '''Fetch a new OAuth2 token from auth provider given client id, secret'''
+    def _send_request(self, request, cur_try=0, **send_kwargs):
+        '''Send a request to the Brightcove CMS api
 
-        # Api seems to require application/x-www-form-urlencoded
-        # body parameters for this call.
-        body = urllib.urlencode({'grant_type': 'client_credentials'})
+        Inputs:
+        request - A tornado.httpclient.HTTPRequest object
+        send_kwargs - Passed arguments to utils.http.send_request
+        '''
+        try:
+            yield self._authenticate()
+        except tornado.httpclient.HTTPError as e:
+            response = tornado.httpclient.HTTPResponse(request, e.code, error=e)
+            raise tornado.gen.Return(response)
 
-        request = tornado.httpclient.HTTPRequest(
-            self.token_url, 'POST', self._headers(), body)
-        response = yield utils.http.send_request(
-            request, async=True, no_retry_codes=[401])
-        if response.error:
-            import pdb; pdb.set_trace()
-            raise Exception('Cannot get token for client id {}'.format(self.client_id))
-        self.token = self._extract_token(response)
-        raise tornado.gen.Return(self.token)
+        # Configure no-retry codes
+        no_retry_codes = send_kwargs.get('no_retry_codes', [])
+        no_retry_codes.append(ResponseCode.HTTP_UNAUTHORIZED)
+        send_kwargs['no_retry_codes'] = no_retry_codes
+
+        # Set required headers
+        request.headers.update({
+            'Authorization': 'Bearer {}'.format(self._token),
+            'Content-Type': 'application/json'
+        })
+
+        # Send
+        response = yield utils.http.send_request(request, async=True, **send_kwargs)
+
+        # Success
+        if not response.error:
+            raise tornado.gen.Return(self._handle_response(response))
+
+        # Handle error
+        if response.error.code == 401 and cur_try == 0:
+            # Treat all 401 responses as token expiration.
+            # Try resetting the request token and re-sending
+            self._token = None
+            yield self._send_request(
+                request, cur_try=cur_try + 1, **send_kwargs)
+
+        error = [response.body, response.error.code, response.error.message]
+#        elif response.error.code >= 500:
+#            raise BrightcoveApiServerError(*error)
+#        elif response.error.code >= 400:
+#            raise BrightcoveApiClientError(*error)
+#        # Unknown error!
+        raise BrightcoveApiError(*error)
+
+
+    def _handle_response(self, response):
+        return json.loads(response.body)
+
+    @tornado.gen.coroutine
+    def _authenticate(self):
+        '''Fetch a new OAuth2 token from auth provider'''
+        while self._token is None:
+            request = HTTPRequest(
+                self.TOKEN_URL,
+                method='POST',
+                headers=self._authorization_header(),
+                body=self._authorization_body())
+            response = yield utils.http.send_request(
+                request,
+                no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
+                async=True)
+            # Break on error
+            if response.error:
+                raise response.error
+            self._token = json.loads(response.body)['access_token']
 
     def _extract_token(self, response):
         return json.loads(response.body)['access_token']
 
-    def _headers(self):
+    def _authorization_body(self):
+        '''Build a dictionary with authorization grant parameter'''
+        return urllib.urlencode({'grant_type': 'client_credentials'})
+
+    def _authorization_header(self):
         '''Build a dictionary with a Authorization header
 
-        Brightcove's API requires an Authorization header
-        where the default location to send is in the POST body.
+        Uses header to convey keys as required by Brightcove.
         '''
 
         auth_string = base64.b64encode('{}:{}'.format(
@@ -799,7 +861,8 @@ class BrightcoveOAuth2Session(OAuth2Session):
             'Authorization': 'Basic {}'.format(auth_string)
         }
 
-class BrightcoveOAuthApi(object):
+
+class PlayerAPI(BrightcoveOAuth2Session):
 
     '''Allow calls to the Brightcove Api
 
@@ -814,6 +877,8 @@ class BrightcoveOAuthApi(object):
     are not saved.) This is because the token expiry is 300 seconds, there is no refresh token
     support, and Brightcove says it does not rate limit.
     '''
+
+    BASE_URL = 'https://players.api.brightcove.com/v1/accounts'
 
     def __init__(self, integration=None, client_id=None, client_secret=None, publisher_id=None):
         '''Ensure integration is set up and the client credential is valued
@@ -844,76 +909,18 @@ class BrightcoveOAuthApi(object):
             raise BrightcoveOAuthConfigException(
                 'BcOauthApi publisher id missing in client {}'.format(client_id))
 
-        # Initialize but do not yet get an access token.
-        # Defer that to the first request.
-        self.oauth = BrightcoveOAuth2Session(client_id, client_secret)
-
-    @tornado.gen.coroutine
-    def get_player(self, player_ref, return_neon_object=False):
-        '''Get a single Brightcove player for the given player_ref
-
-        Returns either a dictionary or a player object if return_neon_object is True.
-        '''
-        response = yield self.oauth.get(self._get_player_url(player_ref))
-        item = json.loads(response.body)
-        if return_neon_object:
-            rv = yield self.dict_to_object(item)
-        else:
-            rv = item
-        raise tornado.gen.Return(rv)
-
-    @tornado.gen.coroutine
-    def get_players(self, return_neon_object=False):
-        '''Get all Brightcove players for the instance's publisher id
-
-        Returns either a list of dictionary or player object if return_neon_object is True'''
-        response = yield self.oauth.get(self._get_players_url())
-        items = [i for i in json.loads(response.body)['items']
-                 if i['id'] != u'default'] # Remove the "default" player
-        if return_neon_object:
-            rv = yield map(self.dict_to_object, items)
-        else:
-            rv = items
-        raise tornado.gen.Return(rv)
-
-    @tornado.gen.coroutine
-    def publish_player(self, player_ref):
-        '''Publish a player, copying its "preview" branch to its "master" branch'''
-        response = yield self.oauth.get(
-            self._get_publish_url(player_ref), method='POST')
-        raise tornado.gen.Return(response)
-
-    @tornado.gen.coroutine
-    def patch_player(self, player_ref, patch_json):
-        '''Merge the contents of patch_json string over player'''
-        response = yield self.oauth.get(
-            self._get_patch_url(player_ref), method='PATCH', params=patch_json)
-        raise tornado.gen.Return(response)
-
-    @tornado.gen.coroutine
-    def dict_to_object(self, data):
-        '''Convert the raw dictionary data to a BrightcovePlayer instance
-
-        Reads from the database. Returns a mostly empty Player if missing.
-        '''
-        player_ref = data.get('id')
-        player = yield cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
-        if player:
-            raise tornado.gen.Return(player)
-        raise tornado.gen.Return(cmsdb.neondata.BrightcovePlayer(
-            player_ref=player_ref,
-            name=data['name']))
+        super(PlayerAPI, self).__init__(client_id, client_secret)
 
     @tornado.gen.coroutine
     def is_authorized(self):
         '''Test access token for read and write operations'''
 
-        if not self.oauth.token:
+        if not self._token:
             raise tornado.gen.Return(False)
 
         # Confirm read access
-        response = yield self.oauth.get(self._get_players_url())
-        if not response.code == 200:
+        response = yield self.get_players()
+        if not 'items' in response:
             raise tornado.gen.Return(False)
 
         # The only write operations available require player ids, but we might not have one.
@@ -923,36 +930,63 @@ class BrightcoveOAuthApi(object):
         if bad_response.error.code != 404:
             raise tornado.gen.Return(False)
 
-        # TODO: test the other operations: thumbnail write, video read/write
-
         raise tornado.gen.Return(True)
 
-    # Url config and methods
-    # account_ref is Brightcove's user id, or our publisher_id
-    # player_ref is Brightcove's player id, which is a base64 string e.g., rkPZ0cH
-    # branch is either "master" or "preview"; patched changes to a player are in preview
-    # until publish is called on their player.
-    PLAYERS_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players'
-    PLAYER_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}'
-    GET_CONFIG_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration/{branch}'
-    PATCH_CONFIG_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/configuration'
-    PUBLISH_URL = 'https://players.api.brightcove.com/v1/accounts/{account_ref}/players/{player_ref}/publish'
+    @tornado.gen.coroutine
+    def get_player(self, player_ref, as_object=False):
+        '''Get a single Brightcove player for the given player_ref
 
-    def _get_players_url(self):
-        return self.PLAYERS_URL.format(account_ref=self.publisher_id)
+        Returns either a dictionary or a player object if return_neon_object is True.
+        '''
+        request = HTTPRequest('{base_url}/{pub_id}/players/{player_ref}'.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id,
+            player_ref=player_ref
+        ))
+        response = yield self._send_request(request)
+        raise tornado.gen.Return(response)
 
-    def _get_player_url(self, player_ref):
-        return self.PLAYER_URL.format(
-            account_ref=self.publisher_id, player_ref=player_ref)
+    @tornado.gen.coroutine
+    def get_players(self, as_object=False):
+        '''Get all Brightcove players for the instance's publisher id
 
-    def _get_config_url(self, player_ref, branch='master'):
-        return self.GET_CONFIG_URL.format(
-            account_ref=self.publisher_id, player_ref=player_ref, branch=branch)
+        Returns either a list of dictionary or player object if return_neon_object is True'''
+        request = HTTPRequest('{base_url}/{pub_id}/players'.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id
+        ))
+        response = yield self._send_request(request)
+        raise tornado.gen.Return(response)
 
-    def _get_patch_url(self, player_ref):
-        return self.PATCH_CONFIG_URL.format(
-            account_ref=self.publisher_id, player_ref=player_ref)
+    @tornado.gen.coroutine
+    def publish_player(self, player_ref):
+        '''Publish a player, copying its "preview" branch to its "master" branch'''
+        request = HTTPRequest('{base_url}/{pub_id}/players/{player_ref}/publish'.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id,
+            player_ref=player_ref
+        ), method='POST', body={})
+        response = yield self._send_request(request)
+        raise tornado.gen.Return(response)
 
-    def _get_publish_url(self, player_ref):
-        return self.PUBLISH_URL.format(
-            account_ref=self.publisher_id, player_ref=player_ref)
+    @tornado.gen.coroutine
+    def patch_player(self, player_ref, patch_json):
+        '''Merge the contents of patch_json string over player'''
+        request = HTTPRequest('{base_url}/{pub_id}/players/{player_ref}/configuration'.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id,
+            player_ref=player_ref
+        ), method='PATCH', body={})
+        response = yield self._send_request(request)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def get_player_config(self, player_ref):
+        '''Get the "configuration" dictionary from master branch of player'''
+        request = HTTPRequest('{base_url}/{pub_id}/players/{player_ref}/configuration/master'.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id,
+            player_ref=player_ref
+        ))
+        response = yield self._send_request(request)
+        raise tornado.gen.Return(response)

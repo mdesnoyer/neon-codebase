@@ -423,22 +423,46 @@ class BrightcovePlayerHandler(APIV2Handler):
     def get(self, account_id):
         """Get the list of BrightcovePlayers for the given integration"""
 
+        # Validate request and data
         schema = Schema({
             Required('integration_id'): Any(str, unicode, Length(min=1, max=256))
         })
         args = self.parse_args()
         schema(args)
         integration_id = args['integration_id']
-
-        # Retrieve the list of Brightcove players from their api
         integration = yield neondata.BrightcoveIntegration.get(integration_id, async=True)
-        api = BrightcoveOAuthApi(integration)
-        players = yield bc_api.get_players(True)
-        # It might be useful to fall back to our copy of these data, but
-        # if the Brightcove api is not available then nothing else will work.
+        if not integration:
+            raise NotFoundError('BrighcoveIntegration does not exist for player reference:%s', args['player_ref'])
 
+        # Retrieve the list of players from Brightcove api
+        try:
+            api = PlayerAPI(integration)
+            json_players = yield api.get_players()
+        except:
+            # @TODO!!
+            pass
+
+        players = map(self._bc_to_obj, json_players)
         response = map(self.db2api, players)
         self.success(response)
+
+    @tornado.gen.coroutine
+    def _bc_to_obj(bc_player):
+        '''Retrieve or create a BrightcovePlayer from db given BC data
+
+        If creating object, the object is not saved to the database.
+        '''
+        # Get the database record. Expect many to be missing, so don't log
+        neon_player = yield neondata.BrightcovePlayer.get(
+            bc_player['id'], async=True, log_missing=False)
+        if neon_player:
+            # Prefer Brightcove's data since it is potentially newer
+            neon_player.name = bc_player['name']
+        else:
+            neon_player = neondata.BrightcovePlayer(
+                player_ref=bc_player['id'],
+                name=bc_player['name'])
+        raise tornado.gen.Return(neon_player)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -467,7 +491,7 @@ class BrightcovePlayerHandler(APIV2Handler):
             raise NotAuthorizedError('Player is not owned by this account')
 
         # Modify the db if flag changed
-        is_tracked = Boolean()(args['is_tracked'])
+        is_tracked = args['is_tracked']
         if player.is_tracked is not is_tracked:
             def _modify(p):
                 p.is_tracked = is_tracked
@@ -488,19 +512,36 @@ class BrightcovePlayerHandler(APIV2Handler):
         self.success(response)
 
 class BrightcovePlayerHelper():
+    '''Contain functions that work on Players that are called internally.'''
+
     @tornado.gen.coroutine
     def publish_plugin_to_player(player):
-        """Publish the current plugin to Brightcove's player"""
+        """Update Brightcove player with current plugin and publishes it'''
+
+        Input-
+        player- BrightcovePlayer object
+        """
 
         integration = yield neondata.BrightcoveIntegration.get(
             player.integration_id, async=True)
+        player_ref = player.player_ref
+
         try:
-            bc = yield BrightcoveOAuthApi(integration)
-            # Get the player JSON data from Brightcove's API
-            bc_player = yield bc.get_player(player.player_ref)
-            bc_player_config = bc_player['branches']['master']['configuration']
-            patch = self._get_patch_json(bc_player_config, intregration.account_id)
-            yield bc.patch_player(player.player_ref, patch)
+            api = PlayerAPI(integration)
+            # Get the current player configuration from Brightcove
+            player_config = yield api.get_player_config(player_ref)
+            # Make the patch json string that will be used to update player
+            patch = self._make_patch_json(player_config, intregration.account_id)
+            try:
+                yield api.patch_player(player_ref, patch)
+            except:
+                #@TODO
+                pass
+            try:
+                yield api.publish_player(player_ref)
+            except:
+                #@TODO
+                pass
 
             # Success. Update the player with the date and version
             def _modify(p):
@@ -517,8 +558,8 @@ class BrightcovePlayerHelper():
         raise tornado.gen.Return(True)
 
     @classmethod
-    def _get_patch_json(cls, player_config, account_id):
-        """Get a patch that replaces our js and json with the current version
+    def _make_patch_json(cls, player_config, account_id):
+        """Make a patch that replaces our js and json with the current version
 
         Brightcove player's configuration api allows PUT to replace the entire
         configuration branch (master or preview). It allows and recommends PATCH
@@ -562,7 +603,7 @@ class BrightcovePlayerHelper():
 
         These are options that injected into the plugin environment and override
         its defaults. { name, options { publisher { id }}} are required. Other
-        flags can be in the neon-videojs-plugin js."""
+        flags can be found in the neon-videojs-plugin js."""
 
         return {
             'name': 'neon',

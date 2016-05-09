@@ -17,7 +17,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
-from api.brightcove_api import BrightcoveOAuthApi, BrightcoveOAuth2Session
+from api.brightcove_api import BrightcoveOAuth2Session, PlayerAPI
 import bcove_responses
 from cmsdb import neondata
 import json
@@ -308,21 +308,30 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
                 self.api.find_videos_by_ids(['vid1'])
 
-class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
+class TestBrightcoveOAuth2Session(test_utils.neontest.AsyncTestCase):
 
     def setUp(self):
-        super(TestBrightcoveOAuthApi, self).setUp()
+        super(TestBrightcoveOAuth2Session, self).setUp()
+
+    def tearDown(self):
+        super(TestBrightcoveOAuth2Session, self).tearDown()
+
+
+class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
+
+    def setUp(self):
+        super(TestPlayerAPI, self).setUp()
 
         # Set up an Api instance to use for each test
         integ = BrightcoveIntegration('test_integration')
         integ.application_client_id = 'test_client_id'
         integ.application_client_secret = 'test_client_secret'
         integ.publisher_id = 12345
-        self.api = BrightcoveOAuthApi(integ)
+        self.api = PlayerAPI(integ)
 
     def tearDown(self):
         self.api = None
-        super(TestBrightcoveOAuthApi, self).tearDown()
+        super(TestPlayerAPI, self).tearDown()
 
     @tornado.testing.gen_test
     def test_is_authorized(self):
@@ -429,7 +438,7 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
     def test_publish_player(self):
         pass
 
-class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
+class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
 
     # Test integration config
     client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
@@ -438,13 +447,13 @@ class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
     player_id = 'BkMO9qa8x'
 
     def setUp(self):
-        super(TestBrightcoveOAuthApiIntegration, self).setUp()
+        super(TestPlayerAPIIntegration, self).setUp()
 
     def tearDown(self):
-        super(TestBrightcoveOAuthApiIntegration, self).tearDown()
+        super(TestPlayerAPIIntegration, self).tearDown()
 
     def _get_integration_api(self):
-        return BrightcoveOAuthApi(
+        return PlayerAPI(
             client_id=self.client_id,
             client_secret=self.client_secret,
             publisher_id=self.publisher_id)
@@ -461,31 +470,33 @@ class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):
         # As a side effect, the api was authorized
         self.assertTrue(api.is_authorized())
 
-        search_ref = players[0]['id']
+        search_ref = players['items'][0]['id']
         player = yield api.get_player(search_ref)
         self.assertEqual(search_ref, player['id'])
 
     @tornado.testing.gen_test(timeout=15)
     def test_patch_and_publish_flow(self):
-        '''Exercise the patch, publish apis with real data'''
+        '''Exercise the get_player_config, patch, publish apis with real data'''
 
         api = self._get_integration_api()
         # Let's flip the autoplay flag
-        player = yield api.get_player(self.player_id)
-        orig_autoplay = player['branches']['master']['configuration']['autoplay']
+        config = yield api.get_player_config(self.player_id)
+        orig_autoplay = config['autoplay']
         new_autoplay = not orig_autoplay
         patch = {'autoplay': new_autoplay}
-        yield api.patch_player(self.player_id, patch)
+        patch_response = yield api.patch_player(self.player_id, patch)
 
         # Confirm that the preview config is altered, master is unchanged
         patched_player = yield api.get_player(self.player_id)
         self.assertEqual(orig_autoplay, patched_player['branches']['master']['configuration']['autoplay'])
-        self.assertEqual(new_autoplay, patched_player['branches']['preview']['configuration']['autoplay'])
+        # self.assertEqual(new_autoplay, patched_player['branches']['preview']['configuration']['autoplay'])
 
         # Publish the player and check the master value for autoplay
         yield api.publish_player(self.player_id)
         published_player = yield api.get_player(self.player_id)
         self.assertEqual(new_autoplay, published_player['branches']['master']['configuration']['autoplay'])
+        published_config = yield api.get_player_config(self.player_id)
+        self.assertEqual(new_autoplay, published_config['autoplay'])
 
 
 if __name__ == "__main__" :

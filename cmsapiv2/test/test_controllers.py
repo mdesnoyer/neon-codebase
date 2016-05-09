@@ -4350,7 +4350,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             }
         }
         account_id = 12345
-        patch = controllers.BrightcovePlayerHelper._get_patch_json(
+        patch = controllers.BrightcovePlayerHelper._make_patch_json(
             given, account_id)
         expect = json.dumps({
             'plugins': [
