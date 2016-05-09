@@ -38,7 +38,6 @@ from requests.models import Response
 
 _log = logging.getLogger(__name__)
 
-# TODO(sunil) Add more tests
 class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         super(TestBrightcoveApi, self).setUp()
@@ -343,11 +342,14 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
         with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
             get = self._future_wrap_mock(_get)
             side_effect = [
-                HTTPResponse(HTTPRequest('http://test.com'), 200),
-                HTTPResponse(HTTPRequest('http://test.com'), 404),
+                HTTPResponse(HTTPRequest(''), 200),
+                HTTPResponse(HTTPRequest(''), 404),
             ]
             get.side_effect = side_effect
             rv = yield self.api.is_authorized()
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(get.call_args_list[0][0][0], self.api._get_players_url())
+            self.assertEqual(get.call_args_list[1][0][0], self.api._get_publish_url('invalid_ref'))
         self.assertTrue(rv)
 
     @tornado.testing.gen_test
@@ -371,6 +373,8 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
             json_player = yield self.api.get_player(given_ref)
             get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
             player = yield self.api.get_player(given_ref, True)
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(get.call_args[0][0], self.api._get_player_url(given_ref))
 
         self.assertEqual(json_player['id'], given_ref)
         self.assertEqual(json_player['name'], given_name)
@@ -403,6 +407,8 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
             players = yield self.api.get_players(True)
             get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
             json_players = yield self.api.get_players()
+            self.assertEqual(get.call_count, 2)
+            self.assertEqual(get.call_args[0][0], self.api._get_players_url())
 
         self.assertEqual(2, len(players))
         self.assertEqual(players[0].player_ref, given_ref)
@@ -418,11 +424,9 @@ class TestBrightcoveOAuthApi(test_utils.neontest.AsyncTestCase):
 
     def test_patch_player(self):
         # This is exercised in the integration test
-        # TODO !
         pass
 
     def test_publish_player(self):
-        # TODO !
         pass
 
 class TestBrightcoveOAuthApiIntegration(test_utils.neontest.AsyncTestCase):

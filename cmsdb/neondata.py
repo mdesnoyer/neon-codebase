@@ -4311,9 +4311,13 @@ class BrightcoveIntegration(AbstractIntegration):
         self.read_token = rtoken
         self.write_token = wtoken
 
-        # The application settings allow the publisher to grant
-        # Neon access via OAuth2 to the BC Player Management API
-        # These are made in the API access page in Video Cloud.
+        # Configure Brightcove OAuth2, if publisher uses this feature
+        # In the Brightcove Cloud 
+        self.application_client_id = application_client_id
+        self.application_client_secret = application_client_secret
+
+        #The publish date of the last processed video - UTC timestamp seconds
+        self.last_process_date = last_process_date
         self.application_client_id = application_client_id
         self.application_client_secret = application_client_secret
 
@@ -5152,10 +5156,10 @@ class BrightcovePlayer(NamespacedStoredObject):
         self.integration_id = integration_id
         # Set if publisher needs the Neon event tracking plugin published to this
         self.is_tracked = is_tracked
-        # Descriptive name of the plugin
+        # Descriptive name of the player
         self.name = name
 
-        # Properties to track publishing
+        # Properties to track publishing:
         self.publish_date = publish_date
         # Version is an increasing integer
         self.published_plugin_version = published_plugin_version
@@ -6164,69 +6168,6 @@ class VideoMetadata(StoredObject):
             # switch up the order clause so the page starts at the right spot 
             order_clause = "ORDER BY created_time ASC" 
             wc_params.append(since) 
-
-        if until: 
-            if where_clause: 
-                where_clause += " AND "
-            where_clause += " created_time < to_timestamp(%s)::timestamp" 
-            wc_params.append(until) 
-        
-        if account_id: 
-            if where_clause: 
-                where_clause += " AND "
-            where_clause += " _data->>'key' LIKE %s"
-            wc_params.append(account_id+'_%')
- 
-        results = yield cls.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg" ], 
-                    where_clause, 
-                    wc_params=wc_params, 
-                    limit_clause="LIMIT %d" % limit, 
-     		    order_clause=order_clause,
-                    cursor_factory=psycopg2.extras.RealDictCursor)
-
-        def _get_time(result): 
-            # need micros here 
-            created_time = result['created_time_pg']
-            cc_tt = time.mktime(created_time.timetuple())
-            _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time 
-        
-        try:   
-            do_reverse = False 
-            if since: 
-                since_time = _get_time(results[-1])
-                until_time = _get_time(results[0])
-                do_reverse = True
-            else:  
-                since_time = _get_time(results[0]) 
-                until_time = _get_time(results[-1]) 
-        except (KeyError,IndexError): 
-            pass
-        
-        for result in results:
-            obj = cls._create(result['_data']['key'], result)
-            videos.append(obj)
-
-        if do_reverse: 
-            videos.reverse() 
-
-        rv['videos'] = videos 
-        rv['since_time'] = since_time
-        rv['until_time'] = until_time
-        raise tornado.gen.Return(rv) 
-         
-class VideoStatus(DefaultedStoredObject):
-    '''Stores the status of the video in the wild for often changing entries.
-
-    '''
-    def __init__(self, video_id, experiment_state=ExperimentState.UNKNOWN,
-                 winner_tid=None,
-                 experiment_value_remaining=None,
-                 state_history=None):
         super(VideoStatus, self).__init__(video_id)
 
         # State of the experiment

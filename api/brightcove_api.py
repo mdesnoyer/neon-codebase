@@ -28,7 +28,6 @@ import urllib
 import utils.http
 import utils.logs
 import utils.neon
-from cmsapiv2.apiv2 import ResponseCode
 from cvutils.imageutils import PILImageUtils
 from utils.http import RequestPool
 from tornado.httpclient import HTTPResponse
@@ -730,6 +729,9 @@ class OAuth2Session(object):
             # Attempt to recover from expired access token
             if response.error.code == 401 and not retrying:
 
+                # Reset access token
+                self.token = None
+
                 # Examples of 401 accompanying authenticate header
                 # WWW-Authenticate: Basic realm="Authorization Required"
                 # WWW-Authenticate: Bearer error="insufficient_scope"
@@ -742,10 +744,12 @@ class OAuth2Session(object):
                             401, 'insufficient scope for method:{}, url:{}'.format(
                                 method, url))
 
-                # Reset access token
-                self.token = None
+                # Fetch new token
                 self._fetch_token()
                 self.get(url, method, params, retrying=True)
+            else:
+                # Unwrap the exception and raise it
+                raise response.error
 
         raise tornado.gen.Return(response)
 
@@ -772,7 +776,7 @@ class BrightcoveOAuth2Session(OAuth2Session):
         request = tornado.httpclient.HTTPRequest(
             self.token_url, 'POST', self._headers(), body)
         response = yield utils.http.send_request(
-            request, async=True, no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED])
+            request, async=True, no_retry_codes=[401])
         if response.error:
             import pdb; pdb.set_trace()
             raise Exception('Cannot get token for client id {}'.format(self.client_id))
@@ -846,7 +850,10 @@ class BrightcoveOAuthApi(object):
 
     @tornado.gen.coroutine
     def get_player(self, player_ref, return_neon_object=False):
-        '''Get a single Brightcove player for the give player_ref'''
+        '''Get a single Brightcove player for the given player_ref
+
+        Returns either a dictionary or a player object if return_neon_object is True.
+        '''
         response = yield self.oauth.get(self._get_player_url(player_ref))
         item = json.loads(response.body)
         if return_neon_object:
@@ -857,7 +864,9 @@ class BrightcoveOAuthApi(object):
 
     @tornado.gen.coroutine
     def get_players(self, return_neon_object=False):
-        '''Get all Brightcove players for the instance's publisher id'''
+        '''Get all Brightcove players for the instance's publisher id
+
+        Returns either a list of dictionary or player object if return_neon_object is True'''
         response = yield self.oauth.get(self._get_players_url())
         items = [i for i in json.loads(response.body)['items']
                  if i['id'] != u'default'] # Remove the "default" player
@@ -869,7 +878,7 @@ class BrightcoveOAuthApi(object):
 
     @tornado.gen.coroutine
     def publish_player(self, player_ref):
-        '''Publish a player, copying its "preview" branch to the "master" branch'''
+        '''Publish a player, copying its "preview" branch to its "master" branch'''
         response = yield self.oauth.get(
             self._get_publish_url(player_ref), method='POST')
         raise tornado.gen.Return(response)
@@ -888,7 +897,6 @@ class BrightcoveOAuthApi(object):
         Reads from the database. Returns a mostly empty Player if missing.
         '''
         player_ref = data.get('id')
-        print(player_ref)
         player = yield cmsdb.neondata.BrightcovePlayer.get(player_ref, async=True)
         if player:
             raise tornado.gen.Return(player)
@@ -911,7 +919,7 @@ class BrightcoveOAuthApi(object):
         # The only write operations available require player ids, but we might not have one.
         # Request a unauthorized resource is a 401 even if it's an invalid resource.
         # So let's botch a request and expect a 404 and not a 401.
-        bad_response = yield self.oauth.get(self._get_patch_url('invalid ref'))
+        bad_response = yield self.oauth.get(self._get_publish_url('invalid_ref'))
         if bad_response.error.code != 404:
             raise tornado.gen.Return(False)
 

@@ -4271,6 +4271,110 @@ class TestAccountIntegrationsHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(rjson['integration_count'], 0) 
 
+
+class TestBrightcovePlayerHandler(TestControllersBase):
+    '''Test the handler and helper classes for BrightcovePlayer'''
+
+    def setUp(self):
+        super(TestBrightcovePlayerHandler, self).setUp()
+
+    def tearDown(self):
+        super(TestBrightcovePlayerHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_get_players(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_put_player(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_publish_player(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_get_patch_json(self):
+        given = {
+            "autoadvance": 0,
+            "autoplay": False,
+            "compatibility": True,
+            "flashHlsDisabledByStudio": False,
+            "fullscreenControl": True,
+            "id": "BkMO9qa8x",
+            "player": {
+                "inactive": False,
+                "template": {
+                    "locked": False,
+                    "name": "single-video-template",
+                    "version": "5.1.14"
+                }
+            },
+            "plugins": [
+                {
+                    "name": "other-plugin-2",
+                    "options": {
+                        "flag": False,
+                    },
+                },
+                {
+                    "name": "neon",
+                    "options": {
+                        "publisher": {
+                            "id": 12345
+                        },
+                    },
+                },
+                {
+                    "name": "other-plugin-1",
+                    "options": {
+                        "flag": True
+                    },
+                },
+            ],
+            "scripts": [
+                "example.js",
+                "another.js",
+                "https://s3.amazonaws.com/neon-cdn-assets/old-version/videojs-neon-tracker.min.js",
+                "other.js"
+            ],
+            "skin": "graphite",
+            "studio_configuration": {
+                "player": {
+                    "adjusted": True
+                }
+            },
+            "stylesheets": [],
+            "video_cloud": {
+                "policy_key": "BCpkADawqM2Z5-2XLiQna9qL7qIuHETaqzXl1fdmHcVOFOP6Rf8uUnlhNxNlh9MLNjb5lkodGFv2yBU9suVWdnXZTcFWEMx2qvNACzbVDIyco9fvRTAi43xUeygF_GPQqOUGomo8Bg1s-V7J"
+            }
+        }
+        account_id = 12345
+        patch = controllers.BrightcovePlayerHelper._get_patch_json(
+            given, account_id)
+        expect = json.dumps({
+            'plugins': [
+                {
+                    'name': 'other-plugin-2',
+                    'options': {'flag': False}
+                }, {
+                    'name': 'other-plugin-1',
+                    'options': {'flag': True}
+                }, {
+                    'name': 'neon',
+                    'options': {'publisher': {'id': 12345}}
+                }
+            ],
+            'scripts': [
+                'example.js',
+                'another.js',
+                'other.js',
+                'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
+            ]
+        })
+        self.assertEqual(expect, patch)
+
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()
