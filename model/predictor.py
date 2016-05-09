@@ -17,13 +17,15 @@ import os
 import pyflann
 import tempfile
 import utils.obj
+from utils import statemon
 import threading
 from grpc.beta import implementations
 import aquila_inference_pb2  # TODO: make sure this is correct.
-
+from grpc.beta.interfaces import ChannelConnectivity
 
 _log = logging.getLogger(__name__)
 
+statemon.define('lost_server_connection', int)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -235,15 +237,19 @@ class DeepnetPredictor(Predictor):
     Note, this does not require you provision a feature generator for 
     the predictor.'''
 
-    def __init__(self, concurrency=10, hostport='localhost:9000'):
+    def __init__(self, concurrency=10, port='9000',
+                 aquila_connection=None):
         '''
         concurrency - The maximum number of simultaneous requests to 
         submit.
-        hostport - The host:port of the Aquila server as a string, 
-        i.e., localhost:9000.
+        port - the port on which to establish the connection.
+        aquila_connection - An instance (or singleton) of an object
+        that supplies the get_ip method, which returns an IP address
+        of an Aquila server as a string.
         '''
         super(DeepnetPredictor, self).__init__()
         self.concurrency = concurrency
+        self.aq_conn = aquila_connection
         host, port = hostport.split(':')
         self.host = host
         self.port = port
@@ -252,8 +258,40 @@ class DeepnetPredictor(Predictor):
         self.done = 0
         self.channel = None
         self.stub = None
-        self._open = False
+        self._open = None
         self.async = True
+
+    def _connect(self):
+        '''
+        Establishes a connection to the server.
+        '''
+        if self._open:
+            return
+        # only force a refresh if self._open is false. If it is
+        # None, then you're just starting out, and you don't need
+        # to to bother. 
+        force_refresh = self._open is not None
+        host = self.aq_conn.get_ip(force_refresh=force_refresh)
+        _log.debug('Establishing connection on %s' % host)
+        # open question: do we have to destroy old channels?
+        # open question: what happens to futures that derive from destroyed
+        #   channels?
+        self.channel = implementations.insecure_channel(host, int(self.port))
+        # register callback
+        self.channel.subscribe(self._check_conn, try_to_connect=True)
+        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
+            self.channel)
+        self._open = True
+
+    def _check_conn(self, status):
+        '''
+        Checks the connection, as a callback.
+        '''
+        if (status == ChannelConnectivity.TRANSIENT_FAILURE or
+            status == ChannelConnectivity.FATAL_FAILURE):
+            statemon.state.increment('lost_server_connection')
+            _log.warn('Lost connection to server, re-establishing')
+            self._open = False
 
     def _predictasync(self, image, timeout=10.0):
         '''
@@ -261,18 +299,10 @@ class DeepnetPredictor(Predictor):
         timeout: How long the request lasts for before expiring. 
         '''
         image = _aquila_prep(image)
-        if not self._open:
-            # for testing purposes, only open a channel once we actually get an async
-            # prediction request.
-            self.channel = implementations.insecure_channel(self.host, int(self.port))
-            self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
-                self.channel)
-            self._open = True
-        _log.debug('Prediction request recieved')
+        self._connect()
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
         with self.cv:
-            _log.debug('Concurrent requests %i / %i', self.active, self.concurrency)
             while self.active == self.concurrency:
                 self.cv.wait()
         self.active += 1
@@ -293,7 +323,6 @@ class DeepnetPredictor(Predictor):
             self.done += 1
             self.active -= 1
             self.cv.notify()
-        _log.debug('Predictor request done callback activated, active threads %i', self.active)
 
     def complete(self):
         '''
@@ -302,9 +331,10 @@ class DeepnetPredictor(Predictor):
         with self.cv:
             return self.active == 0
 
-    def shutdown(self):
+    def __del__(self):
         del self.channel
         del self.stub
+        super(DeepnetPredictor, self).__del__()
 
 
 class KFlannPredictor(Predictor):
