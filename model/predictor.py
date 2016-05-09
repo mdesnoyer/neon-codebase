@@ -235,9 +235,16 @@ class Predictor(object):
 class DeepnetPredictor(Predictor):
     '''Prediction using the deepnet Aquila (or an arbitrary predictor). 
     Note, this does not require you provision a feature generator for 
-    the predictor.'''
+    the predictor.
 
-    def __init__(self, concurrency=10, port='9000',
+    The connection to the server is maintained internally, using the
+    _check_conn method. This is called at the outset and invokes
+    _connect, which creates the channel and the stub, and adds
+    _check_conn as a callback. _check_conn will ensure that the
+    state of the ready event is set appropriately as the state of
+    the gRPC channel changes.'''
+
+    def __init__(self, concurrency=10, port=9000,
                  aquila_connection=None):
         '''
         concurrency - The maximum number of simultaneous requests to 
@@ -250,61 +257,71 @@ class DeepnetPredictor(Predictor):
         super(DeepnetPredictor, self).__init__()
         self.concurrency = concurrency
         self.aq_conn = aquila_connection
-        host, port = hostport.split(':')
-        self.host = host
         self.port = port
-        self.cv = threading.Condition()
+        self._cv = threading.Condition()
+        self._ready = threading.Event()
         self.active = 0
         self.done = 0
-        self.channel = None
-        self.stub = None
-        self._open = None
         self.async = True
+        self._check_conn()
 
-    def _connect(self):
+    def _connect(self, force_refresh):
         '''
         Establishes a connection to the server.
         '''
-        if self._open:
-            return
-        # only force a refresh if self._open is false. If it is
-        # None, then you're just starting out, and you don't need
-        # to to bother. 
-        force_refresh = self._open is not None
         host = self.aq_conn.get_ip(force_refresh=force_refresh)
         _log.debug('Establishing connection on %s' % host)
         # open question: do we have to destroy old channels?
         # open question: what happens to futures that derive from destroyed
         #   channels?
-        self.channel = implementations.insecure_channel(host, int(self.port))
+        self.channel = implementations.insecure_channel(host, self.port)
         # register callback
         self.channel.subscribe(self._check_conn, try_to_connect=True)
         self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
             self.channel)
-        self._open = True
 
-    def _check_conn(self, status):
+    def _check_conn(self, status=None):
         '''
         Checks the connection, as a callback.
         '''
-        if (status == ChannelConnectivity.TRANSIENT_FAILURE or
-            status == ChannelConnectivity.FATAL_FAILURE):
+        if status is None:
+            # then you're just starting up.
+            self._connect(force_refresh=False)
+            self._ready.clear()
+            return
+        if status is ChannelConnectivity.READY:
+            # the connection is ready
+            _log.debug('Connection established')
+            self._ready.set()
+            return
+        if (status is ChannelConnectivity.TRANSIENT_FAILURE or
+            status is ChannelConnectivity.FATAL_FAILURE):
+            # the connection has been lost
+            self._ready.clear()
             statemon.state.increment('lost_server_connection')
-            _log.warn('Lost connection to server, re-establishing')
-            self._open = False
+            _log.warn('Lost connection to server, trying another')
+            self._connect(force_refresh=True)
+            return
+        # otherwise, nothing has changed
+        _log.debug('Connection status is %s' % str(status))
+        self._ready.clear()
 
     def _predictasync(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring. 
         '''
+        conn_est = self._ready.wait(60.)  # TODO: do we want a timeout?
+        if not conn_est:
+            _log.error('Connection not established in time.')
+            # what do we do here? 
+            return
         image = _aquila_prep(image)
-        self._connect()
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data.extend(image.flatten().tolist())
-        with self.cv:
+        with self._cv:
             while self.active == self.concurrency:
-                self.cv.wait()
+                self._cv.wait()
         self.active += 1
         result_future = self.stub.Regress.future(request, timeout)  # 10 second timeout
         result_future.add_done_callback(
@@ -319,10 +336,10 @@ class DeepnetPredictor(Predictor):
         NOTE: This does not handle any errors, this is up to the true callback
         function to handle.
         '''
-        with self.cv:
+        with self._cv:
             self.done += 1
             self.active -= 1
-            self.cv.notify()
+            self._cv.notify()
 
     def complete(self):
         '''
