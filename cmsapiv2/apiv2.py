@@ -66,8 +66,10 @@ define("check_subscription_interval",
     help="how many seconds in between checking the billing integration", 
     type=int)
 
+define("stripe_api_key", default=None, help='The API key we use to talk to stripe.')
+
 # stripe stuff 
-stripe.api_key = 'sk_test_mOzHk0K8yKfe57T63jLhfCa8'
+stripe.api_key = options.stripe_api_key
 
 class ResponseCode(object):
     HTTP_OK = 200
