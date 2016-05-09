@@ -185,6 +185,8 @@ statemon.define('all_frames_filtered', int)
 statemon.define('cv_video_read_error', int)
 statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
+statemon.define('unable_to_score_frame', int)
+statemon.define('frame_score_attempt_limit_reached', int)
 
 define("text_model_path", 
        default=os.path.join(__base_path__, 'cvutils', 'data'), 
@@ -1273,7 +1275,6 @@ class LocalSearcher(object):
         self.filter_text_thresh = filter_text_thresh
         # the explore coefficient relates the probability of
         # sampling vs. searching.
-        self.explore_coef = 0.9
         # the number of workers to use -- set it to the maximum number of
         # requests the predictor is allowed to issue.
         self.num_workers = self.predictor.concurrency
@@ -1364,6 +1365,18 @@ class LocalSearcher(object):
         self.filter_text = processing_strategy.filter_text
         self.text_filter_params = text_filter_params
         self.filter_text_thresh = processing_strategy.filter_text_thresh
+
+    @property
+    def explore_coef(self):
+        '''
+        Determines the rate at which we sample versus search. 
+        Right now, as the percentage of the video sampled increases
+        the probability of taking a new sample decreases, in favor
+        of conducting local searches.
+        '''
+        return 1. - (self.search_algo.n_samples * 1. / 
+                     self.search_algo.max_samps)
+
 
     @property
     def min_score(self):
@@ -1575,6 +1588,7 @@ class LocalSearcher(object):
                 exception = result_future.exception()
                 if exception:
                     result_status['error'] = True
+                    statemon.state.increment('unable_to_score_frame')
                 else:
                     result = result_future.result()
                     inference_result.append(result.valence[0])
@@ -1602,6 +1616,7 @@ class LocalSearcher(object):
         else:
             fno = str(frameno)
         _log.warn('Frame #%s has exceeded the maximum number of retries (%i).', fno, numretry)
+        statemon.state.increment('frame_score_attempt_limit_reached')
         return None
             
     def _conduct_local_search(self, start_frame, start_score,
@@ -1924,7 +1939,3 @@ class LocalSearcher(object):
 
     def get_name(self):
         return 'LocalSearcher'
-
-    def exit(self):
-        _log.info('Exiting...')
-        self.predictor.shutdown()
