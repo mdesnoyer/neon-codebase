@@ -696,6 +696,9 @@ class BrightcoveFeedIterator(object):
         self.items_returned += 1
         raise tornado.gen.Return(self.page_data.pop())
 
+class BrightcoveOAuth2Session(object):
+    pass
+
 class CMSAPI(BrightcoveOAuth2Session):
     '''Wrapper for the Brightcove CMS API.
 
@@ -727,7 +730,6 @@ class CMSAPI(BrightcoveOAuth2Session):
                 base_url = CMSAPI.BASE_URL,
                 pub_id = self.publisher_id,
                 video_id = video_id))
-
             
         response = yield self.send_request(request)
 

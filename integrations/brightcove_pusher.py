@@ -12,7 +12,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api import brightcove_api
+import api.brightcove_api
 from cmsdb import neondata
 from cvutils.imageutils import PILImageUtils
 import json
@@ -23,11 +23,19 @@ import tornado.web
 import urllib
 import urlparse
 import utils.neon
-from utils.options import define
+from utils.options import define, options
 import utils.ps
 from utils import statemon
 
 define('port', default=8888, help='Port to bind to')
+
+statemon.define('callbacks_received', int)
+statemon.define('serving_urls_pushed', int)
+statemon.define('originals_returned', int)
+statemon.define('invalid_json', int)
+statemon.define('no_valid_tokens', int)
+statemon.define('bc_server_error', int)
+statemon.define('unexpected_error', int)
 
 _log = logging.getLogger(__name__)
 
@@ -36,8 +44,9 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def put(self, integration_id):
+        statemon.state.increment('callbacks_received')
         bc_integration = yield neondata.BrightcoveIntegration.get(
-            integration_id)
+            integration_id, async=True)
         if bc_integration is None:
             raise tornado.web.HTTPError(404, 'Invalid integration id')
 
@@ -51,14 +60,17 @@ class ServingURLHandler(tornado.web.RequestHandler):
         try:
             data = json.loads(self.request.body)
         except Exception:
-            raise tornado.web.HTTPError(400, 'Invalid JSON received')
+            statemon.state.increment('invalid_json')
+            raise tornado.web.HTTPError(400, 'Invalid JSON received: %s' %
+                                        self.request.body)
 
         try:
 
             if (bc_integration.application_client_id is not None and
                 bc_integration.application_client_secret is not None):
                 try:
-                    yield self.handle_callback_with_cms_api(data, integration)
+                    yield self.handle_callback_with_cms_api(data,
+                                                            bc_integration)
                     self.write({'message': ('Brightcove thumbnail successfuly '
                                             'updated')})
                     self.set_status(200)
@@ -69,30 +81,41 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
             if (bc_integration.read_token is not None and
                 bc_integration.write_token is not None):
-                yield self.handle_callback_with_media_api(data, integration)
+                yield self.handle_callback_with_media_api(data, bc_integration)
                 self.write({'message': ('Brightcove thumbnail successfuly '
                                         'updated')})
                 self.set_status(200)
                 return
 
-            msg = ('No valid Brightcove tokens for integration %s' %
-                   integration_id)
-            _log.warn_n(msg)
-            raise tornado.web.HTTPError(500, msg)
+            raise api.brightcove_api.BrightcoveApiNotAuthorizedError(
+                'No tokens in the integration object')
 
         except api.brightcove_api.BrightcoveApiServerError as e:
             msg = 'Error with the Brightcove API: %s' % e
             _log.error(msg)
+            statemon.state.increment('bc_server_error')
+            raise tornado.web.HTTPError(500, msg)
+        except api.brightcove_api.BrightcoveApiNotAuthorizedError as e:
+            msg = ('No valid Brightcove tokens for integration %s' %
+                   integration_id)
+            _log.warn_n(msg, 20)
+            statemon.state.increment('no_valid_tokens')
             raise tornado.web.HTTPError(500, msg)
         except Exception as e:
             msg = 'Unexpected Error with request %s: %s' % (data, e)
             _log.exception(msg)
+            statemon.state.increment('unexpected_error')
             raise tornado.web.HTTPError(500, msg)
+
+    @tornado.gen.coroutine
+    def post(self, integration_id):
+        response = yield self.put(integration_id)
+        raise tornado.gen.Return(response)
         
 
     @tornado.gen.coroutine
     def handle_callback_with_cms_api(self, data, integration):
-        api_conn = brightcove_api.CMSAPI(integration)
+        api_conn = api.brightcove_api.CMSAPI(integration)
 
         # Get the current images on the video
         images = yield api_conn.get_video_images(data['video_id'])
@@ -101,6 +124,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                                  'poster', images)
             yield self._push_one_serving_url_cms(data, api_conn, integration,
                                                  'thumbnail', images)
+            statemon.state.increment('serving_urls_pushed')
         elif data['processing_state'] == 'processed' and len(images) > 0:
             # Replace the original image if our serving url was there before
             cur_img = images.values()[0]
@@ -113,6 +137,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                             'poster', images)
             yield self._push_static_url_cms(api_conn, integration, turls,
                                             'thumbnail', images)
+            statemon.state.increment('originals_returned')
 
     def _find_image_size(self, image_response):
         '''Returns (width, height) of the image in a Brightcove Response.'''
@@ -206,7 +231,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                          abs(x[1] - desired_size[1])) == mindiff][0]
             new_url = turls.get_serving_url(*closest_size)
 
-        update_func = api_conn.get_attr('update_%s' % asset_name)
+        update_func = getattr(api_conn, 'update_%s' % asset_name)
         yield update_func(cur_image['asset_id'], new_url)
 
     @tornado.gen.coroutine
@@ -248,23 +273,24 @@ class ServingURLHandler(tornado.web.RequestHandler):
                     save_objects=True,
                     async=True)
 
-           if cur_image['remote']:
+            if cur_image['remote']:
                # We can update the remote url
-               update_func = api_conn.get_attr('update_%s' % asset_name)
+               update_func = getattr(api_conn, 'update_%s' % asset_name)
                yield update_func(cur_image['asset_id'],
                                  self.build_serving_url(
                                      data['serving_url'], height, width))
                return
             else:
                # Delete it from Brightcove
-               delete_func = api_conn.get_attr('delete_%s' % asset_name)
+               delete_func = getattr(api_conn, 'delete_%s' % asset_name)
                yield delete_func(data['video_id'], cur_image['asset_id'])
 
         # Add a new thumbnail with a remote url
         reference_id = ('thumbservingurl-%s' if asset_name == 'thumbnail' 
                         else 'stillservingurl-%s') % data['video_id']
-        add_func = api_conn.get_attr('add_%s' % asset_name)
-        yield add_func(self.build_serving_url(data['serving_url'], height,
+        add_func = getattr(api_conn, 'add_%s' % asset_name)
+        yield add_func(data['video_id'],
+                       self.build_serving_url(data['serving_url'], height,
                                               width),
                                               reference_id)
 
@@ -279,17 +305,18 @@ class ServingURLHandler(tornado.web.RequestHandler):
         return urlparse.urlunparse(parsed_url)
 
     @tornado.gen.coroutine
-    def handle_callback_with_media_api(self, data, integration)
-        api_conn = brightcove_api.BrightcoveApi(integration.account_id,
-                                                integration.publisher_id,
-                                                integration.read_token,
-                                                integration.write_token)
+    def handle_callback_with_media_api(self, data, integration):
+        api_conn = api.brightcove_api.BrightcoveApi(integration.account_id,
+                                                    integration.publisher_id,
+                                                    integration.read_token,
+                                                    integration.write_token)
         if data['processing_state'] == 'serving':
             # Push in the servering url
             yield api_conn.update_thumbnail_and_videostill(
                 data['video_id'],
                 None,
                 remote_url=data['serving_url'])
+            statemon.state.increment('serving_urls_pushed')
         elif data['processing_state'] == 'processed':
             # Put the original image page
             tmeta, turls = yield self._choose_replacement_thumb(data,
@@ -312,6 +339,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 data['video_id'],
                 tmeta.key,
                 image=image)
+            statemon.state.increment('originals_returned')
         
 
 class HealthCheckHandler(tornado.web.RequestHandler):
