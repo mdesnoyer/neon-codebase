@@ -1966,12 +1966,17 @@ class BillingSubscriptionHandler(APIV2Handler):
         billing_plan = yield neondata.BillingPlans.get(
             plan_type.lower(), 
             async=True) 
-       
+               
         # only update limits if we have actually changed the plan type 
-        if original_plan_type != plan_type.lower():     
-            account_limits = neondata.AccountLimits(account.neon_api_key)  
-            account_limits.populate_with_billing_plan(billing_plan)
-            yield account_limits.save(async=True)
+        if original_plan_type != plan_type.lower():
+            def _modify_limits(a): 
+                a.populate_with_billing_plan(billing_plan)
+                
+            yield neondata.AccountLimits.modify(
+                account.neon_api_key,
+                _modify_limits,  
+                create_missing=True, 
+                async=True) 
  
         result = yield self.db2api(subscription)
 
