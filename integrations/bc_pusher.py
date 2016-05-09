@@ -92,14 +92,14 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def handle_callback_with_cms_api(self, data, integration):
-        api = brightcove_api.CMSAPI(integration)
+        api_conn = brightcove_api.CMSAPI(integration)
 
         # Get the current images on the video
-        images = yield api.get_video_images(data['video_id'])
+        images = yield api_conn.get_video_images(data['video_id'])
         if data['processing_state'] == 'serving':
-            yield self._push_one_serving_url_cms(data, api, integration,
+            yield self._push_one_serving_url_cms(data, api_conn, integration,
                                                  'poster', images)
-            yield self._push_one_serving_url_cms(data, api, integration,
+            yield self._push_one_serving_url_cms(data, api_conn, integration,
                                                  'thumbnail', images)
         elif data['processing_state'] == 'processed' and len(images) > 0:
             # Replace the original image if our serving url was there before
@@ -109,9 +109,9 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 return
             tmeta, turls = yield self._choose_replacement_thumb(data,
                                                                 integration)
-            yield self._push_static_url_cms(api, integration, turls,
+            yield self._push_static_url_cms(api_conn, integration, turls,
                                             'poster', images)
-            yield self._push_static_url_cms(api, integration, turls,
+            yield self._push_static_url_cms(api_conn, integration, turls,
                                             'thumbnail', images)
 
     def _find_image_size(self, image_response):
@@ -176,7 +176,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         raise tornado.gen.Return((tmeta, turls))
 
     @tornado.gen.coroutine
-    def _push_static_url_cms(api, integration, turls, asset_name, images):
+    def _push_static_url_cms(api_conn, integration, turls, asset_name, images):
         '''Push our desired url into Brightcove.'''
         cur_image = cur_images.get(asset_name, {})
         width, height = self._find_image_size(cur_image)
@@ -206,12 +206,13 @@ class ServingURLHandler(tornado.web.RequestHandler):
                          abs(x[1] - desired_size[1])) == mindiff][0]
             new_url = turls.get_serving_url(*closest_size)
 
-        update_func = api.get_attr('update_%s' % asset_name)
+        update_func = api_conn.get_attr('update_%s' % asset_name)
         yield update_func(cur_image['asset_id'], new_url)
 
     @tornado.gen.coroutine
-    def _push_one_serving_url_cms(self, data, api, integration, asset_name,
-                                 cur_images):
+    def _push_one_serving_url_cms(self, data, api_conn, integration,
+                                  asset_name,
+                                  cur_images):
         '''Push the serving url for one asset type on the cms api.
 
         data - Callback data json
@@ -249,20 +250,20 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
            if cur_image['remote']:
                # We can update the remote url
-               update_func = api.get_attr('update_%s' % asset_name)
+               update_func = api_conn.get_attr('update_%s' % asset_name)
                yield update_func(cur_image['asset_id'],
                                  self.build_serving_url(
                                      data['serving_url'], height, width))
                return
             else:
                # Delete it from Brightcove
-               delete_func = api.get_attr('delete_%s' % asset_name)
+               delete_func = api_conn.get_attr('delete_%s' % asset_name)
                yield delete_func(data['video_id'], cur_image['asset_id'])
 
         # Add a new thumbnail with a remote url
         reference_id = ('thumbservingurl-%s' if asset_name == 'thumbnail' 
                         else 'stillservingurl-%s') % data['video_id']
-        add_func = api.get_attr('add_%s' % asset_name)
+        add_func = api_conn.get_attr('add_%s' % asset_name)
         yield add_func(self.build_serving_url(data['serving_url'], height,
                                               width),
                                               reference_id)
@@ -279,13 +280,13 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def handle_callback_with_media_api(self, data, integration)
-        api = brightcove_api.BrightcoveApi(integration.account_id,
-                                           integration.publisher_id,
-                                           integration.read_token,
-                                           integration.write_token)
+        api_conn = brightcove_api.BrightcoveApi(integration.account_id,
+                                                integration.publisher_id,
+                                                integration.read_token,
+                                                integration.write_token)
         if data['processing_state'] == 'serving':
             # Push in the servering url
-            yield api.update_thumbnail_and_videostill(
+            yield api_conn.update_thumbnail_and_videostill(
                 data['video_id'],
                 None,
                 remote_url=data['serving_url'])
@@ -307,7 +308,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 _log.warn(msg)
                 raise tornado.web.HTTPError(500, msg)
 
-            yield api.update_thumbnail_and_videostill(
+            yield api_conn.update_thumbnail_and_videostill(
                 data['video_id'],
                 tmeta.key,
                 image=image)
