@@ -265,6 +265,9 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
             groupby_clauses=','.join(groupby_clauses)))
 
     data = get_query_results(query)
+
+    if data is None:
+        return None
     
     if 'page_type' in data.columns:
         data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
