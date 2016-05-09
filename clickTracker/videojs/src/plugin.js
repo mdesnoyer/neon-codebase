@@ -204,11 +204,18 @@ const _extractVideoId = () => {
     return videoId;
 };
 
+const onAutoplay = (playerEvent, eventDetails) => {
+    onPlay(playerEvent, eventDetails);
+}
+
 // Handle play event
 const onPlay = (playerEvent, eventDetails) => {
     if (_isInAdState()) {
         return;
     }
+
+    // Since player played, the autoplay listener is unneeded
+    player.off('timeupdate', onAutoplay);
 
     neon.currentVid = _extractVideoId();
     if (neon.playedVids.indexOf(neon.currentVid) < 0) {
@@ -217,21 +224,13 @@ const onPlay = (playerEvent, eventDetails) => {
     }
 
     eventDetails = eventDetails || {};
-    // Set no-autoplay flag
-    eventDetails.aplay = false;
+    // Set no-autoplay flag if absent
+    if (!eventDetails.hasOwnProperty('aplay')) {
+        eventDetails.aplay = player.autoplay();
+    }
     // Set ad view flag
     eventDetails.adplay = neon.hasAdPlayed;
     _commonTrack('play', eventDetails);
-};
-
-// Rough handle autoplay event
-const guessAutoplay = (e) => {
-    // Autoplay emits no play event.
-    // Thus if a player emits a timeUpdate without
-    // a preceeding play, track this as an autoplay
-    if (neon.playedVids.length === 0) {
-        onPlay({type: 'autoplay'}, {aplay: true});
-    }
 };
 
 // Build basenames param string given list of map {url, width, height}
@@ -292,7 +291,7 @@ const onImageView = (playerEvent, eventDetails) => {
 
     if (images.length === 0) {
         console.error(
-            'Abort log player image load event: not enough info to continue');
+            'Abort log player image view event: not enough info to continue');
         return;
     }
     eventDetails.bns = _buildBnsParamFromList(images);
@@ -306,7 +305,7 @@ const onImageClick = (playerEvent, eventDetails) => {
 
     if (images.length === 0) {
         console.error(
-            'Abort log player image load event: not enough info to continue');
+            'Abort log player image click event: not enough info to continue');
         return;
     }
     // Unlike the other image tracking event formats, the bn includes no dimension
@@ -371,7 +370,10 @@ const onPosterChange = (playerEvent) => {
     onImageView(playerEvent);
 
     // And first play event as a image click for the poster
-    player.one('play', onImageClick);
+    // if the video is not configured for autoplay.
+    if(!player.autoplay()) {
+        player.one('play', onImageClick);
+    }
 };
 
 // Handle the video.js ready event
@@ -410,7 +412,7 @@ const onPlayerReady = (player_, options) => {
     player.on(['adstart', 'ads-ad-started', 'ima3-started'], onAdPlay);
 
     // Use timeupdate for detecting autoplay
-    player.one('timeupdate', guessAutoplay);
+    player.one('timeupdate', onAutoplay);
 };
 
 // Defer setup to video player's ready event.
