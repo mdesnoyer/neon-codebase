@@ -267,6 +267,7 @@ def get_page_clause(page, impression_metric):
     return ''
 
 def get_groupby_clause(page_regex=None,
+                       host_regex=None,
                        desktop_mobile_split=False):
     '''Return a group by clause to split the data up.
 
@@ -280,12 +281,15 @@ def get_groupby_clause(page_regex=None,
     clauses = []
     if page_regex:
         clauses.append('page_type')
+    if host_regex:
+        clauses.append('host')
     if desktop_mobile_split:
         clauses.append('is_mobile')
 
     return clauses
 
 def get_groupby_select(impression_metric=None, page_regex=None, 
+                       host_regex=None
                        desktop_mobile_split=False):
     
     '''Return a string in the select part of the statement to support group by.
@@ -299,16 +303,21 @@ def get_groupby_select(impression_metric=None, page_regex=None,
     The string for the group by clause (including "GROUP BY")
     '''
     clauses = []
+    
+    col_map = {
+        'loads' : 'imloadpageurl',
+        'views' : 'imloadpageurl',
+        'clicks' : 'imclickpageurl',
+        'plays' : 'videopageurl'
+    }
     if page_regex and impression_metric:
-        col_map = {
-            'loads' : 'imloadpageurl',
-            'views' : 'imloadpageurl',
-            'clicks' : 'imclickpageurl',
-            'plays' : 'videopageurl'
-            }
         clauses.append("regexp_extract(parse_url(%s, 'PATH'), '%s', 1) as page_type" %
                        (col_map[impression_metric],
                        page_regex))
+    if host_regex and impression_metric:
+        clauses.append("regexp_extract(parse_url(%s, 'HOST'), '%s', 1) as page_type" %
+                       (col_map[impression_metric],
+                       host_regex))
     if desktop_mobile_split:
         clauses.append("agentinfo_os_name in "
                     "('iPhone', 'Android', 'IPad', 'BlackBerry') "

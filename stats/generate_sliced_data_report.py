@@ -64,6 +64,9 @@ define("page_regex", default=None, type=str,
        help=("An Impala regex that must be matched to the url path "
              "(without host etc) for the event to count. "
              "Data will be split by the first group."))
+define("host_regex", default=None, type=str,
+       help=("An Impala regex to extract a portion of the host."
+             "Data will be split by the first group."))
 define("baseline_types", default="default",
        help="Comma separated list of thumbnail type to treat as baseline")
 
@@ -225,6 +228,7 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
     groupby_cols = ['thumbnail_id']
     groupby_cols.extend(statutils.get_groupby_select(options.impressions,
                                                      options.page_regex,
+                                                     options.host_regex,
                                                      options.split_mobile))
     
     select_cols = ['count(%s) as all_time' % statutils.impala_col_map[metric],
@@ -239,6 +243,7 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
 
     groupby_clauses = ['thumbnail_id']
     groupby_clauses.extend(statutils.get_groupby_clause(options.page_regex,
+                                                        options.host_regex,
                                                         options.split_mobile))
 
     url_clause=''
