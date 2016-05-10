@@ -25,7 +25,8 @@ from grpc.beta.interfaces import ChannelConnectivity
 
 _log = logging.getLogger(__name__)
 
-statemon.define('lost_server_connection', int)
+statemon.define('lost_server_connection', int)  # lost the server connection
+statemon.define('unable_to_connect', int)  # could not connect to server in the first place
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -263,7 +264,7 @@ class DeepnetPredictor(Predictor):
         self.active = 0
         self.done = 0
         self.async = True
-        self._check_conn()
+        self._connect(force_refresh=False)
 
     def _connect(self, force_refresh):
         '''
@@ -280,21 +281,38 @@ class DeepnetPredictor(Predictor):
         self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
             self.channel)
 
+    def _init_check(self, status=None):
+        '''
+        Serves as the callback to a channel when it is under
+        construction / connecting. Once the channel reaches a
+        ready state for the first time, it unsubscribes itself
+        and subscribes the regular check. It is necessary to
+        verify that a server can be connected to. 
+
+        This function is the _only_ function that can authorize
+        requests to begin, which it does by setting the _ready
+        event.
+        '''
+        if status is ChannelConnectivity.READY:
+            _log.debug('Server has been reached')
+            self.channel.unsubscribe(self._init_check)
+            self.channel.subscribe(self._check_conn)
+            self._ready.set()
+        elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
+            status is ChannelConnectivity.FATAL_FAILURE):
+            # attempt to connect again
+            statemon.state.increment('unable_to_connect')
+            _log.debug('Error connecting to server, trying new server')
+            self._connect(force_refresh=True)
+
     def _check_conn(self, status=None):
         '''
         Checks the connection, as a callback.
         '''
-        self._ready.clear()
-        if status is None:
-            # then you're just starting up.
-            self._connect(force_refresh=False)
-        elif status is ChannelConnectivity.READY:
-            # the connection is ready
-            _log.debug('Connection established')
-            self._ready.set()
-        elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
+        if (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
             # the connection has been lost
+            self._ready.clear()
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
             self._connect(force_refresh=True)
@@ -306,7 +324,7 @@ class DeepnetPredictor(Predictor):
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring. 
         '''
-        conn_est = self._ready.wait(60.)  # TODO: do we want a timeout?
+        conn_est = self._ready.wait()  # TODO: do we want a timeout?
         if not conn_est:
             _log.error('Connection not established in time.')
             # what do we do here? 
