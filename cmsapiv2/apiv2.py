@@ -68,9 +68,6 @@ define("check_subscription_interval",
 
 define("stripe_api_key", default=None, help='The API key we use to talk to stripe.')
 
-# stripe stuff 
-stripe.api_key = options.stripe_api_key
-
 class ResponseCode(object):
     HTTP_OK = 200
     HTTP_ACCEPTED = 202
@@ -112,6 +109,8 @@ class APIV2Sender(object):
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
+        # stripe stuff 
+        stripe.api_key = options.stripe_api_key
         self.set_header('Content-Type', 'application/json')
         self.uri = self.request.uri
         self.account = None
@@ -119,7 +118,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
         self.executor = concurrent.futures.ThreadPoolExecutor(5)
-
     
     def set_access_token_information(self): 
         """Helper function to get the access token 
