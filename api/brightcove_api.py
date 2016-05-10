@@ -44,7 +44,13 @@ define('max_retries', default=5, type=int,
 
 class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
+class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
+
+DEFAULT_IMAGE_SIZES = {
+    'thumbnail' : (120, 90),
+    'poster' : (480, 360)
+}
 
 class BrightcoveApi(object): 
 
@@ -165,6 +171,9 @@ class BrightcoveApi(object):
                 raise BrightcoveApiServerError(
                     'Internal Brightcove error when uploading %s for tid %s %s'
                     % (atype, tid, response.error))
+            elif response.error.code == 401:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to upload thumbnail to media API')
             elif response.error.code >= 400:
                 raise BrightcoveApiClientError(
                     'Client error when uploading %s for tid %s %s'
@@ -602,7 +611,10 @@ def _handle_response(response):
                    response.body)
         try:
             json_data = json.load(response.buffer)
-            if json_data['code'] >= 200:
+            if json_data['code'] == 210:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to read the media API')
+            elif json_data['code'] >= 200:
                 raise BrightcoveApiClientError(json_data)
         except ValueError:
             # It's not JSON data so there was some other error
@@ -683,3 +695,143 @@ class BrightcoveFeedIterator(object):
 
         self.items_returned += 1
         raise tornado.gen.Return(self.page_data.pop())
+
+class BrightcoveOAuth2Session(object):
+    pass
+
+class CMSAPI(BrightcoveOAuth2Session):
+    '''Wrapper for the Brightcove CMS API.
+
+    See http://docs.brightcove.com/en/video-cloud/cms-api/references/cms-api/versions/v1/index.html
+
+    All return values are the JSON from the API.
+    '''
+    BASE_URL = 'https://cms.api.brightcove.com/v1'
+    
+    def __init__(self, integration):
+        '''Build the API wrapper.
+
+        Inputs:
+        integration - A neondata.BrightcoveIntegration object
+        '''
+        super(CMSAPI, self).__init__(integration.publisher_id,
+                                     integration.application_client_id,
+                                     integration.application_client_secret)
+    @tornado.gen.coroutine
+    def get_video_images(self, video_id):
+        '''Return the images for the video.
+
+        Inputs: 
+        video_id - The Brightcove video id
+
+        '''
+        request = tornado.httpclient.HTTPRequest(
+            '{base_url}/accounts/{pub_id}/videos/{video_id}/images'.format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id))
+            
+        response = yield self.send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _add_asset_impl(self, asset_name, video_id, remote_url,
+                        reference_id=None):
+        request_data = {'remote_url' : remote_url}
+        if reference_id:
+            request_data['reference_id'] = reference_id
+            
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name),
+            method='POST',
+            headers={'Content-Type' : 'application/json'},
+            body=json.dumps(request_data))
+
+        response = yield self.send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _update_asset_impl(self, asset_name, video_id, asset_id,
+                        remote_url, reference_id=None):
+        request_data = {'remote_url' : remote_url}
+        if reference_id:
+            request_data['reference_id'] = reference_id
+            
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}/{asset_id}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name,
+                asset_id = asset_id),
+            method='PATCH',
+            headers={'Content-Type' : 'application/json'},
+            body=json.dumps(request_data))
+
+        response = yield self.send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _delete_asset_impl(self, asset_name, video_id, asset_id):
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}/{asset_id}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name,
+                asset_id = asset_id),
+            method='DELETE')
+
+        response = yield self.send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def add_thumbnail(self, video_id, remote_url, reference_id=None):
+        response = yield self._add_asset_impl('thumbnail', video_id,
+                                              remote_url, reference_id)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
+    def update_thumbnail(self, video_id, asset_id, remote_url,
+                         reference_id=None):
+        response = yield self._update_asset_impl('thumbnail', video_id,
+                                                 asset_id, remote_url,
+                                                 reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def delete_thumbnail(self, video_id, asset_id):
+        response = yield self._update_asset_impl('thumbnail', video_id,
+                                                 asset_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def add_poster(self, video_id, remote_url, reference_id=None):
+        response = yield self._add_asset_impl('poster', video_id,
+                                              remote_url, reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def update_poster(self, video_id, asset_id, remote_url, reference_id=None):
+        response = yield self._update_asset_impl('poster', video_id,
+                                                 asset_id, remote_url,
+                                                 reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def delete_poster(self, video_id, asset_id):
+        response = yield self._update_asset_impl('poster', video_id,
+                                                 asset_id)
+        raise tornado.gen.Return(response)
+                        
