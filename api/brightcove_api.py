@@ -1122,10 +1122,9 @@ class PlayerAPI(BrightcoveOAuth2Session):
     def get_player_config(self, player_ref):
         '''Get the "configuration" dictionary from master branch of player'''
         url = '{base_url}/{pub_id}/players/{player_ref}/configuration/master'
-        request = HTTPRequest(self.form_url(
+        request = HTTPRequest(url.format(
             base_url=PlayerAPI.BASE_URL,
             pub_id=self.publisher_id,
-            player_ref=player_ref
-        ))
+            player_ref=player_ref))
         response = yield self._send_request(request)
         raise tornado.gen.Return(response)
