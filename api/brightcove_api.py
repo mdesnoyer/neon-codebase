@@ -733,7 +733,7 @@ class CMSAPI(BrightcoveOAuth2Session):
                 pub_id = self.publisher_id,
                 video_id = video_id))
             
-        response = yield self.send_request(request)
+        response = yield self._send_request(request)
 
         raise tornado.gen.Return(response)
 
@@ -755,7 +755,7 @@ class CMSAPI(BrightcoveOAuth2Session):
             headers={'Content-Type' : 'application/json'},
             body=json.dumps(request_data))
 
-        response = yield self.send_request(request)
+        response = yield self._send_request(request)
 
         raise tornado.gen.Return(response)
 
@@ -778,7 +778,7 @@ class CMSAPI(BrightcoveOAuth2Session):
             headers={'Content-Type' : 'application/json'},
             body=json.dumps(request_data))
 
-        response = yield self.send_request(request)
+        response = yield self._send_request(request)
 
         raise tornado.gen.Return(response)
 
@@ -794,7 +794,7 @@ class CMSAPI(BrightcoveOAuth2Session):
                 asset_id = asset_id),
             method='DELETE')
 
-        response = yield self.send_request(request)
+        response = yield self._send_request(request)
 
         raise tornado.gen.Return(response)
 
