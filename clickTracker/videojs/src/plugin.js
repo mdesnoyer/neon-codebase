@@ -32,7 +32,7 @@ const defaults = {
         neonApiUrl: 'http://tracker.neon-images.com/v2/track',
 
         // Neon thumbnail url to id resolver
-        thumbIdUrl: 'http://i1.neon-images.com/v1/getthumbnailid/',
+        neonGetThumbnailIdUrl: 'http://i1.neon-images.com/v1/getthumbnailid/',
 
         // Resolution (in percent points) to track video play percent
         timeUpdateInterval: 25,
@@ -96,16 +96,15 @@ const _isNeonImage = (url) => {
 const _getNeonThumbIdOf = (url) => {
 
     if (neon.options.dev.showConsoleLogging) {
-        console.info(printf('%s -> %s', eventType, action), data);
+        console.info(printf('%s -> %s', url, ''));
     }
-
-    reqwest({
-        url: neon.options.tracking.neonApiUrl,
-        method: 'GET',
-        crossOrigin: true,
-        data
-    });
-}
+    // reqwest({
+    //     url: neon.options.tracking.neonGetThumbnailIdUrl,
+    //     method: 'GET',
+    //     crossOrigin: true,
+    //     data
+    // });
+};
 
 // Calculate the percentage of the video played
 const _getPercentPlayed = () => {
@@ -293,47 +292,40 @@ const _getImagesForEvent = (playerEvent) => {
     return values;
 };
 
-// Handle image load event
-const onImageLoad = (playerEvent, eventDetails) => {
+// Common implementation of image tracking event handler
+const _commonImageTrack = (type, playerEvent, eventDetails) => {
+
     eventDetails = eventDetails || {};
     const images = _getImagesForEvent(eventDetails);
 
     if (images.length === 0) {
         console.error(
-            'Abort log player image load event: not enough info to continue');
+            'Abort log player image ' + type + ' event: not enough info to continue');
         return;
     }
-    eventDetails.bns = _buildBnsParamFromList(images);
-    _commonTrack('imageLoad', eventDetails);
+
+    if (type === 'imageClick') {
+        // Unlike the other image tracking event formats, the bn includes no dimension
+        eventDetails.bn = _getBasenameOf(images[0].url);
+    } else {
+        eventDetails.bns = _buildBnsParamFromList(images);
+    }
+    _commonTrack(type, eventDetails);
+};
+
+// Handle image load event
+const onImageLoad = (playerEvent, eventDetails) => {
+    _commonImageTrack('imageLoad', playerEvent, eventDetails);
 };
 
 // Handle image view event
 const onImageView = (playerEvent, eventDetails) => {
-    eventDetails = eventDetails || {};
-    const images = _getImagesForEvent(eventDetails);
-
-    if (images.length === 0) {
-        console.error(
-            'Abort log player image view event: not enough info to continue');
-        return;
-    }
-    eventDetails.bns = _buildBnsParamFromList(images);
-    _commonTrack('imageView', eventDetails);
+    _commonImageTrack('imageView', playerEvent, eventDetails);
 };
 
 // Handle image click event
 const onImageClick = (playerEvent, eventDetails) => {
-    eventDetails = eventDetails || {};
-    const images = _getImagesForEvent(eventDetails);
-
-    if (images.length === 0) {
-        console.error(
-            'Abort log player image click event: not enough info to continue');
-        return;
-    }
-    // Unlike the other image tracking event formats, the bn includes no dimension
-    eventDetails.bn = _getBasenameOf(images[0].url);
-    _commonTrack('imageClick', eventDetails);
+    _commonImageTrack('imageClick', playerEvent, eventDetails);
 };
 
 // Handle ad play event
