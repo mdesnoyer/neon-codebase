@@ -31,8 +31,13 @@ import urlparse
 import unittest
 from cvutils.imageutils import PILImageUtils
 import utils.neon
+from utils.options import define, options
+
 
 _log = logging.getLogger(__name__)
+
+define('run_tests_on_test_account', default=0, type=int,
+       help='Maximum number of write connections to Brightcove')
 
 # TODO(sunil) Add more tests
 class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
@@ -305,6 +310,65 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
                 self.api.find_videos_by_ids(['vid1'])
 
+class TestCMSAPILive(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        if not options.run_tests_on_test_account:
+            raise unittest.SkipTest('Should only be run manually because it '
+                                    'hits Brightcove')
+        
+        super(TestCMSAPILive, self).setUp()
+
+        self.publisher_id = '2294876105001'
+        self.client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
+        self.client_secret = 'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg'
+        self.test_video_id = '4049585935001'
+        self.test_thumb_url = 'https://s3.amazonaws.com/neon-test/mikey.jpg'
+
+        self.api = api.brightcove_api.CMSAPI(self.publisher_id,
+                                             self.client_id,
+                                             self.client_secret)
+        
+
+    def tearDown(self):
+        super(TestCMSAPILive, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_replace_thumbnail(self):
+
+        video_images = yield self.api.get_video_images(self.test_video_id)
+
+        self.assertIn('thumbnail', video_images)
+
+        yield self.api.delete_thumbnail(self.test_video_id,
+                                        video_images['thumbnail']['asset_id'])
+
+        tresponse = yield self.api.add_thumbnail(self.test_video_id,
+                                                 self.test_thumb_url)
+        self.assertEquals(tresponse['remote_url'], self.test_thumb_url)
+
+        update_response = yield self.api.update_thumbnail(
+            self.test_video_id,
+            tresponse['id'],
+            self.test_thumb_url)
+        self.assertEquals(tresponse['remote_url'], self.test_thumb_url)
+
+
+ 
+class TestCMSAPI(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestCMSAPI, self).setUp()
+
+        self.api = api.brightcove_api.CMSAPI('pub_id',
+                                             'client_id',
+                                             'client_secret')
+
+        # Mock out the _send_request
+        
+
+    def tearDown(self):
+        super(TestCMSAPI, self).tearDown()
+    
+
 if __name__ == "__main__" :
-    utils.neon.InitNeon()
-    unittest.main()
+    args = utils.neon.InitNeon()
+    unittest.main(argv=[__name__] + args)
