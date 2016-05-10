@@ -1808,10 +1808,15 @@ class BillingAccountHandler(APIV2Handler):
         except Exception as e: 
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise  
-        
-        account.billed_elsewhere = False
-        account.billing_provider_ref = customer.id
-        yield account.save(async=True)
+       
+        def _modify_account(a): 
+            a.billed_elsewhere = False
+            a.billing_provider_ref = customer.id
+
+        yield neondata.NeonUserAccount.modify( 
+            account.neon_api_key,
+            _modify_account, 
+            async=True) 
  
         result = yield self.db2api(customer)
 
@@ -1853,22 +1858,35 @@ class BillingAccountHandler(APIV2Handler):
             raise
 
         result = yield self.db2api(customer)
-
         self.success(result) 
 
     @classmethod
     def _get_default_returned_fields(cls):
         return ['id', 'account_balance', 'created', 'currency', 
                 'default_source', 'delinquent', 'description', 
-                'discount', 'email', 'livemode', 'metadata', 
-                'sources', 'subscriptions']
+                'discount', 'email', 'livemode', 'subscriptions',
+                'metadata', 'sources']
     
     @classmethod
     def _get_passthrough_fields(cls):
         return ['id', 'account_balance', 'created', 'currency', 
                 'default_source', 'delinquent', 'description', 
-                'discount', 'email', 'livemode', 'metadata', 
-                'sources', 'subscriptions']
+                'discount', 'email', 'livemode']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'subscriptions':
+            retval = obj.subscriptions.to_dict()
+        elif field == 'sources': 
+            retval = obj.sources.to_dict()
+        elif field == 'metadata': 
+            retval = obj.metadata.to_dict() 
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+             
 
     @classmethod
     def get_access_levels(cls):
@@ -1929,27 +1947,27 @@ class BillingSubscriptionHandler(APIV2Handler):
             # recent and submit the new one 
             cust_subs = yield self.executor.submit(
                 customer.subscriptions.all)
-            
+           
             if len(cust_subs['data']) > 0:
                 cancel_me = cust_subs['data'][0]
                 yield self.executor.submit(cancel_me.delete)
-
+          
             subscription = yield self.executor.submit(
                 customer.subscriptions.create, 
                 plan=plan_type)
-            def _modify_account(a): 
+            def _modify_account(a):
                 a.subscription_information = subscription
                 a.verify_subscription_expiry = \
                   (datetime.utcnow() + timedelta(seconds=3600)).strftime(
                     "%Y-%m-%d %H:%M:%S.%f")           
  
+            _log.info('New subscription created for account %s' % 
+                account.neon_api_key)
+
             yield neondata.NeonUserAccount.modify(
                 account.neon_api_key, 
                 _modify_account, 
                 async=True)
-
-            _log.info('New subscription created for account %s' % 
-                account.neon_api_key)
              
         except stripe.error.InvalidRequestError as e: 
             if 'No such customer' in str(e):
@@ -2016,20 +2034,22 @@ class BillingSubscriptionHandler(APIV2Handler):
             else: 
                 _log.error('Unknown invalid error occurred talking'\
                            ' to Stripe %s' % e)
-                raise Exception('Unknown Stripe Error')  
+                raise Exception('Unknown Stripe Error') 
+        except IndexError: 
+            raise NotFoundError('A subscription was not found.')  
         except Exception as e: 
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise
 
         result = yield self.db2api(most_recent_sub)
-
+ 
         self.success(result) 
 
     @classmethod
     def _get_default_returned_fields(cls):
         return ['id', 'application_fee_percent', 'cancel_at_period_end', 
                 'canceled_at', 'current_period_end', 'current_period_start',
-                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
+                'customer', 'discount', 'ended_at', 'plan', 
                 'quantity', 'start', 'tax_percent', 'trial_end', 
                 'trial_start'] 
     
@@ -2039,7 +2059,17 @@ class BillingSubscriptionHandler(APIV2Handler):
                 'canceled_at', 'current_period_end', 'current_period_start',
                 'customer', 'discount', 'ended_at', 'metadata', 'plan', 
                 'quantity', 'start', 'tax_percent', 'trial_end', 
-                'trial_start'] 
+                'trial_start']
+ 
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'metadata': 
+            retval = obj.metadata.to_dict() 
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
  
     @classmethod
     def get_access_levels(cls):

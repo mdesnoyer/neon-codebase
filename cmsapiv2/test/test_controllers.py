@@ -4563,6 +4563,19 @@ class TestBillingAccountHandler(TestControllersBase):
             headers=header)
         print response.body
 
+    @unittest.skip('this actually gets from stripe') 
+    @tornado.testing.gen_test
+    def test_get_actual_int(self):
+        options._set('cmsapiv2.apiv2.stripe_api_key', 
+            'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = 'cus_8QKom2aGH0u1Vs'
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        response = yield self.http_client.fetch(self.get_url(url), 
+            method='GET') 
+        print response.body
+
 class TestBillingSubscriptionHandler(TestControllersBase): 
     def setUp(self):
         self.verify_account_mocker = patch(
@@ -4713,7 +4726,7 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'not known')
 
     @tornado.testing.gen_test
-    def test_post_billing_subscription_full(self):
+    def test_post_billing_subscription_full_upgrade(self):
         so = neondata.NeonUserAccount('kevinacct')
         so.billing_provider_ref = '123' 
         yield so.save(async=True)
@@ -4761,6 +4774,59 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'pro_monthly', 
             async=True)
 
+        self.assertEquals(acct_limits.max_video_posts, 
+            bp.max_video_posts)
+        next_refresh_time = datetime.utcnow() + \
+            timedelta(seconds=bp.seconds_to_refresh_video_posts - 100) 
+        self.assertTrue(
+            dateutil.parser.parse(
+                acct_limits.refresh_time_video_posts) > next_refresh_time) 
+        self.assertEquals(acct_limits.max_video_size, 
+            bp.max_video_size)
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_full_downgrade(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'demo'})
+       
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+        sub_return = stripe.Subscription()
+        sub_return.status = 'active'
+        sub_return.plan = stripe.Plan(id='pro_monthly')
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+             patch('cmsapiv2.apiv2.stripe.Subscription.delete') as sd:
+            sr.return_value.subscriptions.all.return_value = { 'data' : [] } 
+            sr.return_value.subscriptions.create.return_value = sub_return
+            sd.delete.return_value = True
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        current_time = datetime.utcnow()
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertTrue(current_time < dateutil.parser.parse(
+            acct.verify_subscription_expiry))
+        self.assertEquals(acct.billing_provider_ref, '123')
+        acct_limits = yield neondata.AccountLimits.get(
+            so.neon_api_key,
+            async=True)
+
+        bp = yield neondata.BillingPlans.get(
+            'demo', 
+            async=True)
         self.assertEquals(acct_limits.max_video_posts, 
             bp.max_video_posts)
         next_refresh_time = datetime.utcnow() + \
@@ -4960,6 +5026,19 @@ class TestBillingSubscriptionHandler(TestControllersBase):
                                                 method='POST', 
                                                 headers=header)
         print response
+
+    @unittest.skip('this actually gets from stripe') 
+    @tornado.testing.gen_test
+    def test_get_actual_sub(self):
+        options._set('cmsapiv2.apiv2.stripe_api_key', 
+            'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = 'cus_8P7y8RI3gRyhF0'
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        response = yield self.http_client.fetch(self.get_url(url), 
+            method='GET') 
+        print response.body
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
