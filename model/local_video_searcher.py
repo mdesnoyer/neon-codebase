@@ -204,45 +204,6 @@ TESTING_DIR = None
 CUR_TESTING_DIR = None
 
 
-"""
-------------------------------------------------------------------------------
-FOR TESTING
-------------------------------------------------------------------------------
-"""
-class DummyCondition():
-    """Condition variables allow one or more threads to wait until they are
-       notified by another thread.
-    """
-
-    def __init__(self):
-        self.__waiters = []
-
-    def __enter__(self):
-        return True
-
-    def __exit__(self, *args):
-        return True
-
-    def __repr__(self):
-        return "<Dummy Condition(%s, %d)>" % ('None', len(self.__waiters))
-
-    def wait(self, timeout=None):
-        return
-
-    def notify(self, n=1):
-        return
-
-    def notifyAll(self):
-        return
-
-    notify_all = notifyAll
-"""
-------------------------------------------------------------------------------
-END FOR TESTING
-------------------------------------------------------------------------------
-"""
-
-
 def get_feat_score_transfer_func(max_penalty, median=0.3):
     """
     Returns a function that maps a feature score to another score that will be
@@ -1130,8 +1091,7 @@ class LocalSearcher(object):
                  testing_dir=None,
                  filter_text=True,
                  text_filter_params=None,
-                 filter_text_thresh=0.04,
-                 non_locking=False):
+                 filter_text_thresh=0.04):
         '''
         Inputs:
             predictor:
@@ -1247,10 +1207,6 @@ class LocalSearcher(object):
             filter_text_thresh: [def: 0.04]
                 The fraction of text that occupies the image in order to
                 filter it out.
-            non_locking:
-                If True, will use a dummy condition variable for the process
-                lock, allowing the interpreter to decide when to jump into
-                and out of threads.
 
         '''
         self.predictor = predictor
@@ -1316,10 +1272,7 @@ class LocalSearcher(object):
 
         # create a processing lock, that will be used by the sampling and
         # the local search threads. 
-        if non_locking:
-            self._proc_lock = DummyCondition()
-        else:
-            self._proc_lock = threading.Condition()
+        self._proc_lock = threading.Condition()
         # create an event object to alert the threads that it is time to
         # terminate. 
         self._terminate = threading.Event()
