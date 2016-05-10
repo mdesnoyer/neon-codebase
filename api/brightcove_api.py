@@ -47,7 +47,7 @@ class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 
-DEFAULT_IMAGES_SIZES = {
+DEFAULT_IMAGE_SIZES = {
     'thumbnail' : (120, 90),
     'poster' : (480, 360)
 }
@@ -797,13 +797,14 @@ class CMSAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def add_thumbnail(self, video_id, remote_url, reference_id):
+    def add_thumbnail(self, video_id, remote_url, reference_id=None):
         response = yield self._add_asset_impl('thumbnail', video_id,
                                               remote_url, reference_id)
         raise tornado.gen.Return(response)
     
     @tornado.gen.coroutine
-    def update_thumbnail(self, video_id, asset_id, remote_url, reference_id):
+    def update_thumbnail(self, video_id, asset_id, remote_url,
+                         reference_id=None):
         response = yield self._update_asset_impl('thumbnail', video_id,
                                                  asset_id, remote_url,
                                                  reference_id)
@@ -816,13 +817,13 @@ class CMSAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def add_poster(self, video_id, remote_url, reference_id):
+    def add_poster(self, video_id, remote_url, reference_id=None):
         response = yield self._add_asset_impl('poster', video_id,
                                               remote_url, reference_id)
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def update_poster(self, video_id, asset_id, remote_url, reference_id):
+    def update_poster(self, video_id, asset_id, remote_url, reference_id=None):
         response = yield self._update_asset_impl('poster', video_id,
                                                  asset_id, remote_url,
                                                  reference_id)

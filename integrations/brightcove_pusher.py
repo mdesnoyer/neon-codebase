@@ -101,6 +101,8 @@ class ServingURLHandler(tornado.web.RequestHandler):
             _log.warn_n(msg, 20)
             statemon.state.increment('no_valid_tokens')
             raise tornado.web.HTTPError(500, msg)
+        except tornado.web.HTTPError as e:
+            raise
         except Exception as e:
             msg = 'Unexpected Error with request %s: %s' % (data, e)
             _log.exception(msg)
@@ -128,14 +130,14 @@ class ServingURLHandler(tornado.web.RequestHandler):
         elif data['processing_state'] == 'processed' and len(images) > 0:
             # Replace the original image if our serving url was there before
             cur_img = images.values()[0]
-            if (cur_img['remote'] and 'neonvid_' not in cur_img['src']):
+            if (not cur_img['remote'] or 'neonvid_' not in cur_img['src']):
                 # It's not our image. JUMP!
                 return
             tmeta, turls = yield self._choose_replacement_thumb(data,
                                                                 integration)
-            yield self._push_static_url_cms(api_conn, integration, turls,
+            yield self._push_static_url_cms(data, api_conn, integration, turls,
                                             'poster', images)
-            yield self._push_static_url_cms(api_conn, integration, turls,
+            yield self._push_static_url_cms(data, api_conn, integration, turls,
                                             'thumbnail', images)
             statemon.state.increment('originals_returned')
 
@@ -149,29 +151,29 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
         if image_response['remote']:
             # Try to get the image size from the URL
-            query_params = urlparse.parse_qs(
-                urlparse.urlparse(image_response['src']).query)
+            query_params = dict(urlparse.parse_qsl(
+                urlparse.urlparse(image_response['src']).query))
             try:
                 height = int(query_params.get('height') or 
                              query_params.get('h'))
-            except ValueError:
+            except TypeError:
                 pass
             try:
                 width = int(query_params.get('width') or 
                             query_params.get('w'))
-            except ValueError:
+            except TypeError:
                 pass
         else:
-            width = max(x['width'] for x in image_response['sources'])
-            height = max(x['height'] for x in image_response['sources'])
+            width = max(x.get('width') for x in image_response['sources'])
+            height = max(x.get('height') for x in image_response['sources'])
 
         return (width, height)
 
     @tornado.gen.coroutine
-    def _choose_replacement_thumb(data, integration):
+    def _choose_replacement_thumb(self, data, integration):
         '''Get the thumbnail to put back into Brightcove.
 
-        Returns (ThumbnailMetadata, ThumbnailServingURL)
+        Returns (ThumbnailMetadata, ThumbnailServingURLs)
         '''
 
         # First choose the thumbnail by getting a default, followed by
@@ -193,17 +195,21 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                    key=lambda x: x.rank)
             if len(valid_thumbs) == 0:
                 valid_thumbs = thumbs
+
+                if len(valid_thumbs) == 0:
+                    _log.warn_n('No thumbnails found for video %s' % video.key)
         tmeta = valid_thumbs[0]
 
-        turls = yield neondata.ThumbnailServingURL.get(tmeta.key, async=True)
+        turls = yield neondata.ThumbnailServingURLs.get(tmeta.key, async=True)
         if turls is None:
             raise tornado.web.HTTPError(500, 'No thumbnail serving URLs known')
         raise tornado.gen.Return((tmeta, turls))
 
     @tornado.gen.coroutine
-    def _push_static_url_cms(api_conn, integration, turls, asset_name, images):
+    def _push_static_url_cms(self, data, api_conn, integration, turls,
+                             asset_name, images):
         '''Push our desired url into Brightcove.'''
-        cur_image = cur_images.get(asset_name, {})
+        cur_image = images.get(asset_name, {})
         width, height = self._find_image_size(cur_image)
         if width is None or height is None:
             width, height = api.brightcove_api.DEFAULT_IMAGE_SIZES[asset_name]
@@ -232,7 +238,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
             new_url = turls.get_serving_url(*closest_size)
 
         update_func = getattr(api_conn, 'update_%s' % asset_name)
-        yield update_func(cur_image['asset_id'], new_url)
+        yield update_func(data['video_id'], cur_image['asset_id'], new_url)
 
     @tornado.gen.coroutine
     def _push_one_serving_url_cms(self, data, api_conn, integration,
@@ -257,10 +263,9 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 raise tornado.web.HTTPError(404, 'Unknown video id')
             thumbs = yield neondata.ThumbnailMetadata.get_many(
                 video.thumbnail_ids, async=True)
-            min_rank = min([x.rank for x in thumbs if 
-                            x and x.type == neondata.ThumbnailType.DEFAULT])
 
-            if min_rank is None:
+            if not any([x.type == neondata.ThumbnailType.DEFAULT 
+                        for x in thumbs]):
                 # ingest the image
                 new_thumb = neondata.ThumbnailMetadata(
                     None,
@@ -276,7 +281,8 @@ class ServingURLHandler(tornado.web.RequestHandler):
             if cur_image['remote']:
                # We can update the remote url
                update_func = getattr(api_conn, 'update_%s' % asset_name)
-               yield update_func(cur_image['asset_id'],
+               yield update_func(data['video_id'],
+                                 cur_image['asset_id'],
                                  self.build_serving_url(
                                      data['serving_url'], height, width))
                return
