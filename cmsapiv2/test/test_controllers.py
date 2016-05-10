@@ -4294,7 +4294,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         pass
 
     @tornado.testing.gen_test
-    def test_get_patch_json(self):
+    def test_get_plugin_patch(self):
         given = {
             "autoadvance": 0,
             "autoplay": False,
@@ -4350,9 +4350,9 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             }
         }
         account_id = 12345
-        patch = controllers.BrightcovePlayerHelper._make_patch_json(
+        patch = controllers.BrightcovePlayerHelper._get_plugin_patch(
             given, account_id)
-        expect = json.dumps({
+        expect = {
             'plugins': [
                 {
                     'name': 'other-plugin-2',
@@ -4371,7 +4371,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 'other.js',
                 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
             ]
-        })
+        }
         self.assertEqual(expect, patch)
 
 

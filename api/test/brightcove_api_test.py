@@ -35,6 +35,7 @@ import utils.neon
 from cmsdb.neondata import BrightcoveIntegration
 from collections import OrderedDict
 from requests.models import Response
+import voluptuous
 
 _log = logging.getLogger(__name__)
 
@@ -330,65 +331,62 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
         self.api = PlayerAPI(integ)
 
     def tearDown(self):
-        self.api = None
         super(TestPlayerAPI, self).tearDown()
 
     @tornado.testing.gen_test
-    def test_is_authorized(self):
+    def test_has_required_access(self):
 
-        rv = yield self.api.is_authorized()
+        self.api.token = None
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._authenticate') as _auth:
+            auth = self._future_wrap_mock(_auth)
+            auth.side_effect = HTTPError(401)
+            rv = yield self.api.has_required_access()
         self.assertFalse(rv)
 
-        self.api.oauth.token = 'set'
-        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
-            get = self._future_wrap_mock(_get)
-            side_effect = [HTTPResponse(HTTPRequest('http://test.com'), 401)]
-            get.side_effect = side_effect
-            rv = yield self.api.is_authorized()
+        self.api._token = 'set'
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [HTTPResponse(
+                HTTPRequest(''),
+                code=401,
+                error=HTTPError(401))]
+            rv = yield self.api.has_required_access()
         self.assertFalse(rv)
 
         # Both authorize api calls pass
-        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
-            get = self._future_wrap_mock(_get)
-            side_effect = [
-                HTTPResponse(HTTPRequest(''), 200),
-                HTTPResponse(HTTPRequest(''), 404),
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [
+                {'items': [{'id': 123}]},
+                HTTPResponse(
+                    HTTPRequest(''),
+                    code=404,
+                    error=HTTPError(404))
             ]
-            get.side_effect = side_effect
-            rv = yield self.api.is_authorized()
-            self.assertEqual(get.call_count, 2)
-            self.assertEqual(get.call_args_list[0][0][0], self.api._get_players_url())
-            self.assertEqual(get.call_args_list[1][0][0], self.api._get_publish_url('invalid_ref'))
+            rv = yield self.api.has_required_access()
+            self.assertEqual(send.call_count, 2)
         self.assertTrue(rv)
 
     @tornado.testing.gen_test
     def test_get_player(self):
-
-        self.api.oauth.token = 'set'
 
         given_ref = 'BkMO9qa8x'
         given_name = 'neon player'
         neondata.BrightcovePlayer(given_ref, name=given_name).save()
         given_account = 12345
 
-        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
-            get = self._future_wrap_mock(_get)
-            body = json.dumps({
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [{
                 'id': given_ref,
                 'name': given_name,
                 'accountId': given_account
-            })
-            get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
-            json_player = yield self.api.get_player(given_ref)
-            get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
-            player = yield self.api.get_player(given_ref, True)
-            self.assertEqual(get.call_count, 2)
-            self.assertEqual(get.call_args[0][0], self.api._get_player_url(given_ref))
+            }]
+            player = yield self.api.get_player(given_ref)
+            self.assertEqual(send.call_count, 1)
 
-        self.assertEqual(json_player['id'], given_ref)
-        self.assertEqual(json_player['name'], given_name)
-        self.assertEqual(player.player_ref, given_ref)
-        self.assertEqual(player.name, given_name)
+        self.assertEqual(player['id'], given_ref)
+        self.assertEqual(player['name'], given_name)
 
     @tornado.testing.gen_test
     def test_get_players(self):
@@ -399,9 +397,9 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
         given_name_2 = 'alternate player'
         given_account = 12345
 
-        with patch('api.brightcove_api.BrightcoveOAuth2Session.get') as _get:
-            get = self._future_wrap_mock(_get)
-            body = json.dumps({"items": [
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [{'items': [
                 {
                     'id': given_ref,
                     'name': given_name,
@@ -411,32 +409,48 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
                     'name': given_name_2,
                     'accountId': given_account
                 }
-            ]})
-            get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
-            players = yield self.api.get_players(True)
-            get.side_effect = [HTTPResponse(HTTPRequest(''), 200, buffer=StringIO(body))]
-            json_players = yield self.api.get_players()
-            self.assertEqual(get.call_count, 2)
-            self.assertEqual(get.call_args[0][0], self.api._get_players_url())
+            ]}]
+            result = yield self.api.get_players()
+            self.assertEqual(send.call_count, 1)
 
+        players = result['items']
         self.assertEqual(2, len(players))
-        self.assertEqual(players[0].player_ref, given_ref)
-        self.assertEqual(players[0].name, given_name)
-        self.assertEqual(players[1].player_ref, given_ref_2)
-        self.assertEqual(players[1].name, given_name_2)
+        self.assertEqual(players[0]['id'], given_ref)
+        self.assertEqual(players[0]['name'], given_name)
+        self.assertEqual(players[1]['id'], given_ref_2)
+        self.assertEqual(players[1]['name'], given_name_2)
 
-        self.assertEqual(2, len(json_players))
-        self.assertEqual(json_players[0]['id'], given_ref)
-        self.assertEqual(json_players[0]['name'], given_name)
-        self.assertEqual(json_players[1]['id'], given_ref_2)
-        self.assertEqual(json_players[1]['name'], given_name_2)
+    @tornado.testing.gen_test
+    def test_valid_patch_player(self):
+        given_ref = 'ref'
+        payload = {'autoplay': True}
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [{'id': given_ref}]
+            result = yield self.api.patch_player(given_ref, payload)
+            self.assertEqual(send.call_count, 1)
+        self.assertEqual(result['id'], given_ref)
 
-    def test_patch_player(self):
-        # This is exercised in the integration test
-        pass
+    @tornado.testing.gen_test
+    def test_invalid_patch_player(self):
+        given_ref = 'ref'
+        payload = {'autoflay': True}
+        with self.assertRaises(voluptuous.MultipleInvalid) as e:
+            yield self.api.patch_player(given_ref, payload)
+        # @TODO Write custom type to assert one key is present.
+        # with self.assertRaises(voluptuous.MultipleInvalid) as e:
+        #    yield self.api.patch_player(given_ref, {})
 
+    @tornado.testing.gen_test
     def test_publish_player(self):
-        pass
+        given_ref = 'ref'
+        with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            send.side_effect = [{'id': given_ref}]
+            result = yield self.api.publish_player(given_ref)
+            self.assertEqual(send.call_count, 1)
+        self.assertEqual(result['id'], given_ref)
+
 
 class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
 
@@ -460,17 +474,14 @@ class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=15)
     def test_integration_client_credential(self):
-        '''Exercise the code with a test Brightcove account'''
+        '''Exercise the read loop with a test Brightcove account'''
 
         api = self._get_integration_api()
-        is_auth = yield api.is_authorized()
-        self.assertFalse(is_auth)
+        self.assertTrue(api.has_required_access())
         players = yield api.get_players()
-
-        # As a side effect, the api was authorized
-        self.assertTrue(api.is_authorized())
-
         search_ref = players['items'][0]['id']
+
+        # Repeat the search with the id we found
         player = yield api.get_player(search_ref)
         self.assertEqual(search_ref, player['id'])
 

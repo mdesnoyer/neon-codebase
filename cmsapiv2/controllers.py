@@ -531,7 +531,7 @@ class BrightcovePlayerHelper():
             # Get the current player configuration from Brightcove
             player_config = yield api.get_player_config(player_ref)
             # Make the patch json string that will be used to update player
-            patch = self._make_patch_json(player_config, intregration.account_id)
+            patch = self._get_plugin_patch(player_config, intregration.account_id)
             try:
                 yield api.patch_player(player_ref, patch)
             except:
@@ -557,8 +557,8 @@ class BrightcovePlayerHelper():
             raise e
         raise tornado.gen.Return(True)
 
-    @classmethod
-    def _make_patch_json(cls, player_config, account_id):
+    @staticmethod
+    def _get_plugin_patch(player_config, account_id):
         """Make a patch that replaces our js and json with the current version
 
         Brightcove player's configuration api allows PUT to replace the entire
@@ -569,23 +569,29 @@ class BrightcovePlayerHelper():
         our minified javascript tracker url.
 
         Grabs the current values of the lists to change, removes any Neon info,
-        then addends the Neon js url and json values with current ones."""
+        then addends the Neon js url and json values with current ones.
+
+        Inputs-
+        player_config dict containing a configuration branch from Brightcove
+        account_id neon tracking id for the publisher
+        """
 
         # Remove any plugin named neon, and append the current one
         plugins = [plugin for plugin in player_config.get('plugins')
             if plugin['name'] is not 'neon']
-        plugins.append(cls._get_current_tracking_json(account_id))
+        plugins.append(BrightcovePlayerHelper._get_current_tracking_json(
+            account_id))
 
         # Remove any script like *neon-tracker*, and append the current
         scripts = [script for script in player_config.get('scripts')
             if script.find('neon-tracker') is -1]
-        scripts.append(cls._get_current_tracking_url())
+        scripts.append(BrightcovePlayerHelper._get_current_tracking_url())
 
         # Return a JSON-string
-        return json.dumps({
+        return {
             'plugins': plugins,
             'scripts': scripts
-        })
+        }
 
     @staticmethod
     def _get_current_tracking_version():
