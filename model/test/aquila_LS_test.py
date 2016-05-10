@@ -215,9 +215,20 @@ combiner_m = MultiplicativeCombiner(penalties=penalties,
 combiner_a = AdditiveCombiner(weight_valence=weight_valence,
                               weight_dict=weight_dict)
 
+class AquilaConnectionMock():
+  def __init__(self):
+    '''
+    Mocks the aquila connection object.
+    '''
+    pass
+
+  def get_ip(force_refresh=False):
+    return '10.0.66.209'
+
 _log.info('creating predictor')
-predictor = predictor.DeepnetPredictor(hostport='10.0.66.209:9000',
-                                       concurrency=22)
+predictor = predictor.DeepnetPredictor(port=9000,
+                                       concurrency=22,
+                                       aquila_connection=AquilaConnection())
 # with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
 
 #f = open(os.path.join(dest_folder, 'config'), 'w')
