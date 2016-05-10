@@ -618,6 +618,8 @@ def _handle_response(response):
                    response.body)
         try:
             json_data = json.load(response.buffer)
+            # The response codes are Brightcove error codes, not HTTP ones. 
+            # See https://support.brightcove.com/en/video-cloud/docs/media-api-error-message-reference
             if json_data['code'] == 210:
                 raise BrightcoveApiNotAuthorizedError(
                     'Not enough permissions to read the media API')
