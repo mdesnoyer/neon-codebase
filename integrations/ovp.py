@@ -295,22 +295,21 @@ class OVPIntegration(object):
             'default_thumbnail_url': default_thumbnail,
             'thumbnail_ref': external_thumbnail_id,
             'callback_url': callback_url,
-            'custom_data': custom_data,
+            'custom_data': json.dumps(custom_data),
             'duration': duration,
             'publish_date': publish_date
         }
         headers = {"Content-Type": "application/json"}
 
-        url = 'https://%s:%s/api/v2/%s/videos' % ( 
-            options.cmsapi_host, 
-            options.cmsapi_port,
+        url = '/api/v2/%s/videos' % ( 
             self.account_id)
  
         req = tornado.httpclient.HTTPRequest(
             url, 
             method='POST', 
             headers=headers,
-            body=json.dumps(body))
+            body=json.dumps(dict((k, v) 
+                for k, v in body.iteritems() if v or v is 0)))
 
         client = cmsapiv2.client.Client(
             options.cmsapi_user,

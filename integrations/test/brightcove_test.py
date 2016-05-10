@@ -739,17 +739,16 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         
         url, submission = self._get_video_submission()
         self.assertEquals(
-            url, 'https://services.neon-lab.com:80/api/v2/a1/videos')
+            url, '/api/v2/a1/videos')
         self.assertEquals(
             submission,
             {'external_video_ref': '123456789',
              'url': 'http://video.mp4',
              'title': 'Some video',
-             'callback_url': None,
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
              'thumbnail_ref': 'still_id',
-             'custom_data': { '_bc_int_data' :
-                              { 'bc_id' : 123456789, 'bc_refid': None }},
+             'custom_data': json.dumps({ '_bc_int_data' :
+                              { 'bc_id' : 123456789, 'bc_refid': None }}),
              'duration' : 0.1,
              'publish_date' : '2015-08-16T23:45:47'
              })
@@ -787,14 +786,12 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
             {'external_video_ref': '465972',
              'url': 'http://video.mp4',
              'title': 'Some video',
-             'callback_url': None,
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
              'thumbnail_ref': 'still_id',
-             'custom_data': { '_bc_int_data' :
+             'custom_data': json.dumps({ '_bc_int_data' :
                               { 'bc_id' : 'v1', 'bc_refid': 'video_ref' },
                               'mediaapiid' : 465972
-                              },
-             'publish_date' : None,
+                              }),
              'duration' : 0.1
              })
 
