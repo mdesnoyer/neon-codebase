@@ -931,19 +931,7 @@ class PlayerAPI(BrightcoveOAuth2Session):
         '''
 
         # Validate against the configuration types
-        schema=Schema(Any({
-            'autoplay': Boolean(),
-            'fullscreenControl': Boolean(),
-            'scripts': list,
-            'stylesheets': list,
-            'media': dict,
-            'video_cloud': str,
-            'plugins': list,
-            'inactive': Boolean(),
-            'css': dict,
-            'compatibility': Boolean(),
-            'skin': str
-        }))
+        schema=self._get_config_schema()
         schema(patch_dict)
 
         request = HTTPRequest(
@@ -981,3 +969,18 @@ class PlayerAPI(BrightcoveOAuth2Session):
     def form_url(self, action, **kwargs):
         return self.URLS[action].format(**kwargs)
 
+    @staticmethod
+    def _get_config_schema():
+        return Schema(Any({
+            'autoplay': Boolean(),
+            'fullscreenControl': Boolean(),
+            'scripts': list,
+            'stylesheets': list,
+            'media': dict,
+            'video_cloud': str,
+            'plugins': list,
+            'inactive': Boolean(),
+            'css': dict,
+            'compatibility': Boolean(),
+            'skin': str
+        }))

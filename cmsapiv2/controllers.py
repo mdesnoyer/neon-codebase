@@ -513,7 +513,6 @@ class BrightcovePlayerHandler(APIV2Handler):
 
 class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
-
     @staticmethod
     @tornado.gen.coroutine
     def publish_plugin_to_player(player):
