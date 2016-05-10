@@ -284,27 +284,22 @@ class DeepnetPredictor(Predictor):
         '''
         Checks the connection, as a callback.
         '''
+        self._ready.clear()
         if status is None:
             # then you're just starting up.
             self._connect(force_refresh=False)
-            self._ready.clear()
-            return
-        if status is ChannelConnectivity.READY:
+        elif status is ChannelConnectivity.READY:
             # the connection is ready
             _log.debug('Connection established')
             self._ready.set()
-            return
-        if (status is ChannelConnectivity.TRANSIENT_FAILURE or
+        elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
             # the connection has been lost
-            self._ready.clear()
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
             self._connect(force_refresh=True)
-            return
-        # otherwise, nothing has changed
-        _log.debug('Connection status is %s' % str(status))
-        self._ready.clear()
+        else:
+            _log.debug('Connection status is %s' % str(status))
 
     def _predictasync(self, image, timeout=10.0):
         '''
