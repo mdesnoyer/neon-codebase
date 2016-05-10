@@ -31,6 +31,9 @@ const defaults = {
         // Default Neon api endpoint
         neonApiUrl: 'http://tracker.neon-images.com/v2/track',
 
+        // Neon thumbnail url to id resolver
+        thumbIdUrl: 'http://i1.neon-images.com/v1/getthumbnailid/',
+
         // Resolution (in percent points) to track video play percent
         timeUpdateInterval: 25,
 
@@ -80,10 +83,29 @@ const _getReferrer = () => {
 
 // Get the basename of a url
 // e.g., "http://example.com/dir/thispart.jpg?withparams" => "thispart"
-const _basenameRegex = /^.*\/|\.[^.]*$/g
+const _basenameRegex = /^.*\/|\.[^.]*$/g;
 const _getBasenameOf = (url) => {
     return url.replace(_basenameRegex, '');
 };
+
+const _isNeonImage = (url) => {
+    return (url && (
+        url.indexOf('neontn') > -1 || url.indexOf('neonvid') > -1));
+};
+
+const _getNeonThumbIdOf = (url) => {
+
+    if (neon.options.dev.showConsoleLogging) {
+        console.info(printf('%s -> %s', eventType, action), data);
+    }
+
+    reqwest({
+        url: neon.options.tracking.neonApiUrl,
+        method: 'GET',
+        crossOrigin: true,
+        data
+    });
+}
 
 // Calculate the percentage of the video played
 const _getPercentPlayed = () => {
@@ -188,7 +210,7 @@ const _extractVideoId = () => {
     const regex = neon.options.publisher.videoIdAttributeRegex;
 
     // Check the usefulness of this regex code
-    if (!!regex) {
+    if (regex) {
         const matches = videoId.match(regex);
 
         if (matches !== null) {
@@ -204,9 +226,10 @@ const _extractVideoId = () => {
     return videoId;
 };
 
+// Handle autoplay event
 const onAutoplay = (playerEvent, eventDetails) => {
     onPlay(playerEvent, eventDetails);
-}
+};
 
 // Handle play event
 const onPlay = (playerEvent, eventDetails) => {
@@ -261,7 +284,7 @@ const _getImagesForEvent = (playerEvent) => {
         playerEvent.images.forEach((image) => {
             values.push({url, width, height});
         });
-    } else if (!!player.poster()) {
+    } else if (player.poster()) {
         url = player.poster();
         width = player.posterImage.width();
         height = player.posterImage.height();
@@ -371,7 +394,7 @@ const onPosterChange = (playerEvent) => {
 
     // And first play event as a image click for the poster
     // if the video is not configured for autoplay.
-    if(!player.autoplay()) {
+    if (!player.autoplay()) {
         player.one('play', onImageClick);
     }
 };
@@ -400,7 +423,7 @@ const onPlayerReady = (player_, options) => {
     neon.hasAdPlayed = false;
 
     // If the poster is set, track as though it had just changed
-    if (!!player.poster()) {
+    if (player.poster()) {
         onPosterChange();
     }
 
