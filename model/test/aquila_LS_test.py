@@ -228,7 +228,7 @@ class AquilaConnectionMock():
 _log.info('creating predictor')
 predictor = predictor.DeepnetPredictor(port=9000,
                                        concurrency=22,
-                                       aquila_connection=AquilaConnection())
+                                       aquila_connection=AquilaConnectionMock())
 # with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
 
 #f = open(os.path.join(dest_folder, 'config'), 'w')
