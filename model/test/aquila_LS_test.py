@@ -264,7 +264,7 @@ adapt_improve=True,
 use_best_data=True
 use_all_data=False
 testing_dir=''
-n_thumbs=100
+n_thumbs=5
 startend_clip=0.025
 non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
@@ -275,7 +275,9 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 video = '/home/ubuntu/targ.mkv'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
-res = LS.choose_thumbnails(vid, 100, video_name='test')
-LS.exit()
-with open('/tmp/LS_results', 'w') as f:
-  dill.dump(res, f)
+try:
+  res = LS.choose_thumbnails(vid, 100, video_name='test')
+  with open('/tmp/LS_results', 'w') as f:
+    dill.dump(res, f)
+except:
+  del predictor
