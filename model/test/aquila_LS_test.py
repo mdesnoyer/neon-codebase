@@ -236,7 +236,7 @@ predictor = predictor.DeepnetPredictor(port=9000,
 def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
             processing_time_ratio, adapt_improve, use_best_data,
-            use_all_data, testing_dir, n_thumbs, startend_clip, non_locking):
+            use_all_data, testing_dir, n_thumbs, startend_clip):
     return LocalSearcher(predictor,
                    feature_generators=feature_generators,
                    combiner=combiner_m,
@@ -252,8 +252,7 @@ def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
                    use_all_data=use_all_data,
                    testing_dir=testing_dir,
                    n_thumbs=n_thumbs,
-                   startend_clip=startend_clip,
-                   non_locking=non_locking)
+                   startend_clip=startend_clip)
 
 combiner = combiner_m
 testing = False
@@ -271,7 +270,7 @@ non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
             processing_time_ratio, adapt_improve, use_best_data,
-            use_all_data, testing_dir, n_thumbs, startend_clip, non_locking)
+            use_all_data, testing_dir, n_thumbs, startend_clip)
 
 video = '/home/ubuntu/targ.mkv'
 vid = cv2.VideoCapture(video)
