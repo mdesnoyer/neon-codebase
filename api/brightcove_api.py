@@ -55,7 +55,9 @@ DEFAULT_IMAGE_SIZES = {
 class BrightcoveApi(object): 
 
     ''' Brighcove API Interface class
-    All video ids used in the class refer to the Brightcove platform VIDEO ID
+    All video ids used in the class refer to the Brightcove platform VIDEO ID.
+
+    This is the interface for the legacy Media API
     '''
 
     write_connection = RequestPool(options.max_write_connections,

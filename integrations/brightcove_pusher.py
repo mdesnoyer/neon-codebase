@@ -36,6 +36,7 @@ statemon.define('invalid_json', int)
 statemon.define('no_valid_tokens', int)
 statemon.define('bc_server_error', int)
 statemon.define('unexpected_error', int)
+statemon.define('image_ingestion_error', int)
 
 _log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         bc_integration = yield neondata.BrightcoveIntegration.get(
             integration_id, async=True)
         if bc_integration is None:
-            raise tornado.web.HTTPError(404, 'Invalid integration id')
+            raise tornado.web.HTTPError(404, reason='Invalid integration id')
 
         if not bc_integration.uses_bc_thumbnail_api:
             # Nothing to do because they don't use the BC thumbnails
@@ -61,11 +62,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
             data = json.loads(self.request.body)
         except Exception:
             statemon.state.increment('invalid_json')
-            raise tornado.web.HTTPError(400, 'Invalid JSON received: %s' %
-                                        self.request.body)
+            raise tornado.web.HTTPError(
+                400, reason = 'Invalid JSON received: %s' % self.request.body)
 
         try:
-
             if (bc_integration.application_client_id is not None and
                 bc_integration.application_client_secret is not None):
                 try:
@@ -94,20 +94,20 @@ class ServingURLHandler(tornado.web.RequestHandler):
             msg = 'Error with the Brightcove API: %s' % e
             _log.error(msg)
             statemon.state.increment('bc_server_error')
-            raise tornado.web.HTTPError(500, msg)
+            raise tornado.web.HTTPError(500, reason=msg)
         except api.brightcove_api.BrightcoveApiNotAuthorizedError as e:
             msg = ('No valid Brightcove tokens for integration %s' %
                    integration_id)
             _log.warn_n(msg, 20)
             statemon.state.increment('no_valid_tokens')
-            raise tornado.web.HTTPError(500, msg)
+            raise tornado.web.HTTPError(500, reason=msg)
         except tornado.web.HTTPError as e:
             raise
         except Exception as e:
             msg = 'Unexpected Error with request %s: %s' % (data, e)
             _log.exception(msg)
             statemon.state.increment('unexpected_error')
-            raise tornado.web.HTTPError(500, msg)
+            raise tornado.web.HTTPError(500)
 
     @tornado.gen.coroutine
     def post(self, integration_id):
@@ -183,7 +183,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                               data['video_id']),
                                               async=True)
         if video is None:
-            raise tornado.web.HTTPError(404, 'Unknown video id')
+            raise tornado.web.HTTPError(404, reason='Unknown video id')
         thumbs = yield neondata.ThumbnailMetadata.get_many(
             video.thumbnail_ids, async=True)
         valid_thumbs = sorted([x for x in thumbs if 
@@ -202,7 +202,8 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
         turls = yield neondata.ThumbnailServingURLs.get(tmeta.key, async=True)
         if turls is None:
-            raise tornado.web.HTTPError(500, 'No thumbnail serving URLs known')
+            raise tornado.web.HTTPError(
+                500, reason='No thumbnail serving URLs known')
         raise tornado.gen.Return((tmeta, turls))
 
     @tornado.gen.coroutine
@@ -260,7 +261,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                                   data['video_id']),
                                                   async=True)
             if video is None:
-                raise tornado.web.HTTPError(404, 'Unknown video id')
+                raise tornado.web.HTTPError(404, reason='Unknown video id')
             thumbs = yield neondata.ThumbnailMetadata.get_many(
                 video.thumbnail_ids, async=True)
 
@@ -272,11 +273,15 @@ class ServingURLHandler(tornado.web.RequestHandler):
                     ttype=neondata.ThumbnailType.DEFAULT,
                     rank=0,
                     external_id=cur_image['asset_id'])
-                new_thumb = yield video.download_and_add_thumbnail(
-                    new_thumb,
-                    cur_image['src'],
-                    save_objects=True,
-                    async=True)
+                try:
+                    new_thumb = yield video.download_and_add_thumbnail(
+                        new_thumb,
+                        cur_image['src'],
+                        save_objects=True,
+                        async=True)
+                except Exception as e:
+                    _log.warn('Error while ingesting image: %s' % e)
+                    statemon.state.increment('image_ingestion_error')
 
             if cur_image['remote']:
                # We can update the remote url
@@ -316,6 +321,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                                     integration.publisher_id,
                                                     integration.read_token,
                                                     integration.write_token)
+        # TODO: Handle the image sizes better. We're not going to
+        # bother for now because the media API is deprecated and there
+        # shouldn't be anybody using this code.
+        
         if data['processing_state'] == 'serving':
             # Push in the servering url
             yield api_conn.update_thumbnail_and_videostill(
@@ -339,7 +348,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 msg = 'Error while downloading thumbnail %s: %s' % (tmeta.key,
                                                                     cur_error)
                 _log.warn(msg)
-                raise tornado.web.HTTPError(500, msg)
+                raise tornado.web.HTTPError(500, reason=msg)
 
             yield api_conn.update_thumbnail_and_videostill(
                 data['video_id'],
