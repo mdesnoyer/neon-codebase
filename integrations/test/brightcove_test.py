@@ -19,7 +19,6 @@ from mock import patch, MagicMock
 import multiprocessing
 import test_utils.neontest
 import test_utils.postgresql
-import test_utils.redis
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
