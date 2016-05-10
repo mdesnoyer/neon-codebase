@@ -770,7 +770,7 @@ class BrightcoveOAuth2Session(object):
                 body=self._authorization_body())
             response = yield utils.http.send_request(
                 request,
-                no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
+                no_retry_codes=[401],
                 async=True)
             # Break on error
             if response.error:

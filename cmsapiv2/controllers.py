@@ -514,6 +514,7 @@ class BrightcovePlayerHandler(APIV2Handler):
 class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
 
+    @staticmethod
     @tornado.gen.coroutine
     def publish_plugin_to_player(player):
         """Update Brightcove player with current plugin and publishes it'''
@@ -532,16 +533,9 @@ class BrightcovePlayerHelper():
             player_config = yield api.get_player_config(player_ref)
             # Make the patch json string that will be used to update player
             patch = self._get_plugin_patch(player_config, intregration.account_id)
-            try:
-                yield api.patch_player(player_ref, patch)
-            except:
-                #@TODO
-                pass
-            try:
-                yield api.publish_player(player_ref)
-            except:
-                #@TODO
-                pass
+
+            yield api.patch_player(player_ref, patch)
+            yield api.publish_player(player_ref)
 
             # Success. Update the player with the date and version
             def _modify(p):
@@ -1888,10 +1882,10 @@ class UserHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def put(self, account_id):
+        # TODO give ability to modify access_level
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('username'): All(Coerce(str), Length(min=8, max=64)),
-          Optional('access_level'): All(Coerce(int), Range(min=1, max=63)),
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
           'first_name': Any(str, unicode, Length(min=1, max=256)),
           'last_name': Any(str, unicode, Length(min=1, max=256)),
           'title': Any(str, unicode, Length(min=1, max=32))
@@ -1899,20 +1893,14 @@ class UserHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        username = args.get('username')
-        new_access_level = args.get('access_level')
+        username = args.get('username') 
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
                 raise NotAuthorizedError('Can not update another\
                                users account')
 
-            if new_access_level > self.user.access_level:
-                raise NotAuthorizedError('Can not set access_level above\
-                               requesting users access level')
-
         def _update_user(u):
-            u.access_level = new_access_level
             u.first_name = args.get('first_name', u.first_name)
             u.last_name = args.get('last_name', u.last_name)
             u.title = args.get('title', u.title)
