@@ -222,7 +222,8 @@ class AquilaConnectionMock():
     '''
     pass
 
-  def get_ip(force_refresh=False):
+  # note: this may need to be a static method?
+  def get_ip(self, force_refresh=False):
     return '10.0.66.209'
 
 _log.info('creating predictor')
