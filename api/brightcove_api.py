@@ -30,8 +30,8 @@ import utils.logs
 import utils.neon
 from cvutils.imageutils import PILImageUtils
 from utils.http import RequestPool
+from utils import statemon
 from tornado.httpclient import HTTPRequest, HTTPResponse
-from voluptuous import Schema, Required, All, Length, Range, MultipleInvalid, Coerce, Invalid, Any, Optional, Boolean
 
 import logging
 _log = logging.getLogger(__name__)
@@ -1060,12 +1060,11 @@ class PlayerAPI(BrightcoveOAuth2Session):
 
         Returns either a dictionary or a player object if return_neon_object is True.
         '''
-        request = HTTPRequest(
-            self.form_url(
-                'get_player',
-                base_url=PlayerAPI.BASE_URL,
-                pub_id=self.publisher_id,
-                player_ref=player_ref))
+        url = '{base_url}/{pub_id}/players/{player_ref}'
+        request = HTTPRequest(url.format(
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id,
+            player_ref=player_ref))
         response = yield self._send_request(request)
         raise tornado.gen.Return(response)
 
@@ -1074,25 +1073,25 @@ class PlayerAPI(BrightcoveOAuth2Session):
         '''Get all Brightcove players for the instance's publisher id
 
         Returns either a list of dictionary or player object if return_neon_object is True'''
-        request = HTTPRequest(
-            self.form_url(
-                'get_players',
-                base_url=PlayerAPI.BASE_URL,
-                pub_id=self.publisher_id))
+        url = '{base_url}/{pub_id}/players'
+        request = HTTPRequest(url.format(
+            'get_players',
+            base_url=PlayerAPI.BASE_URL,
+            pub_id=self.publisher_id))
         response = yield self._send_request(request)
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
     def publish_player(self, player_ref, **kwargs):
         '''Publish a player, copying its "preview" branch to its "master" branch'''
+        url = '{base_url}/{pub_id}/players/{player_ref}/publish'
         request = HTTPRequest(
-            self.form_url(
-                'publish_player',
+            url.format(
                 base_url=PlayerAPI.BASE_URL,
                 pub_id=self.publisher_id,
                 player_ref=player_ref),
             method='POST',
-            # By default, an empty body in POST will raise error
+            # Empty body in POST will raise error, so set allow flag.
             allow_nonstandard_methods=True)
         response = yield self._send_request(request, **kwargs)
         raise tornado.gen.Return(response)
@@ -1108,18 +1107,12 @@ class PlayerAPI(BrightcoveOAuth2Session):
         player_ref Brightcove id of the player
         patch_dict Dictionary of configuration tree values to update
         '''
-
-        # Validate against the configuration types
-        schema=self._get_config_schema()
-        schema(patch_dict)
-
+        url = '{base_url}/{pub_id}/players/{player_ref}/configuration'
         request = HTTPRequest(
-            self.form_url(
-                'patch_player',
+            url.format(
                 base_url=PlayerAPI.BASE_URL,
                 pub_id=self.publisher_id,
-                player_ref=player_ref
-            ),
+                player_ref=player_ref),
             method='PATCH',
             body=json.dumps(patch_dict))
         response = yield self._send_request(request)
@@ -1128,38 +1121,11 @@ class PlayerAPI(BrightcoveOAuth2Session):
     @tornado.gen.coroutine
     def get_player_config(self, player_ref):
         '''Get the "configuration" dictionary from master branch of player'''
+        url = '{base_url}/{pub_id}/players/{player_ref}/configuration/master'
         request = HTTPRequest(self.form_url(
-            'get_player_config',
             base_url=PlayerAPI.BASE_URL,
             pub_id=self.publisher_id,
             player_ref=player_ref
         ))
         response = yield self._send_request(request)
         raise tornado.gen.Return(response)
-
-    URLS = {
-        'get_player': '{base_url}/{pub_id}/players/{player_ref}',
-        'get_players': '{base_url}/{pub_id}/players',
-        'get_player_config': '{base_url}/{pub_id}/players/{player_ref}/configuration/master',
-        'patch_player': '{base_url}/{pub_id}/players/{player_ref}/configuration',
-        'publish_player': '{base_url}/{pub_id}/players/{player_ref}/publish'
-    }
-
-    def form_url(self, action, **kwargs):
-        return self.URLS[action].format(**kwargs)
-
-    @staticmethod
-    def _get_config_schema():
-        return Schema(Any({
-            'autoplay': Boolean(),
-            'fullscreenControl': Boolean(),
-            'scripts': list,
-            'stylesheets': list,
-            'media': dict,
-            'video_cloud': str,
-            'plugins': list,
-            'inactive': Boolean(),
-            'css': dict,
-            'compatibility': Boolean(),
-            'skin': str
-        }))
