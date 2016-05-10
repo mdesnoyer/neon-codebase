@@ -432,16 +432,6 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
         self.assertEqual(result['id'], given_ref)
 
     @tornado.testing.gen_test
-    def test_invalid_patch_player(self):
-        given_ref = 'ref'
-        payload = {'autoflay': True}
-        with self.assertRaises(voluptuous.MultipleInvalid) as e:
-            yield self.api.patch_player(given_ref, payload)
-        # @TODO Write custom type to assert one key is present.
-        # with self.assertRaises(voluptuous.MultipleInvalid) as e:
-        #    yield self.api.patch_player(given_ref, {})
-
-    @tornado.testing.gen_test
     def test_publish_player(self):
         given_ref = 'ref'
         with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
