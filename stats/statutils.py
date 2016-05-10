@@ -289,7 +289,7 @@ def get_groupby_clause(page_regex=None,
     return clauses
 
 def get_groupby_select(impression_metric=None, page_regex=None, 
-                       host_regex=None
+                       host_regex=None,
                        desktop_mobile_split=False):
     
     '''Return a string in the select part of the statement to support group by.
