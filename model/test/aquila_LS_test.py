@@ -272,7 +272,7 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip, non_locking)
 
-video = '/home/ubuntu/lemonade.m4v'
+video = '/home/ubuntu/targ.mkv'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
 res = LS.choose_thumbnails(vid, 100, video_name='test')
