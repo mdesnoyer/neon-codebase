@@ -1614,40 +1614,6 @@ class LocalSearcher(object):
                 framenos = [framenos[x] for x in acc_idxs]
                 frames = [frames[x] for x in acc_idxs]
                 gold = [gold[x] for x in acc_idxs]
-            # ---------- START OF TEXT PROCESSING
-            # if self.filter_text:
-            #     lower_crop_frac = 0.2  # how much of the lower portion of the
-            #     # image to crop out
-            #     text_d = []
-            #     for cframe in frames:
-            #         # Cut out the bottom 20% of the image because it often has 
-            #         # tickers
-            #         text_det_out = cv2.text.textDetect(
-            #             cframe[0:int(cframe.shape[0]*.82), :, :],
-            #             *self.text_filter_params)
-            #         text_d.append(text_det_out)
-            #     masks = [x[1] for x in text_d]
-            #     # accept only those where tet occupies a sufficiently small amount 
-            #     # of the image.
-            #     accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh 
-            #                 for x in masks]
-            #     n_rej = np.sum(np.logical_not(accepted))
-            #     n_acc = np.sum(accepted)
-            #     _log.debug(('Filter for feature %s has '
-            #                 'has rejected %i frames, %i remain' % (
-            #                     'fancy text detect', n_rej, n_acc)))
-            #     if not np.any(accepted):
-            #         _log.debug('No frames accepted by filters')
-            #         return
-            #     # filter the current features across all feature
-            #     # dicts, as well as the framenos
-            #     acc_idxs = list(np.nonzero(accepted)[0])
-            #     for k in frame_feats.keys():
-            #         frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
-            #     framenos = [framenos[x] for x in acc_idxs]
-            #     frames = [frames[x] for x in acc_idxs]
-            #     gold = [gold[x] for x in acc_idxs]
-            # ---------- END OF TEXT PROCESSING
             for k, f in self.generators.iteritems():
                 if k in frame_feats:
                     continue
@@ -1720,8 +1686,7 @@ class LocalSearcher(object):
                                    start_score, end_frame, end_score, best_frameno,
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
-                                        np.max(comb), meta=meta,
-                                        feat_score_func=feat_score_func)
+                np.max(comb), meta=meta, feat_score_func=feat_score_func)
             # IMPORTANT: Exiting a "with" block does *not* wake up other threads
             self._proc_lock.notify()
 

@@ -276,7 +276,7 @@ video = '/home/ubuntu/targ.mkv'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
 try:
-  res = LS.choose_thumbnails(vid, 100, video_name='test')
+  res = LS.choose_thumbnails(vid, 5, video_name='test')
   with open('/tmp/LS_results', 'w') as f:
     dill.dump(res, f)
 except:
