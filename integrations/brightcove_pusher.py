@@ -122,6 +122,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         # Get the current images on the video
         images = yield api_conn.get_video_images(data['video_id'])
         if data['processing_state'] == 'serving':
+            yield self._ingest_existing_image(data, integration, images)
             yield self._push_one_serving_url_cms(data, api_conn, integration,
                                                  'poster', images)
             yield self._push_one_serving_url_cms(data, api_conn, integration,
@@ -242,9 +243,46 @@ class ServingURLHandler(tornado.web.RequestHandler):
         yield update_func(data['video_id'], cur_image['asset_id'], new_url)
 
     @tornado.gen.coroutine
+    def _ingest_existing_image(self, data, integration, bc_images):
+        '''See if we already have the image in our system and ingest it 
+        if we do not
+        '''
+        # Try for the poster first, then fallback to the thumbnail
+        cur_image = bc_images.get('poster') or bc_images.get('thumbnail')
+        if cur_image is None:
+            return
+        
+        video = yield neondata.VideoMetadata.get(
+            neondata.InternalVideoID.generate(integration.account_id,
+                                              data['video_id']),
+                                              async=True)
+        if video is None:
+            raise tornado.web.HTTPError(404, reason='Unknown video id')
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids, async=True)
+
+        if not any([x.type == neondata.ThumbnailType.DEFAULT 
+                    for x in thumbs]):
+            # ingest the image
+            new_thumb = neondata.ThumbnailMetadata(
+                None,
+                ttype=neondata.ThumbnailType.DEFAULT,
+                rank=0,
+                external_id=cur_image['asset_id'])
+            try:
+                new_thumb = yield video.download_and_add_thumbnail(
+                    new_thumb,
+                    cur_image['src'],
+                    save_objects=True,
+                    async=True)
+            except Exception as e:
+                _log.warn('Error while ingesting image: %s' % e)
+                statemon.state.increment('image_ingestion_error')
+                               
+
+    @tornado.gen.coroutine
     def _push_one_serving_url_cms(self, data, api_conn, integration,
-                                  asset_name,
-                                  cur_images):
+                                  asset_name, cur_images):
         '''Push the serving url for one asset type on the cms api.
 
         data - Callback data json
@@ -254,35 +292,6 @@ class ServingURLHandler(tornado.web.RequestHandler):
         width, height = self._find_image_size(cur_image)
 
         if len(cur_image) > 0:
-            # First we need to see if we already have the image in our
-            # system and ingest it if we do not               
-            video = yield neondata.VideoMetadata.get(
-                neondata.InternalVideoID.generate(integration.account_id,
-                                                  data['video_id']),
-                                                  async=True)
-            if video is None:
-                raise tornado.web.HTTPError(404, reason='Unknown video id')
-            thumbs = yield neondata.ThumbnailMetadata.get_many(
-                video.thumbnail_ids, async=True)
-
-            if not any([x.type == neondata.ThumbnailType.DEFAULT 
-                        for x in thumbs]):
-                # ingest the image
-                new_thumb = neondata.ThumbnailMetadata(
-                    None,
-                    ttype=neondata.ThumbnailType.DEFAULT,
-                    rank=0,
-                    external_id=cur_image['asset_id'])
-                try:
-                    new_thumb = yield video.download_and_add_thumbnail(
-                        new_thumb,
-                        cur_image['src'],
-                        save_objects=True,
-                        async=True)
-                except Exception as e:
-                    _log.warn('Error while ingesting image: %s' % e)
-                    statemon.state.increment('image_ingestion_error')
-
             if cur_image['remote']:
                # We can update the remote url
                update_func = getattr(api_conn, 'update_%s' % asset_name)
@@ -297,13 +306,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
                yield delete_func(data['video_id'], cur_image['asset_id'])
 
         # Add a new thumbnail with a remote url
-        reference_id = ('thumbservingurl-%s' if asset_name == 'thumbnail' 
-                        else 'stillservingurl-%s') % data['video_id']
         add_func = getattr(api_conn, 'add_%s' % asset_name)
         yield add_func(data['video_id'],
                        self.build_serving_url(data['serving_url'], height,
-                                              width),
-                                              reference_id)
+                                              width))
 
     def build_serving_url(self, base_url, height=None, width=None):
         parsed_url = list(urlparse.urlparse(base_url))

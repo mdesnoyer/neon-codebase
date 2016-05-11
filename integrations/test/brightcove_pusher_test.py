@@ -182,15 +182,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',
-            'stillservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180',
-            'thumbservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
 
     @tornado.testing.gen_test
     def test_post_same_as_put(self):
@@ -205,15 +203,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',
-            'stillservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180',
-            'thumbservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
 
     @tornado.testing.gen_test
     def test_not_using_bc_thumbs(self):
@@ -258,8 +254,7 @@ class TestCMSAPIPush(BaseTest):
         # Make sure the thumbnail was added
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg',
-            'thumbservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg')
 
     @tornado.testing.gen_test
     def test_image_size_found_in_remote_url(self):
@@ -323,15 +318,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',
-            'stillservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',)
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180',
-            'thumbservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
 
     @tornado.testing.gen_test
     def test_state_processed_not_our_url(self):
@@ -653,7 +646,7 @@ class TestCMSAPIPush(BaseTest):
         self.assertEquals(response.code, 200)
         self.assertEquals(statemon.state.get(
             'integrations.brightcove_pusher.image_ingestion_error'),
-            2)
+            1)
 
         # Check that the database didn't change
         video = neondata.VideoMetadata.get('acct1_vid1')
@@ -663,15 +656,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',
-            'stillservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
 
         # Make sure the thumb was still added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180',
-            'thumbservingurl-vid1')
+            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
         
 class TestMediaAPIPush(BaseTest):
     def setUp(self):
