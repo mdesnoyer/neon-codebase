@@ -242,6 +242,12 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     return lambda x: Z + (L / (1 + np.exp(-k * (x - x0))))
 
 
+def memcheck():
+    pvused = psutil.virtual_memory().percent
+    psused = psutil.swap_memory().percent
+    _log.debug('VMem Used: %.2f, Swap Used: %.2f', pvused, psused)
+
+
 class Statistics(object):
     """
     Replicates (to a degree) the functionality of the true running statistics
@@ -1497,9 +1503,6 @@ class LocalSearcher(object):
                 # obtained an item, then break and begin analysis of that
                 # item. Otherwise, try again.
                 try:
-                    pvused = psutil.virtual_memory().percent
-                    psused = psutil.swap_memory().percent
-                    _log.debug('VMem Used: %.2f, Swap Used: %.2f', pvused, psused)
                     item = self._inq.get(True, 2)  # 2 second timeout
                 except:
                     item = None
@@ -1675,6 +1678,7 @@ class LocalSearcher(object):
             else:
                 meta = None
             self._proc_lock.notify()
+        memcheck()
         if self.predictor.async:
             indi_framescore = self._get_score(best_frame, 
                                               frameno=best_frameno)
