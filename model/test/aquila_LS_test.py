@@ -230,6 +230,12 @@ _log.info('creating predictor')
 predictor = predictor.DeepnetPredictor(port=9000,
                                        concurrency=22,
                                        aquila_connection=AquilaConnectionMock())
+try:
+  predictor.shutdown()
+except:
+  import ipdb
+  ipdb.pm()
+
 # with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
 
 #f = open(os.path.join(dest_folder, 'config'), 'w')
