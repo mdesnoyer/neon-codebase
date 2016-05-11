@@ -156,7 +156,7 @@ import heapq
 import logging
 import os
 import sys
-from time import time
+from time import time, sleep
 from itertools import permutations
 from collections import OrderedDict as odict
 from collections import defaultdict as ddict
@@ -1452,8 +1452,12 @@ class LocalSearcher(object):
         self._mix()
         while (time() - start_time) < max_processing_time:
             if self.done_sampling and self.done_searching:
-                break
-            self._step()
+                if not self._active_searches:
+                    break
+                _log.info_n('Waiting for local searches to complete...', 100)
+                sleep(0.5)
+            else:
+                self._step()
         _log.info('Halting worker threads')
         self._terminate.set()
         for t in threads:
