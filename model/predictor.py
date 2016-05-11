@@ -394,16 +394,11 @@ class DeepnetPredictor(Predictor):
 
     def shutdown(self):
         _log.debug('Exit has started.')
-        # TODO: do we have to unsubscribe the
-        # functions as well?
-        try:
-            self.channel.unsubscribe(self._init_check)
-        except:
-            pass  # it wasn't subscribed in the first place
-        try:
-            self.channel.unsubscribe(self._check_conn)
-        except:
-            pass  # it wasn't subscribed in the first place
+        # just try to unsubscribe everything.
+        cbs = channel._connectivity_channel._callbacks_and_connectivities
+        while len(cbs):
+            index, (subscribed_callback, unused_connectivity) = cbs[0]
+            self.channel.unsubscribe(subscribed_callback)
         del self.channel
         del self.stub
 
