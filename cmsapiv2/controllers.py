@@ -6,7 +6,10 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import api.brightcove_api
 from apiv2 import *
+import calendar
+import time 
 
 _log = logging.getLogger(__name__)
 
@@ -154,7 +157,7 @@ class IntegrationHelper():
 
     @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type): #schema):
+    def create_integration(acct, args, integration_type): 
         """Creates an integration for any integration type.
 
         Keyword arguments:
@@ -163,8 +166,6 @@ class IntegrationHelper():
         integration_type - the type of integration to create
         schema - validate args with this Voluptuous schema
         """
-
-        #schema(args)
 
         if integration_type == neondata.IntegrationType.OOYALA:
             integration = neondata.OoyalaIntegration()
@@ -461,8 +462,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             raise NotFoundError('Neon Account required.')
 
         app_id = args.get('application_client_id', None) 
-        app_secret = args.get('application_client_secret', None) 
-        if app_id and app_secret: 
+        app_secret = args.get('application_client_secret', None)
+ 
+        if app_id or app_secret: 
             # Check credentials with Brightcove's CMS API.
             IntegrationHelper.validate_oauth_credentials(
                 client_id=app_id,
@@ -623,7 +625,8 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             else: 
                 rv = float(calendar.timegm(time.gmtime()))
         except (api.brightcove_api.BrightcoveApiServerError, 
-                api.brightcove_api.BrightcoveApiClientError, 
+                api.brightcove_api.BrightcoveApiClientError,
+                api.brightcove_api.BrightcoveApiNotAuthorizedError, 
                 api.brightcove_api.BrightcoveApiError) as e: 
             _log.error('Brightcove Error occurred trying to get \
                         last_processed_date : %s' % e)

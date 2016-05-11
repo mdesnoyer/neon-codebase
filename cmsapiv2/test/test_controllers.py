@@ -6,6 +6,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import api.brightcove_api
 from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
 from cmsapiv2 import authentication
@@ -1489,6 +1490,31 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     gvp.return_value.get_videos)  
                 get_videos_mock.side_effect = [
                     api.brightcove_api.BrightcoveApiServerError('test')] 
+                params = json.dumps({
+                    'publisher_id': '123123abc',
+                    'application_client_id': '5',
+                    'application_client_secret': 'some secret'})
+                header = { 'Content-Type':'application/json' }
+                url = '/api/v2/%s/integrations/brightcove' % (
+                    self.account_id_api_key)
+                response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    body=params,
+                    method='POST',
+                    headers=header)
+
+	self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Brightcove credentials are bad')
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('api.brightcove_api.CMSAPI') as gvp:
+                gvp.return_value.get_videos = MagicMock()
+                get_videos_mock = self._future_wrap_mock(
+                    gvp.return_value.get_videos)  
+                get_videos_mock.side_effect = [
+                    api.brightcove_api.BrightcoveApiNotAuthorizedError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
                     'application_client_id': '5',
