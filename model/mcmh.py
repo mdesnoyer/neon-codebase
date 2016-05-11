@@ -36,17 +36,21 @@ class MCMH(object):
     def __init__(self, elements, search_interval, clip=None):
         '''
         elements: the number of elements to search over.
-        search_interval: The minimum interval between sampled frames.
+        search_interval: The number of frames between search frames plus the
+                         start frame.
         clip: how much of the bookends of the region to ignore, as a fraction.
 
         NOTES:
             Search interval is the number of frames between the search frames.
-            So, if we have search interval of 4, and search frame j, we have:
+            In this diagram, we have search interval of 4, and search frame j, 
+            and search step (not surfaced to mcmh) of 2. 
             ...   j-1   j     j+1   j+2   j+3   j+4   j+5   j+6   ...
-                        ^                              ^
-                   search frame                   search_frame
-            ------------|------------------------------|-------------
-                        |        search interval       |
+                        ^                        ^                  search frames
+                        ^            ^                              search step frames
+                        |----search interval-----|
+            
+            * indicate frames that will be processed during the conducting
+            of a local search.
 
         '''
         self.search_interval = search_interval
@@ -61,7 +65,7 @@ class MCMH(object):
         '''
         N = self.elements
         c = self.clip
-        intr = self.search_interval
+        intr = self.search_interval - 1
 
         start = int(c * N)
         stop = int(N - (c * N))

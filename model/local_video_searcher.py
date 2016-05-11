@@ -1880,7 +1880,7 @@ class LocalSearcher(object):
         frames = self.get_region_frames(start_frame, num,
                                         self.local_search_step)
         frameno = range(start_frame,
-                        start_frame + self.local_search_width + 1,
+                        start_frame + self.local_search_width,
                         self.local_search_step)
         return frames, frameno
 
