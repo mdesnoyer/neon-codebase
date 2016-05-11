@@ -29,6 +29,7 @@ import utils.http
 from utils.http import ResponseCode, HTTPVerbs
 import utils.logs
 import utils.neon
+from utils import statemon
 from cvutils.imageutils import PILImageUtils
 from utils.http import RequestPool
 from utils import statemon
@@ -52,13 +53,26 @@ statemon.define('send_error', int)
 
 class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
+class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
 class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
+
+DEFAULT_IMAGE_SIZES = {
+    'thumbnail' : (120, 90),
+    'poster' : (480, 360)
+}
+
+DEFAULT_IMAGE_SIZES = {
+    'thumbnail' : (120, 90),
+    'poster' : (480, 360)
+}
 
 class BrightcoveApi(object):
 
     ''' Brighcove API Interface class
-    All video ids used in the class refer to the Brightcove platform VIDEO ID
+    All video ids used in the class refer to the Brightcove platform VIDEO ID.
+
+    This is the interface for the legacy Media API
     '''
 
     write_connection = RequestPool(options.max_write_connections,
@@ -174,6 +188,9 @@ class BrightcoveApi(object):
                 raise BrightcoveApiServerError(
                     'Internal Brightcove error when uploading %s for tid %s %s'
                     % (atype, tid, response.error))
+            elif response.error.code == 401:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to upload thumbnail to media API')
             elif response.error.code >= 400:
                 raise BrightcoveApiClientError(
                     'Client error when uploading %s for tid %s %s'
@@ -610,7 +627,12 @@ def _handle_response(response):
                    response.body)
         try:
             json_data = json.load(response.buffer)
-            if json_data['code'] >= 200:
+            # The response codes are Brightcove error codes, not HTTP ones. 
+            # See https://support.brightcove.com/en/video-cloud/docs/media-api-error-message-reference
+            if json_data['code'] == 210:
+                raise BrightcoveApiNotAuthorizedError(
+                    'Not enough permissions to read the media API')
+            elif json_data['code'] >= 200:
                 raise BrightcoveApiClientError(json_data)
         except ValueError:
             # It's not JSON data so there was some other error
@@ -702,7 +724,6 @@ class BrightcoveOAuth2Session(object):
     BrightcoveApiServerError on 500. Parses response body and returns
     dictionary of the response.
     '''
-
     TOKEN_URL = 'https://oauth.brightcove.com/v3/access_token'
 
     def __init__(self, client_id, client_secret):
@@ -712,7 +733,7 @@ class BrightcoveOAuth2Session(object):
 
     @tornado.gen.coroutine
     def _send_request(self, request, cur_try=0, **send_kwargs):
-        '''Send a request to the Brightcove CMS api
+        '''Send a request to the Brightcove OAuth-based api
 
         Inputs:
         request - A tornado.httpclient.HTTPRequest object
@@ -781,8 +802,10 @@ class BrightcoveOAuth2Session(object):
             # Unknown error!
             raise BrightcoveApiError(*error)
 
-
     def _handle_response(self, response):
+        if response.code == 204 or not response.body:
+            # No content so just return True
+            return True
         return json.loads(response.body)
 
     @tornado.gen.coroutine
@@ -825,6 +848,145 @@ class BrightcoveOAuth2Session(object):
             'Authorization': 'Basic {}'.format(auth_string)
         }
 
+class CMSAPI(BrightcoveOAuth2Session):
+    '''Wrapper for the Brightcove CMS API.
+
+    See http://docs.brightcove.com/en/video-cloud/cms-api/references/cms-api/versions/v1/index.html
+
+    All return values are the JSON from the API.
+    '''
+    BASE_URL = 'https://cms.api.brightcove.com/v1'
+    
+    def __init__(self, publisher_id, client_id, client_secret):
+        '''Build the API wrapper.
+
+        Inputs:
+        publisher_id - The Brightcove publisher id
+        client_id - The client id to use
+        client_secret - The client secret to use
+        '''
+        super(CMSAPI, self).__init__(client_id, client_secret)
+        self.publisher_id = publisher_id
+        
+    @tornado.gen.coroutine
+    def get_video_images(self, video_id):
+        '''Return the images for the video.
+
+        Inputs: 
+        video_id - The Brightcove video id
+
+        '''
+        request = tornado.httpclient.HTTPRequest(
+            '{base_url}/accounts/{pub_id}/videos/{video_id}/images'.format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id))
+            
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _add_asset_impl(self, asset_name, video_id, remote_url,
+                        reference_id=None):
+        request_data = {'remote_url' : remote_url}
+        if reference_id:
+            request_data['reference_id'] = reference_id
+            
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name),
+            method='POST',
+            headers={'Content-Type' : 'application/json'},
+            body=json.dumps(request_data))
+
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _update_asset_impl(self, asset_name, video_id, asset_id,
+                           remote_url, reference_id=None):
+        request_data = {'remote_url' : remote_url}
+        if reference_id:
+            request_data['reference_id'] = reference_id
+            
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}/{asset_id}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name,
+                asset_id = asset_id),
+            method='PATCH',
+            headers={'Content-Type' : 'application/json'},
+            body=json.dumps(request_data))
+
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def _delete_asset_impl(self, asset_name, video_id, asset_id):
+        request = tornado.httpclient.HTTPRequest(
+            ('{base_url}/accounts/{pub_id}/videos/{video_id}/assets/'
+             '{asset_name}/{asset_id}').format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id,
+                asset_name = asset_name,
+                asset_id = asset_id),
+            method='DELETE')
+
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def add_thumbnail(self, video_id, remote_url, reference_id=None):
+        response = yield self._add_asset_impl('thumbnail', video_id,
+                                              remote_url, reference_id)
+        raise tornado.gen.Return(response)
+    
+    @tornado.gen.coroutine
+    def update_thumbnail(self, video_id, asset_id, remote_url,
+                         reference_id=None):
+        response = yield self._update_asset_impl('thumbnail', video_id,
+                                                 asset_id, remote_url,
+                                                 reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def delete_thumbnail(self, video_id, asset_id):
+        response = yield self._delete_asset_impl('thumbnail', video_id,
+                                                 asset_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def add_poster(self, video_id, remote_url, reference_id=None):
+        response = yield self._add_asset_impl('poster', video_id,
+                                              remote_url, reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def update_poster(self, video_id, asset_id, remote_url, reference_id=None):
+        response = yield self._update_asset_impl('poster', video_id,
+                                                 asset_id, remote_url,
+                                                 reference_id)
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def delete_poster(self, video_id, asset_id):
+        response = yield self._delete_asset_impl('poster', video_id,
+                                                 asset_id)
+        raise tornado.gen.Return(response)
+                        
+        
 
 class PlayerAPI(BrightcoveOAuth2Session):
 
@@ -897,9 +1059,10 @@ class PlayerAPI(BrightcoveOAuth2Session):
         if not 'items' in response:
             raise tornado.gen.Return(False)
 
-        # The only write operations available require player ids, but we might not have one.
-        # Request a unauthorized resource is a 401 even if it's an invalid resource.
-        # So let's botch a request and expect a 404 and not a 401.
+        # The only write operations available require player ids, but
+        # we might not have one.  Request a unauthorized resource is a
+        # 401 even if it's an invalid resource.  So let's botch a
+        # request and expect a 404 and not a 401.
         try:
             bad_response = yield self.publish_player(
                 'invalid_ref', no_retry_codes=[ResponseCode.HTTP_NOT_FOUND])

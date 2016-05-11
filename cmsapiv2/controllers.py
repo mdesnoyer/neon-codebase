@@ -1642,11 +1642,11 @@ class AccountLimitsHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256))
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256))
         })
         args = self.parse_args()
-        schema(args)
         args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
 
         acct_limits = yield neondata.AccountLimits.get(
                           account_id_api_key,

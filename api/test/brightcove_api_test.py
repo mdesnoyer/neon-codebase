@@ -35,9 +35,16 @@ import utils.neon
 from cmsdb.neondata import BrightcoveIntegration
 from collections import OrderedDict
 from requests.models import Response
-import voluptuous
+from utils.options import define, options
 
 _log = logging.getLogger(__name__)
+
+
+
+_log = logging.getLogger(__name__)
+
+define('run_tests_on_test_account', default=0, type=int,
+       help='If set, will run tests that hit the real Brightcove APIs')
 
 class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
     def setUp(self):
@@ -309,6 +316,7 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
                 self.api.find_videos_by_ids(['vid1'])
 
+<<<<<<< HEAD
 class TestBrightcoveOAuth2Session(test_utils.neontest.AsyncTestCase):
 
     def setUp(self):
@@ -499,7 +507,201 @@ class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
         published_config = yield api.get_player_config(self.player_id)
         self.assertEqual(new_autoplay, published_config['autoplay'])
 
+=======
+class TestCMSAPILive(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        if not options.run_tests_on_test_account:
+            raise unittest.SkipTest('Should only be run manually because it '
+                                    'hits Brightcove')
+        
+        super(TestCMSAPILive, self).setUp()
+
+        self.publisher_id = '2294876105001'
+        self.client_id = '8b089370-ce31-4ecf-9c14-7ffc6ff492b9'
+        self.client_secret = 'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg'
+        self.test_video_id = '4049585935001'
+        self.test_thumb_url = 'https://s3.amazonaws.com/neon-test/mikey.jpg'
+
+        self.api = api.brightcove_api.CMSAPI(self.publisher_id,
+                                             self.client_id,
+                                             self.client_secret)
+        
+
+    def tearDown(self):
+        super(TestCMSAPILive, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_replace_thumbnail(self):
+
+        video_images = yield self.api.get_video_images(self.test_video_id)
+
+        self.assertIn('thumbnail', video_images)
+
+        yield self.api.delete_thumbnail(self.test_video_id,
+                                        video_images['thumbnail']['asset_id'])
+
+        tresponse = yield self.api.add_thumbnail(self.test_video_id,
+                                                 self.test_thumb_url)
+        self.assertEquals(tresponse['remote_url'], self.test_thumb_url)
+
+        update_response = yield self.api.update_thumbnail(
+            self.test_video_id,
+            tresponse['id'],
+            self.test_thumb_url)
+        self.assertEquals(tresponse['remote_url'], self.test_thumb_url)
+
+class TestUpdateImages(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestUpdateImages, self).setUp()
+
+        self.api = api.brightcove_api.BrightcoveApi(
+            'api_key',
+            10,
+            'read_tok',
+            'write_tok')
+
+        self.http_writer_patcher = \
+          patch('api.brightcove_api.BrightcoveApi.write_connection.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_writer_patcher.start())
+
+    def tearDown(self):
+        self.http_writer_patcher.stop()
+        super(TestUpdateImages, self).tearDown()
+
+    # TODO(mdesnoyer): Write update image tests. That'll take a little time
+ 
+class TestCMSAPI(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestCMSAPI, self).setUp()
+
+        self.api = api.brightcove_api.CMSAPI('pub_id',
+                                             'client_id',
+                                             'client_secret')
+
+        # Mock out the _send_request
+        self.api._send_request = MagicMock()
+        self.send_mock = self._future_wrap_mock(self.api._send_request)
+        
+
+    def tearDown(self):
+        super(TestCMSAPI, self).tearDown()
+
+    def get_request(self):
+        cargs, kwargs = self.send_mock.call_args
+        return cargs[0]
+
+    @tornado.testing.gen_test
+    def test_add_thumbnail(self):
+        response = yield self.api.add_thumbnail('vid1', 'remote.jpg',
+                                                'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'POST')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.add_thumbnail('vid1', 'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_add_poster(self):
+        response = yield self.api.add_poster('vid1', 'remote.jpg',
+                                             'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'POST')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.add_poster('vid1', 'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_update_thumbnail(self):
+        response = yield self.api.update_thumbnail('vid1', 'tid1',
+                                                   'remote.jpg',
+                                                   'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'PATCH')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail/tid1'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.update_thumbnail('vid1', 'tid1',
+                                                   'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_update_poster(self):
+        response = yield self.api.update_poster('vid1', 'tid1',
+                                                'remote.jpg',
+                                                'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'PATCH')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster/tid1'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.update_poster('vid1', 'tid1',
+                                                'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_delete_thumbnail(self):
+        response = yield self.api.delete_thumbnail('vid1', 'tid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'DELETE')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail/tid1'))
+
+    @tornado.testing.gen_test
+    def test_delete_poster(self):
+        response = yield self.api.delete_poster('vid1', 'tid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'DELETE')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster/tid1'))
+
+    @tornado.testing.gen_test
+    def test_get_video_images(self):
+        response = yield self.api.get_video_images('vid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'GET')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/images'))
+>>>>>>> origin/working
 
 if __name__ == "__main__" :
-    utils.neon.InitNeon()
-    unittest.main()
+    args = utils.neon.InitNeon()
+    unittest.main(argv=[__name__] + args)
