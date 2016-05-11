@@ -298,6 +298,7 @@ class DeepnetPredictor(Predictor):
             self.channel.unsubscribe(self._init_check)
             self.channel.subscribe(self._check_conn)
             self._ready.set()
+            _log.debug('Ready event is set.')
         elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
             # attempt to connect again
@@ -324,7 +325,7 @@ class DeepnetPredictor(Predictor):
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring. 
         '''
-        conn_est = self._ready.wait()  # TODO: do we want a timeout?
+        conn_est = self._ready.wait(20.)  # TODO: do we want a timeout?
         if not conn_est:
             _log.error('Connection not established in time.')
             # what do we do here? 
