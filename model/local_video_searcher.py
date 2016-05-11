@@ -1347,8 +1347,10 @@ class LocalSearcher(object):
         the probability of taking a new sample decreases, in favor
         of conducting local searches.
         '''
-        return 1. - (self.search_algo.n_samples * 1. / 
-                     self.search_algo.max_samps)
+        _sfrac = (self.search_algo.n_samples * 1. / 
+                  self.search_algo.max_samps)
+        # return 1 - _sfrac # linear
+        return np.sqrt(1 - _sfrac)
 
 
     @property
