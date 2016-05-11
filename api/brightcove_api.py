@@ -28,6 +28,7 @@ import urllib
 import utils.http
 import utils.logs
 import utils.neon
+from utils import statemon
 from cvutils.imageutils import PILImageUtils
 from utils.http import RequestPool
 from utils import statemon
@@ -731,7 +732,7 @@ class BrightcoveOAuth2Session(object):
 
     @tornado.gen.coroutine
     def _send_request(self, request, cur_try=0, **send_kwargs):
-        '''Send a request to the Brightcove CMS api
+        '''Send a request to the Brightcove OAuth-based api
 
         Inputs:
         request - A tornado.httpclient.HTTPRequest object
@@ -764,7 +765,9 @@ class BrightcoveOAuth2Session(object):
         })
 
         # Send
-        response = yield utils.http.send_request(request, async=True, retry_forever_codes=[429], **send_kwargs)
+        response = yield utils.http.send_request(request, async=True,
+                                                 retry_forever_codes=[429],
+                                                 **send_kwargs)
 
         # Success
         if not response.error:
@@ -797,6 +800,9 @@ class BrightcoveOAuth2Session(object):
             raise BrightcoveApiError(*error)
 
     def _handle_response(self, response):
+        if response.code == 204 or not response.body:
+            # No content so just return True
+            return True
         return json.loads(response.body)
 
     @tornado.gen.coroutine
@@ -848,15 +854,17 @@ class CMSAPI(BrightcoveOAuth2Session):
     '''
     BASE_URL = 'https://cms.api.brightcove.com/v1'
     
-    def __init__(self, integration):
+    def __init__(self, publisher_id, client_id, client_secret):
         '''Build the API wrapper.
 
         Inputs:
-        integration - A neondata.BrightcoveIntegration object
+        publisher_id - The Brightcove publisher id
+        client_id - The client id to use
+        client_secret - The client secret to use
         '''
-        super(CMSAPI, self).__init__(integration.publisher_id,
-                                     integration.application_client_id,
-                                     integration.application_client_secret)
+        super(CMSAPI, self).__init__(client_id, client_secret)
+        self.publisher_id = publisher_id
+        
     @tornado.gen.coroutine
     def get_video_images(self, video_id):
         '''Return the images for the video.
@@ -899,7 +907,7 @@ class CMSAPI(BrightcoveOAuth2Session):
 
     @tornado.gen.coroutine
     def _update_asset_impl(self, asset_name, video_id, asset_id,
-                        remote_url, reference_id=None):
+                           remote_url, reference_id=None):
         request_data = {'remote_url' : remote_url}
         if reference_id:
             request_data['reference_id'] = reference_id
@@ -952,7 +960,7 @@ class CMSAPI(BrightcoveOAuth2Session):
 
     @tornado.gen.coroutine
     def delete_thumbnail(self, video_id, asset_id):
-        response = yield self._update_asset_impl('thumbnail', video_id,
+        response = yield self._delete_asset_impl('thumbnail', video_id,
                                                  asset_id)
         raise tornado.gen.Return(response)
 
@@ -971,7 +979,7 @@ class CMSAPI(BrightcoveOAuth2Session):
 
     @tornado.gen.coroutine
     def delete_poster(self, video_id, asset_id):
-        response = yield self._update_asset_impl('poster', video_id,
+        response = yield self._delete_asset_impl('poster', video_id,
                                                  asset_id)
         raise tornado.gen.Return(response)
                         

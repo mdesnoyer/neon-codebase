@@ -117,7 +117,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def handle_callback_with_cms_api(self, data, integration):
-        api_conn = api.brightcove_api.CMSAPI(integration)
+        api_conn = api.brightcove_api.CMSAPI(
+            integration.publisher_id,
+            integration.application_client_id,
+            integration.application_client_secret)
 
         # Get the current images on the video
         images = yield api_conn.get_video_images(data['video_id'])
