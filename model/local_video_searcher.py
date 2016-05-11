@@ -164,6 +164,7 @@ from random import getrandbits
 import shutil
 import threading
 from Queue import Queue
+import psutil
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -1496,6 +1497,9 @@ class LocalSearcher(object):
                 # obtained an item, then break and begin analysis of that
                 # item. Otherwise, try again.
                 try:
+                    pvused = psutil.virtual_memory().percent
+                    psused = psutil.swap_memory().percent
+                    _log.debug('VMem Used: %.2f, Swap Used: %.2f', pvused, psused)
                     item = self._inq.get(True, 2)  # 2 second timeout
                 except:
                     item = None
@@ -1578,9 +1582,9 @@ class LocalSearcher(object):
         Given the frames that are already the best, determine whether it makes
         sense to proceed with local search.
         '''
-        _log.debug('Local search of %i [%.3f] <---> %i [%.3f]' % (
-            start_frame, start_score, end_frame, end_score))
         with self._proc_lock:
+            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]' % (
+                start_frame, start_score, end_frame, end_score))
             gold, framenos = self.get_search_frame(start_frame)
             if gold is None:
                 _log.error('Could not obtain search interval %i <---> %i', 
