@@ -1591,6 +1591,9 @@ class LocalSearcher(object):
         sense to proceed with local search.
         '''
         with self._proc_lock:
+            if self._terminate.is_set():
+                # do not proceed
+                return
             self._active_searches += 1
             _log.debug('Local search of %i [%.3f] <---> %i [%.3f], %i active searches' % (
                 start_frame, start_score, end_frame, end_score, self._active_searches))
@@ -1713,6 +1716,9 @@ class LocalSearcher(object):
         variance, mean frame xdiff, etc.
         '''
         with self._proc_lock:
+            if self._terminate.is_set():
+                # do not proceed
+                return
             self._active_samples += 1
             frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])

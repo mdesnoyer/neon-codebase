@@ -278,8 +278,8 @@ class DeepnetPredictor(Predictor):
         self.channel = implementations.insecure_channel(host, self.port)
         # register callback
         self.channel.subscribe(self._init_check, try_to_connect=True)
-        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
-            self.channel)
+        # self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
+        #     self.channel)
 
     def _init_check(self, status=None):
         '''
@@ -337,7 +337,10 @@ class DeepnetPredictor(Predictor):
             while self.active == self.concurrency:
                 self._cv.wait()
         self.active += 1
-        result_future = self.stub.Regress.future(request, timeout)  # 10 second timeout
+        # it appears to be the case that creating the stub as an attribute can cause some
+        # issues, so let's see if this works.
+        with aquila_inference_pb2.beta_create_AquilaService_stub(self.channel) as stub:
+            result_future = stub.Regress.future(request, timeout)  # 10 second timeout
         result_future.add_done_callback(
             lambda result_future: self.async_cb_hand(result_future))
         return result_future
@@ -364,7 +367,7 @@ class DeepnetPredictor(Predictor):
 
     def __del__(self):
         del self.channel
-        del self.stub
+        #del self.stub
         super(DeepnetPredictor, self).__del__()
 
 
