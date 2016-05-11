@@ -37,7 +37,7 @@ from utils.options import define, options
 _log = logging.getLogger(__name__)
 
 define('run_tests_on_test_account', default=0, type=int,
-       help='Maximum number of write connections to Brightcove')
+       help='If set, will run tests that hit the real Brightcove APIs')
 
 # TODO(sunil) Add more tests
 class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
