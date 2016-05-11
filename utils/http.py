@@ -49,9 +49,9 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
     ntries - Number of times to try sending the request
     do_logging - True if logging should be turned on
     base_delay - Time in seconds for the first delay on the retry
-    no_retry_codes - A list of http codes that will cause the request to not
-                     retry
-
+    no_retry_codes - List of http codes that cause the request not to retry
+    retry_forever_codes - List of http status code that cause request to retry
+        forever until success (e.g., 429) with backoff
     '''
     # Verify the request url
     parsed = urlparse.urlsplit(unicode(request.url))
@@ -65,11 +65,11 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
 
     no_retry_codes = no_retry_codes or []
     retry_forever_codes = retry_forever_codes or []
-    
+
     cur_try = 0
     response = None
-    while cur_try < ntries or (
-            response.error and response.error.code in retry_forever_codes) :
+    while cur_try < ntries or (response and response.error and
+                               response.error.code in retry_forever_codes):
         cur_try += 1
         try:
             http_client = tornado.httpclient.AsyncHTTPClient()

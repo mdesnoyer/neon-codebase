@@ -4374,7 +4374,8 @@ class BrightcoveIntegration(AbstractIntegration):
         self.uses_bc_videojs_player = uses_bc_videojs_player
         # Does publisher use the older Flash-based player
         self.uses_bc_smart_player = uses_bc_smart_player
-        # Does publisher use BC's gallery product to display many videos on a page
+        # Does publisher use BC's gallery product to display many
+        # videos on a page
         self.uses_bc_gallery = uses_bc_gallery
 
         # Which custom field to use for the video id. If it is

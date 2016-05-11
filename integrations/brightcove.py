@@ -27,6 +27,9 @@ define('max_vids_for_new_account', default=100,
 define('max_submit_retries', default=3,
        help='Maximum times we will retry a video submit before passing on it.')
 
+define('bc_servingurl_push_callback_host', default='localhost',
+       help='Location to send the callback to push out a serving url')
+
 statemon.define('bc_apiserver_errors', int)
 statemon.define('bc_apiclient_errors', int)
 statemon.define('cant_get_refid', int)
@@ -235,7 +238,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_callback_url(self, video):
         '''override from ovp'''
-        return self.platform.callback_url
+        return (self.platform.callback_url or 
+                'http://%s/update_serving_url/%s' %
+                (options.bc_servingurl_push_callback_host,
+                 self.platform.integration_id))
 
     @staticmethod
     def get_video_title(video):
