@@ -25,7 +25,7 @@ import urllib
 import test_utils.neontest
 import uuid
 import jwt
-from mock import patch
+from mock import patch, MagicMock
 from cmsdb import neondata
 from passlib.hash import sha256_crypt
 from StringIO import StringIO
@@ -1431,17 +1431,176 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(platform.uses_batch_provisioning, False)
 
     @tornado.testing.gen_test
-    def test_put_integration_client_id_and_secret(self):
+    def test_post_integration_videos_empty(self):
+        with patch('api.brightcove_api.CMSAPI') as gvp:
+            gvp.return_value.get_videos = MagicMock()
+            get_videos_mock = self._future_wrap_mock(
+                gvp.return_value.get_videos)  
+            get_videos_mock.return_value = []
+            params = json.dumps({
+                'publisher_id': '123123abc',
+                'application_client_id': '5',
+                'application_client_secret': 'some secret'})
+            header = { 'Content-Type':'application/json' }
+            url = '/api/v2/%s/integrations/brightcove' % (
+                self.account_id_api_key)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params,
+                method='POST',
+                headers=header)
 
-        params = json.dumps({'publisher_id': '123123abc',
-                             'application_client_id': '5',
-                             'application_client_secret': 'some secret'})
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body=params,
-                                                method='POST',
-                                                headers=header)
+        rjson = json.loads(response.body)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertNotEqual(platform.last_process_date, None)
+ 
+    @tornado.testing.gen_test
+    def test_post_integration_videos_none(self):
+        with patch('api.brightcove_api.CMSAPI') as gvp:
+            gvp.return_value.get_videos = MagicMock()
+            get_videos_mock = self._future_wrap_mock(
+                gvp.return_value.get_videos)  
+            get_videos_mock.return_value = None
+            params = json.dumps({
+                'publisher_id': '123123abc',
+                'application_client_id': '5',
+                'application_client_secret': 'some secret'})
+            header = { 'Content-Type':'application/json' }
+            url = '/api/v2/%s/integrations/brightcove' % (
+                self.account_id_api_key)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params,
+                method='POST',
+                headers=header)
+
+        rjson = json.loads(response.body)
+        platform = yield neondata.BrightcoveIntegration.get(
+            rjson['integration_id'], async=True)
+        self.assertNotEqual(platform.last_process_date, None)
+ 
+    @tornado.testing.gen_test
+    def test_post_integration_videos_brightcove_errors(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('api.brightcove_api.CMSAPI') as gvp:
+                gvp.return_value.get_videos = MagicMock()
+                get_videos_mock = self._future_wrap_mock(
+                    gvp.return_value.get_videos)  
+                get_videos_mock.side_effect = [
+                    api.brightcove_api.BrightcoveApiServerError('test')] 
+                params = json.dumps({
+                    'publisher_id': '123123abc',
+                    'application_client_id': '5',
+                    'application_client_secret': 'some secret'})
+                header = { 'Content-Type':'application/json' }
+                url = '/api/v2/%s/integrations/brightcove' % (
+                    self.account_id_api_key)
+                response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    body=params,
+                    method='POST',
+                    headers=header)
+
+	self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Brightcove credentials are bad')
+ 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('api.brightcove_api.CMSAPI') as gvp:
+                gvp.return_value.get_videos = MagicMock()
+                get_videos_mock = self._future_wrap_mock(
+                    gvp.return_value.get_videos)  
+                get_videos_mock.side_effect = [
+                    api.brightcove_api.BrightcoveApiClientError('test')] 
+                params = json.dumps({
+                    'publisher_id': '123123abc',
+                    'application_client_id': '5',
+                    'application_client_secret': 'some secret'})
+                header = { 'Content-Type':'application/json' }
+                url = '/api/v2/%s/integrations/brightcove' % (
+                    self.account_id_api_key)
+                response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    body=params,
+                    method='POST',
+                    headers=header)
+
+	self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Brightcove credentials are bad')
+ 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('api.brightcove_api.CMSAPI') as gvp:
+                gvp.return_value.get_videos = MagicMock()
+                get_videos_mock = self._future_wrap_mock(
+                    gvp.return_value.get_videos)  
+                get_videos_mock.side_effect = [
+                    api.brightcove_api.BrightcoveApiError('test')] 
+                params = json.dumps({
+                    'publisher_id': '123123abc',
+                    'application_client_id': '5',
+                    'application_client_secret': 'some secret'})
+                header = { 'Content-Type':'application/json' }
+                url = '/api/v2/%s/integrations/brightcove' % (
+                    self.account_id_api_key)
+                response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    body=params,
+                    method='POST',
+                    headers=header)
+
+	self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Brightcove credentials are bad')
+ 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('api.brightcove_api.CMSAPI') as gvp:
+                gvp.return_value.get_videos = MagicMock()
+                get_videos_mock = self._future_wrap_mock(
+                    gvp.return_value.get_videos)  
+                get_videos_mock.side_effect = [Exception('test')] 
+                params = json.dumps({
+                    'publisher_id': '123123abc',
+                    'application_client_id': '5',
+                    'application_client_secret': 'some secret'})
+                header = { 'Content-Type':'application/json' }
+                url = '/api/v2/%s/integrations/brightcove' % (
+                    self.account_id_api_key)
+                response = yield self.http_client.fetch(
+                    self.get_url(url),
+                    body=params,
+                    method='POST',
+                    headers=header)
+
+	self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['data'],
+                                 'test') 
+
+    @tornado.testing.gen_test
+    def test_post_and_put_integration_client_id_and_secret(self):
+        with patch('api.brightcove_api.CMSAPI') as gvp:
+            gvp.return_value.get_videos = MagicMock()
+            get_videos_mock = self._future_wrap_mock(
+                gvp.return_value.get_videos)  
+            get_videos_mock.return_value = [
+                {"updated_at" : "2015-04-20T21:18:32.351Z"}]
+            params = json.dumps({
+                'publisher_id': '123123abc',
+                'application_client_id': '5',
+                'application_client_secret': 'some secret'})
+            header = { 'Content-Type':'application/json' }
+            url = '/api/v2/%s/integrations/brightcove' % (
+                self.account_id_api_key)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params,
+                method='POST',
+                headers=header)
 
         rjson = json.loads(response.body)
         platform = yield neondata.BrightcoveIntegration.get(
@@ -1462,17 +1621,28 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             rjson['integration_id'], async=True)
         self.assertEqual(platform.application_client_id, '6')
         self.assertEqual(platform.application_client_secret, 'another secret')
+        self.assertEqual(platform.last_process_date, 1429564712.0) 
 
     @tornado.testing.gen_test
     def test_put_client_id_missing_secret(self):
-        params = json.dumps({'publisher_id': '123123abc',
-                             'application_client_id': '5',
-                             'application_client_secret': 'some secret',
-                             'uses_bc_gallery': True})
-        header = {'Content-Type':'application/json'}
-        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(
-            self.get_url(url), body=params, method='POST', headers=header)
+        with patch('api.brightcove_api.CMSAPI') as gvp:
+            gvp.return_value.get_videos = MagicMock()
+            get_videos_mock = self._future_wrap_mock(
+                gvp.return_value.get_videos)  
+            get_videos_mock.return_value = [
+                {"updated_at" : "2015-04-20T21:18:32.351Z"}]
+            params = json.dumps({'publisher_id': '123123abc',
+                'application_client_id': '5',
+                'application_client_secret': 'some secret',
+                'uses_bc_gallery': True})
+            header = {'Content-Type':'application/json'}
+            url = '/api/v2/%s/integrations/brightcove' % (
+                self.account_id_api_key)
+            response = yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
 
         rjson = json.loads(response.body)
         platform = yield neondata.BrightcoveIntegration.get(

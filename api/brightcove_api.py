@@ -884,6 +884,38 @@ class CMSAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
+    def get_videos(self,
+                   limit=None,
+                   offset=None,
+                   q=None,
+                   sort=None):
+
+        query_string_dict = {}
+        query_string = ""
+
+        if limit:
+            query_string_dict['limit'] = limit
+        if offset:
+            query_string_dict['offset'] = offset
+        if q:
+            query_string_dict['q'] = q
+        if sort:
+            query_string_dict['sort'] = sort
+
+        if query_string_dict:
+            query_string = '?%s' % urllib.urlencode(query_string_dict)
+
+        request = tornado.httpclient.HTTPRequest(
+            '{base_url}/accounts/{pub_id}/videos{query_string}'.format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                query_string = query_string))
+
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
     def _add_asset_impl(self, asset_name, video_id, remote_url,
                         reference_id=None):
         request_data = {'remote_url' : remote_url}
