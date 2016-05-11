@@ -394,6 +394,8 @@ class MultiplicativeCombiner(object):
     '''
     Multiplicatively combines feature scores
     '''
+    name = 'Multiplicative combiner'
+    weight_domain = [0, 1]
 
     def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
                  combine=lambda x: np.prod(x),
@@ -419,7 +421,6 @@ class MultiplicativeCombiner(object):
         self.weight_valence = weight_valence
         # compute the transfer functions
         self._trans_funcs = dict()
-        self.name = 'Multiplicative combiner'
         for feat in weight_valence:
             max_pen = 1 - penalties[feat]
             self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
@@ -575,6 +576,8 @@ class AdditiveCombiner(object):
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
+    name = 'Additive Combiner'
+    weight_domain = [-np.inf, np.inf]
 
     def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
                  combine=lambda x: np.sum(x)):
@@ -593,7 +596,6 @@ class AdditiveCombiner(object):
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         self._combine = combine
-        self.name = 'Additive Combiner'
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
@@ -1236,15 +1238,11 @@ class LocalSearcher(object):
         self.generators = odict()
         self.feats_to_cache = odict()
         self.combiner = combiner
-        if combiner.name is 'Multiplicative combiner':
-            if self._feat_score_weight > 1.0:
-                _log.warn('Feature score weight domain is '
-                          '[0, 1] for the multiplicative '
-                          'combiner.')
-            else:
-                _log.warn('Feature score weight domain is fine?')
-        else:
-            _log.warn('Not using multiplicative combiner! Combiner name is %s', self.combiner.name)
+        if ((self._feat_score_weight < combiner.weight_domain[0]) or
+            (self._feat_score_weight > combiner.weight_domain[1])):
+            _log.warn('Feature score weight %f is outside the domain '
+                      'for %s, which is %s', float(self._feat_score_weight),
+                      combiner.name, combiner.weight_domain)
         self.startend_clip = startend_clip
         self.filters = filters
         self.max_variety = max_variety
