@@ -860,15 +860,15 @@ class PlayerAPI(BrightcoveOAuth2Session):
 
         # Assert the minimum of settings are set
         if client_id is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi id missing in publisher {}'.format(
                     self.publisher_id))
         if client_secret is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi secret missing in publisher {}'.format(
                     self.publisher_id))
         if self.publisher_id is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi publisher id missing in client {}'.format(
                     client_id))
 
