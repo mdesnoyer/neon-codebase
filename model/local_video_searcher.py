@@ -1112,6 +1112,9 @@ class LocalSearcher(object):
                      across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
+            max_local_searches:
+                The maximum number of simultaneous local searches to conduct.
+                Local searches apparently produce memory leaks. 
             feat_score_weight:
                 The degree to which the combined feature score should effect
                 the rank of the frames. New frames are added to results
@@ -1283,6 +1286,8 @@ class LocalSearcher(object):
         # create an event object to alert the threads that it is time to
         # terminate. 
         self._terminate = threading.Event()
+        self._active_samples = 0
+        self._active_searches = 0
 
     def _reset(self):
         self.cur_frame = None
@@ -1586,8 +1591,9 @@ class LocalSearcher(object):
         sense to proceed with local search.
         '''
         with self._proc_lock:
-            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]' % (
-                start_frame, start_score, end_frame, end_score))
+            self._active_searches += 1
+            _log.debug('Local search of %i [%.3f] <---> %i [%.3f], %i active searches' % (
+                start_frame, start_score, end_frame, end_score, self._active_searches))
             gold, framenos = self.get_search_frame(start_frame)
             if gold is None:
                 _log.error('Could not obtain search interval %i <---> %i', 
@@ -1677,8 +1683,8 @@ class LocalSearcher(object):
                         self.combiner.get_indy_funcs(best_feat_dict)]
             else:
                 meta = None
+            memcheck()
             self._proc_lock.notify()
-        memcheck()
         if self.predictor.async:
             indi_framescore = self._get_score(best_frame, 
                                               frameno=best_frameno)
@@ -1698,6 +1704,7 @@ class LocalSearcher(object):
             self.results.accept_replace(best_frameno, framescore, best_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
             # IMPORTANT: Exiting a "with" block does *not* wake up other threads
+            self._active_searches -= 1
             self._proc_lock.notify()
 
     def _take_sample(self, frameno):
@@ -1706,6 +1713,7 @@ class LocalSearcher(object):
         variance, mean frame xdiff, etc.
         '''
         with self._proc_lock:
+            self._active_samples += 1
             frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])
             if frames is None:
@@ -1731,6 +1739,7 @@ class LocalSearcher(object):
                 self.stats[n].push(vals[0])
             # update the knowledge about its variance
             self.col_stat.push(frames[0])
+            self._active_samples -= 1
             self._proc_lock.notify()
 
     def _step(self, force_sample=False):
