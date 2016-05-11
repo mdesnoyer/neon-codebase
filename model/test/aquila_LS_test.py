@@ -272,7 +272,8 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip)
 
-video = '/home/ubuntu/targ.mkv'
+# video = '/home/ubuntu/targ.mkv'
+video = '/home/ubuntu/targ.mp4'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
 try:
