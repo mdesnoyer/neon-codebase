@@ -1293,6 +1293,8 @@ class LocalSearcher(object):
         # create a processing lock, that will be used by the sampling and
         # the local search threads. 
         self._proc_lock = threading.Condition()
+        # lock to ensure that the active counts are managed atomically.
+        self._act_lock = threading.Lock()
         # create an event object to alert the threads that it is time to
         # terminate. 
         self._terminate = threading.Event()
@@ -1538,15 +1540,17 @@ class LocalSearcher(object):
             if req_type == 'samp':
                 _log.debug('Worker %s taking sample', workerno)
                 try:
-                    self._active_searches += 1
+                    with self._act_lock: self._active_samples += 1
                     self._take_sample(*(args,))
-                    self._active_searches -= 1
+                    with self._act_lock: self._active_samples -= 1
                 except Exception, e:
                     _log.warn('Problem sampling frame %i: %s', args, e.message)
             elif req_type == 'srch':
                 _log.debug('Worker %s performing search', workerno)
                 try:
+                    with self._act_lock: self._active_searches += 1
                     self._conduct_local_search(*args)
+                    with self._act_lock: self._active_searches -= 1
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
@@ -1736,7 +1740,6 @@ class LocalSearcher(object):
             if self._terminate.is_set():
                 # do not proceed
                 return
-            self._active_samples += 1
             frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])
             if frames is None:
@@ -1762,7 +1765,6 @@ class LocalSearcher(object):
                 self.stats[n].push(vals[0])
             # update the knowledge about its variance
             self.col_stat.push(frames[0])
-            self._active_samples -= 1
             self._proc_lock.notify()
 
     def _step(self, force_sample=False):
