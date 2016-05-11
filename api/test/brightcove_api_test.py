@@ -363,11 +363,100 @@ class TestCMSAPI(test_utils.neontest.AsyncTestCase):
                                              'client_secret')
 
         # Mock out the _send_request
+        self.api._send_request = MagicMock()
+        self.send_mock = self._future_wrap_mock(self.api._send_request)
         
 
     def tearDown(self):
         super(TestCMSAPI, self).tearDown()
-    
+
+    def get_request(self):
+        cargs, kwargs = self.send_mock.call_args
+        return cargs[0]
+
+    @tornado.testing.gen_test
+    def test_add_thumbnail(self):
+        response = yield self.api.add_thumbnail('vid1', 'remote.jpg',
+                                                'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'POST')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.add_thumbnail('vid1', 'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_add_poster(self):
+        response = yield self.api.add_poster('vid1', 'remote.jpg',
+                                             'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'POST')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.add_poster('vid1', 'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_update_thumbnail(self):
+        response = yield self.api.update_thumbnail('vid1', 'tid1',
+                                                   'remote.jpg',
+                                                   'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'PATCH')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail/tid1'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.update_thumbnail('vid1', 'tid1',
+                                                   'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
+
+    @tornado.testing.gen_test
+    def test_update_poster(self):
+        response = yield self.api.update_poster('vid1', 'tid1',
+                                                'remote.jpg',
+                                                'ref1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'PATCH')
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg',
+                           'reference_id' : 'ref1'})
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster/tid1'))
+
+        self.send_mock.reset_mock()
+
+        response = yield self.api.update_poster('vid1', 'tid1',
+                                                'remote.jpg')
+        request = self.get_request()
+        self.assertEquals(json.loads(request.body), 
+                          {'remote_url': 'remote.jpg'})
 
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
