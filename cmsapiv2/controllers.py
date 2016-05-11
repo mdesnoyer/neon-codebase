@@ -1229,7 +1229,8 @@ class VideoHandler(APIV2Handler):
                  HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
                  'account_required'  : [HTTPVerbs.GET, 
                                         HTTPVerbs.PUT,
-                                        HTTPVerbs.POST] 
+                                        HTTPVerbs.POST],
+                 'subscription_required' : [HTTPVerbs.POST]  
                }
 
     @classmethod
@@ -1741,6 +1742,343 @@ class UserHandler(APIV2Handler):
         return ['username', 'access_level', 'created', 'updated', 
                 'first_name', 'last_name', 'title' ]
 
+'''*****************************************************************
+BillingAccountHandler 
+*****************************************************************'''
+class BillingAccountHandler(APIV2Handler):
+    """This talks to a sevice and creates a billing account with our 
+          external billing integration (currently stripe).
+
+       This acts as an upreate function, essentially always call 
+        post, to save account information on the recurly side of 
+        things. 
+    """
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('billing_token_ref') : All(
+              Coerce(str), 
+              Length(min=1, max=512))
+        })
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+        billing_token_ref = args.get('billing_token_ref')
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account required.')
+      
+        customer_id = None
+
+        @tornado.gen.coroutine
+        def _create_account():
+            customer = yield self.executor.submit(
+                stripe.Customer.create,
+                email=account.email,
+                source=billing_token_ref)
+            cid = customer.id
+            _log.info('New Stripe customer %s created with id %s' % (
+                account.email, cid))
+            raise tornado.gen.Return(customer) 
+
+        try:
+            if account.billing_provider_ref: 
+                customer = yield self.executor.submit(
+                    stripe.Customer.retrieve, 
+                    account.billing_provider_ref)
+             
+                customer.email = account.email or customer.email 
+                customer.source = billing_token_ref
+                customer_id = customer.id 
+                yield self.executor.submit(customer.save)
+            else:
+                customer = yield _create_account() 
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                # this is here just in case the ref got 
+                # screwed up, it should rarely if ever happen
+                customer = yield _create_account() 
+            else:
+                _log.error('Invalid request error we do not handle %s' % e)
+                raise 
+        except Exception as e: 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise  
+       
+        def _modify_account(a): 
+            a.billed_elsewhere = False
+            a.billing_provider_ref = customer.id
+
+        yield neondata.NeonUserAccount.modify( 
+            account.neon_api_key,
+            _modify_account, 
+            async=True) 
+ 
+        result = yield self.db2api(customer)
+
+        self.success(result) 
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+        }) 
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account required.')
+
+        if not account.billing_provider_ref: 
+            raise NotFoundError('No billing account found - no ref.')     
+
+        try:
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                raise NotFoundError('No billing account found - not in stripe') 
+            else: 
+                _log.error('Unknown invalid error occurred talking'\
+                           ' to Stripe %s' % e)
+                raise Exception('Unknown Stripe Error')  
+        except Exception as e: 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise
+
+        result = yield self.db2api(customer)
+        self.success(result) 
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['id', 'account_balance', 'created', 'currency', 
+                'default_source', 'delinquent', 'description', 
+                'discount', 'email', 'livemode', 'subscriptions',
+                'metadata', 'sources']
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['id', 'account_balance', 'created', 'currency', 
+                'default_source', 'delinquent', 'description', 
+                'discount', 'email', 'livemode']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'subscriptions':
+            retval = obj.subscriptions.to_dict()
+        elif field == 'sources': 
+            retval = obj.sources.to_dict()
+        elif field == 'metadata': 
+            retval = obj.metadata.to_dict() 
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+             
+
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET] 
+               }
+
+'''*****************************************************************
+BillingSubscriptionHandler 
+*****************************************************************'''
+class BillingSubscriptionHandler(APIV2Handler):
+    """This talks to recurly and creates a billing subscription with our 
+          recurly integration. 
+    """
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('plan_type'): Any(Coerce(str), Length(min=1, max=32))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id = str(account_id)
+        schema(args)
+        plan_type = args.get('plan_type') 
+
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+       
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type, 
+            async=True)
+
+        if not billing_plan: 
+            raise NotFoundError('No billing plan for that plan_type')       
+  
+        if not account: 
+            raise NotFoundError('Neon Account was not found')
+
+        if not account.billing_provider_ref: 
+            raise NotFoundError(
+                'There is not a billing account set up for this account')
+        try: 
+            original_plan_type = account.subscription_information['plan']['id']
+        except TypeError: 
+            original_plan_type = None 
+
+        try: 
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+
+            # get all subscriptions, they are sorted 
+            # by most recent, if there are not any, just 
+            # submit the new one, otherwise cancel the most
+            # recent and submit the new one 
+            cust_subs = yield self.executor.submit(
+                customer.subscriptions.all)
+           
+            if len(cust_subs['data']) > 0:
+                cancel_me = cust_subs['data'][0]
+                yield self.executor.submit(cancel_me.delete)
+          
+            subscription = yield self.executor.submit(
+                customer.subscriptions.create, 
+                plan=plan_type)
+            def _modify_account(a):
+                a.subscription_information = subscription
+                a.verify_subscription_expiry = \
+                  (datetime.utcnow() + timedelta(seconds=3600)).strftime(
+                    "%Y-%m-%d %H:%M:%S.%f")           
+ 
+            _log.info('New subscription created for account %s' % 
+                account.neon_api_key)
+
+            yield neondata.NeonUserAccount.modify(
+                account.neon_api_key, 
+                _modify_account, 
+                async=True)
+             
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                _log.error('Billing mismatch for account %s' % account.email)
+                raise NotFoundError('No billing account found in Stripe')
+ 
+            _log.error('Unhandled InvalidRequestError\
+                 occurred talking to Stripe %s' % e)
+            raise 
+        except Exception as e:  
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise 
+ 
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type.lower(), 
+            async=True) 
+               
+        # only update limits if we have actually changed the plan type 
+        if original_plan_type != plan_type.lower():
+            def _modify_limits(a): 
+                a.populate_with_billing_plan(billing_plan)
+                
+            yield neondata.AccountLimits.modify(
+                account.neon_api_key,
+                _modify_limits,  
+                create_missing=True, 
+                async=True) 
+ 
+        result = yield self.db2api(subscription)
+
+        self.success(result) 
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+          Required('account_id') : Any(str, unicode, Length(min=1, max=256))
+        }) 
+        args = self.parse_args()
+        args['account_id'] = str(account_id)
+        schema(args)
+
+        account = yield neondata.NeonUserAccount.get(
+            account_id, 
+            async=True)
+
+        if not account: 
+            raise NotFoundError('Neon Account required.')
+
+        if not account.billing_provider_ref: 
+            raise NotFoundError('No billing account found - no ref.')     
+
+        try:
+            customer = yield self.executor.submit(
+                stripe.Customer.retrieve, 
+                account.billing_provider_ref)
+
+            cust_subs = yield self.executor.submit(
+                customer.subscriptions.all)
+
+            most_recent_sub = cust_subs['data'][0] 
+        except stripe.error.InvalidRequestError as e: 
+            if 'No such customer' in str(e):
+                raise NotFoundError('No billing account found - not in stripe')
+            else: 
+                _log.error('Unknown invalid error occurred talking'\
+                           ' to Stripe %s' % e)
+                raise Exception('Unknown Stripe Error') 
+        except IndexError: 
+            raise NotFoundError('A subscription was not found.')  
+        except Exception as e: 
+            _log.error('Unknown error occurred talking to Stripe %s' % e)
+            raise
+
+        result = yield self.db2api(most_recent_sub)
+ 
+        self.success(result) 
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+                'canceled_at', 'current_period_end', 'current_period_start',
+                'customer', 'discount', 'ended_at', 'plan', 
+                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'trial_start'] 
+    
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+                'canceled_at', 'current_period_end', 'current_period_start',
+                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
+                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'trial_start']
+ 
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'metadata': 
+            retval = obj.metadata.to_dict() 
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+ 
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.POST] 
+               }
+
 '''*********************************************************************
 Endpoints 
 *********************************************************************'''
@@ -1764,6 +2102,9 @@ application = tornado.web.Application([
         ThumbnailSearchExternalHandler),
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+        BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
