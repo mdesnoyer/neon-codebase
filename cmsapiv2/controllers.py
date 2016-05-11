@@ -154,7 +154,7 @@ class IntegrationHelper():
 
     @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type, schema):
+    def create_integration(acct, args, integration_type): #schema):
         """Creates an integration for any integration type.
 
         Keyword arguments:
@@ -164,7 +164,7 @@ class IntegrationHelper():
         schema - validate args with this Voluptuous schema
         """
 
-        schema(args)
+        #schema(args)
 
         if integration_type == neondata.IntegrationType.OOYALA:
             integration = neondata.OoyalaIntegration()
@@ -178,31 +178,55 @@ class IntegrationHelper():
             integration = neondata.BrightcoveIntegration()
             integration.account_id = acct.neon_api_key
             integration.publisher_id = args['publisher_id']
-            integration.read_token = args.get('read_token', integration.read_token)
-            integration.write_token = args.get('write_token', integration.write_token)
+
+            integration.read_token = args.get(
+                'read_token', 
+                integration.read_token)
+            integration.write_token = args.get(
+                'write_token', 
+                integration.write_token)
             integration.application_client_id = args.get(
-                'application_client_id', integration.application_client_id)
+                'application_client_id', 
+                integration.application_client_id)
             integration.application_client_secret = args.get(
-                'application_client_secret', integration.application_client_secret)
-            integration.callback_url = args.get('callback_url', integration.callback_url)
+                'application_client_secret', 
+                integration.application_client_secret)
+            integration.callback_url = args.get(
+                'callback_url', 
+                integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
+
             if playlist_feed_ids:
                 integration.playlist_feed_ids = playlist_feed_ids.split(',')
-            integration.id_field = args.get('id_field', integration.id_field)
+
+            integration.id_field = args.get(
+                'id_field', 
+                integration.id_field)
             integration.uses_batch_provisioning = args.get(
-                'uses_batch_provisioning', integration.uses_batch_provisioning)
+                'uses_batch_provisioning', 
+                integration.uses_batch_provisioning)
             integration.uses_bc_thumbnail_api = args.get(
-                'uses_bc_thumbnail_api', integration.uses_bc_thumbnail_api)
+                'uses_bc_thumbnail_api', 
+                integration.uses_bc_thumbnail_api)
             integration.uses_bc_videojs_player = args.get(
-                'uses_bc_videojs_player', integration.uses_bc_videojs_player)
+                'uses_bc_videojs_player', 
+                integration.uses_bc_videojs_player)
             integration.uses_bc_smart_player = args.get(
-                'uses_bc_smart_player', integration.uses_bc_smart_player)
+                'uses_bc_smart_player', 
+                integration.uses_bc_smart_player)
             integration.uses_bc_gallery = args.get(
-                'uses_bc_gallery', integration.uses_bc_gallery)
+                'uses_bc_gallery', 
+                integration.uses_bc_gallery)
+            integration.last_process_date = args.get(
+                'last_process_date', 
+                integration.last_process_date)
+ 
             yield integration.save(async=True)
 
-        result = yield tornado.gen.Task(
-            acct.modify, acct.neon_api_key, lambda p: p.add_platform(integration))
+        yield neondata.NeonUserAccount.modify(
+            acct.neon_api_key, 
+            lambda p: p.add_platform(integration),
+            async=True) 
 
         # ensure the integration made it to the database by executing a get
         if integration_type == neondata.IntegrationType.OOYALA:
@@ -276,11 +300,14 @@ class IntegrationHelper():
     def validate_oauth_credentials(client_id, client_secret, integration_type):
         if integration_type is neondata.IntegrationType.BRIGHTCOVE:
             if client_id and not client_secret:
-                raise BadRequestError('App id cannot be valued if secret is not also valued')
+                raise BadRequestError(
+                    'App id cannot be valued if secret is not also valued')
             if client_secret and not client_id:
-                raise BadRequestError('App secret cannot be valued if id is not also valued')
-            # TODO validate with BC that keys are valid and the granted permissions are as expected.
-            # (This is implemented in the Oauth feature branch. Need to invoke it here after merge)
+                raise BadRequestError(
+                    'App secret cannot be valued if id is not also valued')
+            # TODO validate with BC that keys are valid and the granted 
+            # permissions are as expected. (This is implemented in the 
+            # Oauth feature branch. Need to invoke it here after merge)
         elif integration_type is neondata.IntegrationType.OOYALA:
             # Implement for Ooyala
             pass
@@ -309,7 +336,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
         integration = yield tornado.gen.Task(
             IntegrationHelper.create_integration, acct, args,
-            neondata.IntegrationType.OOYALA, schema=schema)
+            neondata.IntegrationType.OOYALA)
         statemon.state.increment('post_ooyala_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
@@ -406,14 +433,14 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint post request"""
 
         schema = Schema({
-            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('publisher_id'): All(Coerce(str), Length(min=1, max=256)),
-            'read_token': Any(str, unicode, Length(min=1, max=512)),
-            'write_token': Any(str, unicode, Length(min=1, max=512)),
-            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
-            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
-            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
-            'id_field': Any(str, unicode, Length(min=1, max=32)),
+            'read_token': All(Coerce(str), Length(min=1, max=512)),
+            'write_token': All(Coerce(str), Length(min=1, max=512)),
+            'application_client_id': All(Coerce(str), Length(min=1, max=1024)),
+            'application_client_secret': All(Coerce(str), Length(min=1, max=1024)),
+            'callback_url': All(Coerce(str), Length(min=1, max=1024)),
+            'id_field': All(Coerce(str), Length(min=1, max=32)),
             'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
             'uses_batch_provisioning': Boolean(),
             'uses_bc_thumbnail_api': Boolean(),
@@ -424,16 +451,34 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
+        publisher_id = args.get('publisher_id')  
 
-        # Check credentials with Brightcove's CMS API.
-        IntegrationHelper.validate_oauth_credentials(
-            client_id=args.get('application_client_id'),
-            client_secret=args.get('application_client_secret'),
-            integration_type=neondata.IntegrationType.BRIGHTCOVE)
+        acct = yield neondata.NeonUserAccount.get(
+            args['account_id'], 
+            async=True)
 
-        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+        if not acct: 
+            raise NotFoundError('Neon Account required.')
+
+        app_id = args.get('application_client_id', None) 
+        app_secret = args.get('application_client_secret', None) 
+        if app_id and app_secret: 
+            # Check credentials with Brightcove's CMS API.
+            IntegrationHelper.validate_oauth_credentials(
+                client_id=app_id,
+                client_secret=app_secret,
+                integration_type=neondata.IntegrationType.BRIGHTCOVE)
+            # Excecute a search and get last_processed_date
+            args['last_process_date'] = yield self._get_last_processed_date(
+                publisher_id,
+                app_id, 
+                app_secret)
+            
         integration = yield IntegrationHelper.create_integration(
-            acct, args, neondata.IntegrationType.BRIGHTCOVE, schema=schema)
+            acct, 
+            args, 
+            neondata.IntegrationType.BRIGHTCOVE)
+
         statemon.state.increment('post_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
@@ -493,16 +538,21 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             neondata.IntegrationType.BRIGHTCOVE)
 
         # Check credentials with Brightcove's CMS API.
-        IntegrationHelper.validate_oauth_credentials(
-            args.get('application_client_id', integration.application_client_id),
-            args.get('application_client_secret', integration.application_client_secret),
-            neondata.IntegrationType.BRIGHTCOVE)
+        app_id = args.get('application_client_id', None) 
+        app_secret = args.get('application_client_secret', None) 
+        if app_id and app_secret: 
+            IntegrationHelper.validate_oauth_credentials(
+                app_id, 
+                app_secret,
+                neondata.IntegrationType.BRIGHTCOVE)
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
             p.write_token = args.get('write_token', integration.write_token)
-            p.application_client_id = args.get('application_client_id', integration.application_client_id)
-            p.application_client_secret= args.get('application_client_secret', integration.application_client_secret)
+            p.application_client_id = app_id or \
+                integration.application_client_id
+            p.application_client_secret= app_secret or \
+                integration.application_client_secret
             p.publisher_id = args.get('publisher_id', integration.publisher_id)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
             if playlist_feed_ids:
@@ -535,6 +585,36 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         statemon.state.increment('put_brightcove_oks')
         rv = yield self.db2api(integration)
         self.success(rv)
+
+    @tornado.gen.coroutine
+    def _get_last_processed_date(self, publisher_id, app_id, app_secret):
+        """calls out to brightcove with the sent in app_id
+             and app_secret to get the 4th most recent video 
+             so that we can set a reasonable last_process_date
+             on this video  
+        """
+        rv = None
+        bc_cms_api = api.brightcove_api.CMSAPI(
+            #publisher_id, 
+            #app_id, 
+            #app_secret) 
+            '2294876105001', 
+            '8b089370-ce31-4ecf-9c14-7ffc6ff492b9',
+            'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg')
+        # return one video of a set of 4 
+        # this will be the 4th oldest video 
+        import pdb; pdb.set_trace()
+        videos = yield bc_cms_api.get_videos(
+            limit=4, 
+            offset=3, 
+            sort='updated_by')
+        import pdb; pdb.set_trace()
+        if len(videos) is not 0: 
+            video = videos[0]
+        else: 
+            rv = datetime.utcnow() 
+        
+        raise tornado.gen.Return(rv)  
 
     @classmethod
     def _get_default_returned_fields(cls):
