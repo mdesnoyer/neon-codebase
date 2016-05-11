@@ -11,12 +11,12 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+import stripe
 import tornado.gen
 import tornado.ioloop
 import tornado.testing
 import tornado.httpclient
 import test_utils.postgresql
-import test_utils.redis
 import time
 import unittest
 import utils.neon
@@ -1643,32 +1643,33 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_increase_post_videos(self):
-        cmsdb_download_image_mocker = patch(
-            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(
-            cmsdb_download_image_mocker.start())
-        cmsdb_download_image_mock.side_effect = [self.random_image]
-        
-        limit = neondata.AccountLimits(self.account_id_api_key, 
-            refresh_time_video_posts=datetime(2050,1,1), 
-            video_posts=3)
-        yield limit.save(async=True) 
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            
+            limit = neondata.AccountLimits(self.account_id_api_key, 
+                refresh_time_video_posts=datetime(2050,1,1), 
+                video_posts=3)
+            yield limit.save(async=True) 
+    
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&default_thumbnail_url=url.invalid'\
+                  '&title=a_title&url=some_url'\
+                  '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+    
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+    
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
 
-        url = '/api/v2/%s/videos?integration_id=%s'\
-              '&external_video_ref=1234ascs'\
-              '&default_thumbnail_url=url.invalid'\
-              '&title=a_title&url=some_url'\
-              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
-
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
-         
+             
         yield self.assertWaitForEquals(
             lambda: neondata.AccountLimits.get(self.account_id_api_key).video_posts, 
             4,
@@ -1689,9 +1690,8 @@ class TestVideoHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 method="GET")
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['video_posts'], 4) 
-        cmsdb_download_image_mocker.stop()
-
+        self.assertEquals(rjson['video_posts'], 4)
+ 
     @tornado.testing.gen_test
     def test_post_video_with_limits_too_many_requests(self):
         limit = neondata.AccountLimits(self.account_id_api_key, 
@@ -2327,6 +2327,230 @@ class TestVideoHandler(TestControllersBase):
             async=True)
         self.assertEquals(request.video_title, 'vidkevinnew')
 
+    @tornado.testing.gen_test
+    def test_post_video_sub_required_active(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billed_elsewhere = False
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'active'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
+        so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
+            "%Y-%m-%d %H:%M:%S.%f")
+        yield so.save(async=True)
+
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&default_thumbnail_url=url.invalid'\
+                  '&title=a_title&url=some_url'\
+                  '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
+    
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+    
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        # video should be posted with no issues 
+        video = yield neondata.VideoMetadata.get(
+            so.neon_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url')
+ 
+    @tornado.testing.gen_test
+    def test_post_video_sub_required_trialing(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billed_elsewhere = False
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'trialing'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
+        so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
+            "%Y-%m-%d %H:%M:%S.%f")
+        yield so.save(async=True)
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&default_thumbnail_url=url.invalid'\
+                  '&title=a_title&url=some_url'\
+                  '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
+    
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+    
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        # video should be posted with no issues 
+        video = yield neondata.VideoMetadata.get(
+            so.neon_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url')
+
+    @tornado.testing.gen_test
+    def test_post_video_sub_required_no_good(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billed_elsewhere = False
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'unpaid'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
+        so.verify_subscription_expiry = datetime(2100, 10, 1).strftime(
+            "%Y-%m-%d %H:%M:%S.%f")
+        yield so.save(async=True)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&default_thumbnail_url=url.invalid'\
+                  '&title=a_title&url=some_url'\
+                  '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+        self.assertEquals(e.exception.code, 402)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'], 
+            'Your subscription is not valid')
+ 
+    @tornado.testing.gen_test
+    def test_post_video_sub_check_subscription_state(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billed_elsewhere = False
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'unpaid'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+
+        so.verify_subscription_expiry = datetime(2000, 10, 1).strftime(
+            "%Y-%m-%d %H:%M:%S.%f")
+
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+
+        sub_return = stripe.Subscription()
+        sub_return.status = 'active'
+        sub_return.plan = stripe.Plan(id='pro_monthly') 
+        yield so.save(async=True)
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock,\
+             patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+
+            sr.return_value.subscriptions.all.return_value = { 
+                'data' : [sub_return] } 
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&default_thumbnail_url=url.invalid'\
+                  '&title=a_title&url=some_url'\
+                  '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
+    
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+    
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key, 
+            async=True)
+
+        # verify we added an hour to subscription_expiry  
+        self.assertTrue(
+            dateutil.parser.parse(
+                acct.verify_subscription_expiry) > datetime.utcnow())
+        self.assertEquals(
+            acct.subscription_info['status'], 
+            'active') 
+ 
+        # video should be posted with no issues 
+        video = yield neondata.VideoMetadata.get(
+            so.neon_api_key + '_' + '1234ascs', 
+            async=True)
+        self.assertEquals(video.url, 'some_url')
+
+    @tornado.testing.gen_test
+    def test_post_video_sub_check_subscription_exception(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billed_elsewhere = False
+
+        stripe_sub = stripe.Subscription()
+        stripe_sub.status = 'trialing'
+        stripe_sub.plan = stripe.Plan(id='pro_monthly') 
+        so.subscription_information = stripe_sub
+        
+        so.verify_subscription_expiry = datetime(2000, 10, 1).strftime(
+            "%Y-%m-%d %H:%M:%S.%f")
+
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+
+        yield so.save(async=True)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.return_value.subscriptions.all.side_effect = [
+                    Exception('blah')]
+                url = '/api/v2/%s/videos?integration_id=%s'\
+                      '&external_video_ref=1234ascs'\
+                      '&default_thumbnail_url=url.invalid'\
+                      '&title=a_title&url=some_url'\
+                      '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
+        
+                self.http_mock.side_effect = lambda x, callback: callback(
+                    tornado.httpclient.HTTPResponse(x,200))
+        
+                yield self.http_client.fetch(
+                    self.get_url(url),
+                    body='',
+                    method='POST',
+                    allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'blah')
+
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
         url = '/api/v2/%s/videos' % '1234234'
@@ -2539,23 +2763,9 @@ class TestHealthCheckHandler(TestControllersBase):
         super(TestHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         self.http_mocker.stop()
         super(TestHealthCheckHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-
-    @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
-        super(TestHealthCheckHandler, cls).tearDownClass() 
- 
     def test_healthcheck_success(self): 
         self.http_mock.side_effect = lambda x, callback: callback(
             tornado.httpclient.HTTPResponse(x, 200))
@@ -2591,23 +2801,21 @@ class TestVideoStatsHandler(TestControllersBase):
         self.verify_account_mock.sife_effect = True
         super(TestVideoStatsHandler, self).setUp()
 
-    def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
-        self.verify_account_mocker.stop()
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
         super(TestVideoStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
-        super(TestVideoStatsHandler, cls).tearDownClass() 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_one_video_id(self): 
@@ -2680,36 +2888,6 @@ class TestVideoStatsHandler(TestControllersBase):
         response = self.wait() 
         self.assertEquals(response.code, 400)
 
-class TestVideoStatsHandlerPG(TestVideoStatsHandler): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testbciid' 
-        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestVideoStatsHandler, self).setUp()
-
-    def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
-        super(TestVideoStatsHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
- 
 class TestThumbnailStatsHandler(TestControllersBase): 
     def setUp(self):
         user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
@@ -2727,154 +2905,10 @@ class TestThumbnailStatsHandler(TestControllersBase):
         neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
         super(TestThumbnailStatsHandler, self).setUp()
 
-    def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
-        self.verify_account_mocker.stop()
-        super(TestThumbnailStatsHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-
-    @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
-
-    @tornado.testing.gen_test
-    def test_account_id_video_id(self): 
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'), 
-                                    tids=['testingtid','testing_vtid_one'])
-        vm.save()
-        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
-        ts.save() 
-        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
-        ts.save() 
-        url = '/api/v2/%s/stats/thumbnails?video_id=vid1,vid2' % (self.account_id_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['count'], 2)
-        status_one = rjson['statistics'][0]  
-        status_two = rjson['statistics'][1] 
-        self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_two['ctr'], 0.12)
-
-    @tornado.testing.gen_test
-    def test_account_id_video_id_dne(self): 
-        url = '/api/v2/%s/stats/thumbnails?video_id=does_not_exist' % (self.account_id_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200) 
-        self.assertEquals(rjson['count'], 0) 
-        self.assertEquals(len(rjson['statistics']), 0) 
-
-    @tornado.testing.gen_test
-    def test_account_id_thumbnail_id(self): 
-        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
-        ts.save() 
-        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid' % (self.account_id_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['count'], 1)
-        status_one = rjson['statistics'][0] 
-        self.assertEquals(status_one['ctr'], 0.23)
-
-    @tornado.testing.gen_test
-    def test_account_id_multiple_thumbnail_ids(self): 
-        ts = neondata.ThumbnailStatus('testingtid', serving_frac=0.8, ctr=0.23)
-        ts.save() 
-        ts = neondata.ThumbnailStatus('testing_vtid_one', serving_frac=0.3, ctr=0.12)
-        ts.save() 
-        url = '/api/v2/%s/stats/thumbnails?thumbnail_id=testingtid,testing_vtid_one' % (self.account_id_api_key) 
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['count'], 2)
-        status_one = rjson['statistics'][0]  
-        status_two = rjson['statistics'][1] 
-        self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_two['ctr'], 0.12)
-        
-        # test url encoded 
-        encoded_params = urllib.urlencode({ 'thumbnail_id' : 'testingtid,testing_vtid_one' })
-        self.assertEquals('thumbnail_id=testingtid%2Ctesting_vtid_one', encoded_params) 
-        url = '/api/v2/%s/stats/thumbnails?%s' % (self.account_id_api_key, encoded_params) 
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 200)
-        self.assertEquals(rjson['count'], 2)
-        status_one = rjson['statistics'][0]  
-        status_two = rjson['statistics'][1] 
-        self.assertEquals(status_one['ctr'], 0.23)
-        self.assertEquals(status_two['ctr'], 0.12)
-
-    def test_video_id_limit(self): 
-        url = '/api/v2/%s/stats/thumbnails?video_id=1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o' % (self.account_id_api_key) 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
-        response = self.wait() 
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 400)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'list exceeds limit') 
-
-    def test_video_id_and_thumbnail_id(self): 
-        url = '/api/v2/%s/stats/thumbnails?video_id=1&thumbnail_id=abc' % (self.account_id_api_key) 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
-        response = self.wait() 
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 400)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can only have') 
-
-    def test_no_video_id_or_thumbnail_id(self): 
-        url = '/api/v2/%s/stats/thumbnails' % (self.account_id_api_key) 
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop, 
-                               method='GET')
-        response = self.wait() 
-        rjson = json.loads(response.body)
-        self.assertEquals(response.code, 400)
-        rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'],
-                                 'thumbnail_id or video_id is required') 
-
-class TestThumbnailStatsHandlerPG(TestControllersBase): 
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.test_i_id = 'testbciid' 
-        self.defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True)
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        neondata.ThumbnailMetadata('testingtid', width=800).save()
-        neondata.ThumbnailMetadata('testing_vtid_one', width=500).save()
-        neondata.ThumbnailMetadata('testing_vtid_two', width=500).save()
-        super(TestThumbnailStatsHandlerPG, self).setUp()
-
     def tearDown(self):
         self.verify_account_mocker.stop()  
         self.postgresql.clear_all_tables()
-        super(TestThumbnailStatsHandlerPG, self).tearDown()
+        super(TestThumbnailStatsHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -3823,21 +3857,8 @@ class TestAuthenticationHealthCheckHandler(TestAuthenticationBase):
         super(TestAuthenticationHealthCheckHandler, self).setUp()
 
     def tearDown(self): 
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
         super(TestAuthenticationHealthCheckHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
-
-    @classmethod
-    def tearDownClass(cls): 
-        cls.redis.stop()
- 
     def test_healthcheck_success(self): 
 	url = '/healthcheck/'
         response = self.http_client.fetch(self.get_url(url),
@@ -4265,7 +4286,759 @@ class TestAccountIntegrationsHandler(TestControllersBase):
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 method="GET")
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['integration_count'], 0) 
+        self.assertEquals(rjson['integration_count'], 0)
+ 
+class TestBillingAccountHandler(TestControllersBase): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestBillingAccountHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestBillingAccountHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_post_billing_account_no_account(self):
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/noaccount/billing/account'
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+
+        self.assertEquals(e.exception.code, 404)
+
+    @tornado.testing.gen_test
+    def test_post_billing_account_customer_exists(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as stripe_ret,\
+              patch('cmsapiv2.apiv2.stripe.Customer.save') as stripe_save: 
+            stripe_ret.return_value = customer 
+            yield self.http_client.fetch(self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+       
+        # let's grab our account and make sure we saved the 
+        # id value, and set billed_elsewhere correctly
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertEquals(acct.billed_elsewhere, False) 
+        self.assertEquals(acct.billing_provider_ref, 'test')
+ 
+    @tornado.testing.gen_test
+    def test_post_billing_account_customer_retrieve_exception(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [Exception('testa')] 
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertEquals(acct.billed_elsewhere, True) 
+        self.assertEquals(acct.billing_provider_ref, None)
+ 
+    @tornado.testing.gen_test
+    def test_post_billing_account_customer_save_exception(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        
+        patch_class = 'cmsapiv2.stripe.Customer'
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+                 patch('cmsapiv2.apiv2.stripe.Customer.save') as ss:
+                sr.return_value = customer  
+                ss.side_effect = [Exception('testa')] 
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertEquals(acct.billed_elsewhere, True) 
+        self.assertEquals(acct.billing_provider_ref, None)
+
+    @tornado.testing.gen_test
+    def test_post_billing_account_create_new_customer(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.email = 'kevin@test.invalid'
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+             patch('cmsapiv2.apiv2.stripe.Customer.create') as sc: 
+            sr.side_effect = [ stripe.error.InvalidRequestError(
+                'No such customer', 'test') ]
+            sc.return_value = customer
+            yield self.http_client.fetch(self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+ 
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertEquals(acct.billed_elsewhere, False) 
+        self.assertEquals(acct.billing_provider_ref, 'test')
+        self.assertEquals(sc.call_args[1]['source'], 'testa') 
+        self.assertEquals(sc.call_args[1]['email'], 'kevin@test.invalid')
+ 
+    @tornado.testing.gen_test
+    def test_post_billing_account_customer_different_invalid_request(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        
+        patch_class = 'cmsapiv2.stripe.Customer'
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'not recognized', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertEquals(acct.billed_elsewhere, True) 
+        self.assertEquals(acct.billing_provider_ref, None)
+
+    @tornado.testing.gen_test
+    def test_get_billing_account_no_account(self): 
+        url = '/api/v2/dne/billing/account'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                method='GET') 
+        self.assertEquals(e.exception.code, 404)
+
+    @tornado.testing.gen_test
+    def test_get_billing_account_not_recongnized_invalid(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'not recognized', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                    method='GET') 
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'Unknown')
+
+    @tornado.testing.gen_test
+    def test_get_billing_account_recognized_invalid(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'No such customer', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                    method='GET') 
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing')
+                
+    @tornado.testing.gen_test
+    def test_get_billing_account_customer_exists(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        
+        customer = stripe.Customer(id='test')
+        customer.email = 'test@test.com' 
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+            sr.return_value = customer 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                method='GET') 
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['id'], customer.id)
+        self.assertEquals(rjson['email'], customer.email)
+
+    @tornado.testing.gen_test
+    def test_get_billing_account_normal_exception(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ Exception(
+                    'Unknown', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     method='GET') 
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'Unknown')
+       
+    @unittest.skip('this actually posts to stripe') 
+    @tornado.testing.gen_test
+    def test_post_actual_int(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.email = 'test@invalid24.xxx.test'
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        params = json.dumps({'billing_token_ref' : 'testa'})
+        response = yield self.http_client.fetch(self.get_url(url), 
+            body=params, 
+            method='POST', 
+            headers=header)
+        print response.body
+
+    @unittest.skip('this actually gets from stripe') 
+    @tornado.testing.gen_test
+    def test_get_actual_int(self):
+        options._set('cmsapiv2.apiv2.stripe_api_key', 
+            'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = 'cus_8QKom2aGH0u1Vs'
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/account' % so.neon_api_key
+        response = yield self.http_client.fetch(self.get_url(url), 
+            method='GET') 
+        print response.body
+
+class TestBillingSubscriptionHandler(TestControllersBase): 
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestBillingSubscriptionHandler, self).setUp()
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()  
+        self.postgresql.clear_all_tables()
+        super(TestBillingSubscriptionHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_no_account(self):
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/noaccount/billing/subscription'
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Neon Account was not found')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_no_billing_provider_ref(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(
+                self.get_url(url), 
+                body=params, 
+                method='POST', 
+                headers=header)
+        
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'There is not a billing account')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_invalid_request_error_known(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'No such customer', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing account found in Stripe')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_no_billing_plan(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'proe_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing plan for that plan_type')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_invalid_request_error_not_known(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'not known', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'not known')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_retrieve_exception(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ Exception('not known') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'not known')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_full_upgrade(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+       
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+        sub_return = stripe.Subscription()
+        sub_return.status = 'active'
+        sub_return.plan = stripe.Plan(id='pro_monthly')
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+             patch('cmsapiv2.apiv2.stripe.Subscription.delete') as sd:
+            sr.return_value.subscriptions.all.return_value = { 'data' : [] } 
+            sr.return_value.subscriptions.create.return_value = sub_return
+            sd.delete.return_value = True
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        current_time = datetime.utcnow()
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertTrue(current_time < dateutil.parser.parse(
+            acct.verify_subscription_expiry))
+        self.assertEquals(acct.billing_provider_ref, '123')
+        self.assertEquals(acct.subscription_information['status'], 'active')
+        self.assertEquals(
+            acct.subscription_information['plan']['id'], 
+            'pro_monthly')
+
+        acct_limits = yield neondata.AccountLimits.get(
+            so.neon_api_key,
+            async=True)
+
+        bp = yield neondata.BillingPlans.get(
+            'pro_monthly', 
+            async=True)
+
+        self.assertEquals(acct_limits.max_video_posts, 
+            bp.max_video_posts)
+        next_refresh_time = datetime.utcnow() + \
+            timedelta(seconds=bp.seconds_to_refresh_video_posts - 100) 
+        self.assertTrue(
+            dateutil.parser.parse(
+                acct_limits.refresh_time_video_posts) > next_refresh_time) 
+        self.assertEquals(acct_limits.max_video_size, 
+            bp.max_video_size)
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_full_downgrade(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'demo'})
+       
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+        sub_return = stripe.Subscription()
+        sub_return.status = 'active'
+        sub_return.plan = stripe.Plan(id='pro_monthly')
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+             patch('cmsapiv2.apiv2.stripe.Subscription.delete') as sd:
+            sr.return_value.subscriptions.all.return_value = { 'data' : [] } 
+            sr.return_value.subscriptions.create.return_value = sub_return
+            sd.delete.return_value = True
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        current_time = datetime.utcnow()
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertTrue(current_time < dateutil.parser.parse(
+            acct.verify_subscription_expiry))
+        self.assertEquals(acct.billing_provider_ref, '123')
+        acct_limits = yield neondata.AccountLimits.get(
+            so.neon_api_key,
+            async=True)
+
+        bp = yield neondata.BillingPlans.get(
+            'demo', 
+            async=True)
+        self.assertEquals(acct_limits.max_video_posts, 
+            bp.max_video_posts)
+        next_refresh_time = datetime.utcnow() + \
+            timedelta(seconds=bp.seconds_to_refresh_video_posts - 100) 
+        self.assertTrue(
+            dateutil.parser.parse(
+                acct_limits.refresh_time_video_posts) > next_refresh_time) 
+        self.assertEquals(acct_limits.max_video_size, 
+            bp.max_video_size)
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_change(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+       
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+        sub_return_one = stripe.Subscription()
+        sub_return_one.status = 'active'
+        sub_return_one.plan = stripe.Plan(id='pro_monthly')
+        sub_return_two = stripe.Subscription()
+        sub_return_two.status = 'active'
+        sub_return_two.plan = stripe.Plan(id='pro_yearly')
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
+             patch('cmsapiv2.apiv2.stripe.Subscription.delete') as sd:
+            sr.return_value.subscriptions.all.return_value = { 
+                'data' : [sub_return_one] } 
+            sr.return_value.subscriptions.create.return_value = sub_return_two
+            sd.delete.return_value = True
+            yield self.http_client.fetch(self.get_url(url), 
+                 body=params, 
+                 method='POST', 
+                 headers=header)
+
+        self.assertEquals(sd.call_count, 1) 
+        current_time = datetime.utcnow()
+        acct = yield neondata.NeonUserAccount.get(
+            so.neon_api_key,   
+            async=True)
+        self.assertTrue(current_time < dateutil.parser.parse(
+            acct.verify_subscription_expiry))
+        self.assertEquals(acct.billing_provider_ref, '123')
+        self.assertEquals(acct.subscription_information['status'], 'active')
+        self.assertEquals(
+            acct.subscription_information['plan']['id'], 
+            'pro_yearly')
+
+    @tornado.testing.gen_test
+    def test_post_billing_subscription_create_exception(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+       
+        cust_return = stripe.Customer.construct_from({
+            'id': 'cus_foo',
+            'subscriptions': {
+                'object': 'list',
+                'url': 'localhost',
+            }
+        }, 'api_key')
+        sub_return = stripe.Subscription()
+        sub_return.status = 'active'
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.return_value.subscriptions.create.side_effect = [
+                    Exception('not known') ] 
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'not known')
+
+    @tornado.testing.gen_test
+    def test_get_billing_subscription(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+
+        sub_return_one = stripe.Subscription()
+        sub_return_one.status = 'active'
+        sub_return_one.plan = stripe.Plan(id='pro_monthly')
+
+        with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+            sr.return_value.subscriptions.all.return_value = { 
+                'data' : [sub_return_one] } 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                 method='GET')
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['plan']['id'], 'pro_monthly')
+
+    @tornado.testing.gen_test
+    def test_get_billing_subscription_no_billing_ref(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+
+        sub_return_one = stripe.Subscription()
+        sub_return_one.status = 'active'
+        sub_return_one.plan = stripe.Plan(id='pro_monthly')
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(self.get_url(url), 
+                 method='GET')
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing')
+
+    @tornado.testing.gen_test
+    def test_get_billing_subscription_no_stripe_customer(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'No such customer', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     method='GET') 
+
+        self.assertEquals(e.exception.code, 404)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'No billing account found')
+
+    @tornado.testing.gen_test
+    def test_get_billing_subscription_invalid_diff_error(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.InvalidRequestError(
+                    'invalid', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     method='GET') 
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'Unknown')
+
+    @tornado.testing.gen_test
+    def test_get_billing_subscription_normal_exception(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ Exception(
+                    'Unknown', 'test') ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     method='GET') 
+
+        self.assertEquals(e.exception.code, 500)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['data'],
+            'Unknown')
+        
+    @unittest.skip('actually talks to stripe, skipped in normal testing') 
+    @tornado.testing.gen_test
+    def test_post_billing_actual_talking(self): 
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = 'cus_8P7y8RI3gRyhF0'
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key 
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header)
+        print response
+
+    @unittest.skip('this actually gets from stripe') 
+    @tornado.testing.gen_test
+    def test_get_actual_sub(self):
+        options._set('cmsapiv2.apiv2.stripe_api_key', 
+            'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = 'cus_8P7y8RI3gRyhF0'
+        yield so.save(async=True)
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        response = yield self.http_client.fetch(self.get_url(url), 
+            method='GET') 
+        print response.body
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

@@ -48,4 +48,5 @@ momoko==2.2.2
 xlwt==1.0.0
 dill==0.2.4
 passlib==1.6.5
+stripe==1.32.2
 youtube_dl
