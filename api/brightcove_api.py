@@ -854,11 +854,13 @@ class CMSAPI(BrightcoveOAuth2Session):
     '''
     BASE_URL = 'https://cms.api.brightcove.com/v1'
     
-    def __init__(self, publisher_id, client_id, client_secret,):
+    def __init__(self, publisher_id, client_id, client_secret):
         '''Build the API wrapper.
 
         Inputs:
-        integration - A neondata.BrightcoveIntegration object
+        publisher_id - The Brightcove publisher id
+        client_id - The client id to use
+        client_secret - The client secret to use
         '''
         super(CMSAPI, self).__init__(client_id, client_secret)
         self.publisher_id = publisher_id

@@ -352,7 +352,25 @@ class TestCMSAPILive(test_utils.neontest.AsyncTestCase):
             self.test_thumb_url)
         self.assertEquals(tresponse['remote_url'], self.test_thumb_url)
 
+class TestUpdateImages(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        super(TestUpdateImages, self).setUp()
 
+        self.api = api.brightcove_api.BrightcoveApi(
+            'api_key',
+            10,
+            'read_tok',
+            'write_tok')
+
+        self.http_writer_patcher = \
+          patch('api.brightcove_api.BrightcoveApi.write_connection.send_request')
+        self.http_mock = self._future_wrap_mock(self.http_writer_patcher.start())
+
+    def tearDown(self):
+        self.http_writer_patcher.stop()
+        super(TestUpdateImages, self).tearDown()
+
+    # TODO(mdesnoyer): Write update image tests. That'll take a little time
  
 class TestCMSAPI(test_utils.neontest.AsyncTestCase):
     def setUp(self):
