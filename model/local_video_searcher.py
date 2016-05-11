@@ -1349,8 +1349,9 @@ class LocalSearcher(object):
         '''
         _sfrac = (self.search_algo.n_samples * 1. / 
                   self.search_algo.max_samps)
-        # return 1 - _sfrac # linear
-        return np.sqrt(1 - _sfrac)
+        # return 1 - _sfrac  # linear
+        # return np.sqrt(1 - _sfrac)  # sqrt
+        return (1 - _sfrac) ** 2  # pow 2
 
 
     @property
