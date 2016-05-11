@@ -747,8 +747,8 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
              'title': 'Some video',
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
              'thumbnail_ref': 'still_id',
-             'custom_data': json.dumps({ '_bc_int_data' :
-                              { 'bc_id' : 123456789, 'bc_refid': None }}),
+             'custom_data': { '_bc_int_data' :
+                              { 'bc_id' : 123456789, 'bc_refid': None }},
              'duration' : 0.1,
              'publish_date' : '2015-08-16T23:45:47'
              })
@@ -788,10 +788,10 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
              'title': 'Some video',
              'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
              'thumbnail_ref': 'still_id',
-             'custom_data': json.dumps({ '_bc_int_data' :
+             'custom_data': { '_bc_int_data' :
                               { 'bc_id' : 'v1', 'bc_refid': 'video_ref' },
                               'mediaapiid' : 465972
-                              }),
+                              },
              'duration' : 0.1
              })
 

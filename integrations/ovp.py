@@ -295,7 +295,7 @@ class OVPIntegration(object):
             'default_thumbnail_url': default_thumbnail,
             'thumbnail_ref': external_thumbnail_id,
             'callback_url': callback_url,
-            'custom_data': json.dumps(custom_data),
+            'custom_data': custom_data,
             'duration': duration,
             'publish_date': publish_date
         }
