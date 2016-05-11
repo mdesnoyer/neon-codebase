@@ -174,7 +174,7 @@ feature_stuff['sad'] = {'generator':sad_gen, 'cache':True,
                            'penalty':0.25, 'dependencies':[]}
 feature_stuff['faces'] = {'generator':face_gen, 'cache':True,
                            'valence': PEN_ZERO, 'weight': 1.0,
-                           'penalty':0.5, 'dependencies':[]}
+                           'penalty':0.15, 'dependencies':[]}
 feature_stuff['eyes'] = {'generator':eye_gen, 'cache':True,
                            'valence': MAXIMIZE, 'weight': 2.0,
                            'penalty':0.3,
@@ -260,12 +260,12 @@ testing = False
 feat_score_weight=2.0
 local_search_width=32
 local_search_step=2
-processing_time_ratio=20.0
+processing_time_ratio=10.0
 adapt_improve=True
 use_best_data=True
 use_all_data=False
 testing_dir=''
-n_thumbs=5
+n_thumbs=50
 startend_clip=0.025
 non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
@@ -274,7 +274,8 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
             use_all_data, testing_dir, n_thumbs, startend_clip)
 
 # video = '/home/ubuntu/targ.mkv'
-video = '/home/ubuntu/targ.mp4'
+# video = '/home/ubuntu/targ.mp4'
+video = '/home/ubuntu/lemonade.m4v'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
 res = LS.choose_thumbnails(vid, 5, video_name='test')

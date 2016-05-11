@@ -1456,7 +1456,8 @@ class LocalSearcher(object):
             if self.done_sampling and self.done_searching:
                 if not self._active_searches:
                     break
-                _log.info_n('Waiting for local searches to complete...', 100)
+                _log.info_n('Waiting for %i local searches to complete...' % self._active_searches,
+                            100)
                 sleep(0.5)
             else:
                 self._step()
