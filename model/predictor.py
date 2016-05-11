@@ -395,7 +395,7 @@ class DeepnetPredictor(Predictor):
     def shutdown(self):
         _log.debug('Exit has started.')
         # just try to unsubscribe everything.
-        cbs = channel._connectivity_channel._callbacks_and_connectivities
+        cbs = self.channel._connectivity_channel._callbacks_and_connectivities
         while len(cbs):
             index, (subscribed_callback, unused_connectivity) = cbs[0]
             self.channel.unsubscribe(subscribed_callback)
