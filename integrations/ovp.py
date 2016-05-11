@@ -15,6 +15,7 @@ import datetime
 from integrations.exceptions import IntegrationError
 import json
 import logging
+import re
 import tornado.gen
 import utils.http
 from utils.inputsanitizer import InputSanitizer
