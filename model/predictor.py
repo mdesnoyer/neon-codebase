@@ -11,6 +11,7 @@ Author: Nick Dufour
 '''
 import hashlib
 import logging
+import atexit
 import numpy as np
 from PIL import Image
 import os
@@ -261,9 +262,15 @@ class DeepnetPredictor(Predictor):
         self.port = port
         self._cv = threading.Condition()
         self._ready = threading.Event()
+        self._connecting = threading.Event()
         self.active = 0
         self.done = 0
         self.async = True
+        # register your own shutdown function to the atexit
+        # cleanup handlers, since gRPC currently has issues
+        # with stubs & channels that are *attributes* of a
+        # class.
+        atexit.register(self.shutdown)
         self._connect(force_refresh=False)
 
     def _connect(self, force_refresh):
@@ -293,6 +300,10 @@ class DeepnetPredictor(Predictor):
         requests to begin, which it does by setting the _ready
         event.
         '''
+        if self._ready.is_set():
+            # this should be called, the connection has already
+            # been verified. So do nothing for now.
+            return
         if status is ChannelConnectivity.READY:
             _log.debug('Server has been reached')
             self.channel.unsubscribe(self._init_check)
@@ -301,19 +312,29 @@ class DeepnetPredictor(Predictor):
             _log.debug('Ready event is set.')
         elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
-            # attempt to connect again
+            # remove yourself from the subscribed functions so you don't
+            # get called a shitton of times.
+            self.channel.unsubscribe(self._init_check)
             statemon.state.increment('unable_to_connect')
             _log.debug('Error connecting to server, trying new server')
+            # attempt to connect again -- this will re-add you to the 
+            # subscribed functions.
             self._connect(force_refresh=True)
 
     def _check_conn(self, status=None):
         '''
         Checks the connection, as a callback.
         '''
+        if not self._ready.is_set():
+            # you should be unsubscribed, te connection isn't
+            # even verified yet! so just be patient.
+            return
         if (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
             # the connection has been lost
             self._ready.clear()
+            # unsubscribe yourself
+            self.channel.unsubscribe(self._check_conn)
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
             self._connect(force_refresh=True)
@@ -370,6 +391,11 @@ class DeepnetPredictor(Predictor):
         del self.channel
         del self.stub
         super(DeepnetPredictor, self).__del__()
+
+    def shutdown(self):
+        _log.debug('Exit has started.')
+        del self.channel
+        del self.stub
 
 
 class KFlannPredictor(Predictor):
