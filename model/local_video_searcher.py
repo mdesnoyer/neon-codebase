@@ -1538,7 +1538,9 @@ class LocalSearcher(object):
             if req_type == 'samp':
                 _log.debug('Worker %s taking sample', workerno)
                 try:
+                    self._active_searches += 1
                     self._take_sample(*(args,))
+                    self._active_searches -= 1
                 except Exception, e:
                     _log.warn('Problem sampling frame %i: %s', args, e.message)
             elif req_type == 'srch':
@@ -1611,7 +1613,6 @@ class LocalSearcher(object):
             if self._terminate.is_set():
                 # do not proceed
                 return
-            self._active_searches += 1
             _log.debug('Local search of %i [%.3f] <---> %i [%.3f], %i active searches' % (
                 start_frame, start_score, end_frame, end_score, self._active_searches))
             gold, framenos = self.get_search_frame(start_frame)
@@ -1724,7 +1725,6 @@ class LocalSearcher(object):
             self.results.accept_replace(best_frameno, framescore, best_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
             # IMPORTANT: Exiting a "with" block does *not* wake up other threads
-            self._active_searches -= 1
             self._proc_lock.notify()
 
     def _take_sample(self, frameno):
