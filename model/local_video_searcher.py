@@ -1241,6 +1241,10 @@ class LocalSearcher(object):
                 _log.warn('Feature score weight domain is '
                           '[0, 1] for the multiplicative '
                           'combiner.')
+            else:
+                _log.warn('Feature score weight domain is fine?')
+        else:
+            _log.warn('Not using multiplicative combiner!')
         self.startend_clip = startend_clip
         self.filters = filters
         self.max_variety = max_variety
