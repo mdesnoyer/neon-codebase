@@ -315,7 +315,7 @@ class OVPIntegration(object):
             options.cmsapi_user,
             options.cmsapi_pass)
 
-        res = yield client.send_request(req, ntries=1)
+        res = yield client.send_request(req, no_retry_codes=[409], ntries=3)
         if res.error: 
             if res.error.code == 409:
                 _log.warn('Video %s for account %s already exists' %
