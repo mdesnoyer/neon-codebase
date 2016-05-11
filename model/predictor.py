@@ -397,7 +397,7 @@ class DeepnetPredictor(Predictor):
         # just try to unsubscribe everything.
         cbs = self.channel._connectivity_channel._callbacks_and_connectivities
         while len(cbs):
-            index, (subscribed_callback, unused_connectivity) = cbs[0]
+            subscribed_callback, unused_connectivity = cbs[0]
             self.channel.unsubscribe(subscribed_callback)
         del self.channel
         del self.stub
