@@ -32,6 +32,7 @@ from utils import statemon
 import utils.neon
 import utils.logs
 import utils.http
+from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
@@ -67,25 +68,6 @@ define("check_subscription_interval",
     type=int)
 
 define("stripe_api_key", default=None, help='The API key we use to talk to stripe.')
-
-class ResponseCode(object):
-    HTTP_OK = 200
-    HTTP_ACCEPTED = 202
-    HTTP_BAD_REQUEST = 400
-    HTTP_UNAUTHORIZED = 401
-    # should be a 429, but tornado does not like that
-    HTTP_TOO_MANY_REQUESTS = 402
-    HTTP_FORBIDDEN = 403
-    HTTP_NOT_FOUND = 404
-    HTTP_CONFLICT = 409
-    HTTP_INTERNAL_SERVER_ERROR = 500
-    HTTP_NOT_IMPLEMENTED = 501
-
-class HTTPVerbs(object):
-    POST = 'POST'
-    PUT = 'PUT'
-    GET = 'GET'
-    DELETE = 'DELETE'
 
 class TokenTypes(object):
     ACCESS_TOKEN = 0

@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..')))
 
-from cmsapiv2.apiv2 import ResponseCode
+from utils.http import ResponseCode
 import logging
 import simplejson as json
 import tornado.gen

@@ -30,6 +30,30 @@ _log = logging.getLogger(__name__)
 statemon.state.define('waiting_in_pools', int)
 _waiting_in_pools_ref = statemon.state.get_ref('waiting_in_pools')
 
+
+class ResponseCode(object):
+    HTTP_OK = 200
+    HTTP_ACCEPTED = 202
+    HTTP_BAD_REQUEST = 400
+    HTTP_UNAUTHORIZED = 401
+    # should be a 429, but tornado does not like that
+    HTTP_TOO_MANY_REQUESTS = 402
+    HTTP_FORBIDDEN = 403
+    HTTP_NOT_FOUND = 404
+    HTTP_CONFLICT = 409
+    HTTP_TOO_MANY_429 = 429
+    HTTP_INTERNAL_SERVER_ERROR = 500
+    HTTP_NOT_IMPLEMENTED = 501
+
+
+class HTTPVerbs(object):
+    POST = 'POST'
+    PUT = 'PUT'
+    GET = 'GET'
+    DELETE = 'DELETE'
+    PATCH = 'PATCH'
+
+
 # TODO(mdesnoyer): Handle the stack on async requests so that the
 # callback will have a stack that looks like the original request
 # being called.

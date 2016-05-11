@@ -26,6 +26,7 @@ import tornado.ioloop
 import tornado.escape
 import urllib
 import utils.http
+from utils.http import ResponseCode, HTTPVerbs
 import utils.logs
 import utils.neon
 from cvutils.imageutils import PILImageUtils
@@ -721,7 +722,7 @@ class BrightcoveOAuth2Session(object):
             yield self._authenticate()
         except tornado.httpclient.HTTPError as e:
             statemon.state.increment('auth_error')
-            if e.code == 401:
+            if e.code == ResponseCode.HTTP_UNAUTHORIZED:
                 raise BrightcoveApiNotAuthorizedError(e.code, e.strerror)
             elif e.code >= 500:
                 raise BrightcoveApiServerError(e.code, e.strerror)
@@ -734,7 +735,7 @@ class BrightcoveOAuth2Session(object):
         # Configure no-retry codes
         no_retry_codes = send_kwargs.get('no_retry_codes', [])
         # TODO trouble importing ReponseCode
-        no_retry_codes.append(401)
+        no_retry_codes.append(ResponseCode.HTTP_UNAUTHORIZED)
         send_kwargs['no_retry_codes'] = no_retry_codes
 
         # Set required headers
@@ -744,7 +745,11 @@ class BrightcoveOAuth2Session(object):
         })
 
         # Send
-        response = yield utils.http.send_request(request, async=True, retry_forever_codes=[429], **send_kwargs)
+        response = yield utils.http.send_request(
+            request,
+            async=True,
+            retry_forever_codes=[ResponseCode.HTTP_TOO_MANY_429],
+            **send_kwargs)
 
         # Success
         if not response.error:
@@ -754,7 +759,7 @@ class BrightcoveOAuth2Session(object):
         # Handle error
         statemon.state.increment('send_error')
         error = [response.error.code, response.body]
-        if response.error.code == 401:
+        if response.error.code == ResponseCode.HTTP_UNAUTHORIZED:
             # Retry?
             if cur_try == 0:
                 # Treat all 401 responses as token expiration.
@@ -789,12 +794,12 @@ class BrightcoveOAuth2Session(object):
             tries += 1
             request = HTTPRequest(
                 self.TOKEN_URL,
-                method='POST',
+                method=HTTPVerbs.POST,
                 headers=self._authorization_header(),
                 body=self._authorization_body())
             response = yield utils.http.send_request(
                 request,
-                no_retry_codes=[401],
+                no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
                 async=True)
             # Break on error
             if response.error:
@@ -860,15 +865,15 @@ class PlayerAPI(BrightcoveOAuth2Session):
 
         # Assert the minimum of settings are set
         if client_id is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi id missing in publisher {}'.format(
                     self.publisher_id))
         if client_secret is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi secret missing in publisher {}'.format(
                     self.publisher_id))
         if self.publisher_id is None:
-            raise BrightcoveOAuthConfigException(
+            raise BrightcoveApiNotAuthorizedError(
                 'BcOauthApi publisher id missing in client {}'.format(
                     client_id))
 
@@ -896,9 +901,10 @@ class PlayerAPI(BrightcoveOAuth2Session):
         # Request a unauthorized resource is a 401 even if it's an invalid resource.
         # So let's botch a request and expect a 404 and not a 401.
         try:
-            bad_response = yield self.publish_player('invalid_ref', no_retry_codes=[404])
+            bad_response = yield self.publish_player(
+                'invalid_ref', no_retry_codes=[ResponseCode.HTTP_NOT_FOUND])
         except BrightcoveApiClientError as e:
-            if e.errno != 404:
+            if e.errno != ResponseCode.HTTP_NOT_FOUND:
                 raise tornado.gen.Return(False)
 
         raise tornado.gen.Return(True)
@@ -924,7 +930,6 @@ class PlayerAPI(BrightcoveOAuth2Session):
         Returns either a list of dictionary or player object if return_neon_object is True'''
         url = '{base_url}/{pub_id}/players'
         request = HTTPRequest(url.format(
-            'get_players',
             base_url=PlayerAPI.BASE_URL,
             pub_id=self.publisher_id))
         response = yield self._send_request(request)
@@ -939,7 +944,7 @@ class PlayerAPI(BrightcoveOAuth2Session):
                 base_url=PlayerAPI.BASE_URL,
                 pub_id=self.publisher_id,
                 player_ref=player_ref),
-            method='POST',
+            method=HTTPVerbs.POST,
             # Empty body in POST will raise error, so set allow flag.
             allow_nonstandard_methods=True)
         response = yield self._send_request(request, **kwargs)
@@ -962,7 +967,7 @@ class PlayerAPI(BrightcoveOAuth2Session):
                 base_url=PlayerAPI.BASE_URL,
                 pub_id=self.publisher_id,
                 player_ref=player_ref),
-            method='PATCH',
+            method=HTTPVerbs.PATCH,
             body=json.dumps(patch_dict))
         response = yield self._send_request(request)
         raise tornado.gen.Return(response)
