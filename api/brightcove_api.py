@@ -726,10 +726,11 @@ class BrightcoveOAuth2Session(object):
     '''
     TOKEN_URL = 'https://oauth.brightcove.com/v3/access_token'
 
-    def __init__(self, client_id, client_secret):
+    def __init__(self, client_id, client_secret, token=None):
         self.client_id = client_id
         self.client_secret = client_secret
-        self._token = None # Defer to first request
+        # Defer asking for token to first API request
+        self._token = token
 
     @tornado.gen.coroutine
     def _send_request(self, request, cur_try=0, **send_kwargs):
@@ -739,23 +740,25 @@ class BrightcoveOAuth2Session(object):
         request - A tornado.httpclient.HTTPRequest object
         send_kwargs - Passed arguments to utils.http.send_request
         '''
+
+        # Authenticate
         try:
             yield self._authenticate()
         except tornado.httpclient.HTTPError as e:
+            # Translate tornado HTTPError to BrightcoveApi*Error
             statemon.state.increment('auth_error')
             if e.code == ResponseCode.HTTP_UNAUTHORIZED:
-                raise BrightcoveApiNotAuthorizedError(e.code, e.strerror)
+                raise BrightcoveApiNotAuthorizedError(e.code, e.message)
             elif e.code >= 500:
-                raise BrightcoveApiServerError(e.code, e.strerror)
+                raise BrightcoveApiServerError(e.code, e.message)
             elif e.code >= 400:
-                raise BrightcoveApiClientError(e.code, e.strerror)
+                raise BrightcoveApiClientError(e.code, e.message)
             else:
-                raise BrightcoveApiError(e.code, e.strerror)
-
+                raise BrightcoveApiError(e.code, e.message)
         statemon.state.increment('auth_ok')
+
         # Configure no-retry codes
         no_retry_codes = send_kwargs.get('no_retry_codes', [])
-        # TODO trouble importing ReponseCode
         no_retry_codes.append(ResponseCode.HTTP_UNAUTHORIZED)
         send_kwargs['no_retry_codes'] = no_retry_codes
 
@@ -777,7 +780,7 @@ class BrightcoveOAuth2Session(object):
             statemon.state.increment('send_ok')
             raise tornado.gen.Return(self._handle_response(response))
 
-        # Handle error
+        # Handle error: re-raise as BrightcoveApiError.
         statemon.state.increment('send_error')
         error = [response.error.code, response.body]
         if response.error.code == ResponseCode.HTTP_UNAUTHORIZED:
@@ -791,8 +794,6 @@ class BrightcoveOAuth2Session(object):
             # Abort and raise authorization error
             else:
                 raise BrightcoveApiNotAuthorizedError(*error)
-
-
         elif response.error.code >= 500:
             raise BrightcoveApiServerError(*error)
 
@@ -824,7 +825,7 @@ class BrightcoveOAuth2Session(object):
                 request,
                 no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
                 async=True)
-            # Break on error
+            # Raise on error, unwrapping the HTTPResponse
             if response.error:
                 raise response.error
             self._token = json.loads(response.body)['access_token']

@@ -17,7 +17,9 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
-from api.brightcove_api import BrightcoveOAuth2Session, PlayerAPI
+from api.brightcove_api import BrightcoveOAuth2Session, PlayerAPI,\
+    BrightcoveApiNotAuthorizedError, BrightcoveApiClientError, \
+    BrightcoveApiServerError
 import bcove_responses
 from cmsdb import neondata
 import json
@@ -36,9 +38,6 @@ from cmsdb.neondata import BrightcoveIntegration
 from collections import OrderedDict
 from requests.models import Response
 from utils.options import define, options
-
-_log = logging.getLogger(__name__)
-
 
 
 _log = logging.getLogger(__name__)
@@ -316,7 +315,6 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(api.brightcove_api.BrightcoveApiServerError):
                 self.api.find_videos_by_ids(['vid1'])
 
-<<<<<<< HEAD
 class TestBrightcoveOAuth2Session(test_utils.neontest.AsyncTestCase):
 
     def setUp(self):
@@ -507,7 +505,6 @@ class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
         published_config = yield api.get_player_config(self.player_id)
         self.assertEqual(new_autoplay, published_config['autoplay'])
 
-=======
 class TestCMSAPILive(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         if not options.run_tests_on_test_account:
@@ -700,8 +697,198 @@ class TestCMSAPI(test_utils.neontest.AsyncTestCase):
         self.assertEquals(request.url,
                           ('https://cms.api.brightcove.com/v1/accounts/'
                            'pub_id/videos/vid1/images'))
->>>>>>> origin/working
 
-if __name__ == "__main__" :
-    args = utils.neon.InitNeon()
-    unittest.main(argv=[__name__] + args)
+
+class TestOAuth(test_utils.neontest.AsyncTestCase):
+    '''Tests for the inner OAuth session for Brightcove API
+
+    These were taken from cmsapiv2/test/client_py; these can be refactored'''
+
+    def setUp(self):
+        super(TestOAuth, self).setUp()
+
+        # Get an API to exercise the OAuth session
+        integration = neondata.BrightcoveIntegration(
+            a_id='a0',
+            p_id='p0',
+            application_client_id='id',
+            application_client_secret='secret')
+        self.api = PlayerAPI(integration)
+        self.expect_token = 'expected'
+        self.expect_auth_header = 'aWQ6c2VjcmV0'  # b64e of id:secret
+
+        # Mock out the http requests
+        self.auth_mock = MagicMock()
+        self.auth_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(
+              x,
+              code=200,
+              buffer=StringIO(
+                  '{"access_token":"%s","token_type": "Bearer","expires_in":300}' %
+                  self.expect_token))
+        self.api_mock = MagicMock()
+        # Use a get_players structure response
+        self.api_mock.side_effect = \
+            lambda x, **kw: tornado.httpclient.HTTPResponse(
+                x,
+                code=200,
+                buffer=StringIO(
+                    '{"items": ["a", "b", "c", "d"], "item_count": 4}'))
+        self.send_request_patcher = patch('utils.http.send_request')
+        self.send_request_mock = self._future_wrap_mock(
+            self.send_request_patcher.start(), require_async_kw=True)
+
+        def _handle_http_request(req, **kw):
+            if BrightcoveOAuth2Session.TOKEN_URL in req.url:
+                return self.auth_mock(req, **kw)
+            else:
+                return self.api_mock(req, **kw)
+        self.send_request_mock.side_effect = _handle_http_request
+
+    def tearDown(self):
+        self.send_request_patcher.stop()
+        super(TestOAuth, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_second_request_still_authed(self):
+
+        res = yield self.api.get_players()
+        self.assertEqual(type(res), dict)
+
+        # Check that there was an authentication call with id, secret
+        self.assertEquals(self.auth_mock.call_count, 1)
+        cargs, kwargs = self.auth_mock.call_args_list[0]
+        self.assertEquals(kwargs['no_retry_codes'], [401])
+        auth_request = cargs[0]
+        self.assertEquals(auth_request.url, BrightcoveOAuth2Session.TOKEN_URL)
+        self.assertEquals(auth_request.method, 'POST')
+        self.assertEquals(
+            auth_request.headers,
+            {'Authorization': 'Basic {}'.format(self.expect_auth_header)})
+        self.assertEquals(self.api._token, self.expect_token)
+
+        # Check that the main request went out
+        self.assertEquals(self.api_mock.call_count, 1)
+        cargs, kwargs = self.api_mock.call_args_list[0]
+        self.assertEquals(kwargs['no_retry_codes'], [401])
+        api_request = cargs[0]
+        self.assertIn(PlayerAPI.BASE_URL, api_request.url)
+        self.assertEquals(api_request.method, 'GET')
+        self.assertEquals(
+            api_request.headers,
+            {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer %s' % self.api._token
+            })
+
+        # Now reset the mocks
+        self.auth_mock.reset_mock()
+        self.api_mock.reset_mock()
+
+        # Send another request. Shouldn't need to hit the auth server
+        res = yield self.api.get_players()
+        self.assertIs(type(res), dict)
+        self.assertFalse(self.auth_mock.called)
+        self.assertEquals(self.api_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_expired_token_is_handled(self):
+        # Trigger normal authentication
+        res = yield self.api.get_players()
+        self.assertIs(type(res), dict)
+        self.assertIsNotNone(self.api._token)
+        self.assertEquals(self.api_mock.call_count, 1)
+        self.assertEquals(self.auth_mock.call_count, 1)
+        self.auth_mock.reset_mock()
+        self.api_mock.reset_mock()
+
+        # Now simulate losing authentication
+        self.api_mock.side_effect = [
+            tornado.httpclient.HTTPResponse(
+                HTTPRequest(''),
+                code=401,
+                error=tornado.httpclient.HTTPError(401)),
+            tornado.httpclient.HTTPResponse(
+                HTTPRequest(''), code=200)]
+        res = yield self.api.get_players()
+        self.assertIsNone(res)
+        self.assertIsNotNone(self.api._token)
+        self.assertEquals(self.api_mock.call_count, 2)
+        self.assertEquals(self.auth_mock.call_count, 1)
+
+        # Check the auth call
+        cargs, kwargs = self.auth_mock.call_args_list[0]
+        self.assertEquals(kwargs['no_retry_codes'], [401])
+        auth_request = cargs[0]
+        self.assertEquals(auth_request.url, BrightcoveOAuth2Session.TOKEN_URL)
+        self.assertEquals(auth_request.method, 'POST')
+        self.assertEquals(auth_request.body, 'grant_type=client_credentials')
+        self.assertEquals(
+            auth_request.headers,
+            {'Authorization': 'Basic %s' % self.expect_auth_header})
+
+        # Now reset the mocks
+        self.auth_mock.reset_mock()
+        self.api_mock.reset_mock()
+        self.api_mock.side_effect = \
+            lambda x, **kw: tornado.httpclient.HTTPResponse(
+                x,
+                code=200,
+                buffer=StringIO(
+                    '{"items": ["a", "b", "c", "d"], "item_count": 4}'))
+
+        # Send another request. Shouldn't need to hit the auth server
+        res = yield self.api.get_players()
+        self.assertIs(type(res), dict)
+        self.assertFalse(self.auth_mock.called)
+        self.assertEquals(self.api_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_bad_user_pass(self):
+        '''Check that a 401 returned from auth request raises an error'''
+        self.auth_mock.side_effect = \
+            lambda x, **kw: tornado.httpclient.HTTPResponse(x, code=401)
+        with self.assertRaises(BrightcoveApiNotAuthorizedError) as e:
+            yield self.api.get_players()
+            self.assertEquals(e.errno, 401)
+            import pdb; pdb.set_trace()
+            self.assertEquals(e.strerror, 401)
+
+    @tornado.testing.gen_test
+    def test_not_enough_permissions(self):
+        '''Check that an api request that triggers a 401 raises error'''
+        self.api_mock.side_effect = \
+            lambda x, **kw: tornado.httpclient.HTTPResponse(x, code=500)
+        with self.assertRaises(BrightcoveApiServerError) as e:
+            yield self.api.get_players()
+            self.assertEquals(e.errno, 500)
+        self.assertEquals(self.api_mock.call_count, 1)
+        self.assertEquals(self.auth_mock.call_count, 1)
+
+    @tornado.testing.gen_test
+    def test_service_error(self):
+        # Test when Brightcove responds with 500
+        self.api_mock.side_effect = \
+            lambda x, **kw: tornado.httpclient.HTTPResponse(x, code=401)
+        with self.assertRaises(BrightcoveApiNotAuthorizedError) as e:
+            yield self.api.get_players()
+            self.assertEquals(e.errno, 401)
+        self.assertEquals(self.api_mock.call_count, 2)
+        self.assertEquals(self.auth_mock.call_count, 2)
+
+    @tornado.testing.gen_test
+    def test_invalid_api_call(self):
+        self.api_mock.side_effect = \
+          lambda x, **kw: tornado.httpclient.HTTPResponse(x, code=404)
+        with self.assertRaises(BrightcoveApiClientError) as e:
+            yield self.api.get_players()
+            self.assertEquals(e.errno, 404)
+
+        self.assertEquals(self.api_mock.call_count, 1)
+        self.assertEquals(self.auth_mock.call_count, 1)
+        self.assertEquals(self.api._token, self.expect_token)
+
+
+if __name__ == '__main__':
+    utils.neon.InitNeon()
+    unittest.main()
