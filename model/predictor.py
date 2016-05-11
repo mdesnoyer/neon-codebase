@@ -270,7 +270,7 @@ class DeepnetPredictor(Predictor):
         # cleanup handlers, since gRPC currently has issues
         # with stubs & channels that are *attributes* of a
         # class.
-        atexit.register(self.shutdown)
+        # atexit.register(self.shutdown)
         self._connect(force_refresh=False)
 
     def _connect(self, force_refresh):
