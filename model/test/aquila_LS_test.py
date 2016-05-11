@@ -257,7 +257,7 @@ def getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 
 combiner = combiner_m
 testing = False
-feat_score_weight=2.0
+feat_score_weight=0.5
 local_search_width=32
 local_search_step=2
 processing_time_ratio=10.0
