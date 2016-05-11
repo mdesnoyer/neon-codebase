@@ -259,7 +259,7 @@ testing = False
 feat_score_weight=2.0
 local_search_width=32
 local_search_step=2
-processing_time_ratio=3.0
+processing_time_ratio=1.0
 adapt_improve=True,
 use_best_data=True
 use_all_data=False
@@ -276,9 +276,8 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 video = '/home/ubuntu/targ.mp4'
 vid = cv2.VideoCapture(video)
 _log.info('Starting Search')
-try:
-  res = LS.choose_thumbnails(vid, 5, video_name='test')
-  with open('/tmp/LS_results', 'w') as f:
-    dill.dump(res, f)
-except:
-  del predictor
+res = LS.choose_thumbnails(vid, 5, video_name='test')
+with open('/tmp/LS_results', 'w') as f:
+  dill.dump(res, f)
+_log.info('Manually disabling predictor')
+predictor.shutdown()

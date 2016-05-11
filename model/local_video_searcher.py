@@ -427,7 +427,13 @@ class MultiplicativeCombiner(object):
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
-        self.result_combine = lambda ms, fs, w: ms * fs
+        #
+        # The multiplicative combiner attenuates ms by fs, depending on the
+        # weight. If w is 1.0, then fs may fully attenuate ms. Otherwise, 
+        # it will attenuate it by at most w. 
+        # 
+        # values of w above 1.0 have no meaning.
+        self.result_combine = lambda ms, fs, w: ms - ms * (1-fs) * min(1, w)
         self.dependencies = dependencies
 
     def _set_stats_dict(self, stats_dict):
@@ -1112,9 +1118,6 @@ class LocalSearcher(object):
                      across 12 frames (about 0.5 sec)
             n_thumbs:
                 The number of top images to store.
-            max_local_searches:
-                The maximum number of simultaneous local searches to conduct.
-                Local searches apparently produce memory leaks. 
             feat_score_weight:
                 The degree to which the combined feature score should effect
                 the rank of the frames. New frames are added to results
@@ -1233,6 +1236,11 @@ class LocalSearcher(object):
         self.generators = odict()
         self.feats_to_cache = odict()
         self.combiner = combiner
+        if combiner.name is 'Multiplicative combiner':
+            if self._feat_score_weight > 1.0:
+                _log.warn('Feature score weight domain is '
+                          '[0, 1] for the multiplicative '
+                          'combiner.')
         self.startend_clip = startend_clip
         self.filters = filters
         self.max_variety = max_variety
@@ -1441,7 +1449,7 @@ class LocalSearcher(object):
             if self.done_sampling and self.done_searching:
                 break
             self._step()
-        _log.debug('Halting worker threads')
+        _log.info('Halting worker threads')
         self._terminate.set()
         for t in threads:
             t.join()
