@@ -1626,6 +1626,8 @@ class LocalSearcher(object):
             best_frameno = framenos[np.argmax(comb)]
             best_frame = frames[np.argmax(comb)]
             best_gold = gold[np.argmax(comb)]
+            # unbind gold, so that you don't have a MEMORY CATASTROPHE
+            del gold
             # ---------- START OF TEXT PROCESSING
             if self.filter_text:
                 # check if the gold version of the best frame has too much text
