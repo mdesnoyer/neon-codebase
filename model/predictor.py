@@ -277,7 +277,7 @@ class DeepnetPredictor(Predictor):
         #   channels?
         self.channel = implementations.insecure_channel(host, self.port)
         # register callback
-        self.channel.subscribe(self._check_conn, try_to_connect=True)
+        self.channel.subscribe(self._init_check, try_to_connect=True)
         self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
             self.channel)
 
