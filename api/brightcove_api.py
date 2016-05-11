@@ -732,7 +732,7 @@ class BrightcoveOAuth2Session(object):
 
     @tornado.gen.coroutine
     def _send_request(self, request, cur_try=0, **send_kwargs):
-        '''Send a request to the Brightcove CMS api
+        '''Send a request to the Brightcove OAuth-based api
 
         Inputs:
         request - A tornado.httpclient.HTTPRequest object
@@ -800,7 +800,7 @@ class BrightcoveOAuth2Session(object):
             raise BrightcoveApiError(*error)
 
     def _handle_response(self, response):
-        if response.code == 204:
+        if response.code == 204 or not response.body:
             # No content so just return True
             return True
         return json.loads(response.body)

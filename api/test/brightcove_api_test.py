@@ -458,6 +458,33 @@ class TestCMSAPI(test_utils.neontest.AsyncTestCase):
         self.assertEquals(json.loads(request.body), 
                           {'remote_url': 'remote.jpg'})
 
+    @tornado.testing.gen_test
+    def test_delete_thumbnail(self):
+        response = yield self.api.delete_thumbnail('vid1', 'tid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'DELETE')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/thumbnail/tid1'))
+
+    @tornado.testing.gen_test
+    def test_delete_poster(self):
+        response = yield self.api.delete_poster('vid1', 'tid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'DELETE')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/assets/poster/tid1'))
+
+    @tornado.testing.gen_test
+    def test_get_video_images(self):
+        response = yield self.api.get_video_images('vid1')
+        request = self.get_request()
+        self.assertEquals(request.method, 'GET')
+        self.assertEquals(request.url,
+                          ('https://cms.api.brightcove.com/v1/accounts/'
+                           'pub_id/videos/vid1/images'))
+
 if __name__ == "__main__" :
     args = utils.neon.InitNeon()
     unittest.main(argv=[__name__] + args)
