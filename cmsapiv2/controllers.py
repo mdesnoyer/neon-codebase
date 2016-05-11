@@ -469,10 +469,17 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 client_secret=app_secret,
                 integration_type=neondata.IntegrationType.BRIGHTCOVE)
             # Excecute a search and get last_processed_date
-            args['last_process_date'] = yield self._get_last_processed_date(
+            
+            lpd = yield self._get_last_processed_date(
                 publisher_id,
                 app_id, 
                 app_secret)
+
+            if lpd: 
+                args['last_process_date'] = lpd
+            else:
+                raise BadRequestError('Brightcove credentials are bad, ' \
+                    'application_id or application_secret are wrong.')  
             
         integration = yield IntegrationHelper.create_integration(
             acct, 
@@ -592,27 +599,39 @@ class BrightcoveIntegrationHandler(APIV2Handler):
              and app_secret to get the 4th most recent video 
              so that we can set a reasonable last_process_date
              on this video  
+
+           raises on unknown exceptions 
+           returns none if a video search could not be completed 
         """
         rv = None
+
         bc_cms_api = api.brightcove_api.CMSAPI(
-            #publisher_id, 
-            #app_id, 
-            #app_secret) 
-            '2294876105001', 
-            '8b089370-ce31-4ecf-9c14-7ffc6ff492b9',
-            'zZu6_l62UCYhjpTuwEfWrNDrjEqyP9Pg19Sv5BUUGCig1CMA-mIuxy14DjH6n1xQHZi3_RPYfO8_YRGh8xAyyg')
-        # return one video of a set of 4 
-        # this will be the 4th oldest video 
-        import pdb; pdb.set_trace()
-        videos = yield bc_cms_api.get_videos(
-            limit=4, 
-            offset=3, 
-            sort='updated_by')
-        import pdb; pdb.set_trace()
-        if len(videos) is not 0: 
-            video = videos[0]
-        else: 
-            rv = datetime.utcnow() 
+            publisher_id, 
+            app_id, 
+            app_secret) 
+        try: 
+            # return the fourth oldest video  
+            videos = yield bc_cms_api.get_videos(
+                limit=1, 
+                offset=3, 
+                sort='-updated_at')
+
+            if videos and len(videos) is not 0: 
+                video = videos[0]
+                rv = float(calendar.timegm(dateutil.parser.parse(
+                    video['updated_at']).timetuple()))
+            else: 
+                rv = float(calendar.timegm(time.gmtime()))
+        except (api.brightcove_api.BrightcoveApiServerError, 
+                api.brightcove_api.BrightcoveApiClientError, 
+                api.brightcove_api.BrightcoveApiError) as e: 
+            _log.error('Brightcove Error occurred trying to get \
+                        last_processed_date : %s' % e)
+            pass 
+        except Exception as e: 
+            _log.error('Unknown Error occurred trying to get \
+                        last_processed_date: %s' % e)
+            raise  
         
         raise tornado.gen.Return(rv)  
 
