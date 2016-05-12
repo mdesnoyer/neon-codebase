@@ -100,6 +100,27 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         video_title = video.get('name', '')
         return unicode(video_title)
 
+    @staticmethod
+    def _normalize_thumbnail_url(url):
+        '''Returns a thumb url without transport mechanism or query string,
+        with specific logic for brightcove's domain naming.
+        '''
+
+        if url is None:
+            return None
+
+        parse = urlparse.urlparse(url)
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
+            return 'brightcove.com/%s' % (os.path.basename(parse.path))
+        return '%s%s' % (parse.netloc, parse.path)
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_bc_error.%s' % self.account_id)
+
 class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
         super(CMSAPIIntegration, self).__init__(account_id, platform)
@@ -122,8 +143,8 @@ class CMSAPIIntegration(BrightcoveIntegration):
             src = source.get('src', None)
             if src is not None:
                 video_srcs.append((
-                    (src['width'] or -1),
-                    (src['encoding_rate'] or -1),
+                    (source['width'] or -1),
+                    (source['encoding_rate'] or -1),
                     src))
             
         if len(video_srcs) < 1:
@@ -165,24 +186,8 @@ class CMSAPIIntegration(BrightcoveIntegration):
              else return None
 
         """
-        images = video.get('images', None) 
-        if not images: 
-            _log.error('Unable to find images for video %s' % video)
-            return None 
- 
-        thumb_url = None 
-        thumb_ref = None
- 
-        poster_image = images.get('poster', None) 
-        thumbnail_image = images.get('thumbnail', None) 
+        thumb_url, thumb_ref = self._get_best_image_info(video)
 
-        if poster_image: 
-            thumb_ref = poster_image.get('asset_id', None) 
-            thumb_url = poster_image.get('src', None) 
-        elif thumbnail_image:
-            thumb_ref = thumbnail_image.get('asset_id', None)
-            thumb_url = thumbnail_image.get('src', None)
-        
         if not thumb_ref or not thumb_url: 
             _log.warning('Unable to find image info for video %s' % video)
         else: 
@@ -223,6 +228,68 @@ class CMSAPIIntegration(BrightcoveIntegration):
         '''Submits new videos in the account.'''
         yield self.set_video_iter()
         yield self.submit_ovp_videos(self.get_next_video_item)
+
+    @staticmethod
+    def _get_best_image_info(video):
+        '''Returns the (url, {image_struct}) of the best image in the
+        Brightcove video object
+        '''
+        images = video.get('images', None) 
+        if not images: 
+            _log.error('Unable to find images for video %s' % video)
+            return None 
+ 
+        thumb_url = None 
+        thumb_ref = None
+ 
+        poster_image = images.get('poster', None) 
+        thumbnail_image = images.get('thumbnail', None) 
+
+        if poster_image: 
+            thumb_ref = poster_image.get('asset_id', None) 
+            thumb_url = poster_image.get('src', None) 
+        elif thumbnail_image:
+            thumb_ref = thumbnail_image.get('asset_id', None)
+            thumb_url = thumbnail_image.get('src', None)
+        
+        if not thumb_ref or not thumb_url: 
+            _log.warning('Unable to find image info for video %s' % video)
+        else: 
+            thumb_ref = unicode(thumb_ref)
+
+        return thumb_url, thumb_ref
+ 
+    @staticmethod
+    def _extract_image_field(response, field):
+        '''Extract values of a field in the images in the response
+           from Brightcove
+
+           Return list of unicode strings
+        '''
+        vals = []
+        images = response['images']
+        # TODO clean this up, possibly remove generic from ovp
+        if field == 'id': 
+            field = 'asset_id' 
+ 
+        for image_type in ['poster', 'thumbnail']:
+            fields = images.get(image_type, None)
+            if fields is not None:
+                vals.append(fields.get(field, None))
+
+        return [unicode(x) for x in vals if x is not None]
+
+    @staticmethod
+    def _extract_image_urls(response):
+        '''Extract the list of image urls in the response from Brightcove'''
+        urls = []
+        images = response.get('images', None) 
+        
+        for image_type in ['poster', 'thumbnail']:
+            image = images.get(image_type, None) 
+            urls.append(image.get('src', None))
+
+        return [x for x in urls if x is not None]
 
 class MediaAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
@@ -538,24 +605,3 @@ class MediaAPIIntegration(BrightcoveIntegration):
                 urls.append(response[image_type].get('remoteUrl', None))
 
         return [x for x in urls if x is not None]
-
-    @staticmethod
-    def _normalize_thumbnail_url(url):
-        '''Returns a thumb url without transport mechanism or query string,
-        with specific logic for brightcove's domain naming.
-        '''
-
-        if url is None:
-            return None
-
-        parse = urlparse.urlparse(url)
-        # Brightcove can move the image around, but its basename will
-        # remain the same, so if it is a brightcove url, only look at
-        # the basename.
-        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
-            return 'brightcove.com/%s' % (os.path.basename(parse.path))
-        return '%s%s' % (parse.netloc, parse.path)
-
-    def _log_statemon_submit_video_error(self):
-        statemon.state.define_and_increment(
-            'submit_video_bc_error.%s' % self.account_id)
