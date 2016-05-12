@@ -40,13 +40,269 @@ _log = logging.getLogger(__name__)
 
 
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
+    def __new__(cls, account_id, platform):
+        # Figure out if we have permissions to talk to the media api
+        # or the cms api and build the correct object as a result
+        if cls is BrightcoveIntegration:
+            if (platform.application_client_id is not None and 
+                platform.application_client_secret is not None):
+                return super(BrightcoveIntegration, cls).__new__(
+                    CMSAPIIntegration)
+            else:
+                return super(BrightcoveIntegration, cls).__new__(
+                    MediaAPIIntegration)
+            raise ValueError('No valid authentication tokens found')
+        else:
+            return super(BrightcoveIntegration, cls).__new__(
+                cls, account_id, platform)
+
+    def get_video_id(self, video):
+        '''override from ovp'''
+        # Get the video id to use to key this video
+        if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
+            video_id = self.get_reference_id(video)
+            if video_id is None:
+                msg = ('No valid reference id in video %s for account %s'
+                       % (video['id'], self.neon_api_key))
+                statemon.state.increment('cant_get_refid')
+                _log.error_n(msg)
+                raise integrations.ovp.OVPRefIDError(msg)
+        elif (self.platform.id_field == 
+              neondata.BrightcoveIntegration.BRIGHTCOVE_ID):
+            video_id = video['id']
+        else:
+            # It's a custom field, so look for it
+            custom_data = self.get_video_custom_data(video)
+            video_id = custom_data.get(self.platform.id_field, None)
+            if video_id is None:
+                msg = ('No valid id in custom field %s in video %s for '
+                       'account %s' %
+                       (self.platform.id_field, video['id'],
+                        self.neon_api_key))
+                _log.error_n(msg)
+                statemon.state.increment('cant_get_custom_id')
+                raise integrations.ovp.OVPCustomRefIDError(msg)
+        return video_id
+
+    def get_video_callback_url(self, video):
+        '''override from ovp'''
+        if self.platform.callback_url:
+            return self.platform.callback_url
+        elif options.bc_servingurl_push_callback_host:
+            return ('http://%s/update_serving_url/%s' %
+                    (options.bc_servingurl_push_callback_host,
+                     self.platform.integration_id))
+        return None
+
+    @staticmethod
+    def get_video_title(video):
+        '''override from ovp'''
+        video_title = video.get('name', '')
+        return unicode(video_title)
+
+    @staticmethod
+    def _normalize_thumbnail_url(url):
+        '''Returns a thumb url without transport mechanism or query string,
+        with specific logic for brightcove's domain naming.
+        '''
+
+        if url is None:
+            return None
+
+        parse = urlparse.urlparse(url)
+        # Brightcove can move the image around, but its basename will
+        # remain the same, so if it is a brightcove url, only look at
+        # the basename.
+        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
+            return 'brightcove.com/%s' % (os.path.basename(parse.path))
+        return '%s%s' % (parse.netloc, parse.path)
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_bc_error.%s' % self.account_id)
+
+    def does_video_exist(self, video_meta, video_ref): 
+        return video_meta is not None
+ 
+class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
-        super(BrightcoveIntegration, self).__init__(account_id, platform)
+        super(CMSAPIIntegration, self).__init__(account_id, platform)
+        self.bc_api = brightcove_api.CMSAPI(
+            platform.publisher_id,
+            platform.application_client_id,
+            platform.application_client_secret)
+        self.neon_api_key = self.account_id = account_id
+        self.cur_video_sources = None
+
+    def get_reference_id(self, video):
+        return video.get('reference_id')
+
+    def get_video_duration(self, video):
+        return float(video['duration']) / 1000.0
+
+    def get_video_url(self, video):
+        video_srcs = []  # (width, encoding_rate, url)
+        for source in self.cur_video_sources: 
+            src = source.get('src', None)
+            if src is not None:
+                video_srcs.append((
+                    (source.get('width',-1)),
+                    (source.get('encoding_rate',-1)),
+                    src))
+            
+        if len(video_srcs) < 1:
+            _log.error("Could not find url to download : %s" % video)
+            return None
+
+        if self.platform.rendition_frame_width:
+            # Get the highest encoding rate at a size closest to this width
+            video_srcs = sorted(
+                video_srcs, key=lambda x:
+                (abs(x[0] - self.platform.rendition_frame_width),
+                -x[1]))
+        else:
+            # return the max width rendition with the highest encoding rate
+            video_srcs = sorted(video_srcs, key=lambda x: (-x[0], -x[1]))
+        return video_srcs[0][2]
+
+    def get_video_custom_data(self, video):
+        custom_data = video.get('custom_fields', {})
+        custom_data['_bc_int_data'] = {
+            'bc_id': video['id'],
+            'bc_refid': self.get_reference_id(video)
+        }
+        return custom_data
+
+    @tornado.gen.coroutine
+    def process_publisher_stream(self):
+        yield self.submit_new_videos()
+
+    def get_video_publish_date(self, video):
+        return video['published_at']
+
+    def get_video_last_modified_date(self, video):
+        return video['updated_at']
+
+    def get_video_thumbnail_info(self, video):
+        """get the poster image if its available 
+             if not grab the thumbnail
+             else return None
+
+        """
+        thumb_url, thumb_ref = self._get_best_image_info(video)
+
+        if not thumb_ref or not thumb_url: 
+            _log.warning('Unable to find image info for video %s' % video)
+        else: 
+            thumb_ref = unicode(thumb_ref)
+
+        return {'thumb_url': thumb_url,
+                'thumb_ref': thumb_ref}
+
+    @tornado.gen.coroutine
+    def set_video_iter(self):
+        from_date_str = datetime.datetime.now().strftime(
+            '%Y-%m-%dT%H:%M:%SZ')
+        if (self.platform.last_process_date is not None): 
+            from_date_str = self.platform.last_process_date
+
+        # possible TODO, this could use the feed iterator 
+        # and help catch up videos faster, however in our 
+        # new limits based implementation this isn't necessary
+        # at the moment, just get the most recent 30 vids
+        videos = yield self.bc_api.get_videos(
+            limit=30,
+            q='updated_at:%s' % from_date_str)
+        self.video_iter = iter(videos)
+
+    @tornado.gen.coroutine
+    def get_next_video_item(self):
+        video = None
+        try:
+            video = self.video_iter.next()
+            self.cur_video_sources = yield self.bc_api.get_video_sources(
+                video['id'])
+        except StopIteration:
+            video = StopIteration('hacky')
+
+        raise tornado.gen.Return(video)
+
+    @tornado.gen.coroutine
+    def submit_new_videos(self):
+        '''Submits new videos in the account.'''
+        yield self.set_video_iter()
+        yield self.submit_ovp_videos(self.get_next_video_item)
+
+    @staticmethod
+    def _get_best_image_info(video):
+        '''Returns the (url, {image_struct}) of the best image in the
+        Brightcove video object
+        '''
+        images = video.get('images', None) 
+        if not images: 
+            _log.error('Unable to find images for video %s' % video)
+            return None 
+ 
+        thumb_url = None 
+        thumb_ref = None
+ 
+        poster_image = images.get('poster', None) 
+        thumbnail_image = images.get('thumbnail', None) 
+
+        if poster_image: 
+            thumb_ref = poster_image.get('asset_id', None) 
+            thumb_url = poster_image.get('src', None) 
+        elif thumbnail_image:
+            thumb_ref = thumbnail_image.get('asset_id', None)
+            thumb_url = thumbnail_image.get('src', None)
+        
+        if not thumb_ref or not thumb_url: 
+            _log.warning('Unable to find image info for video %s' % video)
+        else: 
+            thumb_ref = unicode(thumb_ref)
+
+        return thumb_url, thumb_ref
+ 
+    @staticmethod
+    def _extract_image_field(response, field):
+        '''Extract values of a field in the images in the response
+           from Brightcove
+
+           Return list of unicode strings
+        '''
+        vals = []
+        images = response['images']
+        # TODO clean this up, possibly remove generic from ovp
+        if field == 'id': 
+            field = 'asset_id' 
+ 
+        for image_type in ['poster', 'thumbnail']:
+            fields = images.get(image_type, None)
+            if fields is not None:
+                vals.append(fields.get(field, None))
+
+        return [unicode(x) for x in vals if x is not None]
+
+    @staticmethod
+    def _extract_image_urls(response):
+        '''Extract the list of image urls in the response from Brightcove'''
+        urls = []
+        images = response.get('images', None) 
+        
+        for image_type in ['poster', 'thumbnail']:
+            image = images.get(image_type, None) 
+            urls.append(image.get('src', None))
+
+        return [x for x in urls if x is not None]
+
+class MediaAPIIntegration(BrightcoveIntegration):
+    def __init__(self, account_id, platform):
+        super(MediaAPIIntegration, self).__init__(account_id, platform)
         self.bc_api = brightcove_api.BrightcoveApi(
             account_id, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
         self.skip_old_videos = False
-        self.neon_api_key = self.account_id = account_id 
+        self.neon_api_key = self.account_id = account_id
 
     @staticmethod
     def get_submit_video_fields():
@@ -129,7 +385,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         try:
             bc_video_info = yield self.bc_api.find_videos_by_ids(
                 ovp_video_ids,
-                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                video_fields=self.get_submit_video_fields(),
                 custom_fields=self.get_custom_fields(),
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
@@ -169,7 +425,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             try:
                 cur_results = yield self.bc_api.find_playlist_by_id(
                     playlist_id,
-                    video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                    video_fields=self.get_submit_video_fields(),
                     playlist_fields=['id', 'videos'],
                     custom_fields=self.get_custom_fields(),
                     async=True)
@@ -204,53 +460,12 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         yield self.submit_playlist_videos()
         yield self.submit_new_videos()
 
-    def get_video_id(self, video):
-        '''override from ovp'''
-        # Get the video id to use to key this video
-        if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
-            video_id = video.get('referenceId', None)
-            if video_id is None:
-                msg = ('No valid reference id in video %s for account %s'
-                       % (video['id'], self.neon_api_key))
-                statemon.state.increment('cant_get_refid')
-                _log.error_n(msg)
-                raise integrations.ovp.OVPRefIDError(msg)
-        elif (self.platform.id_field == 
-              neondata.BrightcoveIntegration.BRIGHTCOVE_ID):
-            video_id = video['id']
-        else:
-            # It's a custom field, so look for it
-            custom_data = self.get_video_custom_data(video)
-            video_id = custom_data.get(self.platform.id_field, None)
-            if video_id is None:
-                msg = ('No valid id in custom field %s in video %s for '
-                       'account %s' %
-                       (self.platform.id_field, video['id'],
-                        self.neon_api_key))
-                _log.error_n(msg)
-                statemon.state.increment('cant_get_custom_id')
-                raise integrations.ovp.OVPCustomRefIDError(msg)
-        return video_id
+    def get_reference_id(self, video):
+        return video.get('referenceId', None)
 
     def get_video_url(self, video):
         '''override from ovp'''
         return self._get_video_url_to_download(video)
-
-    def get_video_callback_url(self, video):
-        '''override from ovp'''
-        if self.platform.callback_url:
-            return self.platform.callback_url
-        elif options.bc_servingurl_push_callback_host:
-            return ('http://%s/update_serving_url/%s' %
-                    (options.bc_servingurl_push_callback_host,
-                     self.platform.integration_id))
-        return None
-
-    @staticmethod
-    def get_video_title(video):
-        '''override from ovp'''
-        video_title = video.get('name', '')
-        return unicode(video_title)
 
     def get_video_custom_data(self, video):
         '''override from ovp'''
@@ -300,7 +515,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
                 sort_by='MODIFIED_DATE',
                 sort_order='ASC',
-                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                video_fields=self.get_submit_video_fields(),
                 custom_fields=self.get_custom_fields())
 
     def set_video_iter_with_videos(self, videos):
@@ -350,44 +565,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             rv = True
         return rv
 
-    def does_video_exist(self, video_meta, video_ref): 
-        return video_meta is not None 
-
-    @tornado.gen.coroutine
-    def _update_video_info(self, data, bc_video_id, job_id):
-        '''Update information in the database about the video.
-
-        Inputs:
-        data - A video object from Brightcove
-        bc_video_id - The brightcove video id
-        '''
-
-        # Get the data that could be updated
-        video_id = neondata.InternalVideoID.generate(
-            self.neon_api_key, bc_video_id)
-        publish_date = data.get('publishedDate', None)
-        if publish_date is not None:
-            publish_date = datetime.datetime.utcfromtimestamp(
-                int(publish_date) / 1000.0).isoformat()
-        video_title = data.get('name', '')
-
-        # Update the video object
-        def _update_publish_date(x):
-            x.publish_date = publish_date
-            x.job_id = job_id
-        yield tornado.gen.Task(
-            neondata.VideoMetadata.modify,
-            video_id,
-            _update_publish_date)
-
-        # Update the request object
-        def _update_request(x):
-            x.publish_date = publish_date
-            x.video_title = video_title
-        yield tornado.gen.Task(
-            neondata.NeonApiRequest.modify,
-            job_id, self.neon_api_key, _update_request)
-        
     @staticmethod
     def _get_best_image_info(data):
         '''Returns the (url, {image_struct}) of the best image in the
@@ -429,24 +606,3 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 urls.append(response[image_type].get('remoteUrl', None))
 
         return [x for x in urls if x is not None]
-
-    @staticmethod
-    def _normalize_thumbnail_url(url):
-        '''Returns a thumb url without transport mechanism or query string,
-        with specific logic for brightcove's domain naming.
-        '''
-
-        if url is None:
-            return None
-
-        parse = urlparse.urlparse(url)
-        # Brightcove can move the image around, but its basename will
-        # remain the same, so if it is a brightcove url, only look at
-        # the basename.
-        if re.compile('(brightcove)|(bcsecure)').search(parse.netloc):
-            return 'brightcove.com/%s' % (os.path.basename(parse.path))
-        return '%s%s' % (parse.netloc, parse.path)
-
-    def _log_statemon_submit_video_error(self):
-        statemon.state.define_and_increment(
-            'submit_video_bc_error.%s' % self.account_id)

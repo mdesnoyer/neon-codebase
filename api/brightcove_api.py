@@ -882,6 +882,24 @@ class CMSAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
+    def get_video_sources(self, video_id):
+        '''Return the sources for the video.
+
+        Inputs: 
+        video_id - The Brightcove video id
+
+        '''
+        request = tornado.httpclient.HTTPRequest(
+            '{base_url}/accounts/{pub_id}/videos/{video_id}/sources'.format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                video_id = video_id))
+            
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
     def get_videos(self,
                    limit=None,
                    offset=None,

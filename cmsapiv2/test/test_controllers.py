@@ -1647,7 +1647,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             rjson['integration_id'], async=True)
         self.assertEqual(platform.application_client_id, '6')
         self.assertEqual(platform.application_client_secret, 'another secret')
-        self.assertEqual(platform.last_process_date, 1429564712.0) 
+        self.assertEqual(platform.last_process_date, '2015-04-20T21:18:32.351Z') 
 
     @tornado.testing.gen_test
     def test_put_client_id_missing_secret(self):
