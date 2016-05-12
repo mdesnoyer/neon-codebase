@@ -1280,7 +1280,6 @@ class LocalSearcher(object):
             TESTING = True
             global TESTING_DIR
             TESTING_DIR = testing_dir
-        self._reset()
         self.filter_text = filter_text
         if text_filter_params is None:
             tcnm1 = os.path.join(options.text_model_path,
@@ -1314,6 +1313,7 @@ class LocalSearcher(object):
         self._terminate = threading.Event()
         self._active_samples = 0
         self._active_searches = 0
+        self._reset()
 
     def _reset(self):
         self.cur_frame = None
