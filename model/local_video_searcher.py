@@ -182,16 +182,17 @@ from grpc.framework.interfaces.face.face import ExpirationError
 
 _log = logging.getLogger(__name__)
 
-statemon.define('all_frames_filtered', int)
-statemon.define('cv_video_read_error', int)
-statemon.define('video_processing_error', int)
-statemon.define('low_number_of_frames_seen', int)
-statemon.define('unable_to_score_frame', int)
-statemon.define('frame_score_attempt_limit_reached', int)
-statemon.define('sampling_problem', int)
-statemon.define('searching_problem', int)
-statemon.define('mcmh_sample_error', int)
-statemon.define('mcmh_search_error', int)
+statemon.define('all_frames_filtered', int)  # no frame has passed all filters
+statemon.define('cv_video_read_error', int)  # opencv video read error
+statemon.define('video_processing_error', int)  # other video processing error, otherwise unspecified
+statemon.define('low_number_of_frames_seen', int)  # insufficient samples taken
+statemon.define('low_number_of_regions_searched', int)  # insufficient regions searched
+statemon.define('unable_to_score_frame', int)  # within-retry-limit error
+statemon.define('frame_score_attempt_limit_reached', int)  # retry limit exceeded
+statemon.define('sampling_problem', int)  # problem taking a sample, unspecified
+statemon.define('searching_problem', int)  # problem conducting a search, unspecified
+statemon.define('mcmh_sample_error', int)  # problem acquiring a sample from mcmh
+statemon.define('mcmh_search_error', int)  # problem acquiring a local search region
 
 define("text_model_path", 
        default=os.path.join(__base_path__, 'cvutils', 'data'), 
@@ -1482,12 +1483,18 @@ class LocalSearcher(object):
         try:
             perc_samp = self.search_algo.n_samples * 100. / self.search_algo.max_samps
             _log.info('%.2f%% of video sampled' % perc_samp)
+            if perc_samp < 30:
+                # this is considered a 'low number' of sampled frames
+                statemon.state.increment('low_number_of_frames_seen')
         except Exception, e:
             _log.info('Unknown percentage of video sampled')
             _log.debug('Exception: %s', e.message)
         try:
             perc_srch = self._searched * 100. / (self.search_algo.max_samps - 1)
             _log.info('%.2f%% of video searched' % perc_srch)
+            if perc_srch < 5:
+                # this is considered a 'low number' of regions searched
+                statemon.state.increment('low_number_of_regions_searched')
         except Exception, e:
             _log.info('Unknown percentage of video searched')
             _log.debug('Exception: %s', e.message)
