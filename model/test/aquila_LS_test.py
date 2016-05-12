@@ -265,7 +265,7 @@ adapt_improve=True
 use_best_data=True
 use_all_data=False
 testing_dir=''
-n_thumbs=50
+n_thumbs=10
 startend_clip=0.025
 non_locking = False
 LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
@@ -275,11 +275,24 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 
 # video = '/home/ubuntu/targ.mkv'
 # video = '/home/ubuntu/targ.mp4'
-video = '/home/ubuntu/lemonade.m4v'
-vid = cv2.VideoCapture(video)
-_log.info('Starting Search')
-res = LS.choose_thumbnails(vid, n_thumbs, video_name='test')
-with open('/tmp/LS_results', 'w') as f:
-  dill.dump(res, f)
+# video = '/home/ubuntu/lemonade.m4v'
+# vid = cv2.VideoCapture(video)
+# _log.info('Starting Search')
+# res = LS.choose_thumbnails(vid, n_thumbs, video_name='test')
+# with open('/tmp/LS_results', 'w') as f:
+#   dill.dump(res, f)
+# _log.info('Manually disabling predictor')
+# predictor.shutdown()
+
+# this is for stupid-ass salesforce
+from glob import glob
+videos = glob('/home/ubuntu/salesforce/*')
+for video in videos:
+  vid = cv2.VideoCapture(video)
+  _log.info('Starting Search of %s', video)
+  res = LS.choose_thumbnails(vid, n_thumbs, video_name=video)
+  with open('/tmp/LS_results_%s' % video, 'w') as f:
+    dill.dump(res, f)
 _log.info('Manually disabling predictor')
 predictor.shutdown()
+
