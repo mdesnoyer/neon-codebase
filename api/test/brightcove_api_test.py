@@ -19,6 +19,7 @@ if sys.path[0] != __base_path__:
 import api.brightcove_api
 import bcove_responses
 from cmsdb import neondata
+from cStringIO import StringIO
 import json
 import logging
 from mock import patch, MagicMock
@@ -364,11 +365,42 @@ class TestUpdateImages(test_utils.neontest.AsyncTestCase):
 
         self.http_writer_patcher = \
           patch('api.brightcove_api.BrightcoveApi.write_connection.send_request')
-        self.http_mock = self._future_wrap_mock(self.http_writer_patcher.start())
+        self.http_func_mock = self._future_wrap_mock(
+            self.http_writer_patcher.start(), require_async_kw=True)
+        self.http_mock = MagicMock()
+        self.http_mock.side_effect = [{'result': {'id': 'bcimgid'}}]
+        self.http_func_mock.side_effect = lambda x, **kw: HTTPResponse(
+            x, 200,
+            buffer=StringIO(json.dumps(self.http_mock())))
 
     def tearDown(self):
         self.http_writer_patcher.stop()
         super(TestUpdateImages, self).tearDown()
+
+    def get_last_http_request(self):
+        cargs, args = self.http_func_mock.call_args
+        return cargs[0]
+
+    @unittest.skip('Functionality was manually tested and I do not have time now to figure out how to parse multipart upload jrpc')
+    @tornado.testing.gen_test
+    def test_add_remote_image(self):
+        response = yield self.api.add_image('vid1', 'vid1_tid1',
+                                            remote_url='http://remote_url.com')
+        self.assertEquals(response, {'id': 'bcimgid'})
+
+        request = self.get_last_http_request()
+        self.assertEquals(request.url,
+                          'http://api.brightcove.com/services/post')
+        self.assertEquals(json.loads(request.body),
+                          { "method" : "add_image",
+                            "params" : {
+                                "token" : "write_tok",
+                                "image" : {
+                                    "remote_url" : 'http://remote_url.com'
+                                },
+                                "video_id" : "vid1"
+                            }
+                        })
 
     # TODO(mdesnoyer): Write update image tests. That'll take a little time
  

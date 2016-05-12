@@ -54,15 +54,9 @@ class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
-class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 
 DEFAULT_IMAGE_SIZES = {
-    'thumbnail' : (120, 90),
-    'poster' : (480, 360)
-}
-
-DEFAULT_IMAGE_SIZES = {
-    'thumbnail' : (120, 90),
+    'thumbnail' : (160, 90),
     'poster' : (480, 360)
 }
 
@@ -87,7 +81,7 @@ class BrightcoveApi(object):
         self.read_token = read_token
         self.write_token = write_token
 
-        self.THUMB_SIZE = 120, 90
+        self.THUMB_SIZE = 160, 90
         self.STILL_SIZE = 480, 360
 
     ###### Brightcove media api update method ##########

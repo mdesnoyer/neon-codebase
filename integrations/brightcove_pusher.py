@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Service that handles a callback and pushes the serving url to the brightcove 
 account.
@@ -19,6 +20,7 @@ import json
 import logging
 import signal
 import tornado.gen
+import tornado.httpserver
 import tornado.web
 import urllib
 import urlparse
