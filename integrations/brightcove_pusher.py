@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Service that handles a callback and pushes the serving url to the brightcove 
 account.
