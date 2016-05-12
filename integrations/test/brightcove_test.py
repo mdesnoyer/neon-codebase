@@ -19,7 +19,6 @@ from mock import patch, MagicMock
 import multiprocessing
 import test_utils.neontest
 import test_utils.postgresql
-import test_utils.redis
 import tornado.gen
 import tornado.httpclient
 import tornado.testing
@@ -30,8 +29,9 @@ from utils.options import define, options
 
 class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
-        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
@@ -557,8 +557,9 @@ class TestUpdateExistingThumb(test_utils.neontest.AsyncTestCase):
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         # Mock out the call to services
-        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
-        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
@@ -738,16 +739,14 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         
         url, submission = self._get_video_submission()
         self.assertEquals(
-            url, ('http://services.neon-lab.com:80/api/v1/accounts/a1/'
-                  'neon_integrations/%s/create_thumbnail_api_request' % self.platform.integration_id))
+            url, '/api/v2/a1/videos')
         self.assertEquals(
             submission,
-            {'video_id': '123456789',
-             'video_url': 'http://video.mp4',
-             'video_title': 'Some video',
-             'callback_url': None,
-             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
-             'external_thumbnail_id': 'still_id',
+            {'external_video_ref': '123456789',
+             'url': 'http://video.mp4',
+             'title': 'Some video',
+             'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
+             'thumbnail_ref': 'still_id',
              'custom_data': { '_bc_int_data' :
                               { 'bc_id' : 123456789, 'bc_refid': None }},
              'duration' : 0.1,
@@ -817,17 +816,15 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         url, submission = self._get_video_submission()
         self.assertDictEqual(
             submission,
-            {'video_id': '465972',
-             'video_url': 'http://video.mp4',
-             'video_title': 'Some video',
-             'callback_url': None,
-             'default_thumbnail': 'http://bc.com/vid_still.jpg?x=5',
-             'external_thumbnail_id': 'still_id',
+            {'external_video_ref': '465972',
+             'url': 'http://video.mp4',
+             'title': 'Some video',
+             'default_thumbnail_url': 'http://bc.com/vid_still.jpg?x=5',
+             'thumbnail_ref': 'still_id',
              'custom_data': { '_bc_int_data' :
                               { 'bc_id' : 'v1', 'bc_refid': 'video_ref' },
                               'mediaapiid' : 465972
                               },
-             'publish_date' : None,
              'duration' : 0.1
              })
 
@@ -1098,8 +1095,11 @@ class TestChooseDownloadUrl(test_utils.neontest.TestCase):
 class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         # Mock out the call to services
-        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
-        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        #self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
+        #self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
@@ -1420,7 +1420,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         # Make sure that only one video was submitted
         self.assertEquals(self.submit_mock.call_count, 1)
         url, submission = self._get_video_submission()
-        self.assertEquals(submission['video_id'], 'v1')
+        self.assertEquals(submission['external_video_ref'], 'v1')
 
         # Check the call to brightcove
         cargs, kwargs = self.mock_find_videos.call_args
@@ -1501,7 +1501,7 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         # Make sure that a video was submitted
         self.assertEquals(self.submit_mock.call_count, 1)
         url, submission = self._get_video_submission()
-        self.assertEquals(submission['video_id'], 'afunid')
+        self.assertEquals(submission['external_video_ref'], 'afunid')
 
         # Check the call to brightcove
         cargs, kwargs = self.mock_find_videos.call_args
@@ -1539,8 +1539,9 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
 class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         # Mock out the call to services
-        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
-        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
@@ -1609,7 +1610,7 @@ class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
         # Make sure two videos were submitted
         self.assertEquals(self.submit_mock.call_count, 1)
         url, submission = self._get_video_submission()
-        self.assertEquals(submission['video_id'], '1234567')
+        self.assertEquals(submission['external_video_ref'], '1234567')
 
         # Check the call to brightcove
         self.assertEquals(self.mock_get_playlists.call_count, 1)
@@ -1674,7 +1675,7 @@ class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
         # Make sure two videos were submitted
         self.assertEquals(self.submit_mock.call_count, 2)
         url, submission = self._get_video_submission()
-        self.assertEquals(submission['video_id'], 'afunid')
+        self.assertEquals(submission['external_video_ref'], 'afunid')
 
         # Check the call to brightcove
         self.assertEquals(self.mock_get_playlists.call_count, 1)
@@ -1716,8 +1717,9 @@ class TestSubmitPlaylist(test_utils.neontest.AsyncTestCase):
 class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
     def setUp(self):
         # Mock out the call to services
-        self.submit_mocker = patch('integrations.ovp.utils.http.send_request')
-        self.submit_mock = self._callback_wrap_mock(self.submit_mocker.start())
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
         self.submit_mock.side_effect = \
           lambda x, **kwargs: tornado.httpclient.HTTPResponse(
               x, 201, buffer=StringIO('{"job_id": "job1"}'))
@@ -1790,9 +1792,9 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
         # Make sure two videos were submitted
         self.assertEquals(self.submit_mock.call_count, 2)
         url, submission = self._get_video_submission(0)
-        self.assertEquals(submission['video_id'], '1234567')
+        self.assertEquals(submission['external_video_ref'], '1234567')
         url, submission = self._get_video_submission(1)
-        self.assertEquals(submission['video_id'], 'v2')
+        self.assertEquals(submission['external_video_ref'], 'v2')
 
         # Check the call to brightcove
         self.assertEquals(self.mock_get_videos.call_count, 1)
@@ -1838,8 +1840,7 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
         base_request = tornado.httpclient.HTTPRequest('http://some_url')
         self.submit_mock.side_effect = [
             tornado.httpclient.HTTPResponse(
-              base_request, 502, buffer=StringIO(
-                  '{"error":"somethign fed up"}')),
+                base_request, 500, error=tornado.httpclient.HTTPError(500)),
             tornado.httpclient.HTTPResponse(
               base_request, 201, buffer=StringIO('{"job_id": "job1"}'))]
 
@@ -1866,7 +1867,7 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(integrations.ovp.OVPError):
                 yield self.integration.lookup_and_submit_videos(
                     [1234567, 'v2'])
-    
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

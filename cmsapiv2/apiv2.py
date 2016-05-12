@@ -823,7 +823,9 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Dictionary():
         def f(v):
-            if isinstance(ast.literal_eval(v), dict):
+            if type(v) is dict:
+                return v
+            elif isinstance(ast.literal_eval(v), dict):
                 return ast.literal_eval(v)
             else:
                 raise Invalid("not a dictionary")
