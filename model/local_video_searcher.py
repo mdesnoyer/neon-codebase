@@ -1776,7 +1776,7 @@ class LocalSearcher(object):
             frame_score = self.predictor.predict(frames[0])
         with self._proc_lock:
             self.stats['score'].push(frame_score)
-            _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 20)
+            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
             self.search_algo.update(frameno, frame_score)
             # extract all the features we want to cache
             for n, f in self.feats_to_cache.iteritems():
@@ -1793,7 +1793,6 @@ class LocalSearcher(object):
         '''
 
         if force_sample: 
-            _log.debug('Taking sample [Forced]')
             if not self.done_sampling:
                 try:
                     frameno = self.search_algo.get_sample()
