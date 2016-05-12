@@ -2385,6 +2385,57 @@ class BillingSubscriptionHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+TelemetrySnippetHandler : class responsible for creating the telemetry snippet
+   HTTP Verbs     : get
+*********************************************************************'''
+class TelemetrySnippetHandler(tornado.web.RequestHandler): 
+    def __init__(self): 
+        super(TelemetrySnippetHandler, self).__init__()
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        '''Generates a telemetry snippet for a given account'''
+
+        schema = Schema({
+            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+
+        # Find out if there is a Gallery integration
+        integrations = yield self.account.get_platforms(async=True)
+
+        using_gallery = any([x.uses_bc_gallery for x in integrations if 
+                             isinstance(x, neondata.BrightcoveIntegration)])
+
+        # Build the snippet
+        if using_gallery:
+            template = (
+                '<!-- Neon -->',
+                '<script>',
+                "  var neonPublisherId = '{tai}';",
+                "  var neonBrightcoveGallery = True;",
+                '</script>',
+                "<script src='//neon-cdn-assets.s3.amazonaws.com/neonoptimizer_dixon.js'></script>',",
+                '<!-- Neon -->'
+                )
+        else:
+            template = (
+                '<!-- Neon -->'
+                '<script id="neon">',
+                "  var neonPublisherId = '{tai}';",
+                '  !function(e,n,t,o,s)',
+                '  {o=e.createElement(n),s=e.getElementsByTagName(n)[0],o.async=1,o.src=t,s.parentNode.insertBefore(o,s)}',
+                '  (document,"script","//neon-cdn-assets.s3.amazonaws.com/neonoptimizer_dixon.js");'
+                '</script>'
+                '<!-- Neon -->'
+                )
+
+        self.success('\n'.join(template).format(
+            tai=self.account.tracker_account_id))
+
+'''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
@@ -2416,6 +2467,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 
