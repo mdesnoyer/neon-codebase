@@ -5049,18 +5049,152 @@ class TestBrightcovePlayerHandler(TestControllersBase):
 
     def setUp(self):
         super(TestBrightcovePlayerHandler, self).setUp()
-        self.integration = neondata.BrightcoveIntegration(100).save()
+        self.account_id = 'a0'
+        self.publisher_id = 'p0'
+        self.integration = neondata.BrightcoveIntegration(
+            self.account_id,
+            self.publisher_id,
+            application_client_id='id',
+            application_client_secret='secret')
+        self.integration.save()
+
+        # Mock our user authorization
+        self.user = neondata.NeonUserAccount(self.account_id)
+        self.user.save()
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
+        # Set up an initial player
+        self.player = neondata.BrightcovePlayer(
+            player_ref='pl0',
+            integration_id=self.integration.integration_id,
+            name='db name',
+            is_tracked=True,
+            published_plugin_version='0.0.0');
+        self.player.save()
+
+        self.untracked_player = neondata.BrightcovePlayer(
+            player_ref='pl2',
+            integration_id=self.integration.integration_id,
+            name='untracked player',
+            is_tracked=False)
+        self.untracked_player.save()
 
     def tearDown(self):
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(TestBrightcovePlayerHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_get_players(self):
-        pass
+
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            get = self._future_wrap_mock(_get)
+            get.side_effect = [{
+                'items': [
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl0',
+                        'name':'Neon Tracking Player',
+                        'description':'Neon tracking plugin bundled.'
+                    },
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl1',
+                        'name':'Neon Player 2: Neoner',
+                        'description':'Another description.'
+                    }],
+                'item_count': 2
+            }]
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header)
+            self.assertEqual(get.call_count, 1)
+            self.assertEqual(200, r.code)
+        rjson = json.loads(r.body)
+        players, count = rjson.values()
+        self.assertEqual(2, len(players))
+        self.assertEqual(2, count)
+        player0, player1 = players
+        self.assertEqual('pl0', player0['player_ref'])
+        self.assertEqual('Neon Tracking Player', player0['name'])
+        self.assertNotIn('description', player0)
+        self.assertEqual('pl1', player1['player_ref'])
+        self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
-    def test_put_player(self):
-        pass
+    def test_put_tracked_player(self):
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+            pub = self._future_wrap_mock(_pub)
+            pub.side_effect = {
+                'player_ref': 'pl0',
+                'name': 'db name',
+                'published_plugin_version': '0.0.1'
+            }
+            # This is the change behind the mocked publish_plugin_to_player method
+            self.player.published_plugin_version = '0.0.1'
+            self.player.save()
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header,
+                method='PUT',
+                body=json.dumps({
+                    'player_ref': 'pl0',
+                    'is_tracked': True
+                }))
+            self.assertEqual(1, pub.call_count)
+
+        player = json.loads(r.body)
+        self.assertEqual(player['name'],'db name', 'Cant change name via PUT')
+        self.assertEqual(player['published_plugin_version'], '0.0.1')
+        #@TODO add publish date mock and assertEqual
+
+    @tornado.testing.gen_test
+    def test_put_untracked_player(self):
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+            pub = self._future_wrap_mock(_pub)
+            pub.side_effect = Exception('shouldnt be called')
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header,
+                method='PUT',
+                body=json.dumps({
+                    'player_ref': 'pl2',
+                    'is_tracked': False
+                }))
+            self.assertEqual(0, pub.call_count)
+
+        player = json.loads(r.body)
+        self.assertEqual(player['player_ref'], 'pl2')
+        self.assertFalse(player['is_tracked'])
+
+
+
+
 
     @tornado.testing.gen_test
     def test_publish_plugin_to_player(self):
@@ -5068,7 +5202,8 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         player_ref = 'A1'
         integration_id = 100
         player = neondata.BrightcovePlayer(
-            player_ref=player_ref, integration_id=integration_id).save()
+            player_ref=player_ref, integration_id=integration_id)
+        player.save()
 
         with patch.multiple(api.brightcove_api.PlayerAPI, get_player_config=DEFAULT,
                             patch_player=DEFAULT, publish_player=DEFAULT) as mocks:

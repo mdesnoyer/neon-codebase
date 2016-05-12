@@ -457,6 +457,9 @@ class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
     player_id = 'BkMO9qa8x'
 
     def setUp(self):
+        if not options.run_tests_on_test_account:
+            raise unittest.SkipTest('Should only be run manually because it '
+                                    'hits Brightcove')
         super(TestPlayerAPIIntegration, self).setUp()
 
     def tearDown(self):

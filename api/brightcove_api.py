@@ -1074,7 +1074,7 @@ class PlayerAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(True)
 
     @tornado.gen.coroutine
-    def get_player(self, player_ref, as_object=False):
+    def get_player(self, player_ref):
         '''Get a single Brightcove player for the given player_ref
 
         Returns either a dictionary or a player object if return_neon_object is True.
@@ -1088,7 +1088,7 @@ class PlayerAPI(BrightcoveOAuth2Session):
         raise tornado.gen.Return(response)
 
     @tornado.gen.coroutine
-    def get_players(self, as_object=False):
+    def get_players(self):
         '''Get all Brightcove players for the instance's publisher id
 
         Returns either a list of dictionary or player object if return_neon_object is True'''
