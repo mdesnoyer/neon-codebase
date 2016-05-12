@@ -56,12 +56,82 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             return super(BrightcoveIntegration, cls).__new__(
                 cls, account_id, platform)
 
+        def get_video_id(self, video):
+        '''override from ovp'''
+        # Get the video id to use to key this video
+        if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
+            video_id = self.get_reference_id(video)
+            if video_id is None:
+                msg = ('No valid reference id in video %s for account %s'
+                       % (video['id'], self.neon_api_key))
+                statemon.state.increment('cant_get_refid')
+                _log.error_n(msg)
+                raise integrations.ovp.OVPRefIDError(msg)
+        elif (self.platform.id_field == 
+              neondata.BrightcoveIntegration.BRIGHTCOVE_ID):
+            video_id = video['id']
+        else:
+            # It's a custom field, so look for it
+            custom_data = self.get_video_custom_data(video)
+            video_id = custom_data.get(self.platform.id_field, None)
+            if video_id is None:
+                msg = ('No valid id in custom field %s in video %s for '
+                       'account %s' %
+                       (self.platform.id_field, video['id'],
+                        self.neon_api_key))
+                _log.error_n(msg)
+                statemon.state.increment('cant_get_custom_id')
+                raise integrations.ovp.OVPCustomRefIDError(msg)
+        return video_id
+
+    def get_video_callback_url(self, video):
+        '''override from ovp'''
+        if self.platform.callback_url:
+            return self.platform.callback_url
+        elif options.bc_servingurl_push_callback_host:
+            return ('http://%s/update_serving_url/%s' %
+                    (options.bc_servingurl_push_callback_host,
+                     self.platform.integration_id))
+        return None
+
+    @staticmethod
+    def get_video_title(video):
+        '''override from ovp'''
+        video_title = video.get('name', '')
+        return unicode(video_title)
+
 class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
         super(CMSAPIIntegration, self).__init__(account_id, platform)
         self.bc_api = brightcove_api.CMSAPI(platform.applicaiton_client_id,
                                             platform.application_client_secret)
         self.neon_api_key = self.account_id = account_id
+
+    def get_reference_id(self, video):
+        return video.get('reference_id')
+
+    def get_video_duration(self, video):
+        return float(video['duration']) / 1000.0
+
+    def get_video_url(self, video):
+        self.bc_api.get_video_sources
+        raise NotImplementedError()
+
+    def get_video_custom_data(self, video):
+        custom_data = video.get('custom_fields', {})
+        custom_data['_bc_int_data'] = {
+            'bc_id': video['id'],
+            'bc_refid': self.get_reference_id(video)
+        }
+        return custom_data
+
+    def get_video_publish_date(self, video):
+        return dateutil.parser.parse(video['publish_at'])
+
+    def get_video_last_modified_date(self, video):
+        return dateutil.parser.parse(video['updated_at'])
+
+    
 
 class MediaAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
@@ -228,53 +298,12 @@ class MediaAPIIntegration(BrightcoveIntegration):
         yield self.submit_playlist_videos()
         yield self.submit_new_videos()
 
-    def get_video_id(self, video):
-        '''override from ovp'''
-        # Get the video id to use to key this video
-        if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
-            video_id = video.get('referenceId', None)
-            if video_id is None:
-                msg = ('No valid reference id in video %s for account %s'
-                       % (video['id'], self.neon_api_key))
-                statemon.state.increment('cant_get_refid')
-                _log.error_n(msg)
-                raise integrations.ovp.OVPRefIDError(msg)
-        elif (self.platform.id_field == 
-              neondata.BrightcoveIntegration.BRIGHTCOVE_ID):
-            video_id = video['id']
-        else:
-            # It's a custom field, so look for it
-            custom_data = self.get_video_custom_data(video)
-            video_id = custom_data.get(self.platform.id_field, None)
-            if video_id is None:
-                msg = ('No valid id in custom field %s in video %s for '
-                       'account %s' %
-                       (self.platform.id_field, video['id'],
-                        self.neon_api_key))
-                _log.error_n(msg)
-                statemon.state.increment('cant_get_custom_id')
-                raise integrations.ovp.OVPCustomRefIDError(msg)
-        return video_id
+    def get_reference_id(self, video):
+        return video.get('referenceId', None)
 
     def get_video_url(self, video):
         '''override from ovp'''
         return self._get_video_url_to_download(video)
-
-    def get_video_callback_url(self, video):
-        '''override from ovp'''
-        if self.platform.callback_url:
-            return self.platform.callback_url
-        elif options.bc_servingurl_push_callback_host:
-            return ('http://%s/update_serving_url/%s' %
-                    (options.bc_servingurl_push_callback_host,
-                     self.platform.integration_id))
-        return None
-
-    @staticmethod
-    def get_video_title(video):
-        '''override from ovp'''
-        video_title = video.get('name', '')
-        return unicode(video_title)
 
     def get_video_custom_data(self, video):
         '''override from ovp'''
