@@ -885,7 +885,6 @@ class CMSAPI(BrightcoveOAuth2Session):
         video_id - The Brightcove video id
 
         '''
-        print video_id
         request = tornado.httpclient.HTTPRequest(
             '{base_url}/accounts/{pub_id}/videos/{video_id}/sources'.format(
                 base_url = CMSAPI.BASE_URL,
