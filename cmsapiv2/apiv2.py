@@ -9,6 +9,7 @@ if sys.path[0] != __base_path__:
 import ast
 import boto
 from cmsdb import neondata
+import concurrent.futures
 from datetime import datetime, timedelta
 import dateutil.parser
 from functools import wraps
@@ -17,6 +18,7 @@ import jwt
 import logging
 import re
 import signal
+import stripe
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
@@ -30,6 +32,7 @@ from utils import statemon
 import utils.neon
 import utils.logs
 import utils.http
+from utils.http import ResponseCode, HTTPVerbs
 import utils.sync
 from utils.options import define, options
 import uuid
@@ -56,27 +59,15 @@ define("access_token_exp", default=720, help="user access token expiration in se
 define("refresh_token_exp", default=1209600, help="user refresh token expiration in seconds", type=int)
 define("verify_token_exp", default=86400, help="account verify token expiration in seconds", type=int)
 define("frontend_base_url",
-       default='https://app.neon-lab.com',
-       help="will default to this if the origin is null",
-       type=str)
+    default='https://app.neon-lab.com',
+    help="will default to this if the origin is null",
+    type=str)
+define("check_subscription_interval", 
+    default=3600, 
+    help="how many seconds in between checking the billing integration", 
+    type=int)
 
-class ResponseCode(object):
-    HTTP_OK = 200
-    HTTP_ACCEPTED = 202
-    HTTP_BAD_REQUEST = 400
-    HTTP_UNAUTHORIZED = 401
-    # should be a 429, but tornado does not like that
-    HTTP_TOO_MANY_REQUESTS = 402
-    HTTP_NOT_FOUND = 404
-    HTTP_CONFLICT = 409
-    HTTP_INTERNAL_SERVER_ERROR = 500
-    HTTP_NOT_IMPLEMENTED = 501
-
-class HTTPVerbs(object):
-    POST = 'POST'
-    PUT = 'PUT'
-    GET = 'GET'
-    DELETE = 'DELETE'
+define("stripe_api_key", default=None, help='The API key we use to talk to stripe.')
 
 class TokenTypes(object):
     ACCESS_TOKEN = 0
@@ -101,20 +92,23 @@ class APIV2Sender(object):
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
     def initialize(self):
+        # stripe stuff 
+        stripe.api_key = options.stripe_api_key
         self.set_header('Content-Type', 'application/json')
         self.uri = self.request.uri
         self.account = None
         self.account_limits = None
         self.origin = self.request.headers.get("Origin") or\
             options.frontend_base_url
+        self.executor = concurrent.futures.ThreadPoolExecutor(5)
+    
+    def set_access_token_information(self): 
+        """Helper function to get the access token 
 
-    def set_access_token_information(self):
-        """Helper function to get the access token
-
-           the key can be in one of three places
-              1) the Authorization header : Authorization: Bearer <token>
-              2) the query string params : &token=meisatoken
-              3) the post body params : as token
+           the key can be in one of three places 
+              1) the Authorization header : Authorization: Bearer <token> 
+              2) the query string params : &token=meisatoken 
+              3) the post body params : as token 
         """
         self.access_token = None
         auth_header = self.request.headers.get('Authorization')
@@ -247,6 +241,79 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             raise NotAuthorizedError('invalid token')
 
         raise tornado.gen.Return(True)
+
+    @tornado.gen.coroutine
+    def check_valid_subscription(request):
+        '''verifies we have a valid subscription and can make this call 
+
+           called in prepare, and will raise an exception if the subscription
+           is not valid for this account  
+        '''
+        if request.account is None:  
+            raise tornado.gen.Return(True)
+
+        # this account isn't billed through this integration (older account) 
+        # just return true 
+        if request.account.billed_elsewhere: 
+            raise tornado.gen.Return(True)
+
+        current_subscription = None 
+
+        acct = request.account
+        subscription_info = acct.subscription_information
+        current_plan_type = subscription_info['plan']['id'] 
+        acct_subscription_status = subscription_info['status']
+
+        # should we check stripe for updated subscription state?
+        if datetime.utcnow() > dateutil.parser.parse(
+             acct.verify_subscription_expiry):
+            try:  
+                stripe_customer = yield request.executor.submit(
+                    stripe.Customer.retrieve, 
+                    acct.billing_provider_ref)
+    
+                # returns the most active subscriptions up to 10 
+                cust_sub_obj = yield request.executor.submit(
+                    stripe_customer.subscriptions.all)
+                cust_subs = cust_sub_obj['data']
+
+            except Exception as e: 
+                _log.error('Unknown error occurred talking to Stripe %s' % e)
+                raise 
+ 
+            for cs in cust_subs:
+                acct_subscription_status = cs.status  
+                if acct_subscription_status in [ 
+                    neondata.SubscriptionState.ACTIVE,
+                    neondata.SubscriptionState.IN_TRIAL ] and\
+                    current_plan_type == cs.plan.id:
+                    # if we find a subscription in active/trial we 
+                    # are good break out of the for loop, and 
+                    # on the current plan type
+                    current_subscription = cs 
+                    break
+                   
+            new_date = (datetime.utcnow() + timedelta(
+                seconds=options.check_subscription_interval)).strftime(
+                    "%Y-%m-%d %H:%M:%S.%f")
+
+            def _modify_account(a):
+                a.verify_subscription_expiry = new_date
+                if current_subscription is None: 
+                    a.subscription_info = cust_subs[0]
+                else: 
+                    a.subscription_info = current_subscription
+
+            yield neondata.NeonUserAccount.modify(
+                acct.neon_api_key,
+                _modify_account, 
+                async=True)  
+
+        if acct_subscription_status in [ neondata.SubscriptionState.ACTIVE, 
+               neondata.SubscriptionState.IN_TRIAL ]:
+            raise tornado.gen.Return(True)
+
+        raise TooManyRequestsError('Your subscription is not valid') 
 
     @tornado.gen.coroutine
     def check_account_limits(request, limit_list):
@@ -418,15 +485,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            }
            this would then do videos_posted < videos_posted_max in prepare
               check the timer (refresh if necessary, reset if necessary)
-              on_finish will increase the values, if we successfully served
-                 the request
-        '''
+              on_finish will increase the values, if we successfully served 
+                 the request 
+        ''' 
         return None
 
-    def get_special_functions(self):
-        return []
-
-    @tornado.gen.coroutine
+    def get_special_functions(self): 
+        return []   
+ 
+    @tornado.gen.coroutine 
     def prepare(self):
         access_level_dict = self.get_access_levels()
         yield self.set_account()
@@ -453,9 +520,16 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             try:
                 yield self.check_account_limits(
                     limits_dict[self.request.method])
-            except KeyError:
+            except KeyError: 
                 pass
 
+        try: 
+            sub_required = access_level_dict['subscription_required']
+            if self.request.method in sub_required: 
+                yield self.check_valid_subscription() 
+        except KeyError:
+            pass  
+ 
     @tornado.gen.coroutine
     def on_finish(self):
         yield self._handle_limit_inc_dec()
@@ -590,10 +664,13 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         passthrough_fields = set(cls._get_passthrough_fields())
 
         for field in fields:
-            if field in passthrough_fields:
-                retval[field] = getattr(obj, field)
-            else:
-                retval[field] = yield cls._convert_special_field(obj, field)
+            try: 
+                if field in passthrough_fields:
+                    retval[field] = getattr(obj, field)
+                else:
+                    retval[field] = yield cls._convert_special_field(obj, field)
+            except AttributeError: 
+                pass 
         raise tornado.gen.Return(retval)
 
     @classmethod
@@ -729,7 +806,9 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Dictionary():
         def f(v):
-            if isinstance(ast.literal_eval(v), dict):
+            if type(v) is dict:
+                return v
+            elif isinstance(ast.literal_eval(v), dict):
                 return ast.literal_eval(v)
             else:
                 raise Invalid("not a dictionary")

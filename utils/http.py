@@ -30,13 +30,37 @@ _log = logging.getLogger(__name__)
 statemon.state.define('waiting_in_pools', int)
 _waiting_in_pools_ref = statemon.state.get_ref('waiting_in_pools')
 
+
+class ResponseCode(object):
+    HTTP_OK = 200
+    HTTP_ACCEPTED = 202
+    HTTP_BAD_REQUEST = 400
+    HTTP_UNAUTHORIZED = 401
+    # should be a 429, but tornado does not like that
+    HTTP_TOO_MANY_REQUESTS = 402
+    HTTP_FORBIDDEN = 403
+    HTTP_NOT_FOUND = 404
+    HTTP_CONFLICT = 409
+    HTTP_TOO_MANY_429 = 429
+    HTTP_INTERNAL_SERVER_ERROR = 500
+    HTTP_NOT_IMPLEMENTED = 501
+
+
+class HTTPVerbs(object):
+    POST = 'POST'
+    PUT = 'PUT'
+    GET = 'GET'
+    DELETE = 'DELETE'
+    PATCH = 'PATCH'
+
+
 # TODO(mdesnoyer): Handle the stack on async requests so that the
 # callback will have a stack that looks like the original request
 # being called.
 @utils.sync.optional_sync
 @tornado.gen.coroutine
 def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
-                 no_retry_codes=None):
+                 no_retry_codes=None, retry_forever_codes=None):
     '''Sends an HTTP request with retries
 
     If there was an error, either in the connection, or if the
@@ -49,9 +73,9 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
     ntries - Number of times to try sending the request
     do_logging - True if logging should be turned on
     base_delay - Time in seconds for the first delay on the retry
-    no_retry_codes - A list of http codes that will cause the request to not
-                     retry
-
+    no_retry_codes - List of http codes that cause the request not to retry
+    retry_forever_codes - List of http status code that cause request to retry
+        forever until success (e.g., 429) with backoff
     '''
     # Verify the request url
     parsed = urlparse.urlsplit(unicode(request.url))
@@ -64,10 +88,12 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
             request, 400, error=tornado.httpclient.HTTPError(400, msg)))
 
     no_retry_codes = no_retry_codes or []
-    
+    retry_forever_codes = retry_forever_codes or []
+
     cur_try = 0
     response = None
-    while cur_try < ntries:
+    while cur_try < ntries or (response and response.error and
+                               response.error.code in retry_forever_codes):
         cur_try += 1
         try:
             http_client = tornado.httpclient.AsyncHTTPClient()
