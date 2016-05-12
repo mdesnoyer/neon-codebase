@@ -260,7 +260,7 @@ def sec_to_time(secs):
     s2h = 60 * 60
     h, r = divmod(secs, s2h)
     m, s = divmod(r, s2m)
-    print '%02i:%02i:%02i (hh:mm:ss)' % (h, m, s)
+    return '%02i:%02i:%02i (hh:mm:ss)' % (h, m, s)
 
 class Statistics(object):
     """
@@ -1328,6 +1328,7 @@ class LocalSearcher(object):
         self._searched = 0
         self.done_sampling = False
         self.done_searching = False
+        self._terminate.clear()
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
@@ -1776,7 +1777,7 @@ class LocalSearcher(object):
             frame_score = self.predictor.predict(frames[0])
         with self._proc_lock:
             self.stats['score'].push(frame_score)
-            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
+            _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
             self.search_algo.update(frameno, frame_score)
             # extract all the features we want to cache
             for n, f in self.feats_to_cache.iteritems():
