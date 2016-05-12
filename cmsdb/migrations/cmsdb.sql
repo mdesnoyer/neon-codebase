@@ -44,6 +44,20 @@ CREATE TABLE abstractintegration (
 ALTER TABLE abstractintegration OWNER TO pgadmin;
 
 --
+-- Name: brightcoveplayer; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE brightcoveplayer (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
+
+ALTER TABLE brightcoveplayer OWNER TO pgadmin;
+
+--
 -- Name: abstractplatform; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
@@ -322,6 +336,13 @@ COPY abstractintegration (_data, _type) FROM stdin;
 COPY abstractplatform (_data, _type) FROM stdin;
 \.
 
+--
+-- Data for Name: brightcoveplayer; Type: TABLE DATA; Schema: public; Owner: pgadmin
+--
+
+COPY brightcoveplayer (_data, _type) FROM stdin;
+\.
+
 -- Data for Name: billingplans; Type: TABLE DATA; Schema: public; Owner: pgadmin
 --
 
@@ -454,6 +475,7 @@ COPY videostatus (_data, _type) FROM stdin;
 
 CREATE UNIQUE INDEX abstractplatform_key ON abstractplatform USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX abstractintegration_key ON abstractintegration USING btree (((_data ->> 'key'::text)));
+CREATE UNIQUE INDEX brightcoveplayer_key ON brightcoveplayer USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX cdnhostingmetadatalist_key ON cdnhostingmetadatalist USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX experimentstrategy_key ON experimentstrategy USING btree (((_data ->> 'key'::text)));
 CREATE UNIQUE INDEX accountlimits_key ON accountlimits USING btree (((_data ->> 'key'::text)));
@@ -554,6 +576,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER abstractintegration_update_updated_time_trig 
 BEFORE UPDATE 
 ON abstractintegration
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
+
+CREATE TRIGGER brightcoveplayer_update_updated_time_trig 
+BEFORE UPDATE 
+ON brightcoveplayer
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
 
 CREATE TRIGGER billingplans_update_updated_time_trig 
