@@ -121,18 +121,17 @@ class MCMH(object):
                 # add it to the search queue
                 est = (self._get_score(sf) + self._get_score(sf + 1)) * 0.5
                 self._search_queue.put((-est, sf))
-                _log.debug('Obtained new search region: %i to %i' % (sf, sf + 1))
         if frameno > self._first:
             if self._scored[sf - 1]:
                 # then you can search it!
                 # add it to the search queue
                 est = (self._get_score(sf - 1) + self._get_score(sf)) * 0.5
                 self._search_queue.put((-est, sf - 1))
-                _log.debug('Obtained new search region: %i to %i' % (sf - 1, sf))
         insort(self._srt_scores, score)
         self._tot += score
         self._n += 1
         self.n_samples += 1
+        _log.debug('Sampling %.1f%% complete', self.n_samples * 100. / self.max_samps)
 
     def get_search(self):
         '''

@@ -188,6 +188,8 @@ statemon.define('video_processing_error', int)
 statemon.define('low_number_of_frames_seen', int)
 statemon.define('unable_to_score_frame', int)
 statemon.define('frame_score_attempt_limit_reached', int)
+statemon.define('sampling_problem', int)
+statemon.define('searching_problem', int)
 
 define("text_model_path", 
        default=os.path.join(__base_path__, 'cvutils', 'data'), 
@@ -242,11 +244,21 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     return lambda x: Z + (L / (1 + np.exp(-k * (x - x0))))
 
 
+# utilities
 def memcheck():
     pvused = psutil.virtual_memory().percent
     psused = psutil.swap_memory().percent
     _log.debug('VMem Used: %.2f, Swap Used: %.2f', pvused, psused)
 
+
+def sec_to_time(secs):
+    secs = 60*60*3 + 60*27 + 26.3
+    secs = int(secs)
+    s2m = 60
+    s2h = 60 * 60
+    h, r = divmod(secs, s2h)
+    m, s = divmod(r, s2m)
+    print '%02i:%02i:%02i (hh:mm:ss)' % (h, m, s)
 
 class Statistics(object):
     """
@@ -1465,8 +1477,6 @@ class LocalSearcher(object):
         self._terminate.set()
         for t in threads:
             t.join()
-        raw_results = self.results.get_results()
-        # format it into the expected format
         try:
             perc_samp = self.search_algo.n_samples * 100. / self.search_algo.max_samps
             _log.info('%.2f%% of video sampled' % perc_samp)
@@ -1479,6 +1489,11 @@ class LocalSearcher(object):
         except Exception, e:
             _log.info('Unknown percentage of video searched')
             _log.debug('Exception: %s', e.message)
+        _log.info('Total running time: %s, expected: %s', 
+                  sec_to_time(time() - start_time),
+                  max_processing_time)
+        raw_results = self.results.get_results()
+        # format it into the expected format
         results = []
         if not len(raw_results):
             _log.debug('No suitable frames have been found for video %s!'
@@ -1539,15 +1554,14 @@ class LocalSearcher(object):
                     break
             req_type, args = item
             if req_type == 'samp':
-                _log.debug('Worker %s taking sample', workerno)
                 try:
                     with self._act_lock: self._active_samples += 1
                     self._take_sample(*(args,))
                     with self._act_lock: self._active_samples -= 1
                 except Exception, e:
                     _log.warn('Problem sampling frame %i: %s', args, e.message)
+                    statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
-                _log.debug('Worker %s performing search', workerno)
                 try:
                     with self._act_lock: self._active_searches += 1
                     self._conduct_local_search(*args)
@@ -1557,6 +1571,7 @@ class LocalSearcher(object):
                     stop = args[2]
                     _log.warn('Problem local searching %i <---> %i: %s', 
                         start, stop, e.message)
+                    statemon.state.increment('searching_problem')
 
     def _get_score(self, frame, frameno=None, numretry=1, timeout=10.):
         '''
@@ -1639,9 +1654,10 @@ class LocalSearcher(object):
                 accepted = f.filter(feats)
                 n_rej = np.sum(np.logical_not(accepted))
                 n_acc = np.sum(accepted)
-                _log.debug(('Filter for feature %s has '
-                            'has rejected %i frames, %i remain' % (
-                                f.feature, n_rej, n_acc)))
+                if np.any(np.logical_not(accepted)):
+                    _log.debug(('Filter for feature %s has '
+                                'has rejected %i frames, %i remain' % (
+                                    f.feature, n_rej, n_acc)))
                 if not np.any(accepted):
                     _log.debug('No frames accepted by filters')
                     return
@@ -1758,7 +1774,7 @@ class LocalSearcher(object):
             frame_score = self.predictor.predict(frames[0])
         with self._proc_lock:
             self.stats['score'].push(frame_score)
-            _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
+            _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 20)
             self.search_algo.update(frameno, frame_score)
             # extract all the features we want to cache
             for n, f in self.feats_to_cache.iteritems():
@@ -1780,16 +1796,13 @@ class LocalSearcher(object):
                 frameno = self.search_algo.get_sample()
                 if frameno is not None:
                     # then there are still samples to be taken
-                    _log.debug('Acquired sample %i', frameno)
                     self._inq.put(('samp', frameno))
-                    _log.debug('Sample %i placed in queue', frameno)
                 else:
                     self.done_sampling = True
                     _log.info('Finished sampling')
             return
         if ((not self.done_sampling) and 
             (np.random.rand() < self.explore_coef)):
-            _log.debug('Taking sample.')
             frameno = self.search_algo.get_sample()
             if frameno is not None:
                 # then there are still samples to be taken
@@ -1799,7 +1812,6 @@ class LocalSearcher(object):
                 self.done_sampling = True
                 _log.info('Finished sampling')
         # okay, let's get a search frame instead.
-        _log.debug('Performing search')
         srch_info = self.search_algo.get_search()
         if srch_info is None:
             if self.done_sampling:
