@@ -1420,11 +1420,14 @@ class VideoHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(self):
-        return {
-                 HTTPVerbs.GET: neondata.AccessLevels.READ,
-                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-                 'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT]
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
+                 'account_required'  : [HTTPVerbs.GET, 
+                                        HTTPVerbs.PUT,
+                                        HTTPVerbs.POST],
+                 'subscription_required' : [HTTPVerbs.POST]  
                }
 
     @classmethod

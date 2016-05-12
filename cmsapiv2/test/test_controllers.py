@@ -4174,10 +4174,8 @@ class TestAccountLimitsHandler(TestControllersBase):
         yield limits.save(async=True)
 
         url = '/api/v2/%s/limits' % (self.user.neon_api_key)
-        params = {'account_id': 'test'}
         response = yield self.http_client.fetch(self.get_url(url),
-                                                method="GET",
-                                                body=params)
+                                                method="GET")
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_posts'], 0)
