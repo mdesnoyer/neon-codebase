@@ -8,8 +8,6 @@ if sys.path[0] != __base_path__:
 
 import api.brightcove_api
 from apiv2 import *
-import calendar
-import time 
 
 _log = logging.getLogger(__name__)
 
@@ -620,10 +618,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
             if videos and len(videos) is not 0: 
                 video = videos[0]
-                rv = float(calendar.timegm(dateutil.parser.parse(
-                    video['updated_at']).timetuple()))
+                rv = video['updated_at'] 
             else: 
-                rv = float(calendar.timegm(time.gmtime()))
+                rv = datetime.utcnow().strftime(
+                    '%Y-%m-%dT%H:%M:%SZ')
         except (api.brightcove_api.BrightcoveApiServerError, 
                 api.brightcove_api.BrightcoveApiClientError,
                 api.brightcove_api.BrightcoveApiNotAuthorizedError, 
