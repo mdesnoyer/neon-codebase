@@ -197,7 +197,8 @@ class MCMH(object):
         if i != len(self._scores) and self._scores[i][0] == sf:
             sf, score = self._scores[i]
             return score
-        raise ValueError
+        _log.exception('Could not locate score for search frame %i' % sf)
+        raise ValueError('Could not locate the score for %i' % sf)
 
     def _interp_score(self, sf):
         '''

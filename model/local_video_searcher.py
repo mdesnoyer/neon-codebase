@@ -190,6 +190,8 @@ statemon.define('unable_to_score_frame', int)
 statemon.define('frame_score_attempt_limit_reached', int)
 statemon.define('sampling_problem', int)
 statemon.define('searching_problem', int)
+statemon.define('mcmh_sample_error', int)
+statemon.define('mcmh_search_error', int)
 
 define("text_model_path", 
        default=os.path.join(__base_path__, 'cvutils', 'data'), 
@@ -1793,7 +1795,12 @@ class LocalSearcher(object):
         if force_sample: 
             _log.debug('Taking sample [Forced]')
             if not self.done_sampling:
-                frameno = self.search_algo.get_sample()
+                try:
+                    frameno = self.search_algo.get_sample()
+                except Exception, e:
+                    _log.error('ERROR in getting sample from MCMH! %s', e.message)
+                    statemon.state.increment('mcmh_sample_error')
+                    return
                 if frameno is not None:
                     # then there are still samples to be taken
                     self._inq.put(('samp', frameno))
@@ -1803,7 +1810,12 @@ class LocalSearcher(object):
             return
         if ((not self.done_sampling) and 
             (np.random.rand() < self.explore_coef)):
-            frameno = self.search_algo.get_sample()
+            try:
+                frameno = self.search_algo.get_sample()
+            except Exception, e:
+                _log.error('ERROR in getting sample from MCMH! %s', e.message)
+                statemon.state.increment('mcmh_sample_error')
+                return
             if frameno is not None:
                 # then there are still samples to be taken
                 self._inq.put(('samp', frameno))
@@ -1812,7 +1824,12 @@ class LocalSearcher(object):
                 self.done_sampling = True
                 _log.info('Finished sampling')
         # okay, let's get a search frame instead.
-        srch_info = self.search_algo.get_search()
+        try:
+            srch_info = self.search_algo.get_search()
+        except Exception, e:
+            _log.error('ERROR getting search region from MCMH! %s', e.message)
+            statemon.state.increment('mcmh_search_error')
+            return
         if srch_info is None:
             if self.done_sampling:
                 self.done_searching = True
