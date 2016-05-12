@@ -121,14 +121,18 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         statemon.state.define_and_increment(
             'submit_video_bc_error.%s' % self.account_id)
 
+    def does_video_exist(self, video_meta, video_ref): 
+        return video_meta is not None
+ 
 class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
         super(CMSAPIIntegration, self).__init__(account_id, platform)
         self.bc_api = brightcove_api.CMSAPI(
             platform.publisher_id,
-            platform.applicaiton_client_id,
+            platform.application_client_id,
             platform.application_client_secret)
         self.neon_api_key = self.account_id = account_id
+        self.cur_video_sources = None
 
     def get_reference_id(self, video):
         return video.get('reference_id')
@@ -138,13 +142,12 @@ class CMSAPIIntegration(BrightcoveIntegration):
 
     def get_video_url(self, video):
         video_srcs = []  # (width, encoding_rate, url)
-        sources = self.bc_api.get_video_sources(video['id'])
-        for source in sources: 
+        for source in self.cur_video_sources: 
             src = source.get('src', None)
             if src is not None:
                 video_srcs.append((
-                    (source['width'] or -1),
-                    (source['encoding_rate'] or -1),
+                    (source.get('width',-1)),
+                    (source.get('encoding_rate',-1)),
                     src))
             
         if len(video_srcs) < 1:
@@ -153,14 +156,14 @@ class CMSAPIIntegration(BrightcoveIntegration):
 
         if self.platform.rendition_frame_width:
             # Get the highest encoding rate at a size closest to this width
-            video_urls = sorted(
-                video_urls, key=lambda x:
+            video_srcs = sorted(
+                video_srcs, key=lambda x:
                 (abs(x[0] - self.platform.rendition_frame_width),
                 -x[1]))
         else:
             # return the max width rendition with the highest encoding rate
-            video_urls = sorted(video_urls, key=lambda x: (-x[0], -x[1]))
-        return video_urls[0][2]
+            video_srcs = sorted(video_srcs, key=lambda x: (-x[0], -x[1]))
+        return video_srcs[0][2]
 
     def get_video_custom_data(self, video):
         custom_data = video.get('custom_fields', {})
@@ -175,7 +178,7 @@ class CMSAPIIntegration(BrightcoveIntegration):
         yield self.submit_new_videos()
 
     def get_video_publish_date(self, video):
-        return video['publish_at']
+        return video['published_at']
 
     def get_video_last_modified_date(self, video):
         return video['updated_at']
@@ -209,8 +212,7 @@ class CMSAPIIntegration(BrightcoveIntegration):
         # at the moment, just get the most recent 30 vids
         videos = yield self.bc_api.get_videos(
             limit=30,
-            q='updated_at:%' % from_date_str)
-        
+            q='updated_at:%s' % from_date_str)
         self.video_iter = iter(videos)
 
     @tornado.gen.coroutine
@@ -218,6 +220,8 @@ class CMSAPIIntegration(BrightcoveIntegration):
         video = None
         try:
             video = self.video_iter.next()
+            self.cur_video_sources = yield self.bc_api.get_video_sources(
+                video['id'])
         except StopIteration:
             video = StopIteration('hacky')
 
@@ -561,9 +565,6 @@ class MediaAPIIntegration(BrightcoveIntegration):
             rv = True
         return rv
 
-    def does_video_exist(self, video_meta, video_ref): 
-        return video_meta is not None 
-        
     @staticmethod
     def _get_best_image_info(data):
         '''Returns the (url, {image_struct}) of the best image in the
