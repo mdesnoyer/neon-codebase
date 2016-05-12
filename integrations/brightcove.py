@@ -56,7 +56,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             return super(BrightcoveIntegration, cls).__new__(
                 cls, account_id, platform)
 
-        def get_video_id(self, video):
+    def get_video_id(self, video):
         '''override from ovp'''
         # Get the video id to use to key this video
         if self.platform.id_field == neondata.BrightcoveIntegration.REFERENCE_ID:
@@ -103,8 +103,10 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
         super(CMSAPIIntegration, self).__init__(account_id, platform)
-        self.bc_api = brightcove_api.CMSAPI(platform.applicaiton_client_id,
-                                            platform.application_client_secret)
+        self.bc_api = brightcove_api.CMSAPI(
+            platform.publisher_id,
+            platform.applicaiton_client_id,
+            platform.application_client_secret)
         self.neon_api_key = self.account_id = account_id
 
     def get_reference_id(self, video):
@@ -114,8 +116,30 @@ class CMSAPIIntegration(BrightcoveIntegration):
         return float(video['duration']) / 1000.0
 
     def get_video_url(self, video):
-        self.bc_api.get_video_sources
-        raise NotImplementedError()
+        video_srcs = []  # (width, encoding_rate, url)
+        sources = self.bc_api.get_video_sources(video['id'])
+        for source in sources: 
+            src = source.get('src', None)
+            if src is not None:
+                video_srcs.append((
+                    (src['width'] or -1),
+                    (src['encoding_rate'] or -1),
+                    src))
+            
+        if len(video_srcs) < 1:
+            _log.error("Could not find url to download : %s" % video)
+            return None
+
+        if self.platform.rendition_frame_width:
+            # Get the highest encoding rate at a size closest to this width
+            video_urls = sorted(
+                video_urls, key=lambda x:
+                (abs(x[0] - self.platform.rendition_frame_width),
+                -x[1]))
+        else:
+            # return the max width rendition with the highest encoding rate
+            video_urls = sorted(video_urls, key=lambda x: (-x[0], -x[1]))
+        return video_urls[0][2]
 
     def get_video_custom_data(self, video):
         custom_data = video.get('custom_fields', {})
@@ -125,13 +149,80 @@ class CMSAPIIntegration(BrightcoveIntegration):
         }
         return custom_data
 
+    @tornado.gen.coroutine
+    def process_publisher_stream(self):
+        yield self.submit_new_videos()
+
     def get_video_publish_date(self, video):
-        return dateutil.parser.parse(video['publish_at'])
+        return video['publish_at']
 
     def get_video_last_modified_date(self, video):
-        return dateutil.parser.parse(video['updated_at'])
+        return video['updated_at']
 
-    
+    def get_video_thumbnail_info(self, video):
+        """get the poster image if its available 
+             if not grab the thumbnail
+             else return None
+
+        """
+        images = video.get('images', None) 
+        if not images: 
+            _log.error('Unable to find images for video %s' % video)
+            return None 
+ 
+        thumb_url = None 
+        thumb_ref = None
+ 
+        poster_image = images.get('poster', None) 
+        thumbnail_image = images.get('thumbnail', None) 
+
+        if poster_image: 
+            thumb_ref = poster_image.get('asset_id', None) 
+            thumb_url = poster_image.get('src', None) 
+        elif thumbnail_image:
+            thumb_ref = thumbnail_image.get('asset_id', None)
+            thumb_url = thumbnail_image.get('src', None)
+        
+        if not thumb_ref or not thumb_url: 
+            _log.warning('Unable to find image info for video %s' % video)
+        else: 
+            thumb_ref = unicode(thumb_ref)
+
+        return {'thumb_url': thumb_url,
+                'thumb_ref': thumb_ref}
+
+    @tornado.gen.coroutine
+    def set_video_iter(self):
+        from_date_str = datetime.datetime.now().strftime(
+            '%Y-%m-%dT%H:%M:%SZ')
+        if (self.platform.last_process_date is not None): 
+            from_date_str = self.platform.last_process_date
+
+        # possible TODO, this could use the feed iterator 
+        # and help catch up videos faster, however in our 
+        # new limits based implementation this isn't necessary
+        # at the moment, just get the most recent 30 vids
+        videos = yield self.bc_api.get_videos(
+            limit=30,
+            q='updated_at:%' % from_date_str)
+        
+        self.video_iter = iter(videos)
+
+    @tornado.gen.coroutine
+    def get_next_video_item(self):
+        video = None
+        try:
+            video = self.video_iter.next()
+        except StopIteration:
+            video = StopIteration('hacky')
+
+        raise tornado.gen.Return(video)
+
+    @tornado.gen.coroutine
+    def submit_new_videos(self):
+        '''Submits new videos in the account.'''
+        yield self.set_video_iter()
+        yield self.submit_ovp_videos(self.get_next_video_item)
 
 class MediaAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
