@@ -2546,6 +2546,33 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         integrations = yield so.get_integrations(async=True)
         self.assertEquals(len(integrations), 0)  
 
+class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        BasePGNormalObject.keys = [('dynamic', 'key')]
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
+
+    @classmethod
+    def _get_object_type(cls):
+        return neondata.BrightcovePlayer
+
+    @tornado.testing.gen_test
+    def test_play_player_playing(self):
+        self.assertEqual(True, True)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

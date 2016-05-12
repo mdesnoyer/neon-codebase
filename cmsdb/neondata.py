@@ -4342,9 +4342,13 @@ class BrightcoveIntegration(AbstractIntegration):
         self.read_token = rtoken
         self.write_token = wtoken
 
-        # The application settings allow the publisher to grant
-        # Neon access via OAuth2 to the BC Player Management API
-        # These are made in the API access page in Video Cloud.
+        # Configure Brightcove OAuth2, if publisher uses this feature
+        # In the Brightcove Cloud 
+        self.application_client_id = application_client_id
+        self.application_client_secret = application_client_secret
+
+        #The publish date of the last processed video - UTC timestamp seconds
+        self.last_process_date = last_process_date
         self.application_client_id = application_client_id
         self.application_client_secret = application_client_secret
 
@@ -4364,10 +4368,8 @@ class BrightcoveIntegration(AbstractIntegration):
         # videos. http://support.brightcove.com/en/video-cloud/docs/finding-videos-have-changed-media-api
         self.uses_batch_provisioning = uses_batch_provisioning
 
-        # Configuration for the Video.js player event tracking plugin
         # The more Neon knows about how the publisher's images are placed
         # on the page, the more accurately we can capture tracking info.
-
         # Does publisher use BC's CMS to manage their video thumbnails
         self.uses_bc_thumbnail_api = uses_bc_thumbnail_api
         # Does publisher use BC's player based on html5 library named video.js
@@ -4389,6 +4391,7 @@ class BrightcoveIntegration(AbstractIntegration):
 
         # Amount of times we have retried a video submit
         self.video_submit_retries = video_submit_retries
+
 
     @classmethod
     def get_ovp(cls):
@@ -5168,6 +5171,58 @@ class NeonApiRequest(NamespacedStoredObject):
                     x.response = response.to_dict()
             yield tornado.gen.Task(self.modify, self.job_id, self.api_key,
                                    _mod_obj)
+
+class BrightcovePlayer(NamespacedStoredObject):
+    '''
+    Brightcove Player model
+    '''
+    def __init__(self, player_ref, integration_id=None,
+                 name=None, is_tracked=None, publish_date=None,
+                 published_plugin_version=None, last_attempt_result=None):
+
+        super(BrightcovePlayer, self).__init__(player_ref)
+
+        # The Brightcove ID for the player
+        self.player_ref = player_ref
+        # The Neon integration that has this player
+        self.integration_id = integration_id
+        # Set if publisher needs the Neon event tracking plugin published to this
+        self.is_tracked = is_tracked
+        # Descriptive name of the player
+        self.name = name
+
+        # Properties to track publishing:
+        self.publish_date = publish_date
+        # Version is an increasing integer
+        self.published_plugin_version = published_plugin_version
+        # Descriptive string of last failed attempt to publish.
+        # Set to None when last attempt was successful
+        self.last_attempt_result = last_attempt_result
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_players(cls, integration_id):
+        '''Get all players associated to the integration'''
+
+        rv = []
+        results = yield self.get_and_execute_select_query(
+                    [ "_data",
+                      "_type",
+                      "created_time AS created_time_pg",
+                      "updated_time AS updated_time_pg"],
+                    "_data->>'integration_id' = '%s' ",
+                    table_name='brightcoveplayer',
+                    wc_params=[integration_id])
+        for result in results:
+            player = self._create(result['_data']['key'], result)
+            rv.append(player)
+        raise tornado.gen.Return(rv)
+
+    @classmethod
+    def _baseclass_name(cls):
+        return BrightcovePlayer.__name__
+
 
 class BrightcoveApiRequest(NeonApiRequest):
     '''
