@@ -10,11 +10,13 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
+import cmsapiv2.client
 from cmsdb import neondata
 import datetime
 from integrations.exceptions import IntegrationError
 import json
 import logging
+import re
 import tornado.gen
 import utils.http
 from utils.inputsanitizer import InputSanitizer
@@ -38,6 +40,9 @@ define('max_vids_for_new_account', default=100,
 define('cmsapi_host', default='services.neon-lab.com',
        help='Host where the cmsapi is')
 define('cmsapi_port', default=80, type=int, help='Port where the cmsapi is')
+
+define("cmsapi_user", default=None, help='User to make api requests with')
+define("cmsapi_pass", default=None, help='Password for the cmsapi user')
 
 _log = logging.getLogger(__name__)
 
@@ -285,49 +290,47 @@ class OVPIntegration(object):
         json returned by the CMSAPI
         '''
         body = {
-            'video_id': video_id,
-            'video_url': video_url,
-            'video_title': video_title,
-            'default_thumbnail': default_thumbnail,
-            'external_thumbnail_id': external_thumbnail_id,
+            'external_video_ref': video_id,
+            'url': video_url,
+            'title': video_title,
+            'default_thumbnail_url': default_thumbnail,
+            'thumbnail_ref': external_thumbnail_id,
             'callback_url': callback_url,
             'custom_data': custom_data,
             'duration': duration,
             'publish_date': publish_date
         }
-        headers = {"X-Neon-API-Key": self.neon_api_key,
-                   "Content-Type": "application/json"}
-        url = ('http://%s:%s/api/v1/accounts/%s/neon_integrations/%s/'
-               'create_thumbnail_api_request') % (
-                   options.cmsapi_host,
-                   options.cmsapi_port,
-                   self.account_id,
-                   self.platform.integration_id)
-        request = tornado.httpclient.HTTPRequest(
-            url=url,
-            method='POST',
+        headers = {"Content-Type": "application/json"}
+
+        url = '/api/v2/%s/videos' % ( 
+            self.account_id)
+ 
+        req = tornado.httpclient.HTTPRequest(
+            url, 
+            method='POST', 
             headers=headers,
-            body=json.dumps(body),
-            request_timeout=300.0,
-            connect_timeout=30.0)
+            body=json.dumps(dict((k, v) 
+                for k, v in body.iteritems() if v or v is 0)))
 
-        response = yield tornado.gen.Task(utils.http.send_request, request,
-                                          base_delay=4.0, ntries=2)
+        client = cmsapiv2.client.Client(
+            options.cmsapi_user,
+            options.cmsapi_pass)
 
-        if response.code == 409:
-            _log.warn('Video %s for account %s already exists' %
-                      (video_id, self.neon_api_key))
-            raise tornado.gen.Return(json.loads(response.body))
-        elif response.error is not None:
-            statemon.state.increment('job_submission_error')
-            _log.error('Error submitting video %s: %s' % (video_id,
-                                                          response.error))
-            raise CMSAPIError('Error submitting video: %s' % response.error)
+        res = yield client.send_request(req, no_retry_codes=[409], ntries=3)
+        if res.error: 
+            if res.error.code == 409:
+                _log.warn('Video %s for account %s already exists' %
+                    (video_id, self.neon_api_key))
+                raise tornado.gen.Return(json.loads(res.body))
+            else: 
+                statemon.state.increment('job_submission_error')
+                _log.error('Error submitting video: %s' % res.error)
+                raise CMSAPIError(str(res.error))
 
         _log.info('New video was submitted for account %s video id %s'
                   % (self.neon_api_key, video_id))
         statemon.state.increment('new_job_submitted')
-        raise tornado.gen.Return(json.loads(response.body))
+        raise tornado.gen.Return(json.loads(res.body))
 
     @tornado.gen.coroutine
     def _update_video_info(self, data, video_id, job_id):

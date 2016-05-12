@@ -55,15 +55,9 @@ class BrightcoveApiError(IOError): pass
 class BrightcoveApiClientError(BrightcoveApiError): pass
 class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 class BrightcoveApiServerError(BrightcoveApiError): pass
-class BrightcoveApiNotAuthorizedError(BrightcoveApiClientError): pass
 
 DEFAULT_IMAGE_SIZES = {
-    'thumbnail' : (120, 90),
-    'poster' : (480, 360)
-}
-
-DEFAULT_IMAGE_SIZES = {
-    'thumbnail' : (120, 90),
+    'thumbnail' : (160, 90),
     'poster' : (480, 360)
 }
 
@@ -88,7 +82,7 @@ class BrightcoveApi(object):
         self.read_token = read_token
         self.write_token = write_token
 
-        self.THUMB_SIZE = 120, 90
+        self.THUMB_SIZE = 160, 90
         self.STILL_SIZE = 480, 360
 
     ###### Brightcove media api update method ##########
@@ -883,6 +877,38 @@ class CMSAPI(BrightcoveOAuth2Session):
                 pub_id = self.publisher_id,
                 video_id = video_id))
             
+        response = yield self._send_request(request)
+
+        raise tornado.gen.Return(response)
+
+    @tornado.gen.coroutine
+    def get_videos(self,
+                   limit=None,
+                   offset=None,
+                   q=None,
+                   sort=None):
+
+        query_string_dict = {}
+        query_string = ""
+
+        if limit:
+            query_string_dict['limit'] = limit
+        if offset:
+            query_string_dict['offset'] = offset
+        if q:
+            query_string_dict['q'] = q
+        if sort:
+            query_string_dict['sort'] = sort
+
+        if query_string_dict:
+            query_string = '?%s' % urllib.urlencode(query_string_dict)
+
+        request = tornado.httpclient.HTTPRequest(
+            '{base_url}/accounts/{pub_id}/videos{query_string}'.format(
+                base_url = CMSAPI.BASE_URL,
+                pub_id = self.publisher_id,
+                query_string = query_string))
+
         response = yield self._send_request(request)
 
         raise tornado.gen.Return(response)
