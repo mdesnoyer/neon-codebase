@@ -1734,7 +1734,7 @@ class LocalSearcher(object):
                         self.combiner.get_indy_funcs(best_feat_dict)]
             else:
                 meta = None
-            memcheck()
+            # memcheck()
             self._proc_lock.notify()
         if self.predictor.async:
             indi_framescore = self._get_score(best_frame, 
