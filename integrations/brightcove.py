@@ -40,13 +40,37 @@ _log = logging.getLogger(__name__)
 
 
 class BrightcoveIntegration(integrations.ovp.OVPIntegration):
+    def __new__(cls, account_id, platform):
+        # Figure out if we have permissions to talk to the media api
+        # or the cms api and build the correct object as a result
+        if cls is BrightcoveIntegration:
+            if (platform.application_client_id is not None and 
+                platform.application_client_secret is not None):
+                return super(BrightcoveIntegration, cls).__new__(
+                    CMSAPIIntegration)
+            else:
+                return super(BrightcoveIntegration, cls).__new__(
+                    MediaAPIIntegration)
+            raise ValueError('No valid authentication tokens found')
+        else:
+            return super(BrightcoveIntegration, cls).__new__(
+                cls, account_id, platform)
+
+class CMSAPIIntegration(BrightcoveIntegration):
     def __init__(self, account_id, platform):
-        super(BrightcoveIntegration, self).__init__(account_id, platform)
+        super(CMSAPIIntegration, self).__init__(account_id, platform)
+        self.bc_api = brightcove_api.CMSAPI(platform.applicaiton_client_id,
+                                            platform.application_client_secret)
+        self.neon_api_key = self.account_id = account_id
+
+class MediaAPIIntegration(BrightcoveIntegration):
+    def __init__(self, account_id, platform):
+        super(MediaAPIIntegration, self).__init__(account_id, platform)
         self.bc_api = brightcove_api.BrightcoveApi(
             account_id, self.platform.publisher_id,
             self.platform.read_token, self.platform.write_token)
         self.skip_old_videos = False
-        self.neon_api_key = self.account_id = account_id 
+        self.neon_api_key = self.account_id = account_id
 
     @staticmethod
     def get_submit_video_fields():
@@ -129,7 +153,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
         try:
             bc_video_info = yield self.bc_api.find_videos_by_ids(
                 ovp_video_ids,
-                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                video_fields=self.get_submit_video_fields(),
                 custom_fields=self.get_custom_fields(),
                 async=True)
         except brightcove_api.BrightcoveApiServerError as e:
@@ -169,7 +193,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
             try:
                 cur_results = yield self.bc_api.find_playlist_by_id(
                     playlist_id,
-                    video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                    video_fields=self.get_submit_video_fields(),
                     playlist_fields=['id', 'videos'],
                     custom_fields=self.get_custom_fields(),
                     async=True)
@@ -300,7 +324,7 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
                 _filter=['UNSCHEDULED', 'INACTIVE', 'PLAYABLE'],
                 sort_by='MODIFIED_DATE',
                 sort_order='ASC',
-                video_fields=BrightcoveIntegration.get_submit_video_fields(),
+                video_fields=self.get_submit_video_fields(),
                 custom_fields=self.get_custom_fields())
 
     def set_video_iter_with_videos(self, videos):
@@ -352,41 +376,6 @@ class BrightcoveIntegration(integrations.ovp.OVPIntegration):
 
     def does_video_exist(self, video_meta, video_ref): 
         return video_meta is not None 
-
-    @tornado.gen.coroutine
-    def _update_video_info(self, data, bc_video_id, job_id):
-        '''Update information in the database about the video.
-
-        Inputs:
-        data - A video object from Brightcove
-        bc_video_id - The brightcove video id
-        '''
-
-        # Get the data that could be updated
-        video_id = neondata.InternalVideoID.generate(
-            self.neon_api_key, bc_video_id)
-        publish_date = data.get('publishedDate', None)
-        if publish_date is not None:
-            publish_date = datetime.datetime.utcfromtimestamp(
-                int(publish_date) / 1000.0).isoformat()
-        video_title = data.get('name', '')
-
-        # Update the video object
-        def _update_publish_date(x):
-            x.publish_date = publish_date
-            x.job_id = job_id
-        yield tornado.gen.Task(
-            neondata.VideoMetadata.modify,
-            video_id,
-            _update_publish_date)
-
-        # Update the request object
-        def _update_request(x):
-            x.publish_date = publish_date
-            x.video_title = video_title
-        yield tornado.gen.Task(
-            neondata.NeonApiRequest.modify,
-            job_id, self.neon_api_key, _update_request)
         
     @staticmethod
     def _get_best_image_info(data):

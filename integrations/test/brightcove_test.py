@@ -1146,28 +1146,27 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
         self.platform = neondata.BrightcoveIntegration.modify(
             self.platform.integration_id, _set_last_processed, create_missing=True)
         self.integration.platform.video_submit_retries = 0
-        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
-        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
-        submit_video_mock.side_effect = Exception('blah') 
+        with patch('integrations.ovp.OVPIntegration.submit_video') as submit_video_mocker:
+            submit_video_mock = self._future_wrap_mock(submit_video_mocker)
+            submit_video_mock.side_effect = Exception('blah') 
 
-        video_obj = { 'id' : 'v1',
-              'length' : 100,
-              'FLVURL' : 'http://video.mp4',
-              'lastModifiedDate' : 1420080400000,
-              'name' : 'Some Video',
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : 'my_still_ref',
-                  'remoteUrl' : None
-                  },
-            }
-        self.mock_find_videos.side_effect = [[video_obj],[]]
-        yield self.integration.submit_new_videos()
-        bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
-        self.assertEquals(bp.last_process_date, 1410012300)
-        self.assertEquals(bp.video_submit_retries, 1)
-        submit_video_mocker.stop()
+            video_obj = { 'id' : 'v1',
+                  'length' : 100,
+                  'FLVURL' : 'http://video.mp4',
+                  'lastModifiedDate' : 1420080400000,
+                  'name' : 'Some Video',
+                  'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                  'videoStill' : {
+                      'id' : 'still_id',
+                      'referenceId' : 'my_still_ref',
+                      'remoteUrl' : None
+                      },
+                }
+            self.mock_find_videos.side_effect = [[video_obj],[]]
+            yield self.integration.submit_new_videos()
+            bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
+            self.assertEquals(bp.last_process_date, 1410012300)
+            self.assertEquals(bp.video_submit_retries, 1)
 
     @tornado.testing.gen_test
     def test_bc_submit_video_retry_two(self): 
@@ -1179,28 +1178,27 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             _set_last_processed, 
             create_missing=True)
         self.integration.platform.video_submit_retries = 1
-        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
-        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
-        submit_video_mock.side_effect = Exception('blah') 
+        with patch('integrations.ovp.OVPIntegration.submit_video') as submit_video_mocker:
+            submit_video_mock = self._future_wrap_mock(submit_video_mocker)
+            submit_video_mock.side_effect = Exception('blah') 
 
-        video_obj = { 'id' : 'v1',
-              'length' : 100,
-              'FLVURL' : 'http://video.mp4',
-              'lastModifiedDate' : 1420080400000,
-              'name' : 'Some Video',
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : 'my_still_ref',
-                  'remoteUrl' : None
-                  },
-            }
-        self.mock_find_videos.side_effect = [[video_obj],[]]
-        yield self.integration.submit_new_videos()
-        bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
-        self.assertEquals(bp.last_process_date, 1410012300)
-        self.assertEquals(bp.video_submit_retries, 2)
-        submit_video_mocker.stop()
+            video_obj = { 'id' : 'v1',
+                  'length' : 100,
+                  'FLVURL' : 'http://video.mp4',
+                  'lastModifiedDate' : 1420080400000,
+                  'name' : 'Some Video',
+                  'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                  'videoStill' : {
+                      'id' : 'still_id',
+                      'referenceId' : 'my_still_ref',
+                      'remoteUrl' : None
+                      },
+                }
+            self.mock_find_videos.side_effect = [[video_obj],[]]
+            yield self.integration.submit_new_videos()
+            bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
+            self.assertEquals(bp.last_process_date, 1410012300)
+            self.assertEquals(bp.video_submit_retries, 2)
 
     @tornado.testing.gen_test
     def test_bc_submit_video_retry_max(self): 
@@ -1212,29 +1210,28 @@ class TestSubmitNewVideos(test_utils.neontest.AsyncTestCase):
             _set_last_processed, 
             create_missing=True)
         self.integration.platform.video_submit_retries = 3
-        submit_video_mocker = patch('integrations.ovp.OVPIntegration.submit_video')
-        submit_video_mock = self._future_wrap_mock(submit_video_mocker.start())
-        submit_video_mock.side_effect = Exception('blah') 
+        with patch('integrations.ovp.OVPIntegration.submit_video') as submit_video_mocker:
+            submit_video_mock = self._future_wrap_mock(submit_video_mocker)
+            submit_video_mock.side_effect = Exception('blah') 
 
-        video_obj = { 'id' : 'v1',
-              'length' : 100,
-              'FLVURL' : 'http://video.mp4',
-              'lastModifiedDate' : 1420080400000,
-              'name' : 'Some Video',
-              'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
-              'videoStill' : {
-                  'id' : 'still_id',
-                  'referenceId' : 'my_still_ref',
-                  'remoteUrl' : None
-                  },
-            }
-        # should reset in this case
-        self.mock_find_videos.side_effect = [[video_obj],[]]
-        yield self.integration.submit_new_videos()
-        bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
-        self.assertEquals(bp.last_process_date, 1420080400.000)
-        self.assertEquals(bp.video_submit_retries, 0)
-        submit_video_mocker.stop()
+            video_obj = { 'id' : 'v1',
+                  'length' : 100,
+                  'FLVURL' : 'http://video.mp4',
+                  'lastModifiedDate' : 1420080400000,
+                  'name' : 'Some Video',
+                  'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                  'videoStill' : {
+                      'id' : 'still_id',
+                      'referenceId' : 'my_still_ref',
+                      'remoteUrl' : None
+                      },
+                }
+            # should reset in this case
+            self.mock_find_videos.side_effect = [[video_obj],[]]
+            yield self.integration.submit_new_videos()
+            bp = neondata.BrightcoveIntegration.get(self.platform.integration_id) 
+            self.assertEquals(bp.last_process_date, 1420080400.000)
+            self.assertEquals(bp.video_submit_retries, 0)
         
     @tornado.testing.gen_test
     def test_bc_account_with_custom_last_mod_date_updated(self):
