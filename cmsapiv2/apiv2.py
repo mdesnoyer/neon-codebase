@@ -18,7 +18,7 @@ import jwt
 import logging
 import re
 import signal
-import stripe 
+import stripe
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web

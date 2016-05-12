@@ -16,6 +16,7 @@ import datetime
 from integrations.exceptions import IntegrationError
 import json
 import logging
+import re
 import tornado.gen
 import utils.http
 from utils.inputsanitizer import InputSanitizer
@@ -390,6 +391,13 @@ class OVPIntegration(object):
             return
         ext_thumb_urls = [self._normalize_thumbnail_url(x)
                           for x in self._extract_image_urls(data)]
+
+        # Check if the url is our video serving url. If so, we can
+        # ignore the thumb
+        neon_url_re = re.compile('/neonvid_%s' % 
+                                 neondata.InternalVideoID.VALID_EXTERNAL_REGEX)
+        if any([neon_url_re.search(x) for x in ext_thumb_urls if x]):
+            return
 
         # Get our video and thumbnail metadata objects
         video_meta = yield tornado.gen.Task(

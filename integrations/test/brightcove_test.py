@@ -754,6 +754,39 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
              })
 
     @tornado.testing.gen_test
+    def test_servingurl_push_callback(self):
+        with options._set_bounded(
+                'integrations.brightcove.bc_servingurl_push_callback_host',
+                '10.1.2.3'):
+            job_id = yield self.integration.submit_one_video_object(
+                { 'id' : 123456789,
+                  'referenceId': None,
+                  'name' : 'Some video',
+                  'length' : 100,
+                  'publishedDate' : "1439768747000",
+                  'videoStillURL' : 'http://bc.com/vid_still.jpg?x=5',
+                  'videoStill' : {
+                      'id' : 'still_id',
+                      'referenceId' : None,
+                      'remoteUrl' : None
+                  },
+                  'thumbnailURL' : 'http://bc.com/thumb_still.jpg?x=8',
+                  'thumbnail' : {
+                      'id' : 123456,
+                      'referenceId' : None,
+                      'remoteUrl' : None
+                  },
+                  'FLVURL' : 'http://video.mp4'
+                })
+
+            self.assertIsNotNone(job_id)
+
+            url, submission = self._get_video_submission()
+            self.assertEquals(submission['callback_url'],
+                              'http://10.1.2.3/update_serving_url/%s' %
+                              self.platform.integration_id)
+
+    @tornado.testing.gen_test
     def test_submit_video_using_custom_id_field(self):
         def _set_id_field(x):
             x.id_field = 'mediaapiid'
@@ -1701,12 +1734,12 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
         self.integration.bc_api.find_videos_by_ids = find_videos_mock
         self.mock_get_videos =  self._future_wrap_mock(find_videos_mock)
 
-        super(test_utils.neontest.AsyncTestCase, self).setUp()
+        super(TestSubmitSpecificVideos, self).setUp()
 
     def tearDown(self):
         self.submit_mocker.stop()
         self.postgresql.clear_all_tables() 
-        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+        super(TestSubmitSpecificVideos, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
