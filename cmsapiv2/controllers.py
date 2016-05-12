@@ -451,7 +451,8 @@ class BrightcovePlayerHandler(APIV2Handler):
 
         # Validate request and data
         schema = Schema({
-            Required('integration_id'): Any(str, unicode, Length(min=1, max=256))
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('integration_id'): All(Coerce(str), Length(min=1, max=256))
         })
         args = self.parse_args()
         schema(args)
@@ -504,8 +505,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         # The only field that is set via public api is is_tracked.
         # @TODO fix the Any() below
         schema = Schema({
-            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-            Required('player_ref'): Any(str, unicode, Length(min=1, max=256)),
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('player_ref'): All(Coerce(str), Length(min=1, max=256)),
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
