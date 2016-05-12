@@ -260,7 +260,7 @@ testing = False
 feat_score_weight=0.5
 local_search_width=32
 local_search_step=2
-processing_time_ratio=3.0
+processing_time_ratio=2.0
 adapt_improve=True
 use_best_data=True
 use_all_data=False
@@ -288,10 +288,11 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 from glob import glob
 videos = glob('/home/ubuntu/salesforce/*')
 for video in videos:
+  vn = video.split('/')[-1].split('.')[0]
   vid = cv2.VideoCapture(video)
-  _log.info('Starting Search of %s', video)
-  res = LS.choose_thumbnails(vid, n_thumbs, video_name=video)
-  with open('/tmp/LS_results_%s' % video, 'w') as f:
+  _log.info('Starting Search of %s', vn)
+  res = LS.choose_thumbnails(vid, n_thumbs, video_name=vn)
+  with open('/tmp/LS_results_%s' % vn.replace(' ', '_'), 'w') as f:
     dill.dump(res, f)
 _log.info('Manually disabling predictor')
 predictor.shutdown()
