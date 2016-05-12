@@ -21,6 +21,8 @@ import time
 import threading
 import utils.neon
 import utils.monitor
+from boto.emr import EmrConnection
+from boto.ec2 import EC2Connection
 
 import logging
 _log = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ define("cluster_type", default="video_click_stats",
        help="Name of the EMR cluster to use")
 define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
-define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned/",
+define("cleaned_output_path", default="mnt/cleaned",
        help="Base path where the cleaned logs will be output")
 define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
@@ -87,9 +89,23 @@ class BatchProcessManager(threading.Thread):
             # Run the job
             _log.info('Running batch process.')
             try:
-                cleaned_output_path = "%s/%s" % (
-                    options.cleaned_output_path,
-                    time.strftime("%Y-%m-%d-%H-%M"))
+                # Build the output hdfs path string
+                # If HDFS Hostname could not be resolved, fall back to S3 output
+
+                hdfs_path = ' '
+                hdfs_path = 'hdfs://%s:9000' % self.get_master_ip()
+
+                if hdfs_path = ' '
+                    cleaned_output_path = "%s/%s" % (
+                        's3://neon-tracker-logs-v2/cleaned',
+                        time.strftime("%Y-%m-%d-%H-%M"))
+                    _log.info('Output of clean up job goes to %s',cleaned_output_path)
+                else:
+                    cleaned_output_path = "%s/%s/%s" % (
+                        hdfs_path,
+                        options.cleaned_output_path,
+                        time.strftime("%Y-%m-%d-%H-%M"))
+                    _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
@@ -143,6 +159,40 @@ class BatchProcessManager(threading.Thread):
                     self.n_task_instances -= 1
 
             self._ready_to_run.wait()
+
+    def get_master_ip(self):
+
+        #Gets the master ip address of the running cluster
+        
+        conn = EmrConnection()
+        ec2conn = EC2Connection()
+
+        self.private_ip = ' '
+
+        cluster_list = conn.list_clusters(cluster_states=['WAITING'])
+        clusterids = []
+
+        for cl in cluster_list.clusters:
+            clusterids.append(cl.id)
+
+        for cluster_in_my_list in clusterids:
+
+            cluster_details = conn.describe_cluster(cluster_in_my_list)
+            this_is_primary = [i.value for i in cluster_details.tags if i.value == 'primary']
+
+            if this_is_primary and cluster_details.tags[1].value == options.cluster_type:
+                instance_gps = conn.list_instance_groups(cluster_in_my_list)
+
+                for i in instance_gps.instancegroups:
+
+                    if i.instancegrouptype == 'MASTER':
+                        instance_gp_id = i.id
+                        mstr_instances = conn.list_instances(cluster_in_my_list,instance_group_id=instance_gp_id)
+
+                        for j in mstr_instances.instances:
+                            private_ip =  j.privateipaddress
+        
+        return private_ip
 
     def stop(self):
         self._stopped.set()

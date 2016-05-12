@@ -374,6 +374,7 @@ class Cluster():
                     _log.info('Map reduce job %s complete. Results: %s' % 
                               (main_class, 
                                json.dumps(data, indent=4, sort_keys=True)))
+                    self.checkpoint_hdfs_to_s3(output_path,cluster_id)
                     return
                 elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
                     msg = ('Map reduce job %s failed: %s' %
@@ -901,8 +902,7 @@ class Cluster():
         #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'} 
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-74c10003'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
@@ -961,6 +961,43 @@ class Cluster():
         avg_price = total_cost / (timestamps[-1] - timestamps[0]) * 3600.0
         cur_price = prices[-1]
         return cur_price, avg_price
+
+    def checkpoint_hdfs_to_s3(self,hdfs_path_to_copy,clusterid):
+        #Does checkpoint of hdfs data from mapreduce output to S3.
+
+        emrconn = boto.emr.EmrConnection()
+        name_step = 's3distcp'
+        jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
+
+        s3_path = 's3://neon-tracker-logs-v2/cleaned/'+hdfs_path_to_copy[13:]
+        
+        step_arg = []
+        step_arg.append('--src')
+        step_arg.append(hdfs_path_to_copy)
+        step_arg.append('--dest')
+        step_arg.append(s3_path)
+
+        _log.info('Copying data from %s to %s' % (hdfs_path_to_copy,s3_path))
+
+        step = boto.emr.step.JarStep(name=name_step,
+                                     jar=jar_location,
+                                     step_args=step_arg,
+                                     action_on_failure='CONTINUE')
+
+        jobid = emrconn.add_jobflow_steps(clusterid, [step])
+        step_id = jobid.stepids[0].value
+
+        step_status = emrconn.describe_step(clusterid,step_id).status.state
+
+        while (emrconn.describe_step(cluster_id,step_id).status.state in ['RUNNING','PENDING']):
+            time.sleep(120)
+
+        job_state = emrconn.describe_step(clusterid,step_id).status.state
+
+        if (job_state == 'COMPLETED'):
+            _log.info('S3 copy to path %s was successful' % s3_path)
+        else:
+            _log.info('S3 copy to path %s was unsuccessful' % s3_path)
             
 
 class ClusterSSHConnection:
