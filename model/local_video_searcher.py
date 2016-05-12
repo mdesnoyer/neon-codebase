@@ -254,7 +254,6 @@ def memcheck():
 
 
 def sec_to_time(secs):
-    secs = 60*60*3 + 60*27 + 26.3
     secs = int(secs)
     s2m = 60
     s2h = 60 * 60
@@ -1494,7 +1493,7 @@ class LocalSearcher(object):
             _log.debug('Exception: %s', e.message)
         _log.info('Total running time: %s, expected: %s', 
                   sec_to_time(time() - start_time),
-                  max_processing_time)
+                  sec_to_time(max_processing_time))
         raw_results = self.results.get_results()
         # format it into the expected format
         results = []
