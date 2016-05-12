@@ -370,6 +370,11 @@ class TestUpdateImages(test_utils.neontest.AsyncTestCase):
         self.http_writer_patcher.stop()
         super(TestUpdateImages, self).tearDown()
 
+    @tornado.testing.gen_test
+    def test_add_remote_image(self):
+        pass
+        
+
     # TODO(mdesnoyer): Write update image tests. That'll take a little time
  
 class TestCMSAPI(test_utils.neontest.AsyncTestCase):

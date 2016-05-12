@@ -20,6 +20,7 @@ import json
 import logging
 import signal
 import tornado.gen
+import tornado.httpserver
 import tornado.web
 import urllib
 import urlparse
