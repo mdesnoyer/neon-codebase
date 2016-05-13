@@ -609,7 +609,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             if isinstance(exception, stripe.error.CardError):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
-                self.set_status(exception.code)
+
+                if exception.http_status: 
+                    try: 
+                        self.set_status(exception.http_status)
+                    except ValueError: 
+                        self._status_code = exception.http_status
+                        self._reason = exception.message 
+                else: 
+                    self.set_status(ResponseCode.HTTP_PAYMENT_REQUIRED)
 
             self.error(get_exc_message(exception), code=self.get_status())
 
