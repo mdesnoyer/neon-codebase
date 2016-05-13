@@ -103,14 +103,14 @@ class BatchProcessManager(threading.Thread):
                 else:
                     cleaned_output_path = "%s/%s/%s" % (
                         hdfs_path,
-                        options.cleaned_output_path,
+                        'mnt/cleaned',
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path,
+                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/2016/*',
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
