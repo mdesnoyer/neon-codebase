@@ -524,7 +524,9 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Get or create db record
         player = yield neondata.BrightcovePlayer.get(ref, async=True)
         if not player:
-            player = neondata.BrightcovePlayer(ref)
+            player = neondata.BrightcovePlayer(
+                ref,
+                integration_id=integration.integration_id)
             yield player.save(async=True)
 
         # Update with put, as well as bc's current name of player
