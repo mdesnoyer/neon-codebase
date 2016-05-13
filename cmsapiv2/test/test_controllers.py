@@ -4936,6 +4936,29 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'not known')
 
     @tornado.testing.gen_test
+    def test_post_billing_subscription_bad_card_error_different_status(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.CardError(
+                    'not known', 'test', 402, http_status=433) ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 433)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'not known')
+
+    @tornado.testing.gen_test
     def test_post_billing_subscription_retrieve_exception(self):
         so = neondata.NeonUserAccount('kevinacct')
         so.billing_provider_ref = '123' 
