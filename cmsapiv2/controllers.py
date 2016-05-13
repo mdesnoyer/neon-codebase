@@ -2388,10 +2388,7 @@ class BillingSubscriptionHandler(APIV2Handler):
 TelemetrySnippetHandler : class responsible for creating the telemetry snippet
    HTTP Verbs     : get
 *********************************************************************'''
-class TelemetrySnippetHandler(tornado.web.RequestHandler): 
-    def __init__(self): 
-        super(TelemetrySnippetHandler, self).__init__()
-
+class TelemetrySnippetHandler(APIV2Handler): 
     @tornado.gen.coroutine
     def get(self, account_id):
         '''Generates a telemetry snippet for a given account'''
@@ -2403,8 +2400,11 @@ class TelemetrySnippetHandler(tornado.web.RequestHandler):
         args['account_id'] = account_id_api_key = str(account_id)
         data = schema(args)
 
+        if self.account is None:
+            raise NotFoundError('Unknown Account Id')
+
         # Find out if there is a Gallery integration
-        integrations = yield self.account.get_platforms(async=True)
+        integrations = yield self.account.get_integrations(async=True)
 
         using_gallery = any([x.uses_bc_gallery for x in integrations if 
                              isinstance(x, neondata.BrightcoveIntegration)])
@@ -2415,9 +2415,9 @@ class TelemetrySnippetHandler(tornado.web.RequestHandler):
                 '<!-- Neon -->',
                 '<script>',
                 "  var neonPublisherId = '{tai}';",
-                "  var neonBrightcoveGallery = True;",
+                "  var neonBrightcoveGallery = true;",
                 '</script>',
-                "<script src='//neon-cdn-assets.s3.amazonaws.com/neonoptimizer_dixon.js'></script>',",
+                "<script src='//cdn.neon-lab.com/neonoptimizer_dixon.js'></script>',",
                 '<!-- Neon -->'
                 )
         else:
@@ -2426,14 +2426,22 @@ class TelemetrySnippetHandler(tornado.web.RequestHandler):
                 '<script id="neon">',
                 "  var neonPublisherId = '{tai}';",
                 '  !function(e,n,t,o,s)',
-                '  {o=e.createElement(n),s=e.getElementsByTagName(n)[0],o.async=1,o.src=t,s.parentNode.insertBefore(o,s)}',
-                '  (document,"script","//neon-cdn-assets.s3.amazonaws.com/neonoptimizer_dixon.js");'
+                '  {{o=e.createElement(n),s=e.getElementsByTagName(n)[0],o.async=1,o.src=t,s.parentNode.insertBefore(o,s)}}',
+                '  (document,"script","//cdn.neon-lab.com/neonoptimizer_dixon.js");'
                 '</script>'
                 '<!-- Neon -->'
                 )
 
+        self.set_header('Content-Type', 'text/plain')
         self.success('\n'.join(template).format(
             tai=self.account.tracker_account_id))
+
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.GET] 
+               }
 
 '''*********************************************************************
 Endpoints
@@ -2467,7 +2475,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet?$', TelemetrySnippetHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 
