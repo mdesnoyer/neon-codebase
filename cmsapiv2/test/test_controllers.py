@@ -1248,11 +1248,16 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration(self):
         read_token = 'readtoken' 
-        url = '/api/v2/%s/integrations/brightcove?integration_id=%s&read_token=%s' % (self.account_id_api_key, self.test_i_id, read_token)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT', 
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/integrations/brightcove?'\
+              'integration_id=%s&read_token=%s' % (
+                  self.account_id_api_key, 
+                  self.test_i_id, 
+                  read_token)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT', 
+            allow_nonstandard_methods=True)
 
         self.assertEquals(response.code, 200)
         platform = yield tornado.gen.Task(neondata.BrightcoveIntegration.get, 
@@ -1637,10 +1642,18 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                              'application_client_secret': 'another secret'})
 
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body=params,
-                                                method='PUT',
-                                                headers=header)
+        with patch('api.brightcove_api.CMSAPI') as gvp:
+            gvp.return_value.get_videos = MagicMock()
+            get_videos_mock = self._future_wrap_mock(
+                gvp.return_value.get_videos)  
+            get_videos_mock.return_value = [
+                {'updated_at': '2015-04-20T21:18:32.351Z'}]
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params,
+                method='PUT',
+                headers=header)
+
         self.assertEqual(response.code, 200)
         rjson = json.loads(response.body)
         platform = yield neondata.BrightcoveIntegration.get(
@@ -4900,6 +4913,29 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'not known')
 
     @tornado.testing.gen_test
+    def test_post_billing_subscription_bad_card_error(self):
+        so = neondata.NeonUserAccount('kevinacct')
+        so.billing_provider_ref = '123' 
+        yield so.save(async=True)
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/billing/subscription' % so.neon_api_key
+        params = json.dumps({'plan_type' : 'pro_monthly'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr:
+                sr.side_effect = [ stripe.error.CardError(
+                    'not known', 'test', 402) ]
+                yield self.http_client.fetch(self.get_url(url), 
+                     body=params, 
+                     method='POST', 
+                     headers=header)
+
+        self.assertEquals(e.exception.code, 402)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(
+            rjson['error']['message'],
+            'not known')
+
+    @tornado.testing.gen_test
     def test_post_billing_subscription_retrieve_exception(self):
         so = neondata.NeonUserAccount('kevinacct')
         so.billing_provider_ref = '123' 
@@ -4965,7 +5001,7 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         acct_limits = yield neondata.AccountLimits.get(
             so.neon_api_key,
             async=True)
-
+        
         bp = yield neondata.BillingPlans.get(
             'pro_monthly', 
             async=True)
@@ -4994,13 +5030,28 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             'subscriptions': {
                 'object': 'list',
                 'url': 'localhost',
-            }
+            },
+            'sources' : { 
+                'object' : 'list', 
+                "data": [
+                {
+                    "id": "card_18AYHJBbJLCvOlUnloCk6f5k"
+                }, 
+                {
+                    "id": "card_18AYHJBbJLCvOlUnloCk6f5k"
+                }
+                ] 
+            } 
         }, 'api_key')
         sub_return = stripe.Subscription()
         sub_return.status = 'active'
         sub_return.plan = stripe.Plan(id='pro_monthly')
         with patch('cmsapiv2.apiv2.stripe.Customer.retrieve') as sr,\
              patch('cmsapiv2.apiv2.stripe.Subscription.delete') as sd:
+            sr.return_value.sources.all.return_value = \
+                cust_return.sources['data']
+            for rv in sr.return_value.sources.all.return_value:
+                rv.delete = MagicMock()
             sr.return_value.subscriptions.all.return_value = { 'data' : [] } 
             sr.return_value.subscriptions.create.return_value = sub_return
             sd.delete.return_value = True
@@ -5013,9 +5064,9 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         acct = yield neondata.NeonUserAccount.get(
             so.neon_api_key,   
             async=True)
-        self.assertTrue(current_time < dateutil.parser.parse(
-            acct.verify_subscription_expiry))
-        self.assertEquals(acct.billing_provider_ref, '123')
+        self.assertEquals(acct.subscription_information, None)
+        self.assertEquals(acct.billed_elsewhere, True)
+        self.assertEquals(acct.serving_enabled, False)
         acct_limits = yield neondata.AccountLimits.get(
             so.neon_api_key,
             async=True)
@@ -5075,6 +5126,7 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             acct.verify_subscription_expiry))
         self.assertEquals(acct.billing_provider_ref, '123')
         self.assertEquals(acct.subscription_information['status'], 'active')
+        self.assertEquals(acct.serving_enabled, True)
         self.assertEquals(
             acct.subscription_information['plan']['id'], 
             'pro_yearly')
