@@ -5412,6 +5412,46 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
+    def test_get_no_default_player(self):
+        # TODO factor these header, etc.
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            get = self._future_wrap_mock(_get)
+            default_bc_player = {
+                'accountId': self.publisher_id,
+                'id':'default',
+                'name':'Default Player',
+                'description':'Default Brightcove player.'
+            }
+            get.side_effect = [{
+                'items': [
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl0',
+                        'name':'Neon Tracking Player',
+                        'description':'Neon tracking plugin bundled.'
+                    },
+                    default_bc_player,
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl1',
+                        'name':'Neon Player 2: Neoner',
+                        'description':'Another description.'
+                    },
+                    default_bc_player],
+                'item_count': 2
+            }]
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header)
+        players, count = json.loads(r.body).values()
+        self.assertEqual(players[0]['player_ref'], 'pl0')
+        self.assertEqual(players[1]['player_ref'], 'pl1')
+        self.assertEqual(count, 2)
+
+    @tornado.testing.gen_test
     def test_put_tracked_player(self):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)

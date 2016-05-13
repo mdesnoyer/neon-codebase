@@ -453,7 +453,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Retrieve the list of players from Brightcove api
         bc = api.brightcove_api.PlayerAPI(integration)
         r = yield bc.get_players()
-        players = r.get('items', [])
+        players = [p for p in r.get('items', []) if p['id'] != 'default']
+
         # @TODO batch transform dict-players to object-players
         objects  = yield map(self._bc_to_obj, players)
         ret_list = yield map(self.db2api, objects)
