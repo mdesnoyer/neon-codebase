@@ -5325,6 +5325,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             application_client_id='id',
             application_client_secret='secret')
         self.integration.save()
+        self.api = api.brightcove_api.PlayerAPI(self.integration)
 
         # Mock our user authorization
         self.user = neondata.NeonUserAccount(self.account_id)
@@ -5351,10 +5352,11 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.untracked_player.save()
 
         # Mock bc player get
-        self._get_player = patch('api.brightcove_api.PlayerAPI.get_player')
-        self.get_player = self._future_wrap_mock(self._get_player.start())
+        self.get_player_mocker = patch('api.brightcove_api.PlayerAPI.get_player')
+        self.get_player = self._future_wrap_mock(self.get_player_mocker.start())
 
     def tearDown(self):
+        self.get_player_mocker.stop()
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
         super(TestBrightcovePlayerHandler, self).tearDown()
@@ -5614,6 +5616,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         }
         self.assertEqual(expect, patch)
 
+    @unittest.skip('in progress')
     @tornado.testing.gen_test
     def test_publish_plugin(self):
         bc_player = {
@@ -5628,10 +5631,11 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 }
             }
         }
+        # Look again at this with-patch; maybe a magicmock on the api instance
         with patch('api.brightcove_api.PlayerAPI._send_request') as _send:
             send = self._future_wrap_mock(_send)
             controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.integration)
+                bc_player, self.integration, self.api)
             # Check call arg @TODO
 
         self.assertEqual(1, 1)
