@@ -95,7 +95,7 @@ class BatchProcessManager(threading.Thread):
                 hdfs_path = ' '
                 hdfs_path = 'hdfs://%s:9000' % self.get_master_ip()
 
-                if hdfs_path = ' '
+                if hdfs_path == ' ':
                     cleaned_output_path = "%s/%s" % (
                         's3://neon-tracker-logs-v2/cleaned',
                         time.strftime("%Y-%m-%d-%H-%M"))
