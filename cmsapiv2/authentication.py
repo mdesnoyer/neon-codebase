@@ -328,10 +328,10 @@ class NewAccountHandler(APIV2Handler):
         kwargs['body'] = """<html>
                               <head>
                                 <style>
-                                  p { font-family: 'Roboto', sans-serif; }
-                                  .logo { height: 43.25px; width: 104px; }
-                                  .footer { font-size: small; }
-                                  a { color: #f16122; }
+                                  p {{ font-family: 'Roboto', sans-serif; }}
+                                  .logo {{ height: 43.25px; width: 104px; }}
+                                  .footer {{ font-size: small; }}
+                                  a {{ color: #f16122; }}
                                 </style>
                               </head>
                               <body>
@@ -341,14 +341,20 @@ class NewAccountHandler(APIV2Handler):
                                  alt="Neon">
                                 </a></p>
                                 <br><br>
-                                <p>Hi %s,</p>
+                                <p>Hi {first_name},</p>
                                 <p>Thank you for signing up for Neon for Video. 
                                    You're just a step away from getting more 
                                    value from your videos. First, please verify 
-                                   your account by clicking here: <a href="%s">
-                                   verify your account</a>.</p>
-                                   Text Link : %s 
-                                <p>For your reference, your username is: %s<br>
+                                   your account by clicking here: 
+                                   <a href="{url}">
+                                   verify your account
+                                   </a>.
+                                   If this link does not work please copy 
+                                   and paste the following address into your 
+                                   browser : {url} 
+                                </p>
+                                <p>For your reference, your username is: 
+                                   {username}<br>
                                   <a href="https://app.neon-lab.com/signin">
                                   Login </a> to your account.
                                 </p>
@@ -366,9 +372,10 @@ class NewAccountHandler(APIV2Handler):
                                 <a href="mailto:ask@neon-lab.com">
                                   ask@neon-lab.com</a></p>
                               </body>
-                            </html>""" % (user.first_name, 
-                                click_me_url, click_me_url, 
-                                user.username) 
+                            </html>""".format(
+                                first_name=user.first_name, 
+                                url=click_me_url, 
+                                username=user.username) 
 
                                  
         kwargs['source'] = 'Neon Account Creation <noreply@neon-lab.com>' 
