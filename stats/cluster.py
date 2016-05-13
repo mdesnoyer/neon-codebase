@@ -374,7 +374,7 @@ class Cluster():
                     _log.info('Map reduce job %s complete. Results: %s' % 
                               (main_class, 
                                json.dumps(data, indent=4, sort_keys=True)))
-                    self.checkpoint_hdfs_to_s3(output_path,self.cluster_id)
+                    self.checkpoint_hdfs_to_s3(output_path)
                     return
                 elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
                     msg = ('Map reduce job %s failed: %s' %
@@ -962,7 +962,7 @@ class Cluster():
         cur_price = prices[-1]
         return cur_price, avg_price
 
-    def checkpoint_hdfs_to_s3(self,hdfs_path_to_copy,clusterid):
+    def checkpoint_hdfs_to_s3(self,hdfs_path_to_copy):
         #Does checkpoint of hdfs data from mapreduce output to S3.
 
         emrconn = boto.emr.EmrConnection()
@@ -977,24 +977,24 @@ class Cluster():
         step_arg.append('--dest')
         step_arg.append(s3_path)
 
-        _log.info("Copying data from %s to %s" % (hdfs_path_to_copy,s3_path))
+        _log.info("Copying data from %s to %s in cluster %s" % (hdfs_path_to_copy,s3_path,self.cluster_id))
 
         step = boto.emr.step.JarStep(name=name_step,
                                      jar=jar_location,
                                      step_args=step_arg,
                                      action_on_failure='CONTINUE')
 
-        jobid = emrconn.add_jobflow_steps(self.clusterid, [step])
+        jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
-        step_status = emrconn.describe_step(self.clusterid,step_id).status.state
+        step_status = emrconn.describe_step(self.cluster_id,step_id).status.state
 
-        while (emrconn.describe_step(self.clusterid,step_id).status.state in ['RUNNING','PENDING']):
+        while (emrconn.describe_step(self.cluster_id,step_id).status.state in ['RUNNING','PENDING']):
             time.sleep(120)
 
-        job_state = emrconn.describe_step(self.clusterid,step_id).status.state
+        job_state = emrconn.describe_step(self.cluster_id,step_id).status.state
 
-        if job_state in ['COMPLETED','SUCCEEDED','FINISHED']:
+        if job_state == 'SUCCEEDED':
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
             _log.info("S3 copy to path %s was unsuccessful" % s3_path)
