@@ -518,7 +518,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Verify player_ref is at Brightcove
         bc = api.brightcove_api.PlayerAPI(integration)
         # This will error(404) if player_ref not found
-        bc_player = bc.get_player(ref)
+        bc_player = yield bc.get_player(ref)
 
         # Get or create db record
         player = yield neondata.BrightcovePlayer.get(
