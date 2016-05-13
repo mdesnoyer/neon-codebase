@@ -542,7 +542,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         # because they are likely to be troubleshooting their setup and
         # publishing several times.
         if player.is_tracked:
-            publish_result = yield BrightcovePlayerHelper.publish_plugin_to_player(player)
+            publish_result = yield BrightcovePlayerHelper.publish_plugin(
+                bc_player, integration)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
@@ -580,22 +581,19 @@ class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
     @staticmethod
     @tornado.gen.coroutine
-    def publish_plugin_to_player(player):
+    def publish_plugin(bc_player, integration):
         """Update Brightcove player with current plugin and publishes it'''
 
         Input-
-        player- BrightcovePlayer object
+        bc_player - Brightcove player dict
         """
-        integration = yield neondata.BrightcoveIntegration.get(
-            player.integration_id, async=True)
-        player_ref = player.player_ref
+        player_ref = bc_player['id']
+        player_config = bc_player['branches']['master']['configuration']
 
-        bc = api.brightcove_api.PlayerAPI(integration)
-        # Get the current player configuration from Brightcove
-        player_config = yield api.get_player_config(player_ref)
         # Make the patch json string that will be used to update player
         patch = self._get_plugin_patch(player_config, intregration.account_id)
 
+        bc = api.brightcove_api.PlayerAPI(integration)
         yield bc.patch_player(player_ref, patch)
         yield bc.publish_player(player_ref)
 

@@ -5456,7 +5456,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
@@ -5474,7 +5474,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 }))
             self.assertEqual(1, pub.call_count)
 
-            # This is the change behind the mocked publish_plugin_to_player method
+            # This is the change behind the mocked publish_plugin method
             self.player.published_plugin_version = '0.0.1'
             self.player.save()
 
@@ -5483,7 +5483,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(player['name'], 'new name')
 
         # Try with a new player
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
@@ -5515,7 +5515,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = Exception('shouldnt be called')
             r = yield self.http_client.fetch(
@@ -5532,28 +5532,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         player = json.loads(r.body)
         self.assertEqual(player['player_ref'], 'pl2')
         self.assertFalse(player['is_tracked'])
-
-    @tornado.testing.gen_test
-    def test_publish_plugin_to_player(self):
-
-        player_ref = 'A1'
-        integration_id = 100
-        player = neondata.BrightcovePlayer(
-            player_ref=player_ref, integration_id=integration_id)
-        player.save()
-
-        with patch.multiple(api.brightcove_api.PlayerAPI, get_player_config=DEFAULT,
-                            patch_player=DEFAULT, publish_player=DEFAULT) as mocks:
-
-            get_mock = self._future_wrap_mock(mocks['get_player_config'])
-            get_mock.side_effect = {'bad config': 123}
-            r = controllers.BrightcovePlayerHelper.publish_plugin_to_player(player)
-
-
-            patch_mock = self._future_wrap_mock(mocks['patch_player'])
-            publish_mock = self._future_wrap_mock(mocks['publish_player'])
-
-
 
     @tornado.testing.gen_test
     def test_get_plugin_patch(self):
