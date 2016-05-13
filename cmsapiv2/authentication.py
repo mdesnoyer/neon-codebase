@@ -301,7 +301,7 @@ class NewAccountHandler(APIV2Handler):
  
         yield verifier.save(async=True)
         
-        self.send_email(account.email, verify_token)  
+        self.send_email(account, new_user, verify_token)  
         msg = 'account verification email sent to %s' % account.email
         self.success({'message' : msg})  
             
@@ -312,7 +312,8 @@ class NewAccountHandler(APIV2Handler):
                } 
     
     def send_email(self, 
-                   send_to, 
+                   account,
+                   user,  
                    token): 
         """ Helper to send emails via ses 
 
@@ -321,16 +322,62 @@ class NewAccountHandler(APIV2Handler):
         """ 
         kwargs = {}
         click_me_url = '%s/account/confirm?token=%s' % (self.origin, token) 
-        kwargs['to_addresses'] = send_to 
-        kwargs['subject'] = 'Welcome to Neon' 
+        kwargs['to_addresses'] = account.email 
+        kwargs['subject'] = 'Welcome to Neon for Videos' 
              
-        kwargs['body'] = """<div style='margin-left:15px'><h3>Hi,</h3></div>
-                            <div style='margin-left:25px'>  
-                            Thank you for signing up for Neon. To validate
-                            your email address and sign-in please use the 
-                            link below : <br>
-                            <br>  
-                            <a href=%s>Verify Account</a></div>""" % click_me_url 
+        kwargs['body'] = """<html>
+                              <head>
+                                <style>
+                                  p {{ font-family: 'Roboto', sans-serif; }}
+                                  .logo {{ height: 43.25px; width: 104px; }}
+                                  .footer {{ font-size: small; }}
+                                  a {{ color: #f16122; }}
+                                </style>
+                              </head>
+                              <body>
+                                <p><a href="https://www.neon-lab.com">
+                                <img class="logo" 
+                                 src="https://app.neon-lab.com/img/logo-777.svg" 
+                                 alt="Neon">
+                                </a></p>
+                                <br><br>
+                                <p>Hi {first_name},</p>
+                                <p>Thank you for signing up for Neon for Video. 
+                                   You're just a step away from getting more 
+                                   value from your videos. First, please verify 
+                                   your account by clicking here: 
+                                   <a href="{url}">
+                                   verify your account
+                                   </a>.
+                                   If this link does not work please copy 
+                                   and paste the following address into your 
+                                   browser : {url} 
+                                </p>
+                                <p>For your reference, your username is: 
+                                   {username}<br>
+                                  <a href="https://app.neon-lab.com/signin">
+                                  Login </a> to your account.
+                                </p>
+                                <p>Thanks,<br>
+                                  The Neon Team
+                                </p>
+                                <p>------------</p>
+                                <p class="footer">Neon Labs Inc.<br>
+                                70 South Park St. | San Francisco, CA 94107<br>
+                                (415) 355-4249<br>
+                                <a href="https://www.neon-lab.com">neon-lab.com</a>
+                                </p>
+                                <p class="footer">This is an automated email. 
+                                Please get in touch with use at 
+                                <a href="mailto:ask@neon-lab.com">
+                                  ask@neon-lab.com</a></p>
+                              </body>
+                            </html>""".format(
+                                first_name=user.first_name, 
+                                url=click_me_url, 
+                                username=user.username) 
+
+                                 
         kwargs['source'] = 'Neon Account Creation <noreply@neon-lab.com>' 
         kwargs['reply_addresses'] = 'noreply@neon-lab.com' 
         kwargs['format'] = 'html' 
@@ -339,7 +386,7 @@ class NewAccountHandler(APIV2Handler):
             ses.send_email(**kwargs)
         except Exception as e: 
             _log.error('Failed to Verification Send email to %s exc_info %s' % 
-                (send_to, e))
+                (user.username, e))
             raise Exception('unable to send verification email')
  
         return True 
