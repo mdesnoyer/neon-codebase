@@ -190,9 +190,9 @@ class BatchProcessManager(threading.Thread):
                         mstr_instances = conn.list_instances(cluster_in_my_list,instance_group_id=instance_gp_id)
 
                         for j in mstr_instances.instances:
-                            private_ip =  j.privateipaddress
+                            self.private_ip =  j.privateipaddress
         
-        return private_ip
+        return self.private_ip
 
     def stop(self):
         self._stopped.set()
