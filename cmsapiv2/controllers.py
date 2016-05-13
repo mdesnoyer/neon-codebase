@@ -593,7 +593,7 @@ class BrightcovePlayerHelper():
         # Make the patch json string that will be used to update player
         patch = BrightcovePlayerHelper._get_plugin_patch(
             player_config,
-            intregration.account_id)
+            integration.account_id)
 
         bc = api.brightcove_api.PlayerAPI(integration)
         yield bc.patch_player(player_ref, patch)

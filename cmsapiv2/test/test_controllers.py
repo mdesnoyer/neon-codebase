@@ -5614,6 +5614,27 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         }
         self.assertEqual(expect, patch)
 
+    @tornado.testing.gen_test
+    def test_publish_plugin(self):
+        bc_player = {
+            "accountId": "2294876105001",
+            "branches": {
+                "master": {
+                    "configuration": {
+                        "plugins": [],
+                        "scripts": ["optimizely.js"],
+                        "stylesheets": [],
+                    }
+                }
+            }
+        }
+        with patch('api.brightcove_api.PlayerAPI._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.integration)
+            # Check call arg @TODO
+
+        self.assertEqual(1, 1)
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
