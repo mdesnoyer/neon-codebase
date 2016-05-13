@@ -588,27 +588,25 @@ class BrightcovePlayerHelper():
             player.integration_id, async=True)
         player_ref = player.player_ref
 
-        try:
-            bc = api.brightcove_api.PlayerAPI(integration)
-            # Get the current player configuration from Brightcove
-            player_config = yield api.get_player_config(player_ref)
-            # Make the patch json string that will be used to update player
-            patch = self._get_plugin_patch(player_config, intregration.account_id)
+        bc = api.brightcove_api.PlayerAPI(integration)
+        # Get the current player configuration from Brightcove
+        player_config = yield api.get_player_config(player_ref)
+        # Make the patch json string that will be used to update player
+        patch = self._get_plugin_patch(player_config, intregration.account_id)
 
-            yield bc.patch_player(player_ref, patch)
-            yield bc.publish_player(player_ref)
+        yield bc.patch_player(player_ref, patch)
+        yield bc.publish_player(player_ref)
 
-            # Success. Update the player with the date and version
-            def _modify(p):
-                p.publish_date = datetime.now().isoformat()
-                p.published_plugin_version = self._get_current_tracking_version()
-                p.last_attempt_result = None
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-        except Exception as e:
-            def _modify(p):
-                p.last_attempt_result = e.message
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-            raise e
+        # Success. Update the player with the date and version
+        def _modify(p):
+            p.publish_date = datetime.now().isoformat()
+            p.published_plugin_version = self._get_current_tracking_version()
+            p.last_attempt_result = None
+        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+        #def _modify(p):
+        #    p.last_attempt_result = e.message
+        #yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+        #raise e
 
         raise tornado.gen.Return(True)
 
