@@ -591,7 +591,9 @@ class BrightcovePlayerHelper():
         player_config = bc_player['branches']['master']['configuration']
 
         # Make the patch json string that will be used to update player
-        patch = self._get_plugin_patch(player_config, intregration.account_id)
+        patch = BrightcovePlayerHelper._get_plugin_patch(
+            player_config,
+            intregration.account_id)
 
         bc = api.brightcove_api.PlayerAPI(integration)
         yield bc.patch_player(player_ref, patch)
@@ -600,7 +602,7 @@ class BrightcovePlayerHelper():
         # Success. Update the player with the date and version
         def _modify(p):
             p.publish_date = datetime.now().isoformat()
-            p.published_plugin_version = self._get_current_tracking_version()
+            p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
             p.last_attempt_result = None
         yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
         #def _modify(p):
