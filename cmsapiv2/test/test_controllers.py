@@ -5489,7 +5489,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             self.get_player.side_effect = [{
                 'player_ref': 'pl-new',
                 'name': 'new name'}]
-            # This is the change behind the mocked publish_plugin_to_player method
             r = yield self.http_client.fetch(
                 self.get_url(url),
                 headers=header,
@@ -5504,6 +5503,12 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         player = json.loads(r.body)
         self.assertEqual(player['name'],'new name')
         self.assertTrue(player['is_tracked'])
+        player = yield neondata.BrightcovePlayer.get('pl-new', async=True)
+        self.assertEqual(player.name,'new name')
+        self.assertTrue(player.is_tracked)
+        self.assertEqual(
+            player.integration_id, self.integration.integration_id)
+
 
     @tornado.testing.gen_test
     def test_put_untracked_player(self):
