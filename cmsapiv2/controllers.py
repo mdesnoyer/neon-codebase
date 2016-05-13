@@ -494,32 +494,39 @@ class BrightcovePlayerHandler(APIV2Handler):
         """
 
         # The only field that is set via public api is is_tracked.
-        # @TODO fix the Any() below
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('integration_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('player_ref'): All(Coerce(str), Length(min=1, max=256)),
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
+        ref = args['player_ref']
 
-        player = yield neondata.BrightcovePlayer.get(
-            args['player_ref'], 
-            async=True)
-        if not player:
-            raise NotFoundError(
-                'Player does not exist for reference:%s', 
-                args['player_ref'])
         integration = yield neondata.BrightcoveIntegration.get(
-            player.integration_id, 
+            args['integration_id'],
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s', 
-                args['player_ref'])
+                'BrighcoveIntegration does not exist for integration_id:%s',
+                args['integration_id'])
         if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
+
+        # Verify player_ref is at Brightcove
+        bc = api.brightcove_api.PlayerAPI(integration)
+        # This will error(404) if player_ref not found
+        bc_player = bc.get_player(ref)
+
+        # Get or create db record
+        player = yield neondata.BrightcovePlayer.get(
+            args['player_ref'],
+            async=True)
+        if not player:
+            player = neondata.BrightcovePlayer(ref, name=bc_player['name'])
+            yield player.save(async=True)
 
         # Modify the db if flag changed
         is_tracked = args['is_tracked']
@@ -539,7 +546,7 @@ class BrightcovePlayerHandler(APIV2Handler):
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
-            args['player_ref'], 
+            player.player_ref,
             async=True)
         response = yield self.db2api(player)
         self.success(response)

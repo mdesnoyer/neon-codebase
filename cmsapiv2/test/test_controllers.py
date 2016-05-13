@@ -5429,7 +5429,8 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 method='PUT',
                 body=json.dumps({
                     'player_ref': 'pl0',
-                    'is_tracked': True
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(1, pub.call_count)
 
@@ -5452,7 +5453,8 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 method='PUT',
                 body=json.dumps({
                     'player_ref': 'pl2',
-                    'is_tracked': False
+                    'is_tracked': False,
+                    'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(0, pub.call_count)
 
