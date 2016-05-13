@@ -521,20 +521,17 @@ class BrightcovePlayerHandler(APIV2Handler):
         bc_player = yield bc.get_player(ref)
 
         # Get or create db record
-        player = yield neondata.BrightcovePlayer.get(
-            args['player_ref'],
-            async=True)
+        player = yield neondata.BrightcovePlayer.get(ref, async=True)
         if not player:
-            player = neondata.BrightcovePlayer(ref, name=bc_player['name'])
+            player = neondata.BrightcovePlayer(ref)
             yield player.save(async=True)
 
-        # Modify the db if flag changed
-        is_tracked = args['is_tracked']
-        if player.is_tracked is not is_tracked:
-            def _modify(p):
-                p.is_tracked = is_tracked
-                yield neondata.BrightcovePlayer.modify(
-                    player.player_ref, _modify, async=True)
+        # Update with put, as well as bc's current name of player
+        def _modify(p):
+            p.is_tracked = args['is_tracked']
+            p.name = bc_player['name']
+        player = yield neondata.BrightcovePlayer.modify(
+            player.player_ref, _modify, async=True)
 
         # If the player is tracked, then send a request to Brightcove's
         # CMS Api to put the plugin in the player and publish the player.
