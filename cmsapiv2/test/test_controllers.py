@@ -5616,29 +5616,45 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         }
         self.assertEqual(expect, patch)
 
-    @unittest.skip('in progress')
     @tornado.testing.gen_test
     def test_publish_plugin(self):
         bc_player = {
-            "accountId": "2294876105001",
-            "branches": {
-                "master": {
-                    "configuration": {
-                        "plugins": [],
-                        "scripts": ["optimizely.js"],
-                        "stylesheets": [],
+            'id': 'pl0',
+            'accountId': '2294876105001',
+            'branches': {
+                'master': {
+                    'configuration': {
+                        'plugins': [{
+                            'name': 'current',
+                            'options': {}
+                        }],
+                        'scripts': ['optimizely.js'],
+                        'stylesheets': [],
                     }
                 }
             }
         }
-        # Look again at this with-patch; maybe a magicmock on the api instance
-        with patch('api.brightcove_api.PlayerAPI._send_request') as _send:
-            send = self._future_wrap_mock(_send)
-            controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.integration, self.api)
-            # Check call arg @TODO
 
-        self.assertEqual(1, 1)
+        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
+            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
+
+            patch_mock = self._future_wrap_mock(_patch)
+            publish_mock = self._future_wrap_mock(_publish)
+            yield controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.integration, self.api)
+
+        self.assertEqual(patch_mock.call_count, 1)
+        pid, arg = patch_mock.call_args[0]
+        self.assertIn('optimizely.js', arg['scripts'])
+        our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
+        self.assertIn(our_url, arg['scripts'])
+        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'current'])
+        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'neon'])
+        self.assertNotIn('stylesheets', arg)
+        self.assertEqual(pid, 'pl0')
+
+        self.assertEqual(publish_mock.call_count, 1)
+        self.assertEqual(publish_mock.call_args[0][0], 'pl0')
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
