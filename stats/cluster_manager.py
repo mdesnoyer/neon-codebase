@@ -32,7 +32,7 @@ define("cluster_type", default="video_click_stats",
        help="Name of the EMR cluster to use")
 define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
-define("cleaned_output_path", default="mnt/cleaned",
+define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned",
        help="Base path where the cleaned logs will be output")
 define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
@@ -110,7 +110,7 @@ class BatchProcessManager(threading.Thread):
 
                 if hdfs_host == ' ':
                     cleaned_output_path = "%s/%s" % (
-                        's3://neon-tracker-logs-v2-test/cleaned',
+                        options.cleaned_output_path,
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
                 else:
