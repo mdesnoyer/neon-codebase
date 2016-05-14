@@ -52,7 +52,7 @@ class OVPRefIDError(OVPError): pass
 class OVPCustomRefIDError(OVPError): pass
 class OVPNoValidURL(OVPError): pass
 class CMSAPIError(IntegrationError): pass
-
+class RateLimitError(IntegrationError): pass
 
 class OVPIntegration(object):
     def __init__(self, account_id, platform):
@@ -110,7 +110,10 @@ class OVPIntegration(object):
                     added_jobs += 1 
             except (KeyError, OVPCustomRefIDError, OVPRefIDError):
                 # pass here, we do not have enough to submit 
-                pass 
+                pass
+            except RateLimitError:
+                # just break here, we don't want to update last_processed 
+                break  
             except OVPNoValidURL: 
                 _log.error('Unable to find a valid url for video_id : %s' % \
                     self.get_video_id(video))
@@ -316,12 +319,19 @@ class OVPIntegration(object):
             options.cmsapi_user,
             options.cmsapi_pass)
 
-        res = yield client.send_request(req, no_retry_codes=[409], ntries=3)
+        res = yield client.send_request(
+            req, 
+            no_retry_codes=[402,409,429], 
+            ntries=3)
         if res.error: 
             if res.error.code == 409:
                 _log.warn('Video %s for account %s already exists' %
                     (video_id, self.neon_api_key))
                 raise tornado.gen.Return(json.loads(res.body))
+            elif res.error.code == 402 or res.error.code == 429: 
+                _log.warn('Rate limit for account %s has been met' %
+                    (self.neon_api_key))
+                raise RateLimitError(str(res.error))
             else: 
                 statemon.state.increment('job_submission_error')
                 _log.error('Error submitting video: %s' % res.error)

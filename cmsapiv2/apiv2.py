@@ -333,7 +333,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         # grab the account_limit object for the requests
         acct_limits = yield neondata.AccountLimits.get(
                           request.account_id,
-                          async=True)
+                          async=True, 
+                          log_missing=False)
 
         # limits are not set up for this account, let it
         # slide for now
@@ -576,7 +577,8 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                                   NotFoundError,
                                                   BadRequestError,
                                                   NotImplementedError,
-                                                  TooManyRequestsError]):
+                                                  TooManyRequestsError,
+                                                  stripe.error.CardError]):
             if isinstance(exception, Invalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
@@ -598,10 +600,24 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
 
+            # raise http payment required because 402s freaks tornado
             if isinstance(exception, TooManyRequestsError):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
-                self.set_status(ResponseCode.HTTP_TOO_MANY_REQUESTS)
+                self.set_status(ResponseCode.HTTP_PAYMENT_REQUIRED)
+
+            if isinstance(exception, stripe.error.CardError):
+                statemon.state.increment(ref=_invalid_input_errors_ref,
+                                         safe=False)
+
+                if exception.http_status: 
+                    try: 
+                        self.set_status(exception.http_status)
+                    except ValueError: 
+                        self._status_code = exception.http_status
+                        self._reason = exception.message 
+                else: 
+                    self.set_status(ResponseCode.HTTP_PAYMENT_REQUIRED)
 
             self.error(get_exc_message(exception), code=self.get_status())
 
@@ -766,8 +782,8 @@ class NotAuthorizedError(tornado.web.HTTPError):
 
 class TooManyRequestsError(tornado.web.HTTPError):
     def __init__(self,
-                 msg='not authorized',
-                 code=ResponseCode.HTTP_TOO_MANY_REQUESTS):
+                 msg='you have exceeded your request limit',
+                 code=ResponseCode.HTTP_PAYMENT_REQUIRED):
         self.msg = self.reason = self.log_message = msg
         self.code = self.status_code = code
 

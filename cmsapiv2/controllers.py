@@ -48,7 +48,7 @@ class AccountHandler(APIV2Handler):
         """handles account endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
 
@@ -74,10 +74,10 @@ class AccountHandler(APIV2Handler):
         """handles account endpoint put request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)),
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048))
+          'default_thumbnail_id': All(Coerce(str), Length(min=1, max=2048))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -323,16 +323,18 @@ class OoyalaIntegrationHandler(APIV2Handler):
         Keyword arguments:
         """
         schema = Schema({
-            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             Required('publisher_id') : All(Coerce(str), Length(min=1, max=256)),
-            'api_key': Any(str, unicode, Length(min=1, max=1024)),
-            'api_secret': Any(str, unicode, Length(min=1, max=1024))
+            'api_key': All(Coerce(str), Length(min=1, max=1024)),
+            'api_secret': All(Coerce(str), Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
-        acct = yield tornado.gen.Task(neondata.NeonUserAccount.get, args['account_id'])
+        acct = yield neondata.NeonUserAccount.get( 
+            args['account_id'],
+            async=True)
         integration = yield tornado.gen.Task(
             IntegrationHelper.create_integration, acct, args,
             neondata.IntegrationType.OOYALA)
@@ -345,8 +347,8 @@ class OoyalaIntegrationHandler(APIV2Handler):
         """handles an ooyala endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+          Required('integration_id'): All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -371,11 +373,11 @@ class OoyalaIntegrationHandler(APIV2Handler):
         """handles an ooyala endpoint put request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('integration_id'): Any(str, unicode, Length(min=1, max=256)),
-          'api_key': Any(str, unicode, Length(min=1, max=1024)),
-          'api_secret': Any(str, unicode, Length(min=1, max=1024)),
-          'publisher_id': Any(str, unicode, Length(min=1, max=1024))
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+          Required('integration_id'): All(Coerce(str), Length(min=1, max=256)),
+          'api_key': All(Coerce(str), Length(min=1, max=1024)),
+          'api_secret': All(Coerce(str), Length(min=1, max=1024)),
+          'publisher_id': All(Coerce(str), Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -427,24 +429,6 @@ BrightcovePlayerHandler
 class BrightcovePlayerHandler(APIV2Handler):
     """Handle requests to Brightcove player endpoint"""
 
-    @classmethod
-    def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-            'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
-
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
-                'publish_date', 'published_plugin_version', 'last_attempt_result']
-
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
-                'publish_date', 'published_plugin_version', 'last_attempt_result']
-
     @tornado.gen.coroutine
     def get(self, account_id):
         """Get the list of BrightcovePlayers for the given integration"""
@@ -458,14 +442,19 @@ class BrightcovePlayerHandler(APIV2Handler):
         args['account_id'] = account_id = str(account_id)
         schema(args)
         integration_id = args['integration_id']
-        integration = yield neondata.BrightcoveIntegration.get(integration_id, async=True)
+        integration = yield neondata.BrightcoveIntegration.get(
+            integration_id, 
+            async=True)
         if not integration:
-            raise NotFoundError('BrighcoveIntegration does not exist for player reference:%s', args['player_ref'])
+            raise NotFoundError(
+                'BrighcoveIntegration does not exist for player reference:%s', 
+                args['player_ref'])
 
         # Retrieve the list of players from Brightcove api
         bc = api.brightcove_api.PlayerAPI(integration)
         r = yield bc.get_players()
-        players = r.get('items', [])
+        players = [p for p in r.get('items', []) if p['id'] != 'default']
+
         # @TODO batch transform dict-players to object-players
         objects  = yield map(self._bc_to_obj, players)
         ret_list = yield map(self.db2api, objects)
@@ -485,7 +474,9 @@ class BrightcovePlayerHandler(APIV2Handler):
         '''
         # Get the database record. Expect many to be missing, so don't log
         neon_player = yield neondata.BrightcovePlayer.get(
-            bc_player['id'], async=True, log_missing=False)
+            bc_player['id'], 
+            async=True, 
+            log_missing=False)
         if neon_player:
             # Prefer Brightcove's data since it is potentially newer
             neon_player.name = bc_player['name']
@@ -504,82 +495,112 @@ class BrightcovePlayerHandler(APIV2Handler):
         """
 
         # The only field that is set via public api is is_tracked.
-        # @TODO fix the Any() below
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('integration_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('player_ref'): All(Coerce(str), Length(min=1, max=256)),
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
+        ref = args['player_ref']
 
-        player = yield neondata.BrightcovePlayer.get(args['player_ref'], async=True)
-        if not player:
-            raise NotFoundError('Player does not exist for reference:%s', args['player_ref'])
-        integration = yield neondata.BrightcoveIntegration.get(player.integration_id, async=True)
+        integration = yield neondata.BrightcoveIntegration.get(
+            args['integration_id'],
+            async=True)
         if not integration:
-            raise NotFoundError('BrighcoveIntegration does not exist for player reference:%s', args['player_ref'])
+            raise NotFoundError(
+                'BrighcoveIntegration does not exist for integration_id:%s',
+                args['integration_id'])
         if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
-        # Modify the db if flag changed
-        is_tracked = args['is_tracked']
-        if player.is_tracked is not is_tracked:
-            def _modify(p):
-                p.is_tracked = is_tracked
-                yield neondata.BrightcovePlayer.modify(
-                    player.player_ref, _modify, async=True)
+        # Verify player_ref is at Brightcove
+        bc = api.brightcove_api.PlayerAPI(integration)
+        # This will error (expect 404) if player not found
+        bc_player = yield bc.get_player(ref)
+
+        # Get or create db record
+        def _modify(p):
+            p.is_tracked = args['is_tracked']
+            p.name = bc_player['name'] # BC's name is newer
+            p.integration_id = integration.integration_id
+        player = yield neondata.BrightcovePlayer.modify(
+            ref,
+            _modify,
+            create_missing=True,
+            async=True)
 
         # If the player is tracked, then send a request to Brightcove's
-        # CMS Api to put the plugin in the player and publish the player.
-        # We do this anytime the user calls this API with is_tracked=True
-        # because they are likely to be troubleshooting their setup and
-        # publishing several times.
+        # player managament API to put the plugin in the player
+        # and publish the player.  We do this any time the user calls
+        # this API with is_tracked=True because they are likely to be
+        # troubleshooting their setup and publishing several times.
         if player.is_tracked:
-            publish_result = yield BrightcovePlayerHelper.publish_plugin_to_player(player)
+            publish_result = yield BrightcovePlayerHelper.publish_plugin(
+                bc_player, integration, bc)
 
         # Finally, respond with the current version of the player
-        player = yield neondata.BrightcovePlayer.get(args['player_ref'], async=True)
+        player = yield neondata.BrightcovePlayer.get(
+            player.player_ref,
+            async=True)
         response = yield self.db2api(player)
         self.success(response)
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['player_ref', 'name', 'is_tracked', 
+                'created', 'updated', 'publish_date', 
+                'published_plugin_version', 'last_attempt_result']
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['player_ref', 'name', 'is_tracked', 
+                'created', 'updated',
+                'publish_date', 'published_plugin_version', 
+                'last_attempt_result']
+
+'''*********************************************************************
+BrightcovePlayerHelper
+*********************************************************************'''
 
 class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
     @staticmethod
     @tornado.gen.coroutine
-    def publish_plugin_to_player(player):
+    def publish_plugin(bc_player, integration, bc_api):
         """Update Brightcove player with current plugin and publishes it'''
 
         Input-
-        player- BrightcovePlayer object
+        bc_player - Brightcove player dict
         """
-        integration = yield neondata.BrightcoveIntegration.get(
-            player.integration_id, async=True)
-        player_ref = player.player_ref
+        player_ref = bc_player['id']
+        player_config = bc_player['branches']['master']['configuration']
 
-        try:
-            api = api.brightcove_api.PlayerAPI(integration)
-            # Get the current player configuration from Brightcove
-            player_config = yield api.get_player_config(player_ref)
-            # Make the patch json string that will be used to update player
-            patch = self._get_plugin_patch(player_config, intregration.account_id)
+        # Make the patch json string that will be used to update player
+        patch = BrightcovePlayerHelper._get_plugin_patch(
+            player_config,
+            integration.account_id)
 
-            yield api.patch_player(player_ref, patch)
-            yield api.publish_player(player_ref)
+        yield bc_api.patch_player(player_ref, patch)
+        yield bc_api.publish_player(player_ref)
 
-            # Success. Update the player with the date and version
-            def _modify(p):
-                p.publish_date = datetime.now().isoformat()
-                p.published_plugin_version = self._get_current_tracking_version()
-                p.last_attempt_result = None
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+        # Success. Update the player with the date and version
+        def _modify(p):
+            p.publish_date = datetime.now().isoformat()
+            p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
+            p.last_attempt_result = None
+        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
 
-        except Exception as e:
-            def _modify(p):
-                p.last_attempt_result = e.message
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-            raise e
         raise tornado.gen.Return(True)
 
     @staticmethod
@@ -726,8 +747,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint get request"""
 
         schema = Schema({
-            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('account_id') : All(Coerce(str), 
+                Length(min=1, max=256)),
+            Required('integration_id') : All(Coerce(str), 
+                Length(min=1, max=256)),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
         args = self.parse_args()
@@ -751,14 +774,14 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint put request"""
 
         schema = Schema({
-            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-            Required('integration_id') : Any(str, unicode, Length(min=1, max=256)),
-            'read_token': Any(str, unicode, Length(min=1, max=1024)),
-            'write_token': Any(str, unicode, Length(min=1, max=1024)),
-            'application_client_id': Any(None, str, unicode, Length(min=1, max=1024)),
-            'application_client_secret': Any(None, str, unicode, Length(min=1, max=1024)),
-            'callback_url': Any(str, unicode, Length(min=1, max=1024)),
-            'publisher_id': Any(str, unicode, Length(min=1, max=512)),
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+            Required('integration_id') : All(Coerce(str), Length(min=1, max=256)),
+            'read_token': All(Coerce(str), Length(min=1, max=1024)),
+            'write_token': All(Coerce(str), Length(min=1, max=1024)),
+            'application_client_id': All(Coerce(str), Length(min=1, max=1024)),
+            'application_client_secret': All(Coerce(str), Length(min=1, max=1024)),
+            'callback_url': All(Coerce(str), Length(min=1, max=1024)),
+            'publisher_id': All(Coerce(str), Length(min=1, max=512)),
             'playlist_feed_ids': All(CustomVoluptuousTypes.CommaSeparatedList()),
             'uses_batch_provisioning': Boolean(),
             'uses_bc_thumbnail_api': Boolean(),
@@ -783,6 +806,16 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 app_id, 
                 app_secret,
                 neondata.IntegrationType.BRIGHTCOVE)
+
+            # just run a basic search to see that the creds are ok
+            lpd = yield self._get_last_processed_date(
+                integration.publisher_id,
+                app_id, 
+                app_secret)
+
+            if not lpd: 
+                raise BadRequestError('Brightcove credentials are bad, ' \
+                    'application_id or application_secret are wrong.')  
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
@@ -906,10 +939,10 @@ class ThumbnailHandler(APIV2Handler):
         """handles a thumbnail endpoint post request"""
 
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('url') : Any(str, unicode, Length(min=1, max=2048)),
-          'thumbnail_ref' : Any(str, unicode, Length(min=1, max=1024)) 
+          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('video_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('url') : All(Coerce(str), Length(min=1, max=2048)),
+          'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024)) 
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1371,18 +1404,19 @@ class VideoHandler(APIV2Handler):
     def post(self, account_id):
         """handles a Video endpoint post request"""
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('external_video_ref'): Any(str, unicode, Length(min=1, max=512)),
-          Optional('url'): Any(str, unicode, Length(min=1, max=512)),
-          Optional('reprocess'): Boolean(),
-          'integration_id': Any(str, unicode, Length(min=1, max=256)),
-          'callback_url': Any(str, unicode, Length(min=1, max=512)),
-          'title': Any(str, unicode, Length(min=1, max=1024)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+          Required('external_video_ref'): All(Coerce(str), 
+              Length(min=1, max=512)),
+          'url': All(Coerce(str), Length(min=1, max=512)),
+          'reprocess': Boolean(),
+          'integration_id': All(Coerce(str), Length(min=1, max=256)),
+          'callback_url': All(Coerce(str), Length(min=1, max=512)),
+          'title': All(Coerce(str), Length(min=1, max=1024)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': Any(str, unicode, Length(min=1, max=128)),
-          'thumbnail_ref': Any(str, unicode, Length(min=1, max=512))
+          'default_thumbnail_url': All(Coerce(str), Length(min=1, max=2048)),
+          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args()
@@ -1569,7 +1603,7 @@ class VideoStatsHandler(APIV2Handler):
         """gets the video statuses of 1 -> n videos"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           Required('video_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -1637,7 +1671,7 @@ class ThumbnailStatsHandler(APIV2Handler):
         """
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           Optional('thumbnail_id'): Any(CustomVoluptuousTypes.CommaSeparatedList()),
           Optional('video_id'): Any(CustomVoluptuousTypes.CommaSeparatedList(20)),
           Optional('fields'): Any(CustomVoluptuousTypes.CommaSeparatedList())
@@ -1934,7 +1968,7 @@ class AccountIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -1969,7 +2003,7 @@ class UserHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           Required('username'): All(Coerce(str), Length(min=8, max=64)),
         })
         args = self.parse_args()
@@ -2061,7 +2095,7 @@ class BillingAccountHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('billing_token_ref') : All(
               Coerce(str), 
               Length(min=1, max=512))
@@ -2211,8 +2245,8 @@ class BillingSubscriptionHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
-          Required('plan_type'): Any(Coerce(str), Length(min=1, max=32))
+          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+          Required('plan_type'): All(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -2256,18 +2290,39 @@ class BillingSubscriptionHandler(APIV2Handler):
             if len(cust_subs['data']) > 0:
                 cancel_me = cust_subs['data'][0]
                 yield self.executor.submit(cancel_me.delete)
-          
-            subscription = yield self.executor.submit(
-                customer.subscriptions.create, 
-                plan=plan_type)
-            def _modify_account(a):
-                a.subscription_information = subscription
-                a.verify_subscription_expiry = \
-                  (datetime.utcnow() + timedelta(seconds=3600)).strftime(
-                    "%Y-%m-%d %H:%M:%S.%f")           
+
+            if plan_type == 'demo':
+                subscription = stripe.Subscription(id='canceled') 
+                def _modify_account(a): 
+                    a.subscription_information = None 
+                    a.billed_elsewhere = True
+                    a.billing_provider_ref = None
+                    a.verify_subscription_expiry = None
+                    a.serving_enabled = False 
+                # cancel all the things!
+                cards = yield self.executor.submit( 
+                    customer.sources.all, 
+                    object='card') 
+                for card in cards: 
+                    yield self.executor.submit(card.delete)
+                _log.info('Subscription downgraded for account %s' % 
+                     account.neon_api_key)
+            else: 
+                subscription = yield self.executor.submit(
+                    customer.subscriptions.create, 
+                    plan=plan_type)
+                def _modify_account(a):
+                    a.serving_enabled = True
+                    a.subscription_information = subscription
+                    a.verify_subscription_expiry = \
+                        (datetime.utcnow() + timedelta(
+                        seconds=options.get(
+                        'cmsapiv2.apiv2.check_subscription_interval'))
+                        ).strftime(
+                            "%Y-%m-%d %H:%M:%S.%f")
  
-            _log.info('New subscription created for account %s' % 
-                account.neon_api_key)
+                _log.info('New subscription created for account %s' % 
+                    account.neon_api_key)
 
             yield neondata.NeonUserAccount.modify(
                 account.neon_api_key, 
@@ -2281,7 +2336,9 @@ class BillingSubscriptionHandler(APIV2Handler):
  
             _log.error('Unhandled InvalidRequestError\
                  occurred talking to Stripe %s' % e)
-            raise 
+            raise
+        except stripe.error.CardError as e: 
+            raise  
         except Exception as e:  
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise 

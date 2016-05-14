@@ -249,12 +249,12 @@ class TestCMSAPIPush(BaseTest):
         # Make sure the poster was updated
         self.update_poster_mock.assert_called_with(
             'vid1', 'poster1',
-            'http://neon-images.com/neonvid_vid1.jpg')
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
 
         # Make sure the thumbnail was added
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg')
+            'http://neon-images.com/neonvid_vid1.jpg?width=160&height=90')
 
     @tornado.testing.gen_test
     def test_image_size_found_in_remote_url(self):
