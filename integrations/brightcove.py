@@ -194,7 +194,7 @@ class CMSAPIIntegration(BrightcoveIntegration):
         if not thumb_ref or not thumb_url: 
             _log.warning('Unable to find image info for video %s' % video)
         else: 
-            thumb_ref = unicode(thumb_ref)
+            thumb_ref = unicode(thumb_ref['id'])
 
         return {'thumb_url': thumb_url,
                 'thumb_ref': thumb_ref}
@@ -210,10 +210,19 @@ class CMSAPIIntegration(BrightcoveIntegration):
         # and help catch up videos faster, however in our 
         # new limits based implementation this isn't necessary
         # at the moment, just get the most recent 30 vids
-        videos = yield self.bc_api.get_videos(
-            limit=30,
-            q='updated_at:%s' % from_date_str)
-        self.video_iter = iter(videos)
+        try: 
+            videos = yield self.bc_api.get_videos(
+                limit=30,
+                q='updated_at:%s' % from_date_str)
+            self.video_iter = iter(videos)
+        except (brightcove_api.BrightcoveApiServerError,
+                brightcove_api.BrightcoveApiClientError,
+                brightcove_api.BrightcoveApiNotAuthorizedError,
+                brightcove_api.BrightcoveApiError) as e:
+            _log.error('Brightcove Error occurred trying to get videos : %s' % e)
+            self.video_iter = iter([]) 
+            pass  
+
 
     @tornado.gen.coroutine
     def get_next_video_item(self):
@@ -258,10 +267,11 @@ class CMSAPIIntegration(BrightcoveIntegration):
         
         if not thumb_ref or not thumb_url: 
             _log.warning('Unable to find image info for video %s' % video)
+            return None, {'id': None}
         else: 
             thumb_ref = unicode(thumb_ref)
 
-        return thumb_url, thumb_ref
+        return thumb_url, {'id': thumb_ref} 
  
     @staticmethod
     def _extract_image_field(response, field):
