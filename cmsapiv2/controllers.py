@@ -2451,7 +2451,7 @@ class TelemetrySnippetHandler(APIV2Handler):
         '''Generates a telemetry snippet for a given account'''
 
         schema = Schema({
-            Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
