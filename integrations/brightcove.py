@@ -210,10 +210,19 @@ class CMSAPIIntegration(BrightcoveIntegration):
         # and help catch up videos faster, however in our 
         # new limits based implementation this isn't necessary
         # at the moment, just get the most recent 30 vids
-        videos = yield self.bc_api.get_videos(
-            limit=30,
-            q='updated_at:%s' % from_date_str)
-        self.video_iter = iter(videos)
+        try: 
+            videos = yield self.bc_api.get_videos(
+                limit=30,
+                q='updated_at:%s' % from_date_str)
+            self.video_iter = iter(videos)
+        except (brightcove_api.BrightcoveApiServerError,
+                brightcove_api.BrightcoveApiClientError,
+                brightcove_api.BrightcoveApiNotAuthorizedError,
+                brightcove_api.BrightcoveApiError) as e:
+            _log.error('Brightcove Error occurred trying to get videos : %s' % e)
+            self.video_iter = iter([]) 
+            pass  
+
 
     @tornado.gen.coroutine
     def get_next_video_item(self):
