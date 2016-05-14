@@ -2454,6 +2454,60 @@ class BillingSubscriptionHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+TelemetrySnippetHandler : class responsible for creating the telemetry snippet
+   HTTP Verbs     : get
+*********************************************************************'''
+class TelemetrySnippetHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        '''Generates a telemetry snippet for a given account'''
+
+        schema = Schema({
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+            })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+
+        # Find out if there is a Gallery integration
+        integrations = yield self.account.get_integrations(async=True)
+
+        using_gallery = any([x.uses_bc_gallery for x in integrations if 
+                             isinstance(x, neondata.BrightcoveIntegration)])
+
+        # Build the snippet
+        if using_gallery:
+            template = (
+                '<!-- Neon -->',
+                '<script id="neon">',
+                "  var neonPublisherId = '{tai}';",
+                "  var neonBrightcoveGallery = true;",
+                '</script>',
+                "<script src='//cdn.neon-lab.com/neonoptimizer_dixon.js'></script>',",
+                '<!-- Neon -->'
+                )
+        else:
+            template = (
+                '<!-- Neon -->',
+                '<script id="neon">',
+                "  var neonPublisherId = '{tai}';",
+                '</script>',
+                "<script src='//cdn.neon-lab.com/neonoptimizer_dixon.js'></script>',",
+                '<!-- Neon -->'
+                )
+
+        self.set_header('Content-Type', 'text/plain')
+        self.success('\n'.join(template).format(
+            tai=self.account.tracker_account_id))
+
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
+                 'account_required'  : [HTTPVerbs.GET] 
+               }
+
+'''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
@@ -2485,6 +2539,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
 
