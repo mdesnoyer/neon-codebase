@@ -3949,6 +3949,8 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
         header = { 'Content-Type':'application/json' }
+        datetime_patcher = patch('datetime.utcnow')
+        datetime_patcher.start()
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 
