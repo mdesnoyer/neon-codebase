@@ -45,7 +45,21 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
 
     def tearDown(self): 
         self.send_email_mocker.stop()
+        self.postgresql.clear_all_tables()
         super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(TestBase, cls).tearDownClass() 
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        super(TestBase, cls).tearDownClass() 
         
     def post_exceptions(self, url, params, exception_mocker): 
         exception_mock = self._future_wrap_mock(exception_mocker.start())
@@ -185,18 +199,6 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestNewAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_create_new_account_query(self):
@@ -507,20 +509,7 @@ class TestAccountHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestAccountHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -677,20 +666,8 @@ class TestNewUserHandler(TestAuthenticationBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestNewUserHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestNewUserHandler, cls).tearDownClass()
  
     @tornado.testing.gen_test 
     def test_create_new_user_query(self):
@@ -737,21 +714,6 @@ class TestUserHandler(TestControllersBase):
         self.neon_user.save() 
         super(TestUserHandler, self).setUp()
 
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        super(TestUserHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestUserHandler, cls).tearDownClass()
 
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
@@ -951,20 +913,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestOoyalaIntegrationHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestOoyalaIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -1126,20 +1076,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestBrightcoveIntegrationHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestBrightcoveIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -1765,23 +1703,12 @@ class TestVideoHandler(TestControllersBase):
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
         super(TestVideoHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
@@ -2806,22 +2733,11 @@ class TestThumbnailHandler(TestControllersBase):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
-        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
         super(TestThumbnailHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -3012,19 +2928,8 @@ class TestVideoStatsHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoStatsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_one_video_id(self): 
@@ -3116,19 +3021,8 @@ class TestThumbnailStatsHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestThumbnailStatsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_account_id_video_id(self): 
@@ -3245,21 +3139,6 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
-
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequired, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     def make_calls_and_assert_401(self, 
                                   url, 
@@ -3580,21 +3459,6 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
         self.neon_user.save() 
         super(TestAPIKeyRequiredAuth, self).setUp()
 
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequiredAuth, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-
     @tornado.testing.gen_test 
     def test_create_new_account_god_mode(self): 
         user = neondata.User(username='testuser', 
@@ -3656,20 +3520,6 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         self.user.save()
         super(TestAuthenticationHandler, self).setUp()
 
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        super(TestAuthenticationHandler, self).tearDown()
- 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     def test_no_username(self): 
         url = '/api/v2/authenticate' 
@@ -4078,7 +3928,8 @@ class TestAuthenticationHealthCheckHandler(TestAuthenticationBase):
  
 class TestVideoSearchInternalHandler(TestControllersBase): 
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.verify_account_mocker = patch(
@@ -4090,19 +3941,8 @@ class TestVideoSearchInternalHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoSearchInternalHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test 
     def test_search_no_videos(self):
@@ -4263,19 +4103,8 @@ class TestVideoSearchExternalHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoSearchExternalHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test 
     def test_search_base(self):
@@ -4361,20 +4190,9 @@ class TestAccountLimitsHandler(TestControllersBase):
         super(TestAccountLimitsHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestAccountLimitsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_search_with_limit(self):
@@ -4398,20 +4216,9 @@ class TestAccountIntegrationsHandler(TestControllersBase):
         super(TestAccountIntegrationsHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestAccountIntegrationsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test 
     def test_one_integration(self):
@@ -4507,20 +4314,9 @@ class TestBillingAccountHandler(TestControllersBase):
         super(TestBillingAccountHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestBillingAccountHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_post_billing_account_no_account(self):
@@ -4795,20 +4591,9 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         super(TestBillingSubscriptionHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestBillingSubscriptionHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_post_billing_subscription_no_account(self):
@@ -5311,6 +5096,99 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             method='GET') 
         print response.body
 
+class TestTelemetrySnippet(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        user = neondata.User('my_user',
+                             access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        user.save()
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'my_user'
+            }
+        super(TestTelemetrySnippet, self).setUp()
+
+    def tearDown(self):
+        self.token_decode_patcher.stop()  
+        super(TestTelemetrySnippet, self).tearDown()
+
+    @tornado.gen.coroutine
+    def _send_authed_request(self, url):
+        request = tornado.httpclient.HTTPRequest(
+            self.get_url(url),
+            headers={'Authorization' : 'Bearer my_token'})
+        response = yield self.http_client.fetch(request)
+        raise tornado.gen.Return(response) 
+
+    @tornado.testing.gen_test
+    def test_invalid_account_id(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self._send_authed_request(
+                '/api/v2/badacct/telemetry/snippet')
+
+        self.assertEquals(e.exception.code, 401)
+
+    @tornado.testing.gen_test
+    def test_no_integrations(self):
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertNotIn('neonBrightcoveGallery', response.body)
+        self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
+
+    @tornado.testing.gen_test
+    def test_non_gallery_bc_integration(self):
+        neondata.BrightcoveIntegration(self.account_id, 'pub_id').save()
+        
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertNotIn('neonBrightcoveGallery', response.body)
+        self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
+
+    @tornado.testing.gen_test
+    def test_gallery_bc_integration(self):
+        neondata.BrightcoveIntegration(self.account_id, 'pub_id',
+                                       uses_bc_gallery=True).save()
+        
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertIn('neonBrightcoveGallery = true', response.body)
+        self.assertNotIn('insertBefore', response.body)
+        self.assertIn("src='//cdn.neon-lab.com/neonoptimizer_dixon.js'",
+                      response.body)
+
+
 
 class TestBrightcovePlayerHandler(TestControllersBase):
     '''Test the handler and helper classes for BrightcovePlayer'''
@@ -5358,19 +5236,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
     def tearDown(self):
         self.get_player_mocker.stop()
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestBrightcovePlayerHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_get_players(self):
