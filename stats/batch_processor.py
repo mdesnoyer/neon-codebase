@@ -387,10 +387,9 @@ def _get_last_batch_app(rm_response):
     last_app = None
     last_started_time = None
     for app in rm_response['apps']['app']:
-        if (app['name'] == 'Raw Tracker Data Cleaning' and 
-            (last_app is None or last_started_time < app['startedTime'])):
-            last_app = app
-            last_started_time = app['startedTime']            
+        if (app['name'].startswith('S3')):
+            job_name = app['name']
+            last_app = app            
             
     if last_app is None:
         return None
@@ -398,7 +397,7 @@ def _get_last_batch_app(rm_response):
     _log.info('The batch job with id %s is in state %s with '
               'progress of %i%%' % 
               (last_app['id'], last_app['state'], last_app['progress']))
-    return last_app
+    return job_name
 
 def get_last_sucessful_batch_output(cluster):
     '''Determines the last sucessful batch output path.
@@ -409,29 +408,14 @@ def get_last_sucessful_batch_output(cluster):
 
     response = cluster.query_resource_manager(
         '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
-    app = _get_last_batch_app(response)
+    job_name = _get_last_batch_app(response)
 
-    if app is None:
+    if job_name is None:
         return None
 
-    # Check the config on the history server to get the path
-    query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
-             re.compile(r'application_(\S+)').search(app['id']).group(1))
-    try:
-        conf = cluster.query_history_manager(query)
-    except urllib2.HTTPError as e:
-        _log.warn('Could not get the job history for job %s. HTTP Code %s' %
-                  (app['id'], e.code))
-        return None
+    last_successful_output = job_name[job_name.find('s3'):]
 
-    if not 'conf' in conf:
-        raise UnexpectedInfo('Unexpected response from the history server: %s'
-                             % conf)
-    for prop in conf['conf']['property']:
-        if prop['name'] == 'mapreduce.output.fileoutputformat.outputdir':
-            _log.info('Found the last sucessful output directory as %s' %
-                      prop['value'])
-            return prop['value']
+    _log.info('Found the last successful output directory as %s' % last_successful_output)
 
-    return None
+    return last_successful_output
     

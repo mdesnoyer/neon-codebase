@@ -996,7 +996,7 @@ class Cluster():
 
         _log.info("job_state = %s",job_state)
 
-        if job_state == u'SUCCEEDED':
+        if job_state == 'COMPLETED':
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
             _log.info("S3 copy to path %s was unsuccessful" % s3_path)
