@@ -2034,6 +2034,8 @@ class UserHandler(APIV2Handler):
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
           'first_name': Any(str, unicode, Length(min=1, max=256)),
           'last_name': Any(str, unicode, Length(min=1, max=256)),
+          'secondary_email': Any(str, unicode, Length(min=1, max=256)),
+          'cell_phone_number': Any(str, unicode, Length(min=1, max=32)),
           'title': Any(str, unicode, Length(min=1, max=32))
         })
         args = self.parse_args()
@@ -2050,6 +2052,12 @@ class UserHandler(APIV2Handler):
             u.first_name = args.get('first_name', u.first_name)
             u.last_name = args.get('last_name', u.last_name)
             u.title = args.get('title', u.title)
+            u.cell_phone_number = args.get(
+                'cell_phone_number', 
+                u.cell_phone_number)
+            u.secondary_email = args.get(
+                'secondary_email', 
+                u.secondary_email)
 
         user_internal = yield neondata.User.modify(
             username,
@@ -2073,13 +2081,17 @@ class UserHandler(APIV2Handler):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['username', 'access_level', 'created', 'updated',
-                'first_name', 'last_name', 'title' ]
-
+        return ['username', 'created', 'updated', 
+                'first_name', 'last_name', 'title', 
+                'secondary_email', 'cell_phone_number',
+                'access_level' ]
+    
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['username', 'access_level', 'created', 'updated',
-                'first_name', 'last_name', 'title' ]
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title', 
+                'secondary_email', 'cell_phone_number',
+                'access_level' ]
 
 '''*****************************************************************
 BillingAccountHandler 

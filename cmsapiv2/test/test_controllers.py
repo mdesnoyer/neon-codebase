@@ -41,10 +41,15 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
             'cmsapiv2.authentication.NewAccountHandler.send_email')
         self.send_email_mock = self.send_email_mocker.start()
         self.send_email_mock.return_value = True
+        self.send_email_mocker_two = patch(
+            'cmsapiv2.authentication.ForgotPasswordHandler._send_email')
+        self.send_email_mock_two = self.send_email_mocker_two.start()
+        self.send_email_mock_two.return_value = True
         super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
 
     def tearDown(self): 
         self.send_email_mocker.stop()
+        self.send_email_mocker_two.stop()
         super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
         
     def post_exceptions(self, url, params, exception_mocker): 
@@ -666,19 +671,19 @@ class TestAccountHandler(TestControllersBase):
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
 
-class TestNewUserHandler(TestAuthenticationBase):
+class TestAuthUserHandler(TestAuthenticationBase):
     def setUp(self):
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
-        super(TestNewUserHandler, self).setUp()
+        super(TestAuthUserHandler, self).setUp()
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
-        super(TestNewUserHandler, self).tearDown()
+        super(TestAuthUserHandler, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -690,7 +695,7 @@ class TestNewUserHandler(TestAuthenticationBase):
     def tearDownClass(cls): 
         options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
-        super(TestNewUserHandler, cls).tearDownClass()
+        super(TestAuthUserHandler, cls).tearDownClass()
  
     @tornado.testing.gen_test 
     def test_create_new_user_query(self):
@@ -709,8 +714,10 @@ class TestNewUserHandler(TestAuthenticationBase):
     @tornado.testing.gen_test 
     def test_create_new_user_json(self):
         params = json.dumps({'username': 'abcd1234', 
-                             'password': 'b1234567', 
-                             'access_level': '6'})
+            'password': 'b1234567',
+            'access_level': '6', 
+            'cell_phone_number':'867-5309', 
+            'secondary_email':'rocking@invalid.com'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/users'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -720,14 +727,134 @@ class TestNewUserHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'abcd1234')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
         user = yield neondata.User.get('abcd1234', async=True) 
         self.assertEquals(user.username, 'abcd1234') 
+        self.assertEquals(user.cell_phone_number, '867-5309')
+        self.assertEquals(user.secondary_email, 'rocking@invalid.com')
 
     def test_post_user_exceptions(self):
-        exception_mocker = patch('cmsapiv2.authentication.NewUserHandler.post')
+        exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
         params = json.dumps({'username': '123123abc'})
 	url = '/api/v2/users'
         self.post_exceptions(url, params, exception_mocker)
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_no_user(self): 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'dne@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': 'sdfasdfasdfasdfasdfasdf'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'User was not found')
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_bad_pw_token(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        header = { 'Content-Type':'application/json' }
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': 'ohsobadmeissixteenchars'})
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 401)
+ 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Token mismatch')
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_token_expired(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        header = { 'Content-Type':'application/json' }
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid', 'exp' : -1}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': token})
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 401)
+ 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'reset password token has')
+   
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_full(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': user.reset_password_token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(
+            self.get_url(url), 
+            body=params, 
+            method='PUT', 
+            headers=header)
+
+        # verify the password was changed 
+        user = yield user.get('testuser@test.invalid', async=True)
+        self.assertTrue(sha256_crypt.verify('newpassword', user.password_hash))
+        self.assertEqual(None, user.reset_password_token)  
 
 class TestUserHandler(TestControllersBase):
     def setUp(self):
@@ -759,7 +886,9 @@ class TestUserHandler(TestControllersBase):
         user = neondata.User(username='testuser', 
                              password='testpassword',
                              first_name='kevin',
-                             last_name='kevin',  
+                             last_name='kevin', 
+                             cell_phone_number='867-5309', 
+                             secondary_email='rocking@invalid.com', 
                              access_level=neondata.AccessLevels.CREATE | 
                                           neondata.AccessLevels.READ)
         
@@ -779,6 +908,8 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(rjson['username'], 'testuser')
         self.assertEquals(rjson['first_name'], 'kevin')
         self.assertEquals(rjson['last_name'], 'kevin')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
 
         user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(user.username, 'testuser') 
@@ -855,6 +986,8 @@ class TestUserHandler(TestControllersBase):
                              'first_name' : 'kevin',  
                              'last_name' : 'kevin',  
                              'title' : 'DOCTOR',  
+                             'cell_phone_number':'867-5309',
+                             'secondary_email':'rocking@invalid.com',
                              'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
@@ -863,10 +996,15 @@ class TestUserHandler(TestControllersBase):
                                                 method='PUT', 
                                                 headers=header)
         self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
         updated_user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(updated_user.first_name, 'kevin')
         self.assertEquals(updated_user.last_name, 'kevin')
         self.assertEquals(updated_user.title, 'DOCTOR')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
+        self.assertEquals(updated_user.cell_phone_number, '867-5309')
+        self.assertEquals(updated_user.secondary_email, 'rocking@invalid.com')
  
     # token creation can be slow give it some extra time just in case
     @unittest.skip('revisit when access levels are better defined')
@@ -5655,6 +5793,230 @@ class TestBrightcovePlayerHandler(TestControllersBase):
 
         self.assertEqual(publish_mock.call_count, 1)
         self.assertEqual(publish_mock.call_args[0][0], 'pl0')
+
+class TestForgotPasswordHandler(TestAuthenticationBase):
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestForgotPasswordHandler, self).setUp()
+
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        self.postgresql.clear_all_tables()
+        super(TestForgotPasswordHandler, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        super(TestForgotPasswordHandler, cls).tearDownClass()
+ 
+    @tornado.testing.gen_test 
+    def test_no_user(self):
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'dne@test.invalid'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'User was not found')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_no_secondary(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'No recovery email')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_secondary(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin', 
+                             secondary_email='kevindfenger@gmail.com', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps({'username': 'testuser'}) 
+        url = '/api/v2/users/forgot_password' 
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=params, 
+            method="POST", 
+            headers=header) 
+	self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+            'Reset Password')
+        user = yield neondata.User.get(user.username, async=True)
+        self.assertNotEqual(None, user.reset_password_token) 
+ 
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_phone_not_available(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'cell_phone'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'No cell phone number')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_phone_available(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin', 
+                             cell_phone_number='123-245-3423', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'cell_phone'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 501) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'recovery by phone is not ready')
+
+    @tornado.testing.gen_test 
+    def test_invalid_communication_type(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'carrier_pigeon'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Communication Type not')
+
+    @tornado.testing.gen_test 
+    def test_non_expired_token(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',
+                             secondary_email='kf@kf.com', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'email'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'There is a password reset comm')
+
+    @tornado.testing.gen_test 
+    def test_existing_token_expired(self):
+        user = neondata.User(username='kevindfenger@gmail.com', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        token = JWTHelper.generate_token(
+            {'username' : 'kevindfenger@gmail.com', 'exp': -1}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'kevindfenger@gmail.com', 
+             'communication_type' : 'email'})
+        url = '/api/v2/users/forgot_password' 
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=params, 
+            method="POST", 
+            headers=header) 
+	self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+            'Reset Password')
+        user = yield neondata.User.get(user.username, async=True)
+        self.assertNotEqual(None, user.reset_password_token) 
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
