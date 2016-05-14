@@ -2894,14 +2894,18 @@ class User(NamespacedStoredObject):
                  access_level=AccessLevels.ALL_NORMAL_RIGHTS, 
                  first_name=None,
                  last_name=None,
-                 title=None):
+                 title=None,
+                 reset_password_token=None, 
+                 secondary_email=None, 
+                 cell_phone_number=None):
  
         super(User, self).__init__(username)
 
         # here for the conversion to postgres, not used yet  
         self.user_id = uuid.uuid1().hex
 
-        # the users username, chosen by them, redis key 
+        # the users username, chosen by them, email is required 
+        # on the frontend 
         self.username = username.lower()
 
         # the users password_hash, we don't store plain text passwords 
@@ -2925,7 +2929,18 @@ class User(NamespacedStoredObject):
         self.last_name = last_name 
  
         # the title of the user 
-        self.title = title  
+        self.title = title 
+
+        # short lived JWT that is utilized in resetting passwords
+        self.reset_password_token = reset_password_token
+
+        # optional email, for users with non-email based usernames 
+        # also for users that may want a secondary form of being reached
+        self.secondary_email = secondary_email
+ 
+        # optional cell phone number, can be used for recovery purposes 
+        # eventually 
+        self.cell_phone_number = cell_phone_number
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
