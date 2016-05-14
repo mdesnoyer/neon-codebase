@@ -593,7 +593,6 @@ class BrightcovePlayerHelper():
 
         yield bc_api.patch_player(player_ref, patch)
         yield bc_api.publish_player(player_ref)
-        import pdb; pdb.set_trace()
 
         # Success. Update the player with the date and version
         def _modify(p):
