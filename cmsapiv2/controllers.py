@@ -453,7 +453,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Retrieve the list of players from Brightcove api
         bc = api.brightcove_api.PlayerAPI(integration)
         r = yield bc.get_players()
-        players = r.get('items', [])
+        players = [p for p in r.get('items', []) if p['id'] != 'default']
+
         # @TODO batch transform dict-players to object-players
         objects  = yield map(self._bc_to_obj, players)
         ret_list = yield map(self.db2api, objects)
@@ -494,52 +495,55 @@ class BrightcovePlayerHandler(APIV2Handler):
         """
 
         # The only field that is set via public api is is_tracked.
-        # @TODO fix the Any() below
         schema = Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('integration_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('player_ref'): All(Coerce(str), Length(min=1, max=256)),
             Required('is_tracked'): Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
+        ref = args['player_ref']
 
-        player = yield neondata.BrightcovePlayer.get(
-            args['player_ref'], 
-            async=True)
-        if not player:
-            raise NotFoundError(
-                'Player does not exist for reference:%s', 
-                args['player_ref'])
         integration = yield neondata.BrightcoveIntegration.get(
-            player.integration_id, 
+            args['integration_id'],
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s', 
-                args['player_ref'])
+                'BrighcoveIntegration does not exist for integration_id:%s',
+                args['integration_id'])
         if integration.account_id != account_id:
             raise NotAuthorizedError('Player is not owned by this account')
 
-        # Modify the db if flag changed
-        is_tracked = args['is_tracked']
-        if player.is_tracked is not is_tracked:
-            def _modify(p):
-                p.is_tracked = is_tracked
-                yield neondata.BrightcovePlayer.modify(
-                    player.player_ref, _modify, async=True)
+        # Verify player_ref is at Brightcove
+        bc = api.brightcove_api.PlayerAPI(integration)
+        # This will error (expect 404) if player not found
+        bc_player = yield bc.get_player(ref)
+
+        # Get or create db record
+        def _modify(p):
+            p.is_tracked = args['is_tracked']
+            p.name = bc_player['name'] # BC's name is newer
+            p.integration_id = integration.integration_id
+        player = yield neondata.BrightcovePlayer.modify(
+            ref,
+            _modify,
+            create_missing=True,
+            async=True)
 
         # If the player is tracked, then send a request to Brightcove's
-        # CMS Api to put the plugin in the player and publish the player.
-        # We do this anytime the user calls this API with is_tracked=True
-        # because they are likely to be troubleshooting their setup and
-        # publishing several times.
+        # player managament API to put the plugin in the player
+        # and publish the player.  We do this any time the user calls
+        # this API with is_tracked=True because they are likely to be
+        # troubleshooting their setup and publishing several times.
         if player.is_tracked:
-            publish_result = yield BrightcovePlayerHelper.publish_plugin_to_player(player)
+            publish_result = yield BrightcovePlayerHelper.publish_plugin(
+                bc_player, integration, bc)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
-            args['player_ref'], 
+            player.player_ref,
             async=True)
         response = yield self.db2api(player)
         self.success(response)
@@ -573,38 +577,30 @@ class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
     @staticmethod
     @tornado.gen.coroutine
-    def publish_plugin_to_player(player):
+    def publish_plugin(bc_player, integration, bc_api):
         """Update Brightcove player with current plugin and publishes it'''
 
         Input-
-        player- BrightcovePlayer object
+        bc_player - Brightcove player dict
         """
-        integration = yield neondata.BrightcoveIntegration.get(
-            player.integration_id, async=True)
-        player_ref = player.player_ref
+        player_ref = bc_player['id']
+        player_config = bc_player['branches']['master']['configuration']
 
-        try:
-            api = api.brightcove_api.PlayerAPI(integration)
-            # Get the current player configuration from Brightcove
-            player_config = yield api.get_player_config(player_ref)
-            # Make the patch json string that will be used to update player
-            patch = self._get_plugin_patch(player_config, intregration.account_id)
+        # Make the patch json string that will be used to update player
+        patch = BrightcovePlayerHelper._get_plugin_patch(
+            player_config,
+            integration.account_id)
 
-            yield api.patch_player(player_ref, patch)
-            yield api.publish_player(player_ref)
+        yield bc_api.patch_player(player_ref, patch)
+        yield bc_api.publish_player(player_ref)
 
-            # Success. Update the player with the date and version
-            def _modify(p):
-                p.publish_date = datetime.now().isoformat()
-                p.published_plugin_version = self._get_current_tracking_version()
-                p.last_attempt_result = None
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
+        # Success. Update the player with the date and version
+        def _modify(p):
+            p.publish_date = datetime.now().isoformat()
+            p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
+            p.last_attempt_result = None
+        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
 
-        except Exception as e:
-            def _modify(p):
-                p.last_attempt_result = e.message
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-            raise e
         raise tornado.gen.Return(True)
 
     @staticmethod

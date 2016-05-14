@@ -5325,6 +5325,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             application_client_id='id',
             application_client_secret='secret')
         self.integration.save()
+        self.api = api.brightcove_api.PlayerAPI(self.integration)
 
         # Mock our user authorization
         self.user = neondata.NeonUserAccount(self.account_id)
@@ -5343,7 +5344,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             is_tracked=True,
             published_plugin_version='0.0.0');
         self.player.save()
-
         self.untracked_player = neondata.BrightcovePlayer(
             player_ref='pl2',
             integration_id=self.integration.integration_id,
@@ -5351,7 +5351,12 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             is_tracked=False)
         self.untracked_player.save()
 
+        # Mock bc player get
+        self.get_player_mocker = patch('api.brightcove_api.PlayerAPI.get_player')
+        self.get_player = self._future_wrap_mock(self.get_player_mocker.start())
+
     def tearDown(self):
+        self.get_player_mocker.stop()
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
         super(TestBrightcovePlayerHandler, self).tearDown()
@@ -5409,41 +5414,110 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
+    def test_get_no_default_player(self):
+        # TODO factor these header, etc.
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            get = self._future_wrap_mock(_get)
+            default_bc_player = {
+                'accountId': self.publisher_id,
+                'id':'default',
+                'name':'Default Player',
+                'description':'Default Brightcove player.'
+            }
+            get.side_effect = [{
+                'items': [
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl0',
+                        'name':'Neon Tracking Player',
+                        'description':'Neon tracking plugin bundled.'
+                    },
+                    default_bc_player,
+                    {
+                        'accountId': self.publisher_id,
+                        'id':'pl1',
+                        'name':'Neon Player 2: Neoner',
+                        'description':'Another description.'
+                    },
+                    default_bc_player],
+                'item_count': 2
+            }]
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header)
+        players, count = json.loads(r.body).values()
+        self.assertEqual(players[0]['player_ref'], 'pl0')
+        self.assertEqual(players[1]['player_ref'], 'pl1')
+        self.assertEqual(count, 2)
+
+    @tornado.testing.gen_test
     def test_put_tracked_player(self):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
             pub = self._future_wrap_mock(_pub)
-            pub.side_effect = {
+            pub.side_effect = [True]
+            self.get_player.side_effect = [{
                 'player_ref': 'pl0',
-                'name': 'db name',
-                'published_plugin_version': '0.0.1'
-            }
-            # This is the change behind the mocked publish_plugin_to_player method
-            self.player.published_plugin_version = '0.0.1'
-            self.player.save()
+                'name': 'new name'}]
+
             r = yield self.http_client.fetch(
                 self.get_url(url),
                 headers=header,
                 method='PUT',
                 body=json.dumps({
                     'player_ref': 'pl0',
-                    'is_tracked': True
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id
+                }))
+            self.assertEqual(1, pub.call_count)
+
+            # This is the change behind the mocked publish_plugin method
+            self.player.published_plugin_version = '0.0.1'
+            self.player.save()
+
+        player = json.loads(r.body)
+        self.assertTrue(player['is_tracked'])
+        self.assertEqual(player['name'], 'new name')
+
+        # Try with a new player
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
+            pub = self._future_wrap_mock(_pub)
+            pub.side_effect = [True]
+            self.get_player.side_effect = [{
+                'player_ref': 'pl-new',
+                'name': 'new name'}]
+            r = yield self.http_client.fetch(
+                self.get_url(url),
+                headers=header,
+                method='PUT',
+                body=json.dumps({
+                    'player_ref': 'pl-new',
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(1, pub.call_count)
 
         player = json.loads(r.body)
-        self.assertEqual(player['name'],'db name', 'Cant change name via PUT')
-        self.assertEqual(player['published_plugin_version'], '0.0.1')
-        #@TODO add publish date mock and assertEqual
+        self.assertEqual(player['name'],'new name')
+        self.assertTrue(player['is_tracked'])
+        player = yield neondata.BrightcovePlayer.get('pl-new', async=True)
+        self.assertEqual(player.name,'new name')
+        self.assertTrue(player.is_tracked)
+        self.assertEqual(
+            player.integration_id, self.integration.integration_id)
+
 
     @tornado.testing.gen_test
     def test_put_untracked_player(self):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin_to_player') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = Exception('shouldnt be called')
             r = yield self.http_client.fetch(
@@ -5452,35 +5526,14 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 method='PUT',
                 body=json.dumps({
                     'player_ref': 'pl2',
-                    'is_tracked': False
+                    'is_tracked': False,
+                    'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(0, pub.call_count)
 
         player = json.loads(r.body)
         self.assertEqual(player['player_ref'], 'pl2')
         self.assertFalse(player['is_tracked'])
-
-    @tornado.testing.gen_test
-    def test_publish_plugin_to_player(self):
-
-        player_ref = 'A1'
-        integration_id = 100
-        player = neondata.BrightcovePlayer(
-            player_ref=player_ref, integration_id=integration_id)
-        player.save()
-
-        with patch.multiple(api.brightcove_api.PlayerAPI, get_player_config=DEFAULT,
-                            patch_player=DEFAULT, publish_player=DEFAULT) as mocks:
-
-            get_mock = self._future_wrap_mock(mocks['get_player_config'])
-            get_mock.side_effect = {'bad config': 123}
-            r = controllers.BrightcovePlayerHelper.publish_plugin_to_player(player)
-
-
-            patch_mock = self._future_wrap_mock(mocks['patch_player'])
-            publish_mock = self._future_wrap_mock(mocks['publish_player'])
-
-
 
     @tornado.testing.gen_test
     def test_get_plugin_patch(self):
@@ -5563,6 +5616,29 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         }
         self.assertEqual(expect, patch)
 
+    @unittest.skip('in progress')
+    @tornado.testing.gen_test
+    def test_publish_plugin(self):
+        bc_player = {
+            "accountId": "2294876105001",
+            "branches": {
+                "master": {
+                    "configuration": {
+                        "plugins": [],
+                        "scripts": ["optimizely.js"],
+                        "stylesheets": [],
+                    }
+                }
+            }
+        }
+        # Look again at this with-patch; maybe a magicmock on the api instance
+        with patch('api.brightcove_api.PlayerAPI._send_request') as _send:
+            send = self._future_wrap_mock(_send)
+            controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.integration, self.api)
+            # Check call arg @TODO
+
+        self.assertEqual(1, 1)
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
