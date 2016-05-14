@@ -443,11 +443,11 @@ class BrightcovePlayerHandler(APIV2Handler):
         schema(args)
         integration_id = args['integration_id']
         integration = yield neondata.BrightcoveIntegration.get(
-            integration_id, 
+            integration_id,
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s', 
+                'BrighcoveIntegration does not exist for player reference:%s',
                 args['player_ref'])
 
         # Retrieve the list of players from Brightcove api
@@ -464,27 +464,6 @@ class BrightcovePlayerHandler(APIV2Handler):
             'player_count': len(ret_list)
         }
         self.success(response)
-
-    @staticmethod
-    @tornado.gen.coroutine
-    def _bc_to_obj(bc_player):
-        '''Retrieve or create a BrightcovePlayer from db given BC data
-
-        If creating object, the object is not saved to the database.
-        '''
-        # Get the database record. Expect many to be missing, so don't log
-        neon_player = yield neondata.BrightcovePlayer.get(
-            bc_player['id'], 
-            async=True, 
-            log_missing=False)
-        if neon_player:
-            # Prefer Brightcove's data since it is potentially newer
-            neon_player.name = bc_player['name']
-        else:
-            neon_player = neondata.BrightcovePlayer(
-                player_ref=bc_player['id'],
-                name=bc_player['name'])
-        raise tornado.gen.Return(neon_player)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -548,6 +527,15 @@ class BrightcovePlayerHandler(APIV2Handler):
         response = yield self.db2api(player)
         self.success(response)
 
+    def write_error(self, status_code, **kwargs):
+        '''Adapt a BrightcoveApi*Error to a http-type error'''
+        exception = kwargs["exc_info"][1]
+        if hasattr(exception, 'errno') and exception.errno:
+            status_code = exception.errno
+        super(BrightcovePlayerHandler, self).write_error(
+            status_code,
+            **kwargs)
+
     @classmethod
     def get_access_levels(self):
         return {
@@ -556,17 +544,37 @@ class BrightcovePlayerHandler(APIV2Handler):
             HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
             'account_required': [HTTPVerbs.GET, HTTPVerbs.PUT, HTTPVerbs.POST]}
 
+    @staticmethod
+    @tornado.gen.coroutine
+    def _bc_to_obj(bc_player):
+        '''Retrieve or create a BrightcovePlayer from db given BC data
+
+        If creating object, the object is not saved to the database.
+        '''
+        # Get the database record. Expect many to be missing, so don't log
+        neon_player = yield neondata.BrightcovePlayer.get(
+            bc_player['id'],
+            async=True,
+            log_missing=False)
+        if neon_player:
+            # Prefer Brightcove's data since it is potentially newer
+            neon_player.name = bc_player['name']
+        else:
+            neon_player = neondata.BrightcovePlayer(
+                player_ref=bc_player['id'],
+                name=bc_player['name'])
+        raise tornado.gen.Return(neon_player)
+
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 
-                'created', 'updated', 'publish_date', 
-                'published_plugin_version', 'last_attempt_result']
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
+                'publish_date', 'published_plugin_version',
+                'last_attempt_result']
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 
-                'created', 'updated',
-                'publish_date', 'published_plugin_version', 
+        return ['player_ref', 'name', 'is_tracked', 'created', 'updated',
+                'publish_date', 'published_plugin_version',
                 'last_attempt_result']
 
 '''*********************************************************************

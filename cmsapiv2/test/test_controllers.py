@@ -5354,8 +5354,11 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         # Mock bc player get
         self.get_player_mocker = patch('api.brightcove_api.PlayerAPI.get_player')
         self.get_player = self._future_wrap_mock(self.get_player_mocker.start())
+        self.get_players_mocker = patch('api.brightcove_api.PlayerAPI.get_players')
+        self.get_players = self._future_wrap_mock(self.get_players_mocker.start())
 
     def tearDown(self):
+        self.get_players_mocker.stop()
         self.get_player_mocker.stop()
         self.verify_account_mocker.stop()
         self.postgresql.clear_all_tables()
@@ -5366,6 +5369,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        cls._headers = {'Content-Type':'application/json'}
 
     @classmethod
     def tearDownClass(cls):
@@ -5375,33 +5379,29 @@ class TestBrightcovePlayerHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_get_players(self):
 
-        header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
              self.account_id, self.integration.integration_id)
-
-        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
-            get = self._future_wrap_mock(_get)
-            get.side_effect = [{
-                'items': [
-                    {
-                        'accountId': self.publisher_id,
-                        'id':'pl0',
-                        'name':'Neon Tracking Player',
-                        'description':'Neon tracking plugin bundled.'
-                    },
-                    {
-                        'accountId': self.publisher_id,
-                        'id':'pl1',
-                        'name':'Neon Player 2: Neoner',
-                        'description':'Another description.'
-                    }],
-                'item_count': 2
-            }]
-            r = yield self.http_client.fetch(
-                self.get_url(url),
-                headers=header)
-            self.assertEqual(get.call_count, 1)
-            self.assertEqual(200, r.code)
+        self.get_players.side_effect = [{
+            'items': [
+                {
+                    'accountId': self.publisher_id,
+                    'id':'pl0',
+                    'name':'Neon Tracking Player',
+                    'description':'Neon tracking plugin bundled.'
+                },
+                {
+                    'accountId': self.publisher_id,
+                    'id':'pl1',
+                    'name':'Neon Player 2: Neoner',
+                    'description':'Another description.'
+                }],
+            'item_count': 2
+        }]
+        r = yield self.http_client.fetch(
+            self.get_url(url),
+            headers=self._headers)
+        self.assertEqual(self.get_players.call_count, 1)
+        self.assertEqual(200, r.code)
         rjson = json.loads(r.body)
         players, count = rjson.values()
         self.assertEqual(2, len(players))
@@ -5414,40 +5414,53 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
-    def test_get_no_default_player(self):
-        # TODO factor these header, etc.
-        header = { 'Content-Type':'application/json' }
+    def test_get_players_no_auth(self):
+
+        headers = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
              self.account_id, self.integration.integration_id)
-        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
-            get = self._future_wrap_mock(_get)
-            default_bc_player = {
-                'accountId': self.publisher_id,
-                'id':'default',
-                'name':'Default Player',
-                'description':'Default Brightcove player.'
-            }
-            get.side_effect = [{
-                'items': [
-                    {
-                        'accountId': self.publisher_id,
-                        'id':'pl0',
-                        'name':'Neon Tracking Player',
-                        'description':'Neon tracking plugin bundled.'
-                    },
-                    default_bc_player,
-                    {
-                        'accountId': self.publisher_id,
-                        'id':'pl1',
-                        'name':'Neon Player 2: Neoner',
-                        'description':'Another description.'
-                    },
-                    default_bc_player],
-                'item_count': 2
-            }]
+
+        self.get_players.side_effect = api.brightcove_api.BrightcoveApiClientError(
+            401,
+            'Unauthorized')
+
+        with self.assertRaises(HTTPError) as e:
             r = yield self.http_client.fetch(
                 self.get_url(url),
-                headers=header)
+                headers=self._headers)
+        self.assertEqual(e.exception.code, 401)
+
+    @tornado.testing.gen_test
+    def test_get_no_default_player(self):
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        default_bc_player = {
+            'accountId': self.publisher_id,
+            'id':'default',
+            'name':'Default Player',
+            'description':'Default Brightcove player.'
+        }
+        self.get_players.side_effect = [{
+            'items': [
+                {
+                    'accountId': self.publisher_id,
+                    'id':'pl0',
+                    'name':'Neon Tracking Player',
+                    'description':'Neon tracking plugin bundled.'
+                },
+                default_bc_player,
+                {
+                    'accountId': self.publisher_id,
+                    'id':'pl1',
+                    'name':'Neon Player 2: Neoner',
+                    'description':'Another description.'
+                },
+                default_bc_player],
+            'item_count': 2
+        }]
+        r = yield self.http_client.fetch(
+            self.get_url(url),
+            headers=self._headers)
         players, count = json.loads(r.body).values()
         self.assertEqual(players[0]['player_ref'], 'pl0')
         self.assertEqual(players[1]['player_ref'], 'pl1')
@@ -5510,7 +5523,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertTrue(player.is_tracked)
         self.assertEqual(
             player.integration_id, self.integration.integration_id)
-
 
     @tornado.testing.gen_test
     def test_put_untracked_player(self):
