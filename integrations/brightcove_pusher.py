@@ -295,6 +295,8 @@ class ServingURLHandler(tornado.web.RequestHandler):
         '''
         cur_image = cur_images.get(asset_name, {})
         width, height = self._find_image_size(cur_image)
+        if width is None or height is None:
+            width, height = api.brightcove_api.DEFAULT_IMAGE_SIZES[asset_name]
 
         if len(cur_image) > 0:
             if cur_image['remote']:
