@@ -5098,57 +5098,74 @@ class TestBillingSubscriptionHandler(TestControllersBase):
 
 class TestTelemetrySnippet(TestControllersBase):
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
                                         name='testingme')
+        self.acct.save()
+        user = neondata.User('my_user',
+                             access_level=neondata.AccessLevels.GLOBAL_ADMIN)
         user.save()
-        self.account_id = user.neon_api_key
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'my_user'
+            }
         super(TestTelemetrySnippet, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
+        self.token_decode_patcher.stop()  
         super(TestTelemetrySnippet, self).tearDown()
+
+    @tornado.gen.coroutine
+    def _send_authed_request(self, url):
+        request = tornado.httpclient.HTTPRequest(
+            self.get_url(url),
+            headers={'Authorization' : 'Bearer my_token'})
+        response = yield self.http_client.fetch(request)
+        raise tornado.gen.Return(response) 
 
     @tornado.testing.gen_test
     def test_invalid_account_id(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(
-                self.get_url('/api/v2/badacct/telemetry/snippet'))
+            yield self._send_authed_request(
+                '/api/v2/badacct/telemetry/snippet')
 
-        self.assertEquals(e.exception.code, 404)
+        self.assertEquals(e.exception.code, 401)
 
     @tornado.testing.gen_test
     def test_no_integrations(self):
-        response = yield self.http_client.fetch(
-            self.get_url('/api/v2/%s/telemetry/snippet' % self.account_id))
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
 
         self.assertEquals(response.headers['Content-Type'], 
                           'text/plain')
         self.assertEquals(response.code, 200)
 
-        # Make sure we have async code not for gallery
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
         self.assertNotIn('neonBrightcoveGallery', response.body)
-        self.assertIn('insertBefore', response.body)
         self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
 
     @tornado.testing.gen_test
     def test_non_gallery_bc_integration(self):
         neondata.BrightcoveIntegration(self.account_id, 'pub_id').save()
         
-        response = yield self.http_client.fetch(
-            self.get_url('/api/v2/%s/telemetry/snippet' % self.account_id))
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
 
         self.assertEquals(response.headers['Content-Type'], 
                           'text/plain')
         self.assertEquals(response.code, 200)
 
-        # Make sure we have async code not for gallery
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
         self.assertNotIn('neonBrightcoveGallery', response.body)
-        self.assertIn('insertBefore', response.body)
         self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
 
     @tornado.testing.gen_test
@@ -5156,14 +5173,16 @@ class TestTelemetrySnippet(TestControllersBase):
         neondata.BrightcoveIntegration(self.account_id, 'pub_id',
                                        uses_bc_gallery=True).save()
         
-        response = yield self.http_client.fetch(
-            self.get_url('/api/v2/%s/telemetry/snippet' % self.account_id))
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
 
         self.assertEquals(response.headers['Content-Type'], 
                           'text/plain')
         self.assertEquals(response.code, 200)
 
-        # Make sure we have async code not for gallery
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
         self.assertIn('neonBrightcoveGallery = true', response.body)
         self.assertNotIn('insertBefore', response.body)
         self.assertIn("src='//cdn.neon-lab.com/neonoptimizer_dixon.js'",

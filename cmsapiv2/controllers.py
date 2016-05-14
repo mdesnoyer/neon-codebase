@@ -2457,9 +2457,6 @@ class TelemetrySnippetHandler(APIV2Handler):
         args['account_id'] = account_id_api_key = str(account_id)
         data = schema(args)
 
-        if self.account is None:
-            raise NotFoundError('Unknown Account Id')
-
         # Find out if there is a Gallery integration
         integrations = yield self.account.get_integrations(async=True)
 
@@ -2470,7 +2467,7 @@ class TelemetrySnippetHandler(APIV2Handler):
         if using_gallery:
             template = (
                 '<!-- Neon -->',
-                '<script>',
+                '<script id="neon">',
                 "  var neonPublisherId = '{tai}';",
                 "  var neonBrightcoveGallery = true;",
                 '</script>',
@@ -2479,13 +2476,11 @@ class TelemetrySnippetHandler(APIV2Handler):
                 )
         else:
             template = (
-                '<!-- Neon -->'
+                '<!-- Neon -->',
                 '<script id="neon">',
                 "  var neonPublisherId = '{tai}';",
-                '  !function(e,n,t,o,s)',
-                '  {{o=e.createElement(n),s=e.getElementsByTagName(n)[0],o.async=1,o.src=t,s.parentNode.insertBefore(o,s)}}',
-                '  (document,"script","//cdn.neon-lab.com/neonoptimizer_dixon.js");'
-                '</script>'
+                '</script>',
+                "<script src='//cdn.neon-lab.com/neonoptimizer_dixon.js'></script>',",
                 '<!-- Neon -->'
                 )
 
