@@ -27,6 +27,7 @@ statemon.define('successful_logouts', int)
 _successful_logouts_ref = statemon.state.get_ref('successful_logouts')
 
 statemon.define('post_account_oks', int) 
+statemon.define('bad_password_reset_attempts', int) 
 
 class CommunicationTypes(object): 
     EMAIL = 'email' 
@@ -56,8 +57,8 @@ class AuthenticateHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('username') : Any(str, unicode, Length(min=3, max=128)),
-          Required('password') : Any(str, unicode, Length(min=8, max=64)),
+          Required('username') : All(Coerce(str), Length(min=3, max=128)),
+          Required('password') : All(Coerce(str), Length(min=8, max=64)),
         })
         args = self.parse_args()
         schema(args)
@@ -130,7 +131,7 @@ class LogoutHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
         args = self.parse_args(keep_token=True)
         schema(args)
@@ -191,7 +192,7 @@ class RefreshTokenHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args(keep_token=True)
@@ -247,10 +248,9 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('customer_name') : Any(str, 
-              unicode,
+          Required('customer_name') : All(Coerce(str), 
               Length(min=1, max=1024)),
-          Required('email') : Any(CustomVoluptuousTypes.Email(),
+          Required('email') : All(CustomVoluptuousTypes.Email(),
               Length(min=6, max=1024)),
           Required('admin_user_username') : All(CustomVoluptuousTypes.Email(), 
               Length(min=6, max=512)), 
@@ -258,10 +258,10 @@ class NewAccountHandler(APIV2Handler):
               Length(min=8, max=64)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
-          'admin_user_first_name': Any(str, unicode, Length(min=1, max=256)),
-          'admin_user_last_name': Any(str, unicode, Length(min=1, max=256)),
-          'admin_user_title': Any(str, unicode, Length(min=1, max=32))
+          'default_thumbnail_id': All(Coerce(str), Length(min=1, max=2048)),
+          'admin_user_first_name': All(Coerce(str), Length(min=1, max=256)),
+          'admin_user_last_name': All(Coerce(str), Length(min=1, max=256)),
+          'admin_user_title': All(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
         schema(args) 
@@ -406,11 +406,11 @@ class UserHandler(APIV2Handler):
           Required('username') : All(Coerce(str), Length(min=8, max=256)),
           Required('password') : All(Coerce(str), Length(min=8, max=64)),
           Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
-          'first_name': Any(str, unicode, Length(min=1, max=256)),
-          'last_name': Any(str, unicode, Length(min=1, max=256)),
-          'secondary_email': Any(str, unicode, Length(min=1, max=256)),
-          'cell_phone_number': Any(str, unicode, Length(min=1, max=32)),
-          'title': Any(str, unicode, Length(min=1, max=32))
+          'first_name': All(Coerce(str), Length(min=1, max=256)),
+          'last_name': All(Coerce(str), Length(min=1, max=256)),
+          'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+          'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
+          'title': All(Coerce(str), Length(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -431,7 +431,6 @@ class UserHandler(APIV2Handler):
 
         self.success(user)
 
-    """Handles post requests to the user endpoint."""
     @tornado.gen.coroutine 
     def put(self):
         """handles user endpoint put request, currently only 
@@ -459,13 +458,19 @@ class UserHandler(APIV2Handler):
         if not current_user: 
             raise NotFoundError('User was not found')
  
-        if reset_password_token != current_user.reset_password_token: 
+        if reset_password_token != current_user.reset_password_token:
+            _log.info('Invalid attempt(token mismatch)'\
+                      ' to reset %s password' % username)  
+            statemon.state.increment('bad_password_reset_attempts')
             raise NotAuthorizedError('Token mismatch') 
 
         try: 
             payload = JWTHelper.decode_token(reset_password_token) 
             pl_username = payload['username']
             if pl_username != username: 
+                _log.info('Invalid attempt(mismatched usernames)'\
+                          ' to reset %s password' % username)  
+                statemon.state.increment('bad_password_reset_attempts')
                 raise NotAuthorizedError('User mismatch please try again') 
 
         except jwt.ExpiredSignatureError:
@@ -520,7 +525,7 @@ class VerifyAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args(keep_token=True)

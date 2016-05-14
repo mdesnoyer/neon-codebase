@@ -2030,13 +2030,13 @@ class UserHandler(APIV2Handler):
     def put(self, account_id):
         # TODO give ability to modify access_level
         schema = Schema({
-          Required('account_id') : Any(str, unicode, Length(min=1, max=256)),
+          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('username') : All(Coerce(str), Length(min=8, max=64)),
-          'first_name': Any(str, unicode, Length(min=1, max=256)),
-          'last_name': Any(str, unicode, Length(min=1, max=256)),
-          'secondary_email': Any(str, unicode, Length(min=1, max=256)),
-          'cell_phone_number': Any(str, unicode, Length(min=1, max=32)),
-          'title': Any(str, unicode, Length(min=1, max=32))
+          'first_name': All(Coerce(str), Length(min=1, max=256)),
+          'last_name': All(Coerce(str), Length(min=1, max=256)),
+          'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+          'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
+          'title': All(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
