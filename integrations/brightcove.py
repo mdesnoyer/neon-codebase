@@ -194,7 +194,7 @@ class CMSAPIIntegration(BrightcoveIntegration):
         if not thumb_ref or not thumb_url: 
             _log.warning('Unable to find image info for video %s' % video)
         else: 
-            thumb_ref = unicode(thumb_ref)
+            thumb_ref = unicode(thumb_ref['id'])
 
         return {'thumb_url': thumb_url,
                 'thumb_ref': thumb_ref}
@@ -267,10 +267,11 @@ class CMSAPIIntegration(BrightcoveIntegration):
         
         if not thumb_ref or not thumb_url: 
             _log.warning('Unable to find image info for video %s' % video)
+            return None, {'id': None}
         else: 
             thumb_ref = unicode(thumb_ref)
 
-        return thumb_url, thumb_ref
+        return thumb_url, {'id': thumb_ref} 
  
     @staticmethod
     def _extract_image_field(response, field):
