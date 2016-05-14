@@ -379,7 +379,7 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
 
         given_ref = 'BkMO9qa8x'
         given_name = 'neon player'
-        neondata.BrightcovePlayer(given_ref, name=given_name).save()
+        yield neondata.BrightcovePlayer(given_ref, name=given_name).save(async=True)
         given_account = 12345
 
         with patch('api.brightcove_api.BrightcoveOAuth2Session._send_request') as _send:
