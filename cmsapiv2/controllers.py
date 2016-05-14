@@ -539,7 +539,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # troubleshooting their setup and publishing several times.
         if player.is_tracked:
             publish_result = yield BrightcovePlayerHelper.publish_plugin(
-                bc_player, integration)
+                bc_player, integration, bc)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
@@ -591,23 +591,16 @@ class BrightcovePlayerHelper():
             player_config,
             integration.account_id)
 
-        try:
-            yield bc_api.patch_player(player_ref, patch)
-            yield bc_api.publish_player(player_ref)
+        yield bc_api.patch_player(player_ref, patch)
+        yield bc_api.publish_player(player_ref)
+        import pdb; pdb.set_trace()
 
-            # Success. Update the player with the date and version
-            def _modify(p):
-                p.publish_date = datetime.now().isoformat()
-                p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
-                p.last_attempt_result = None
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-        except Exception as e:
-            # Since this is a job possibly triggered from a db observer
-            # keep track of the error if an uncaught exception is raised.
-            def _modify(p):
-                p.last_attempt_result = e.message
-            yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-            raise e
+        # Success. Update the player with the date and version
+        def _modify(p):
+            p.publish_date = datetime.now().isoformat()
+            p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
+            p.last_attempt_result = None
+        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
 
         raise tornado.gen.Return(True)
 
