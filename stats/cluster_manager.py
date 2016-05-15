@@ -229,6 +229,7 @@ class BatchProcessManager(threading.Thread):
                 data_path = \
                   stats.batch_processor.get_last_sucessful_batch_output(
                     self.cluster)
+            _log.info("data_path is %s" % data_path)
             if (data_path is not None and (
                     force or 
                     data_path != self.last_output_path)):
