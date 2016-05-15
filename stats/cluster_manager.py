@@ -97,14 +97,16 @@ class BatchProcessManager(threading.Thread):
 
                 hdfs_host = self.get_master_ip()
 
+                # Make attempts to obtain a master ip. If couldn't write output to S3
+
                 while hdfs_host == ' ':
-                	if wait_time > 6:
-                		_log.info("We could not get master ip after trying for 30 minutes, so outputting to S3")
-                		break
+                    if wait_time > 6:
+                        _log.info("We could not get master ip after trying for 30 minutes, so outputting to S3")
+                        break
                 	
-                	time.sleep(300)
-                	wait_time += 1
-                	hdfs_host = self.get_master_ip()
+                    time.sleep(300)
+                    wait_time += 1
+                    hdfs_host = self.get_master_ip()
                 
                 hdfs_host == self.get_master_ip()
 
@@ -114,12 +116,12 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
                 else:
-                	hdfs_path = 'hdfs://%s:9000' % hdfs_host
-                	cleaned_output_path = "%s/%s/%s" % (
+                    hdfs_path = 'hdfs://%s:9000' % hdfs_host
+                    cleaned_output_path = "%s/%s/%s" % (
                         hdfs_path,
                         'mnt/cleaned',
                         time.strftime("%Y-%m-%d-%H-%M"))
-                	_log.info('Output of clean up job goes to %s',cleaned_output_path)
+                    _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
@@ -130,7 +132,7 @@ class BatchProcessManager(threading.Thread):
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
                 self.last_output_path = 's3://neon-tracker-logs-v2-test/cleaned/'+cleaned_output_path[-16:]
-                
+
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
                 stats.batch_processor.build_impala_tables(
