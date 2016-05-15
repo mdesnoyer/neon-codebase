@@ -694,7 +694,6 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
-        print args
         schema(args)
         publisher_id = args.get('publisher_id')  
 
