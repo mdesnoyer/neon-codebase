@@ -619,9 +619,6 @@ class Cluster():
             port = options.resource_manager_port,
             query = query)
 
-        _log.info("Trying to display the query_url")
-        _log.info("query url is %s" % query_url)
-
         return self._query_hadoop_rest(query_url, tries)
 
     def query_history_manager(self, query, tries=5):

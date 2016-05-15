@@ -130,7 +130,9 @@ class BatchProcessManager(threading.Thread):
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
                 self.last_output_path = 's3://neon-tracker-logs-v2-test/cleaned/'+cleaned_output_path[-16:]
-                _log.info("self.last_output_path is %s" % self.last_output_path)
+                
+                _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
+                
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
