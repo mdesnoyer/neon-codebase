@@ -32,7 +32,7 @@ define("cluster_type", default="video_click_stats",
        help="Name of the EMR cluster to use")
 define("input_path", default="s3://neon-tracker-logs-v2/v2.2/*/*/*/*",
        help="Path for the raw input data")
-define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned",
+define("cleaned_output_path", default="s3://neon-tracker-logs-v2/cleaned/",
        help="Base path where the cleaned logs will be output")
 define("batch_period", default=86400, type=float,
        help='Minimum period in seconds between runs of the batch process.')
@@ -129,7 +129,7 @@ class BatchProcessManager(threading.Thread):
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
-                self.last_output_path = options.cleaned_output_path+'/'+cleaned_output_path[-16:]
+                self.last_output_path = options.cleaned_output_path+cleaned_output_path[-16:]
                 _log.info("self.last_output_path is %s" % self.last_output_path)
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
