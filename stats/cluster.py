@@ -619,7 +619,7 @@ class Cluster():
             port = options.resource_manager_port,
             query = query)
 
-        _log.info("query url =",query_url)
+        _log.info("query url =",str(query_url))
 
         return self._query_hadoop_rest(query_url, tries)
 

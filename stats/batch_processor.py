@@ -409,7 +409,7 @@ def get_last_sucessful_batch_output(cluster):
     response = cluster.query_resource_manager(
         '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
 
-    _log.info("response =",response)
+    _log.info("response =",str(response))
 
     job_name = _get_last_batch_app(response)
 
