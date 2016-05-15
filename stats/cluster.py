@@ -331,8 +331,6 @@ class Cluster():
         while True:
             if timeout is not None and budget_time < datetime.datetime.now():
                 raise MapReduceError("Map Reduce Job timed out.")
-
-            _log.info("job_status is %s" % job_status)
                 
             try:
                 if job_status != 'RUNNING':
@@ -356,9 +354,6 @@ class Cluster():
                            app_id=application_id, 
                            job_id=job_id)
                 response = urllib2.urlopen(url)
-                
-                _log.info("url is %s" % url)
-                _log.info("url is %s" % response.geturl())
 
                 if url != response.geturl():
                     # The job is probably done, so we need to look at the
@@ -375,8 +370,6 @@ class Cluster():
                 for key, value in data.iteritems():
                     utils.monitor.send_data('batch_processor.%s' % key, value)
 
-                _log.info("data['state'] is %s" % str(data['state']))
-                
                 if data['state'] == 'SUCCEEDED':
                     _log.info('Map reduce job %s complete. Results: %s' % 
                               (main_class, 

@@ -124,7 +124,7 @@ class BatchProcessManager(threading.Thread):
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/2016/*/*/*',
+                    self.cluster, options.input_path,
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
@@ -230,7 +230,6 @@ class BatchProcessManager(threading.Thread):
                 data_path = \
                   stats.batch_processor.get_last_sucessful_batch_output(
                     self.cluster)
-            _log.info("data_path is %s" % data_path)
             if (data_path is not None and (
                     force or 
                     data_path != self.last_output_path)):
