@@ -3547,7 +3547,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'publisher_id': '123123abc', 'token': token})
+        params = json.dumps({'publisher_id': '123123abc', 'token': token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
