@@ -1218,7 +1218,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc' % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false') % (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1241,18 +1242,19 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
         self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
         self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
-        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
+        self.assertFalse(rjson['uses_bc_gallery'])
  
     @tornado.testing.gen_test 
     def test_post_integration_body_params(self):
-        params = json.dumps({'publisher_id': '123123abc'})
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['publisher_id'], '123123abc')
 
@@ -1272,8 +1274,59 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
         self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
         self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
-        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
- 
+        self.assertFalse(rjson['uses_bc_gallery'])
+
+
+    @tornado.testing.gen_test 
+    def test_post_gallery_required(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = ('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                    % (self.account_id_api_key))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+        self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test 
+    def test_post_gallery(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': True})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertTrue(rjson['uses_bc_gallery'])
+
+        # Check that the CDN was set properly
+        cdns = neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                self.account_id_api_key,
+                rjson['integration_id']))
+        self.assertItemsEqual(cdns.cdns[0].rendition_sizes,[
+            [120, 67],
+            [120, 90],
+            [160, 90],
+            [160, 120],
+            [210, 118],
+            [320, 180],
+            [374, 210],
+            [320, 240],
+            [460, 260],
+            [480, 270],
+            [622, 350],
+            [480, 360],
+            [640, 360],
+            [640, 480],
+            [960, 540],
+            [1280, 720]])
+        
+        
     @tornado.testing.gen_test 
     def test_get_integration(self):
         url = '/api/v2/%s/integrations/brightcove?integration_id=%s' % (
@@ -1376,8 +1429,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_post_integration_one_playlist_feed_id(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc' \
-                   % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false&playlist_feed_ids=abc') % 
+                (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1394,8 +1448,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_post_integration_multiple_playlist_feed_ids(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc,def,ghi' \
-                   % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false&playlist_feed_ids=abc,def,ghi') % 
+                (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1417,6 +1472,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_post_integration_body_playlist_feed_ids(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery' : 'true',
                              'playlist_feed_ids': 'abc,def,ghi,123'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1442,6 +1498,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_post_integration_with_uses_batch_provisioning(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery' : 0,
                              'uses_batch_provisioning': 1})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1458,6 +1515,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_playlist_feed_ids(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': True,
                              'playlist_feed_ids': 'abc,def,ghi,123'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1485,7 +1543,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_uses_batch_provisioning(self):
         params = json.dumps({'publisher_id': '123123abc',
-                             'uses_batch_provisioning': 1})
+                             'uses_batch_provisioning': 1,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -1520,6 +1579,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             get_videos_mock.return_value = []
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery': False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1545,6 +1605,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             get_videos_mock.return_value = None
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery' : False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1572,6 +1633,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiServerError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1583,7 +1645,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1597,6 +1659,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiNotAuthorizedError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1608,7 +1671,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1622,6 +1685,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiClientError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1633,7 +1697,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1647,6 +1711,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1658,7 +1723,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1671,6 +1736,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                 get_videos_mock.side_effect = [Exception('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1682,7 +1748,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 500)
+        self.assertEquals(e.exception.code, 500)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['data'],
                                  'test') 
@@ -1697,6 +1763,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                 {"updated_at" : "2015-04-20T21:18:32.351Z"}]
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery': False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1748,7 +1815,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             params = json.dumps({'publisher_id': '123123abc',
                 'application_client_id': '5',
                 'application_client_secret': 'some secret',
-                'uses_bc_gallery': True})
+                'uses_bc_gallery': True,
+                'uses_bc_videojs_player': 'True'})
             header = {'Content-Type':'application/json'}
             url = '/api/v2/%s/integrations/brightcove' % (
                 self.account_id_api_key)
@@ -1763,6 +1831,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             rjson['integration_id'], async=True)
         self.assertEqual(platform.application_client_id, '5')
         self.assertEqual(platform.uses_bc_gallery, True)
+        self.assertTrue(platform.uses_bc_videojs_player)
         params = json.dumps({'integration_id': rjson['integration_id'],
                              'application_client_id': 'not 5',
                              'application_client_secret': None})
@@ -1780,13 +1849,14 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         params = json.dumps({'integration_id': rjson['integration_id'],
                              'application_client_id': None,
                              'application_client_secret': None,
-                             'uses_bc_gallery': False})
+                             'uses_bc_videojs_player': False})
         response = yield self.http_client.fetch(
             self.get_url(url), body=params, method='PUT', headers=header)
         self.assertEqual(response.code, 200)
         platform = yield neondata.BrightcoveIntegration.get(
             rjson['integration_id'], async=True)
-        self.assertEqual(platform.uses_bc_gallery, False, 'Valid PUT updates this field')
+        self.assertEqual(platform.uses_bc_videojs_player, False,
+                         'Valid PUT updates this field')
 
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
@@ -1802,7 +1872,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     def test_post_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/integrations/brightcove' % '1234234'
+        url = '/api/v2/%s/integrations/brightcove' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
 class TestVideoHandler(TestControllersBase): 
@@ -3477,7 +3547,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'publisher_id': '123123abc', 'token': token})
+        params = json.dumps({'publisher_id': '123123abc', 'token': token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -3497,7 +3568,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.save()
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
-        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
