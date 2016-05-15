@@ -155,7 +155,7 @@ class IntegrationHelper():
 
     @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type): 
+    def create_integration(acct, args, integration_type, cdn=None): 
         """Creates an integration for any integration type.
 
         Keyword arguments:
@@ -163,15 +163,17 @@ class IntegrationHelper():
         args - the args sent in via the API request
         integration_type - the type of integration to create
         schema - validate args with this Voluptuous schema
+        cdn - an optional CDNHostingMetadata object to intialize the
+              CDNHosting with
         """
 
+        integration = None
         if integration_type == neondata.IntegrationType.OOYALA:
             integration = neondata.OoyalaIntegration()
             integration.account_id = acct.neon_api_key
             integration.partner_code = args['publisher_id']
             integration.api_key = args.get('api_key', integration.api_key)
             integration.api_secret = args.get('api_secret', integration.api_secret)
-            yield integration.save(async=True)
 
         elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
             integration = neondata.BrightcoveIntegration()
@@ -201,43 +203,42 @@ class IntegrationHelper():
             integration.id_field = args.get(
                 'id_field', 
                 integration.id_field)
-            integration.uses_batch_provisioning = args.get(
+            integration.uses_batch_provisioning = Boolean()(args.get(
                 'uses_batch_provisioning', 
-                integration.uses_batch_provisioning)
-            integration.uses_bc_thumbnail_api = args.get(
+                integration.uses_batch_provisioning))
+            integration.uses_bc_thumbnail_api = Boolean()(args.get(
                 'uses_bc_thumbnail_api', 
-                integration.uses_bc_thumbnail_api)
-            integration.uses_bc_videojs_player = args.get(
+                integration.uses_bc_thumbnail_api))
+            integration.uses_bc_videojs_player = Boolean()(args.get(
                 'uses_bc_videojs_player', 
-                integration.uses_bc_videojs_player)
-            integration.uses_bc_smart_player = args.get(
+                integration.uses_bc_videojs_player))
+            integration.uses_bc_smart_player = Boolean()(args.get(
                 'uses_bc_smart_player', 
-                integration.uses_bc_smart_player)
-            integration.uses_bc_gallery = args.get(
+                integration.uses_bc_smart_player))
+            integration.uses_bc_gallery = Boolean()(args.get(
                 'uses_bc_gallery', 
-                integration.uses_bc_gallery)
+                integration.uses_bc_gallery))
             integration.last_process_date = args.get(
                 'last_process_date', 
                 integration.last_process_date)
- 
-            yield integration.save(async=True)
-
-        yield neondata.NeonUserAccount.modify(
-            acct.neon_api_key,
-            lambda p: p.add_platform(integration),
-            async=True)
-
-        # ensure the integration made it to the database by executing a get
-        if integration_type == neondata.IntegrationType.OOYALA:
-            integration = yield tornado.gen.Task(
-                neondata.OoyalaIntegration.get, integration.integration_id)
-        elif integration_type == neondata.IntegrationType.BRIGHTCOVE:
-            integration = yield tornado.gen.Task(
-                neondata.BrightcoveIntegration.get, integration.integration_id)
-        if integration:
-            raise tornado.gen.Return(integration)
         else:
-            raise SaveError('unable to save the integration')
+            raise ValueError('Unknown integration type')
+
+        if cdn:
+            cdn_list = neondata.CDNHostingMetadataList(
+                neondata.CDNHostingMetadataList.create_key(
+                    acct.neon_api_key,
+                    integration.get_id()),
+                [cdn])
+            success = yield cdn_list.save(async=True)
+            if not success:
+                raise SaveError('unable to save CDN hosting')
+
+        success = yield integration.save(async=True)
+        if not success:
+            raise SaveError('unable to save Integration')
+
+        raise tornado.gen.Return(integration)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -523,7 +524,7 @@ class BrightcovePlayerHandler(APIV2Handler):
 
         # Get or create db record
         def _modify(p):
-            p.is_tracked = args['is_tracked']
+            p.is_tracked = Boolean()(args['is_tracked'])
             p.name = bc_player['name'] # BC's name is newer
             p.integration_id = integration.integration_id
         player = yield neondata.BrightcovePlayer.modify(
@@ -689,10 +690,11 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             'uses_bc_thumbnail_api': Boolean(),
             'uses_bc_videojs_player': Boolean(),
             'uses_bc_smart_player': Boolean(),
-            'uses_bc_gallery': Boolean()
+            Required('uses_bc_gallery'): Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
+        print args
         schema(args)
         publisher_id = args.get('publisher_id')  
 
@@ -731,12 +733,36 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 args['last_process_date'] = lpd
             else:
                 raise BadRequestError('Brightcove credentials are bad, ' \
-                    'application_id or application_secret are wrong.')  
+                    'application_id or application_secret are wrong.')
+
+        cdn = None
+        if Boolean()(args['uses_bc_gallery']):
+            # We have a different set of image sizes to generate for
+            # Gallery, so setup the CDN
+            cdn = neondata.NeonCDNHostingMetadata(
+                rendition_sizes = [
+                    [120, 67],
+                    [120, 90],
+                    [160, 90],
+                    [160, 120],
+                    [210, 118],
+                    [320, 180],
+                    [374, 210],
+                    [320, 240],
+                    [460, 260],
+                    [480, 270],
+                    [622, 350],
+                    [480, 360],
+                    [640, 360],
+                    [640, 480],
+                    [960, 540],
+                    [1280, 720]])
             
         integration = yield IntegrationHelper.create_integration(
             acct, 
             args, 
-            neondata.IntegrationType.BRIGHTCOVE)
+            neondata.IntegrationType.BRIGHTCOVE,
+            cdn=cdn)
 
         statemon.state.increment('post_brightcove_oks')
         rv = yield self.db2api(integration)
@@ -786,8 +812,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             'uses_batch_provisioning': Boolean(),
             'uses_bc_thumbnail_api': Boolean(),
             'uses_bc_videojs_player': Boolean(),
-            'uses_bc_smart_player': Boolean(),
-            'uses_bc_gallery': Boolean()
+            'uses_bc_smart_player': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
@@ -840,9 +865,6 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             p.uses_bc_smart_player = Boolean()(
                 args.get('uses_bc_smart_player',
                 integration.uses_bc_smart_player))
-            p.uses_bc_gallery = Boolean()(
-                args.get('uses_bc_gallery',
-                integration.uses_bc_gallery))
 
         yield neondata.BrightcoveIntegration.modify(
             integration_id, _update_integration, async=True)
@@ -1187,7 +1209,7 @@ class VideoHelper(object):
             yield tornado.gen.Task(video.save)
             raise tornado.gen.Return((video,api_request))
         else:
-            reprocess = args.get('reprocess', False)
+            reprocess = Boolean()(args.get('reprocess', False))
             if reprocess:
 
                 reprocess_url = 'http://%s:%s/reprocess' % (
