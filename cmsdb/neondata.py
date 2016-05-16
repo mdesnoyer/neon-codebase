@@ -2979,7 +2979,7 @@ class NeonUserAccount(NamespacedStoredObject):
                  default_size=(DefaultSizes.WIDTH,DefaultSizes.HEIGHT), 
                  name=None, 
                  abtest=True, 
-                 serving_enabled=False, 
+                 serving_enabled=True, 
                  serving_controller=ServingControllerType.IMAGEPLATFORM, 
                  users=None, 
                  email=None, 
