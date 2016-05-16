@@ -2331,7 +2331,6 @@ class BillingSubscriptionHandler(APIV2Handler):
                     a.billed_elsewhere = True
                     a.billing_provider_ref = None
                     a.verify_subscription_expiry = None
-                    a.serving_enabled = False 
                 # cancel all the things!
                 cards = yield self.executor.submit( 
                     customer.sources.all, 
