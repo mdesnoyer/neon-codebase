@@ -205,7 +205,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
 
-    @tornado.testing.gen_test(timeout=1000)
+    @tornado.testing.gen_test
     def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
               '&admin_user_username=a@a.com'\
