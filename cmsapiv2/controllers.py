@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import integrations.brightcove
 
 _log = logging.getLogger(__name__)
 
@@ -723,7 +724,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 integration_type=neondata.IntegrationType.BRIGHTCOVE)
             # Excecute a search and get last_processed_date
             
-            lpd = yield self._get_last_processed_date(
+            lpd, video = yield self._get_last_processed_date(
                 publisher_id,
                 app_id, 
                 app_secret)
@@ -762,6 +763,13 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             args, 
             neondata.IntegrationType.BRIGHTCOVE,
             cdn=cdn)
+
+        # Submit a video to get us going
+        if video:
+            bcsubmitter = integrations.brightcove.BrightcoveIntegration(
+                args['account_id'],
+                integration)
+            yield bcsubmitter.submit_one_video_object(video)
 
         statemon.state.increment('post_brightcove_oks')
         rv = yield self.db2api(integration)
@@ -832,7 +840,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                 neondata.IntegrationType.BRIGHTCOVE)
 
             # just run a basic search to see that the creds are ok
-            lpd = yield self._get_last_processed_date(
+            lpd, video = yield self._get_last_processed_date(
                 integration.publisher_id,
                 app_id, 
                 app_secret)
@@ -886,7 +894,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
            raises on unknown exceptions 
            returns none if a video search could not be completed 
         """
-        rv = None
+        rv = (None, None)
 
         bc_cms_api = api.brightcove_api.CMSAPI(
             publisher_id, 
@@ -901,10 +909,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
             if videos and len(videos) is not 0: 
                 video = videos[0]
-                rv = video['updated_at'] 
+                rv = (video['updated_at'], video) 
             else: 
-                rv = datetime.utcnow().strftime(
-                    '%Y-%m-%dT%H:%M:%SZ')
+                rv = (datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                      None)
         except (api.brightcove_api.BrightcoveApiServerError, 
                 api.brightcove_api.BrightcoveApiClientError,
                 api.brightcove_api.BrightcoveApiNotAuthorizedError, 
