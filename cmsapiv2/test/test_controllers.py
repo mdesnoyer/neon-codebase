@@ -1303,6 +1303,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertTrue(rjson['uses_bc_gallery'])
 
+        # Check that uses_bc_thumbnail_api is set
+        self.assertTrue(rjson['uses_bc_thumbnail_api'])
+
         # Check that the CDN was set properly
         cdns = neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(

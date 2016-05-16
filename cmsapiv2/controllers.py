@@ -206,6 +206,9 @@ class IntegrationHelper():
             integration.uses_batch_provisioning = Boolean()(args.get(
                 'uses_batch_provisioning', 
                 integration.uses_batch_provisioning))
+            integration.uses_bc_gallery = Boolean()(args.get(
+                'uses_bc_gallery', 
+                integration.uses_bc_gallery))
             integration.uses_bc_thumbnail_api = Boolean()(args.get(
                 'uses_bc_thumbnail_api', 
                 integration.uses_bc_thumbnail_api))
@@ -215,9 +218,6 @@ class IntegrationHelper():
             integration.uses_bc_smart_player = Boolean()(args.get(
                 'uses_bc_smart_player', 
                 integration.uses_bc_smart_player))
-            integration.uses_bc_gallery = Boolean()(args.get(
-                'uses_bc_gallery', 
-                integration.uses_bc_gallery))
             integration.last_process_date = args.get(
                 'last_process_date', 
                 integration.last_process_date)
@@ -756,6 +756,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                     [640, 480],
                     [960, 540],
                     [1280, 720]])
+            args['uses_bc_thumbnail_api'] = True
             
         integration = yield IntegrationHelper.create_integration(
             acct, 
