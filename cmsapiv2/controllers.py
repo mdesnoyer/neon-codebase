@@ -640,6 +640,12 @@ class BrightcovePlayerHelper():
             'scripts': scripts
         }
 
+    def write_error(self, status_code, **kwargs):
+        exception = kwargs["exc_info"][1]
+        if hasattr(exception, 'errno'):
+            status_code = exception.errno
+        super(BrightcovePlayerHandler, self).write_error(status_code, **kwargs)
+
     @staticmethod
     def _get_current_tracking_version():
         """Get the version of the current tracking plugin"""

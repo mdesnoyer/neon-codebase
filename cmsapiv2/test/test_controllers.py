@@ -5469,6 +5469,23 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
+    def test_put_player_bc_404(self):
+        self.get_player.side_effect = api.brightcove_api.BrightcoveApiClientError(
+            404,
+            'not found')
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT',
+                body=json.dumps({
+                    'player_ref': 'pl0',
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id}))
+        import pdb; pdb.set_trace()
+
+    @tornado.testing.gen_test
     def test_get_no_default_player(self):
         # TODO factor these header, etc.
         header = { 'Content-Type':'application/json' }
