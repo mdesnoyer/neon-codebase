@@ -994,8 +994,6 @@ class Cluster():
 
         job_state = emrconn.describe_step(self.cluster_id,step_id).status.state
 
-        _log.info("job_state = %s",job_state)
-
         if job_state == 'COMPLETED':
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
