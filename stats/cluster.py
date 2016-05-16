@@ -969,7 +969,7 @@ class Cluster():
         name_step = 's3distcp'
         jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
 
-        s3_path = 's3://neon-tracker-logs-v2-test/cleaned/'+hdfs_path_to_copy[-16:]
+        s3_path = 's3://neon-tracker-logs-v2/cleaned/'+hdfs_path_to_copy[-16:]
         
         step_arg = []
         step_arg.append('--src')
