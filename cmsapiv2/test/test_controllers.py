@@ -5462,7 +5462,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
-                'id': 'pl0',
+                'id': 'pl_0',
                 'name': 'new name'}]
 
             r = yield self.http_client.fetch(
@@ -5470,14 +5470,14 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 headers=header,
                 method='PUT',
                 body=json.dumps({
-                    'player_ref': 'brightcoveplayer_pl0',
+                    'player_ref': 'brightcoveplayer_pl_0',
                     'is_tracked': True,
                     'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(1, pub.call_count)
 
-        self.assertEqual(self.get_player.call_args[0][0], 'pl0')
-        self.assertEqual(pub.call_args[0][0]['id'], 'pl0')
+        self.assertEqual(self.get_player.call_args[0][0], 'pl_0')
+        self.assertEqual(pub.call_args[0][0]['id'], 'pl_0')
         player = json.loads(r.body)
         self.assertTrue(player['is_tracked'])
         self.assertEqual(player['name'], 'new name')

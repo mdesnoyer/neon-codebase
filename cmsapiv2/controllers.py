@@ -519,7 +519,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Verify player_ref is at Brightcove
         bc = api.brightcove_api.PlayerAPI(integration)
         # This will error (expect 404) if player not found
-        bc_player = yield bc.get_player(ref.split('_')[-1])
+        bc_player = yield bc.get_player(ref.split('_', 1)[-1])
 
         # Get or create db record
         def _modify(p):
