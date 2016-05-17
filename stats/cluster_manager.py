@@ -124,11 +124,6 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
-                _log.info('new change')
-                get_ipp = stats.cluster.Cluster._find_master_info()
-                ip = get_ipp.master_ip
-                _log.info("ip is %s" % ip)
-
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
@@ -271,6 +266,11 @@ def main():
         cluster = stats.cluster.Cluster(options.cluster_type, 20,
                                         options.cluster_ip)
         cluster.connect()
+
+        _log.info('new change')
+        get_ipp = cluster._find_master_info()
+        ip = get_ipp.master_ip
+        _log.info("ip is %s" % ip)
 
         batch_processor = BatchProcessManager(cluster)
         atexit.register(batch_processor.stop)
