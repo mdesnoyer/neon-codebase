@@ -205,7 +205,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
 
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test
     def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
               '&admin_user_username=a@a.com'\
@@ -5384,8 +5384,19 @@ class TestBrightcovePlayerHandler(TestControllersBase):
 
     def setUp(self):
         super(TestBrightcovePlayerHandler, self).setUp()
-        self.account_id = 'a0'
+
+        # Mock our user authorization
+        self.user = neondata.NeonUserAccount('a0')
+        self.user.save()
+        self.account_id = self.user.neon_api_key
         self.publisher_id = 'p0'
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
+        # Create a mock integration
         self.integration = neondata.BrightcoveIntegration(
             self.account_id,
             self.publisher_id,
@@ -5394,22 +5405,13 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.integration.save()
         self.api = api.brightcove_api.PlayerAPI(self.integration)
 
-        # Mock our user authorization
-        self.user = neondata.NeonUserAccount(self.account_id)
-        self.user.save()
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-
-        # Set up an initial player
+        # Set up two initial players
         self.player = neondata.BrightcovePlayer(
             player_ref='pl0',
             integration_id=self.integration.integration_id,
             name='db name',
             is_tracked=True,
-            published_plugin_version='0.0.0');
+            published_plugin_version='0.0.1');
         self.player.save()
         self.untracked_player = neondata.BrightcovePlayer(
             player_ref='pl2',
@@ -5432,7 +5434,8 @@ class TestBrightcovePlayerHandler(TestControllersBase):
 
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
-             self.account_id, self.integration.integration_id)
+             self.account_id,
+             self.integration.integration_id)
 
         with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
             get = self._future_wrap_mock(_get)
@@ -5473,7 +5476,8 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         # TODO factor these header, etc.
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
-             self.account_id, self.integration.integration_id)
+             self.account_id,
+             self.integration.integration_id)
         with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
             get = self._future_wrap_mock(_get)
             default_bc_player = {
@@ -5566,13 +5570,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 }))
             self.assertEqual(1, pub.call_count)
 
-            # This is the change behind the mocked publish_plugin method
-            self.player.published_plugin_version = '0.0.1'
-            self.player.save()
-
         player = json.loads(r.body)
         self.assertTrue(player['is_tracked'])
         self.assertEqual(player['name'], 'new name')
+        self.assertEqual(pub.call_args[0][2], self.user.tracker_account_id)
 
         # Try with a new player
         with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
@@ -5700,9 +5701,9 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 "policy_key": "BCpkADawqM2Z5-2XLiQna9qL7qIuHETaqzXl1fdmHcVOFOP6Rf8uUnlhNxNlh9MLNjb5lkodGFv2yBU9suVWdnXZTcFWEMx2qvNACzbVDIyco9fvRTAi43xUeygF_GPQqOUGomo8Bg1s-V7J"
             }
         }
-        account_id = 12345
+        tracker_id = 12345
         patch = controllers.BrightcovePlayerHelper._get_plugin_patch(
-            given, account_id)
+            given, tracker_id)
         expect = {
             'plugins': [
                 {
@@ -5734,8 +5735,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 'master': {
                     'configuration': {
                         'plugins': [{
-                            'name': 'current',
-                            'options': {}
+                            'name': 'notneon',
+                            'options': {
+                                'color': 'red'
+                            }
                         }],
                         'scripts': ['optimizely.js'],
                         'stylesheets': [],
@@ -5750,20 +5753,38 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             patch_mock = self._future_wrap_mock(_patch)
             publish_mock = self._future_wrap_mock(_publish)
             yield controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.integration, self.api)
+                bc_player, self.api, self.user.tracker_account_id)
 
         self.assertEqual(patch_mock.call_count, 1)
-        pid, arg = patch_mock.call_args[0]
-        self.assertIn('optimizely.js', arg['scripts'])
+        pid, patch_args = patch_mock.call_args[0]
+        self.assertIn('optimizely.js', patch_args['scripts'],
+                      'Keeps the non-Neon script')
         our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
-        self.assertIn(our_url, arg['scripts'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'current'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'neon'])
-        self.assertNotIn('stylesheets', arg)
-        self.assertEqual(pid, 'pl0')
+        self.assertIn(our_url, patch_args['scripts'], 'Adds this url to scripts')
+        self.assertEqual(
+            1,
+            len([p for p in patch_args['plugins'] if p['name'] == 'notneon']),
+            'Keeps the non-Neon plugin')
+        self.assertEqual(
+            1,
+            len([p for p in patch_args['plugins'] if p['name'] == 'neon']),
+            'Has one Neon plugin')
+        self.assertNotIn('stylesheets', patch_args, 'Patch skips stylesheets')
+        self.assertEqual('pl0', pid, 'Keeps player ref')
 
         self.assertEqual(publish_mock.call_count, 1)
         self.assertEqual(publish_mock.call_args[0][0], 'pl0')
+
+        # Run it again and assert no change
+        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
+            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
+
+            patch_mock = self._future_wrap_mock(_patch)
+            publish_mock = self._future_wrap_mock(_publish)
+            yield controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.api, self.user.tracker_account_id)
+
+        self.assertEqual(patch_args, patch_mock.call_args[0][1])
 
 class TestForgotPasswordHandler(TestAuthenticationBase):
     def setUp(self):

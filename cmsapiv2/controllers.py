@@ -84,7 +84,6 @@ class AccountHandler(APIV2Handler):
         schema(args)
         acct_internal = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                                args['account_id'])
-
         if not acct_internal:
             raise NotFoundError()
 
@@ -532,7 +531,6 @@ class BrightcovePlayerHandler(APIV2Handler):
             _modify,
             create_missing=True,
             async=True)
-
         # If the player is tracked, then send a request to Brightcove's
         # player managament API to put the plugin in the player
         # and publish the player.  We do this any time the user calls
@@ -540,7 +538,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # troubleshooting their setup and publishing several times.
         if player.is_tracked:
             publish_result = yield BrightcovePlayerHelper.publish_plugin(
-                bc_player, integration, bc)
+                bc_player, bc, self.account.tracker_account_id)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
@@ -578,11 +576,13 @@ class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
     @staticmethod
     @tornado.gen.coroutine
-    def publish_plugin(bc_player, integration, bc_api):
+    def publish_plugin(bc_player, bc_api, tracker_account_id):
         """Update Brightcove player with current plugin and publishes it'''
 
         Input-
         bc_player - Brightcove player dict
+        bc_api - Instance of Brightcove API with appropriate integration
+        tracker_account_id - tracker id for the associated neonuseraccount
         """
         player_ref = bc_player['id']
         player_config = bc_player['branches']['master']['configuration']
@@ -590,7 +590,7 @@ class BrightcovePlayerHelper():
         # Make the patch json string that will be used to update player
         patch = BrightcovePlayerHelper._get_plugin_patch(
             player_config,
-            integration.account_id)
+            tracker_account_id)
 
         yield bc_api.patch_player(player_ref, patch)
         yield bc_api.publish_player(player_ref)
@@ -605,7 +605,7 @@ class BrightcovePlayerHelper():
         raise tornado.gen.Return(True)
 
     @staticmethod
-    def _get_plugin_patch(player_config, account_id):
+    def _get_plugin_patch(player_config, tracker_account_id):
         """Make a patch that replaces our js and json with the current version
 
         Brightcove player's configuration api allows PUT to replace the entire
@@ -620,14 +620,14 @@ class BrightcovePlayerHelper():
 
         Inputs-
         player_config dict containing a configuration branch from Brightcove
-        account_id neon tracking id for the publisher
+        tracker_account_id neon tracking id for the publisher
         """
 
         # Remove any plugin named neon, and append the current one
         plugins = [plugin for plugin in player_config.get('plugins')
             if plugin['name'] is not 'neon']
         plugins.append(BrightcovePlayerHelper._get_current_tracking_json(
-            account_id))
+            tracker_account_id))
 
         # Remove any script like *neon-tracker*, and append the current
         scripts = [script for script in player_config.get('scripts')
@@ -651,7 +651,7 @@ class BrightcovePlayerHelper():
         return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
 
     @staticmethod
-    def _get_current_tracking_json(account_id):
+    def _get_current_tracking_json(tracker_account_id):
         """Get JSON string that configures the plugin given the account_id
 
         These are options that injected into the plugin environment and override
@@ -662,7 +662,7 @@ class BrightcovePlayerHelper():
             'name': 'neon',
             'options': {
                 'publisher': {
-                    'id': account_id
+                    'id': tracker_account_id
                 }
             }
         }
