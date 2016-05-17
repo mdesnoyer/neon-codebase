@@ -466,12 +466,6 @@ class BrightcovePlayerHandler(APIV2Handler):
         }
         self.success(response)
 
-    def write_error(self, status_code, **kwargs):
-        exception = kwargs["exc_info"][1]
-        if hasattr(exception, 'errno'):
-            status_code = exception.errno
-        super(BrightcovePlayerHandler, self).write_error(status_code, **kwargs)
-
     @staticmethod
     @tornado.gen.coroutine
     def _bc_to_obj(bc_player):
