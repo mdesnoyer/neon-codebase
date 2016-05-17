@@ -107,6 +107,7 @@ class BatchProcessManager(threading.Thread):
                     time.sleep(300)
                     wait_time += 1
                     hdfs_host = self.get_master_ip()
+                    _log.info("master ip is %s" % hdfs_host)
                 
                 hdfs_host == self.get_master_ip()
 
@@ -123,7 +124,9 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
-                ip = cluster._find_master_info()
+                _log.info('new change')
+                cluster._find_master_info()
+                ip = cluster.master_ip
                 _log.info("ip is %s" % ip)
 
                 self.cluster.change_instance_group_size(
