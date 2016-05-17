@@ -333,7 +333,7 @@ class Cluster():
                 raise MapReduceError("Map Reduce Job timed out.")
                 
             try:
-                if job_status != 'RUNNING':
+                if job_status != 'RUNNING' and job_status != 'FINISHED':
                     response = self.query_resource_manager(
                         '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
                     latest_app_time = None
@@ -343,9 +343,11 @@ class Cluster():
                             latest_app_time < app['startedTime'])):
                             latest_app_time = app['startedTime']
                             job_status = app['state']
-                    if job_status != 'RUNNING':
+                    if job_status != 'RUNNING' and job_status != 'FINISHED':
                         time.sleep(60)
                         continue
+
+                _log.info("Breaking the infinite loop job_status is %s" % job_status)
                 
                 url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
                        "jobs/{job_id}").format(
