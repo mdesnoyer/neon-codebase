@@ -5469,23 +5469,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
 
     @tornado.testing.gen_test
-    def test_put_player_bc_404(self):
-        self.get_player.side_effect = api.brightcove_api.BrightcoveApiClientError(
-            404,
-            'not found')
-        header = { 'Content-Type':'application/json' }
-        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            yield self.http_client.fetch(
-                self.get_url(url),
-                method='PUT',
-                body=json.dumps({
-                    'player_ref': 'pl0',
-                    'is_tracked': True,
-                    'integration_id': self.integration.integration_id}))
-        import pdb; pdb.set_trace()
-
-    @tornado.testing.gen_test
     def test_get_no_default_player(self):
         # TODO factor these header, etc.
         header = { 'Content-Type':'application/json' }
@@ -5524,6 +5507,41 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(players[0]['player_ref'], 'pl0')
         self.assertEqual(players[1]['player_ref'], 'pl1')
         self.assertEqual(count, 2)
+
+    @tornado.testing.gen_test
+    def test_get_players_bc_401(self):
+        '''Test that a BrightcoveApiClientError for authorization translates to 401'''
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                get = self._future_wrap_mock(_get)
+                get.side_effect = api.brightcove_api.BrightcoveApiClientError(
+                    401,
+                    'Insufficient access for operation')
+                yield self.http_client.fetch(
+                    self.get_url(url),
+                    headers=headers)
+        self.assertEqual(e.exception.code, 401)
+
+
+    @tornado.testing.gen_test
+    def test_get_players_bc_500(self):
+        '''Test that a BrightcoveApiServerError for authorization translates to 500'''
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                get = self._future_wrap_mock(_get)
+                get.side_effect = api.brightcove_api.BrightcoveApiServerError(
+                    500,
+                    'Internal server error')
+                yield self.http_client.fetch(
+                    self.get_url(url),
+                    headers=headers)
+        self.assertEqual(e.exception.code, 500)
 
     @tornado.testing.gen_test
     def test_put_tracked_player(self):
@@ -5606,6 +5624,25 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         player = json.loads(r.body)
         self.assertEqual(player['player_ref'], 'pl2')
         self.assertFalse(player['is_tracked'])
+
+    @tornado.testing.gen_test
+    def test_put_player_bc_404(self):
+        '''Test that a BrightcoveApiClientError translates to HTTPError(404)'''
+        self.get_player.side_effect = api.brightcove_api.BrightcoveApiClientError(
+            404,
+            'not found')
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT',
+                headers=headers,
+                body=json.dumps({
+                    'player_ref': 'pl0',
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id}))
+        self.assertEqual(e.exception.code, 404)
 
     @tornado.testing.gen_test
     def test_get_plugin_patch(self):
