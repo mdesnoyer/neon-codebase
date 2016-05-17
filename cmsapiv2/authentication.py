@@ -557,14 +557,14 @@ class VerifyAccountHandler(APIV2Handler):
                           async=True)
     
             tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
-                                     account.tracker_account_id, 
-                                     account.neon_api_key, 
-                                     neondata.TrackerAccountIDMapper.PRODUCTION)
+                account.tracker_account_id, 
+                account.neon_api_key, 
+                neondata.TrackerAccountIDMapper.PRODUCTION)
     
             tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
-                                     account.staging_tracker_account_id, 
-                                     account.neon_api_key, 
-                                     neondata.TrackerAccountIDMapper.STAGING)
+                account.staging_tracker_account_id, 
+                account.neon_api_key, 
+                neondata.TrackerAccountIDMapper.STAGING)
     
             yield tracker_p_aid_mapper.save(async=True)
             yield tracker_s_aid_mapper.save(async=True)
@@ -576,7 +576,12 @@ class VerifyAccountHandler(APIV2Handler):
            
             account_limits = neondata.AccountLimits(account.neon_api_key)
             account_limits.populate_with_billing_plan(billing_plan)
-            yield account_limits.save(async=True)  
+            yield account_limits.save(async=True) 
+
+            # add a default experimentstrategy as well 
+            experiment_strategy = neondata.ExperimentStrategy( 
+                account.neon_api_key) 
+            yield experiment_strategy.save(async=True) 
     
             account = yield self.db2api(account)
             

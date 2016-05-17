@@ -259,6 +259,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
+
+        exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
+        self.assertEquals(exps.get_id(), account_id) 
+        self.assertEquals(exps.exp_frac, 1.0)
         
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
@@ -306,6 +310,11 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
+
+        exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
+        self.assertEquals(exps.get_id(), account_id) 
+        self.assertEquals(exps.exp_frac, 1.0)
+        self.assertEquals(exps.holdback_frac, 0.05)
 
     @tornado.testing.gen_test 
     def test_create_new_account_uppercase_username(self):
