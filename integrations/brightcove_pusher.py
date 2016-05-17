@@ -48,6 +48,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
     @tornado.gen.coroutine
     def put(self, integration_id):
         statemon.state.increment('callbacks_received')
+        _log.info('Received callback for integration id: %s' % integration_id)
         bc_integration = yield neondata.BrightcoveIntegration.get(
             integration_id, async=True)
         if bc_integration is None:
@@ -68,6 +69,9 @@ class ServingURLHandler(tornado.web.RequestHandler):
                 400, reason = 'Invalid JSON received: %s' % self.request.body)
 
         try:
+            _log.info('Processing video %s (%s) integration id: %s' % 
+                      (data['video_id'], data['processing_state'],
+                       integration_id))
             if (bc_integration.application_client_id is not None and
                 bc_integration.application_client_secret is not None):
                 try:

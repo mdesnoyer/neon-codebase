@@ -175,11 +175,10 @@ class OVPIntegration(object):
         try:
             job_id = yield self._submit_one_video_object_impl(
                     video, grab_new_thumb=grab_new_thumb)
-        except CMSAPIError:
-            raise
-        except OVPError:
-            raise
-        except TypeError:
+        except (CMSAPIError, 
+                OVPError,
+                TypeError,
+                RateLimitError):
             raise
         except Exception:
             _log.exception('Unexpected error submitting video %s' % video)
