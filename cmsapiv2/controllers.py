@@ -1427,17 +1427,20 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint post request"""
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Required('external_video_ref'): All(Coerce(str), 
+          Required('external_video_ref'): All(Any(Coerce(str), unicode), 
               Length(min=1, max=512)),
-          'url': All(Coerce(str), Length(min=1, max=512)),
+          'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
           'reprocess': Boolean(),
           'integration_id': All(Coerce(str), Length(min=1, max=256)),
-          'callback_url': All(Coerce(str), Length(min=1, max=512)),
-          'title': All(Coerce(str), Length(min=1, max=1024)),
+          'callback_url': All(Any(Coerce(str), unicode), 
+              Length(min=1, max=2048)),
+          'title': All(Any(Coerce(str), unicode), 
+              Length(min=1, max=2048)), 
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': All(Coerce(str), Length(min=1, max=2048)),
+          'default_thumbnail_url': All(Any(Coerce(str), unicode), 
+              Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512))
         })
 
