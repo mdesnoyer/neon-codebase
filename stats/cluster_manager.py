@@ -89,41 +89,19 @@ class BatchProcessManager(threading.Thread):
             # Run the job
             _log.info('Running batch process.')
             try:
-                # Build the output hdfs path string
-                # If HDFS Hostname could not be resolved, fall back to S3 output
-
-#                hdfs_host = ' '
-#                wait_time = 0
-
-#                hdfs_host = cluster.master_ip
-
-                # Make attempts to obtain a master ip. If couldn't, write output to S3
-
-                # while hdfs_host == ' ':
-                #     if wait_time > 6:
-                #         _log.info("We could not get master ip after trying for 30 minutes, so output to S3")
-                #         break
-                	
-                #     time.sleep(300)
-                #     wait_time += 1
-                #     hdfs_host = self.get_master_ip()
-                #     _log.info("master ip is %s" % hdfs_host)
-                
-                # hdfs_host == self.get_master_ip()
-
-                _log.info("hdfs_host inside is %s" % self.cluster.master_ip)
+                run_time = time.strftime("%Y-%m-%d-%H-%M")
 
                 if self.cluster.master_ip == ' ':
                     cleaned_output_path = "%s/%s" % (
                         options.cleaned_output_path,
-                        time.strftime("%Y-%m-%d-%H-%M"))
+                        run_time)
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
                 else:
                     hdfs_path = 'hdfs://%s:9000' % self.cluster.master_ip
                     cleaned_output_path = "%s/%s/%s" % (
                         hdfs_path,
                         'mnt/cleaned',
-                        time.strftime("%Y-%m-%d-%H-%M"))
+                        run_time)
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
 
@@ -135,8 +113,8 @@ class BatchProcessManager(threading.Thread):
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
-                self.last_output_path = options.cleaned_output_path+'/'+cleaned_output_path[-16:]
 
+                self.last_output_path = options.cleaned_output_path+run_time
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
                 stats.batch_processor.build_impala_tables(
@@ -182,40 +160,6 @@ class BatchProcessManager(threading.Thread):
                     self.n_task_instances -= 1
 
             self._ready_to_run.wait()
-
-    def get_master_ip(self):
-
-        #Gets the master ip address of the running cluster
-        
-        conn = EmrConnection()
-        ec2conn = EC2Connection()
-
-        self.private_ip = ' '
-
-        cluster_list = conn.list_clusters(cluster_states=['WAITING'])
-        clusterids = []
-
-        for cl in cluster_list.clusters:
-            clusterids.append(cl.id)
-
-        for cluster_in_my_list in clusterids:
-
-            cluster_details = conn.describe_cluster(cluster_in_my_list)
-            this_is_primary = [i.value for i in cluster_details.tags if i.value == 'primary']
-
-            if this_is_primary and cluster_details.tags[1].value == options.cluster_type:
-                instance_gps = conn.list_instance_groups(cluster_in_my_list)
-
-                for i in instance_gps.instancegroups:
-
-                    if i.instancegrouptype == 'MASTER':
-                        instance_gp_id = i.id
-                        mstr_instances = conn.list_instances(cluster_in_my_list,instance_group_id=instance_gp_id)
-
-                        for j in mstr_instances.instances:
-                            self.private_ip =  j.privateipaddress
-        
-        return self.private_ip
 
     def stop(self):
         self._stopped.set()
