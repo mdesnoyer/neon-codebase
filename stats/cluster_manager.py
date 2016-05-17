@@ -119,7 +119,7 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
                 else:
-                    hdfs_path = 'hdfs://%s:9000' % hdfs_host
+                    hdfs_path = 'hdfs://%s:9000' % self.cluster.master_ip
                     cleaned_output_path = "%s/%s/%s" % (
                         hdfs_path,
                         'mnt/cleaned',
