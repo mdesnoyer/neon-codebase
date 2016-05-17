@@ -5471,6 +5471,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertNotIn('description', player0)
         self.assertEqual('pl1', player1['player_ref'])
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
+        self.assertIsNone(neondata.BrightcovePlayer.get('pl1'))
 
     @tornado.testing.gen_test
     def test_get_no_default_player(self):
@@ -5522,7 +5523,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
-                'id': 'pl_0',
+                'id': 'pl0',
                 'name': 'new name'}]
 
             r = yield self.http_client.fetch(
@@ -5530,16 +5531,17 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 headers=header,
                 method='PUT',
                 body=json.dumps({
-                    'player_ref': 'pl_0',
+                    'player_ref': 'pl0',
                     'is_tracked': True,
                     'integration_id': self.integration.integration_id
                 }))
             self.assertEqual(1, pub.call_count)
 
-        self.assertEqual(self.get_player.call_args[0][0], 'pl_0')
-        self.assertEqual(pub.call_args[0][0]['id'], 'pl_0')
+        self.assertEqual(self.get_player.call_args[0][0], 'pl0')
+        self.assertEqual(pub.call_args[0][0]['id'], 'pl0')
         player = json.loads(r.body)
         self.assertTrue(player['is_tracked'])
+        self.assertEqual(player['player_ref'], 'pl0')
         self.assertEqual(player['name'], 'new name')
         self.assertEqual(pub.call_args[0][2], self.user.tracker_account_id)
 
@@ -5562,9 +5564,11 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             self.assertEqual(1, pub.call_count)
 
         player = json.loads(r.body)
+        self.assertEqual(player['player_ref'], 'pl-new')
         self.assertEqual(player['name'],'new name')
         self.assertTrue(player['is_tracked'])
         player = yield neondata.BrightcovePlayer.get('pl-new', async=True)
+        self.assertEqual(player.get_id(), 'pl-new')
         self.assertEqual(player.name,'new name')
         self.assertTrue(player.is_tracked)
         self.assertEqual(
