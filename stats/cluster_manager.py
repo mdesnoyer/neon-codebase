@@ -95,21 +95,21 @@ class BatchProcessManager(threading.Thread):
                 hdfs_host = ' '
                 wait_time = 0
 
-                hdfs_host = self.get_master_ip()
+                hdfs_host = cluster.master_ip
 
                 # Make attempts to obtain a master ip. If couldn't, write output to S3
 
-                while hdfs_host == ' ':
-                    if wait_time > 6:
-                        _log.info("We could not get master ip after trying for 30 minutes, so output to S3")
-                        break
+                # while hdfs_host == ' ':
+                #     if wait_time > 6:
+                #         _log.info("We could not get master ip after trying for 30 minutes, so output to S3")
+                #         break
                 	
-                    time.sleep(300)
-                    wait_time += 1
-                    hdfs_host = self.get_master_ip()
-                    _log.info("master ip is %s" % hdfs_host)
+                #     time.sleep(300)
+                #     wait_time += 1
+                #     hdfs_host = self.get_master_ip()
+                #     _log.info("master ip is %s" % hdfs_host)
                 
-                hdfs_host == self.get_master_ip()
+                # hdfs_host == self.get_master_ip()
 
                 if hdfs_host == ' ':
                     cleaned_output_path = "%s/%s" % (
@@ -123,12 +123,6 @@ class BatchProcessManager(threading.Thread):
                         'mnt/cleaned',
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
-
-
-                _log.info('new change')
-                get_ipp = stats.cluster.Cluster.find_cluster()
-                ip = get_ipp.master_ip
-                _log.info("ip is %s" % ip)
 
 
                 self.cluster.change_instance_group_size(
