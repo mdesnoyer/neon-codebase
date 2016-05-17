@@ -113,7 +113,7 @@ class BatchProcessManager(threading.Thread):
 
                 _log.info("hdfs_host inside is %s" % self.cluster.master_ip)
 
-                if hdfs_host == ' ':
+                if self.cluster.master_ip == ' ':
                     cleaned_output_path = "%s/%s" % (
                         options.cleaned_output_path,
                         time.strftime("%Y-%m-%d-%H-%M"))
@@ -135,7 +135,7 @@ class BatchProcessManager(threading.Thread):
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
-                self.last_output_path = 's3://neon-tracker-logs-v2-test/cleaned/'+cleaned_output_path[-16:]
+                self.last_output_path = options.cleaned_output_path+'/'+cleaned_output_path[-16:]
 
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
@@ -269,10 +269,6 @@ def main():
         cluster = stats.cluster.Cluster(options.cluster_type, 20,
                                         options.cluster_ip)
         cluster.connect()
-
-        hdfs_host = cluster.master_ip
-
-        _log.info("hdfs_host is %s" % hdfs_host)
 
         batch_processor = BatchProcessManager(cluster)
         atexit.register(batch_processor.stop)
