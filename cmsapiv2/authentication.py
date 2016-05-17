@@ -27,6 +27,12 @@ statemon.define('successful_logouts', int)
 _successful_logouts_ref = statemon.state.get_ref('successful_logouts')
 
 statemon.define('post_account_oks', int) 
+statemon.define('bad_password_reset_attempts', int) 
+
+class CommunicationTypes(object): 
+    EMAIL = 'email' 
+    SECONDARY_EMAIL = 'secondary_email' 
+    CELL_PHONE = 'cell_phone' 
 
 '''*****************************************************************
 AuthenticateHandler 
@@ -51,8 +57,8 @@ class AuthenticateHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('username') : Any(str, unicode, Length(min=3, max=128)),
-          Required('password') : Any(str, unicode, Length(min=8, max=64)),
+          Required('username') : All(Coerce(str), Length(min=3, max=128)),
+          Required('password') : All(Coerce(str), Length(min=8, max=64)),
         })
         args = self.parse_args()
         schema(args)
@@ -125,7 +131,7 @@ class LogoutHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
         args = self.parse_args(keep_token=True)
         schema(args)
@@ -186,7 +192,7 @@ class RefreshTokenHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args(keep_token=True)
@@ -242,10 +248,9 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('customer_name') : Any(str, 
-              unicode,
+          Required('customer_name') : All(Coerce(str), 
               Length(min=1, max=1024)),
-          Required('email') : Any(CustomVoluptuousTypes.Email(),
+          Required('email') : All(CustomVoluptuousTypes.Email(),
               Length(min=6, max=1024)),
           Required('admin_user_username') : All(CustomVoluptuousTypes.Email(), 
               Length(min=6, max=512)), 
@@ -253,10 +258,10 @@ class NewAccountHandler(APIV2Handler):
               Length(min=8, max=64)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
-          'default_thumbnail_id': Any(str, unicode, Length(min=1, max=2048)),
-          'admin_user_first_name': Any(str, unicode, Length(min=1, max=256)),
-          'admin_user_last_name': Any(str, unicode, Length(min=1, max=256)),
-          'admin_user_title': Any(str, unicode, Length(min=1, max=32))
+          'default_thumbnail_id': All(Coerce(str), Length(min=1, max=2048)),
+          'admin_user_first_name': All(Coerce(str), Length(min=1, max=256)),
+          'admin_user_last_name': All(Coerce(str), Length(min=1, max=256)),
+          'admin_user_title': All(Coerce(str), Length(min=1, max=32))
         })
         args = self.parse_args()
         schema(args) 
@@ -389,21 +394,23 @@ class NewAccountHandler(APIV2Handler):
         return True 
  
 '''****************************************************************
-NewUserHandler
+UserHandler
 ****************************************************************'''
-class NewUserHandler(APIV2Handler):
+class UserHandler(APIV2Handler):
     """Handles post requests to the user endpoint."""
     @tornado.gen.coroutine 
     def post(self):
         """handles user endpoint post request""" 
 
         schema = Schema({ 
-          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('username') : All(Coerce(str), Length(min=8, max=256)),
           Required('password') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=63)),
-          'first_name': Any(str, unicode, Length(min=1, max=256)),
-          'last_name': Any(str, unicode, Length(min=1, max=256)),
-          'title': Any(str, unicode, Length(min=1, max=32))
+          Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
+          'first_name': All(Coerce(str), Length(min=1, max=256)),
+          'last_name': All(Coerce(str), Length(min=1, max=256)),
+          'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+          'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
+          'title': All(Coerce(str), Length(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -414,6 +421,8 @@ class NewUserHandler(APIV2Handler):
                        access_level=args.get('access_level'),
                        first_name=args.get('first_name', None),
                        last_name=args.get('last_name', None), 
+                       secondary_email=args.get('secondary_email', None), 
+                       cell_phone_number=args.get('cell_phone_number', None), 
                        title=args.get('title',None))
 
         yield new_user.save(async=True)
@@ -421,22 +430,84 @@ class NewUserHandler(APIV2Handler):
         user = yield self.db2api(new_user)
 
         self.success(user)
+
+    @tornado.gen.coroutine 
+    def put(self):
+        """handles user endpoint put request, currently only 
+           used for password resets"""
+ 
+        schema = Schema({ 
+          Required('username') : All(Coerce(str), Length(min=8, max=64)),
+          Required('new_password') : All(Coerce(str), Length(min=8, max=64)),
+          Required('reset_password_token') : All(
+              Coerce(str), 
+              Length(min=16, max=512))
+        })
+
+        args = self.parse_args()
+        schema(args)
+
+        username = args.get('username') 
+        new_password = args.get('new_password') 
+        reset_password_token = args.get('reset_password_token') 
+
+        current_user = yield neondata.User.get(
+            username, 
+            async=True)
+ 
+        if not current_user: 
+            raise NotFoundError('User was not found')
+ 
+        if reset_password_token != current_user.reset_password_token:
+            _log.info('Invalid attempt(token mismatch)'\
+                      ' to reset %s password' % username)  
+            statemon.state.increment('bad_password_reset_attempts')
+            raise NotAuthorizedError('Token mismatch') 
+
+        try: 
+            payload = JWTHelper.decode_token(reset_password_token) 
+            pl_username = payload['username']
+            if pl_username != username: 
+                _log.info('Invalid attempt(mismatched usernames)'\
+                          ' to reset %s password' % username)  
+                statemon.state.increment('bad_password_reset_attempts')
+                raise NotAuthorizedError('User mismatch please try again') 
+
+        except jwt.ExpiredSignatureError:
+            raise NotAuthorizedError(
+                'reset password token has expired, please request another')
+       
+        def _modify_user(u):  
+            u.password_hash = sha256_crypt.encrypt(new_password) 
+            u.reset_password_token = None
+ 
+        user = yield neondata.User.modify(
+            username, 
+            _modify_user, 
+            async=True)   
+
+        rv = yield self.db2api(user)
+
+        self.success(rv)
  
     @classmethod
     def get_access_levels(self):
         return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.GLOBAL_ADMIN 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE
                } 
  
     @classmethod
     def _get_default_returned_fields(cls):
         return ['username', 'created', 'updated', 
-                'first_name', 'last_name', 'title' ]
+                'first_name', 'last_name', 'title', 
+                'secondary_email', 'cell_phone_number' ]
     
     @classmethod
     def _get_passthrough_fields(cls):
         return ['username', 'created', 'updated',
-                'first_name', 'last_name', 'title' ]
+                'first_name', 'last_name', 'title', 
+                'secondary_email', 'cell_phone_number' ]
 
 '''****************************************************************
 VerifyAccountHandler
@@ -454,7 +525,7 @@ class VerifyAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('token') : Any(str, unicode, Length(min=1, max=512))
+          Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args(keep_token=True)
@@ -486,14 +557,14 @@ class VerifyAccountHandler(APIV2Handler):
                           async=True)
     
             tracker_p_aid_mapper = neondata.TrackerAccountIDMapper(
-                                     account.tracker_account_id, 
-                                     account.neon_api_key, 
-                                     neondata.TrackerAccountIDMapper.PRODUCTION)
+                account.tracker_account_id, 
+                account.neon_api_key, 
+                neondata.TrackerAccountIDMapper.PRODUCTION)
     
             tracker_s_aid_mapper = neondata.TrackerAccountIDMapper(
-                                     account.staging_tracker_account_id, 
-                                     account.neon_api_key, 
-                                     neondata.TrackerAccountIDMapper.STAGING)
+                account.staging_tracker_account_id, 
+                account.neon_api_key, 
+                neondata.TrackerAccountIDMapper.STAGING)
     
             yield tracker_p_aid_mapper.save(async=True)
             yield tracker_s_aid_mapper.save(async=True)
@@ -505,7 +576,12 @@ class VerifyAccountHandler(APIV2Handler):
            
             account_limits = neondata.AccountLimits(account.neon_api_key)
             account_limits.populate_with_billing_plan(billing_plan)
-            yield account_limits.save(async=True)  
+            yield account_limits.save(async=True) 
+
+            # add a default experimentstrategy as well 
+            experiment_strategy = neondata.ExperimentStrategy( 
+                account.neon_api_key) 
+            yield experiment_strategy.save(async=True) 
     
             account = yield self.db2api(account)
             
@@ -556,6 +632,209 @@ class VerifyAccountHandler(APIV2Handler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+'''****************************************************************
+ForgotPasswordHandler
+****************************************************************'''
+class ForgotPasswordHandler(APIV2Handler):
+    """Handles post requests to the forgot_password endpoint.
+
+       This will send out an email to the username(email) that 
+          requests it. 
+
+       It will update the user object with a reset_password_token, 
+         which will be valid for a short period of time. 
+
+       If this is called and the reset_password_token is set, and 
+         not expired, it will not send out another email. This will
+         prevent spamming emails, based on just a username. 
+    """
+    @tornado.gen.coroutine 
+    def post(self):
+        """handles account endpoint post request""" 
+        schema = Schema({ 
+          Required('username') : All(CustomVoluptuousTypes.Email(),
+              Length(min=6, max=1024)),
+          'communication_type' : All(Coerce(str), Length(1,16)) 
+        })
+        alt_schema = Schema({
+            Required('username') : All(Coerce(str), 
+                Length(min=6, max=1024)),
+            'communication_type' : All(Coerce(str), Length(1,16)) 
+        })
+
+        args = self.parse_args()
+        email_address = None 
+        phone_number = None 
+ 
+        communication_type = args.get('communication_type', None)
+        if communication_type is None: 
+            communication_type = CommunicationTypes.EMAIL
+ 
+        communication_type = communication_type.lower()
+
+        try: 
+            schema(args)
+            username = args.get('username')  
+        except Invalid as e:
+            # let's see if it's a string username, they 
+            # could possibly have a secondary_email on 
+            # the account
+            if 'not a valid email address' in e.error_message:
+                alt_schema(args)
+                username = args.get('username')
+                if communication_type == CommunicationTypes.EMAIL: 
+                    communication_type = CommunicationTypes.SECONDARY_EMAIL
+            else: 
+                raise 
+
+        user = yield neondata.User.get(username, async=True) 
+
+        if not user: 
+            raise NotFoundError('User was not found.')
+ 
+        if communication_type == CommunicationTypes.EMAIL:
+            email_address = username
+        elif communication_type == CommunicationTypes.SECONDARY_EMAIL:
+            if not user.secondary_email: 
+                raise BadRequestError('No recovery email is available'\
+                   ' please contact us, or try a different form'\
+                   ' of recovery.')  
+            else: 
+                email_address = user.secondary_email 
+        elif communication_type == CommunicationTypes.CELL_PHONE:
+            if not user.cell_phone_number: 
+                raise BadRequestError('No cell phone number is available'\
+                    ' please contact us, or try a different form'\
+                    ' of recovery.')
+            else: 
+                phone_number = user.cell_phone_number
+        else: 
+            raise BadRequestError('Communication Type not recognized') 
+
+        # TODO implement through SNS
+        if phone_number: 
+            raise NotImplementedError('recovery by phone is not ready') 
+ 
+        if user.reset_password_token:
+            # make sure we can't just spam communication 
+            try: 
+                payload = JWTHelper.decode_token(user.reset_password_token) 
+                raise BadRequestError('There is a password reset comm'\
+                    ' already sent to this user. Check your spam or junk'\
+                    ' folders to ensure you have not missed it.') 
+            except jwt.ExpiredSignatureError:
+                pass 
+            
+        rp_token = JWTHelper.generate_token(
+            { 'username' : username }, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN)
+
+        def _modify_user(u): 
+            u.reset_password_token = rp_token 
+
+        user = yield neondata.User.modify(
+            username,
+            _modify_user, 
+            async=True) 
+
+        if email_address:
+            self._send_email(email_address, user)  
+            msg = 'Reset Password email sent to %s' % email_address
+            self.success({'message' : msg})
+ 
+    def _send_email(self, 
+                    email_address,
+                    user): 
+        """ Helper to send emails via ses 
+
+            if the email is sent successfully, it returns True 
+            if something goes wrong it logs, and raises an exception
+        """ 
+        kwargs = {}
+        click_me_url = '%s/user/reset/token/%s/username/%s/' % (
+            self.origin, 
+            user.reset_password_token,
+            user.username) 
+        kwargs['to_addresses'] = email_address
+        kwargs['subject'] = 'Password Reset Request' 
+             
+        kwargs['body'] = """<html>
+                              <body>
+                                <p><a href="https://www.neon-lab.com">
+                                <img class="logo"
+                                 style = "height: 43.25px; width: 104px;"  
+                                 src="https://s3.amazonaws.com/neon_website_assets/logo_777.png" 
+                                 alt="Neon">
+                                </a></p>
+                                <br> 
+                                <p>Hi {first_name},</p>
+                                <p>
+                                  Sorry to hear, you've forgotten your 
+                                  password. But, have no fear the link to 
+                                  reset it is right below. This link will 
+                                  be good for the next hour. 
+                                  <p>
+                                    <a style="color: #f16122" href="{url}">
+                                      Reset Your Password
+                                    </a>
+                                  </p> 
+                                </p>
+                                <p>
+                                  You have received this message because 
+                                  someone requested to have the password 
+                                  reset for this user. If this was not you,
+                                  don't worry. Someone may have typed in 
+                                  your username by mistake. 
+                                </p>
+                                <p> 
+                                  Nobody will be able to change your password
+                                  without the token contained in the link above. 
+                                  When you have completed the password change, 
+                                  you can delete this email. 
+                                </p>
+                                <p>Thanks,<br>
+                                  The Neon Team
+                                </p>
+                                <p style="font-size:smaller">
+                                   If the reset password link does not work 
+                                   please copy and paste the following address 
+                                   into your browser : {url} 
+                                </p> 
+                                <p>------------</p>
+                                <p class="footer" style="font-size: smaller">Neon Labs Inc.<br>
+                                70 South Park St. | San Francisco, CA 94107<br>
+                                (415) 355-4249<br>
+                                <a style="color: #f16122" href="https://www.neon-lab.com">neon-lab.com</a>
+                                </p>
+                                <p class="footer" style="font-size: smaller">This is an automated email. 
+                                Please get in touch with us at 
+                                <a href="mailto:ask@neon-lab.com">
+                                  ask@neon-lab.com</a></p>
+                              </body>
+                            </html>""".format(
+                                first_name=user.first_name, 
+                                url=click_me_url, 
+                                username=user.username) 
+
+        kwargs['source'] = 'Neon Forgot Your Password <noreply@neon-lab.com>' 
+        kwargs['reply_addresses'] = 'noreply@neon-lab.com' 
+        kwargs['format'] = 'html' 
+        ses = boto.connect_ses()
+        try: 
+            ses.send_email(**kwargs)
+        except Exception as e: 
+            _log.error('Failed to Send Reset Password email to %s exc_info %s' % 
+                (email_address, e))
+            raise Exception('unable to send reset password email')
+ 
+        return True
+ 
+    @classmethod
+    def get_access_levels(self):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE
+               }
          
 '''*********************************************************************
 Endpoints 
@@ -566,7 +845,8 @@ application = tornado.web.Application([
     (r'/api/v2/refresh_token/?$', RefreshTokenHandler),
     (r'/api/v2/accounts/?$', NewAccountHandler),
     (r'/api/v2/accounts/verify?$', VerifyAccountHandler),
-    (r'/api/v2/users/?$', NewUserHandler),
+    (r'/api/v2/users/?$', UserHandler),
+    (r'/api/v2/users/forgot_password?$', ForgotPasswordHandler),
     (r'/api/v2/logout/?$', LogoutHandler)
 ], gzip=True)
 

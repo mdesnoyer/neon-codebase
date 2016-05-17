@@ -54,10 +54,26 @@ _already_exists_errors_ref = statemon.state.get_ref('already_exists_errors')
 statemon.define('internal_server_errors', int)
 _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
 
-define("token_secret", default="9gRvLemgdfHUlzpv", help="the secret for tokens", type=str)
-define("access_token_exp", default=720, help="user access token expiration in seconds", type=int)
-define("refresh_token_exp", default=1209600, help="user refresh token expiration in seconds", type=int)
-define("verify_token_exp", default=86400, help="account verify token expiration in seconds", type=int)
+define("token_secret", 
+    default="9gRvLemgdfHUlzpv", 
+    help="the secret for tokens", 
+    type=str)
+define("access_token_exp", 
+    default=720, 
+    help="user access token expiration in seconds", 
+    type=int)
+define("refresh_token_exp", 
+    default=1209600, 
+    help="user refresh token expiration in seconds", 
+    type=int)
+define("verify_token_exp", 
+    default=86400, 
+    help="account verify token expiration in seconds", 
+    type=int)
+define("reset_password_token_exp", 
+    default=3600, 
+    help="reset password token expiration in seconds", 
+    type=int)
 define("frontend_base_url",
     default='https://app.neon-lab.com',
     help="will default to this if the origin is null",
@@ -67,12 +83,15 @@ define("check_subscription_interval",
     help="how many seconds in between checking the billing integration", 
     type=int)
 
-define("stripe_api_key", default=None, help='The API key we use to talk to stripe.')
+define("stripe_api_key", 
+    default=None, 
+    help='The API key we use to talk to stripe.')
 
 class TokenTypes(object):
     ACCESS_TOKEN = 0
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
+    RESET_PASSWORD_TOKEN = 3
 
 class APIV2Sender(object):
     def success(self, data, code=ResponseCode.HTTP_OK):
@@ -631,7 +650,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             self.set_status(ResponseCode.HTTP_BAD_REQUEST)
             self.error('failed to download thumbnail',
                        extra_data=get_exc_message(exception))
-
+        elif isinstance(exception, IOError):
+            self.set_status(exception.errno)
+            self.error(exception.strerror, code=self.get_status())
         else:
             _log.exception(''.join(traceback.format_tb(kwargs['exc_info'][2])))
             statemon.state.increment(ref=_internal_server_errors_ref,
@@ -738,6 +759,8 @@ class JWTHelper(object):
             exp_time_add = options.refresh_token_exp
         elif token_type is TokenTypes.VERIFY_TOKEN:
             exp_time_add = options.verify_token_exp
+        elif token_type is TokenTypes.RESET_PASSWORD_TOKEN:
+            exp_time_add = options.reset_password_token_exp
         else:
             _log.exception('requested a token_type that does not exist')
             raise Exception('token type not recognized')
