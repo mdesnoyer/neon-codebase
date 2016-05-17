@@ -127,6 +127,11 @@ class BatchProcessManager(threading.Thread):
                 cluster1 = stats.cluster.Cluster(options.cluster_type, 20,
                                     options.cluster_ip)
 
+                _log.info('new change')
+                get_ipp = cluster1.find_cluster()
+                ip = get_ipp.master_ip
+                _log.info("ip is %s" % ip)
+
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
