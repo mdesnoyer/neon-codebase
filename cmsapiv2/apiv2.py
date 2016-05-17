@@ -699,13 +699,13 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         passthrough_fields = set(cls._get_passthrough_fields())
 
         for field in fields:
-            try: 
+            try:
                 if field in passthrough_fields:
                     retval[field] = getattr(obj, field)
                 else:
                     retval[field] = yield cls._convert_special_field(obj, field)
-            except AttributeError: 
-                pass 
+            except AttributeError:
+                retval[field] = None
         raise tornado.gen.Return(retval)
 
     @classmethod
