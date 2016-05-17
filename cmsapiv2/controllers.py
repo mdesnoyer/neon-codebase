@@ -458,6 +458,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         # @TODO batch transform dict-players to object-players
         objects  = yield map(self._bc_to_obj, players)
         ret_list = yield map(self.db2api, objects)
+
+
         # Envelope with players:, player_count:
         response = {
             'players': ret_list,
@@ -519,7 +521,7 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Verify player_ref is at Brightcove
         bc = api.brightcove_api.PlayerAPI(integration)
         # This will error (expect 404) if player not found
-        bc_player = yield bc.get_player(ref.split('_', 1)[-1])
+        bc_player = yield bc.get_player(ref)
 
         # Get or create db record
         def _modify(p):
@@ -542,7 +544,7 @@ class BrightcovePlayerHandler(APIV2Handler):
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
-            player.player_ref,
+            player.get_id(),
             async=True)
         response = yield self.db2api(player)
         self.success(response)
@@ -557,16 +559,26 @@ class BrightcovePlayerHandler(APIV2Handler):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 
-                'created', 'updated', 'publish_date', 
+        return ['player_ref', 'name', 'is_tracked',
+                'created', 'updated', 'publish_date',
                 'published_plugin_version', 'last_attempt_result']
 
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['player_ref', 'name', 'is_tracked', 
+        # Player ref is transformed with get_id
+        return ['name', 'is_tracked',
                 'created', 'updated',
-                'publish_date', 'published_plugin_version', 
+                'publish_date', 'published_plugin_version',
                 'last_attempt_result']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'player_ref':
+            # Translate key to player_ref
+            raise tornado.gen.Return(obj.get_id())
+        raise BadRequestError('invalid field %s' % field)
+
 
 '''*********************************************************************
 BrightcovePlayerHelper
@@ -577,7 +589,9 @@ class BrightcovePlayerHelper():
     @staticmethod
     @tornado.gen.coroutine
     def publish_plugin(bc_player, bc_api, tracker_account_id):
-        """Update Brightcove player with current plugin and publishes it'''
+        """Update Brightcove player with current plugin and publishes it
+
+        Assumes that the BC player reference by bc_player is valid.
 
         Input-
         bc_player - Brightcove player dict

@@ -5197,8 +5197,6 @@ class BrightcovePlayer(NamespacedStoredObject):
 
         super(BrightcovePlayer, self).__init__(player_ref)
 
-        # The Brightcove ID for the player
-        self.player_ref = player_ref
         # The Neon integration that has this player
         self.integration_id = integration_id
         # Set if publisher needs the Neon event tracking plugin published to this

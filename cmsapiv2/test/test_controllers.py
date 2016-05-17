@@ -5465,6 +5465,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(2, len(players))
         self.assertEqual(2, count)
         player0, player1 = players
+        self.assertNotIn('id', player0)
         self.assertEqual('pl0', player0['player_ref'])
         self.assertEqual('Neon Tracking Player', player0['name'])
         self.assertNotIn('description', player0)
@@ -5529,7 +5530,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 headers=header,
                 method='PUT',
                 body=json.dumps({
-                    'player_ref': 'brightcoveplayer_pl_0',
+                    'player_ref': 'pl_0',
                     'is_tracked': True,
                     'integration_id': self.integration.integration_id
                 }))
