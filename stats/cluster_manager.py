@@ -92,10 +92,10 @@ class BatchProcessManager(threading.Thread):
                 # Build the output hdfs path string
                 # If HDFS Hostname could not be resolved, fall back to S3 output
 
-                hdfs_host = ' '
-                wait_time = 0
+#                hdfs_host = ' '
+#                wait_time = 0
 
-                hdfs_host = cluster.master_ip
+#                hdfs_host = cluster.master_ip
 
                 # Make attempts to obtain a master ip. If couldn't, write output to S3
 
@@ -111,6 +111,8 @@ class BatchProcessManager(threading.Thread):
                 
                 # hdfs_host == self.get_master_ip()
 
+                _log.info("hdfs_host inside is %s" % hdfs_host)
+                
                 if hdfs_host == ' ':
                     cleaned_output_path = "%s/%s" % (
                         options.cleaned_output_path,
@@ -268,7 +270,9 @@ def main():
                                         options.cluster_ip)
         cluster.connect()
 
-        _log.info("self.cluster.master_ip is %s" % cluster.master_ip)
+        hdfs_host = cluster.master_ip
+
+        _log.info("hdfs_host is %s" % hdfs_host)
 
         batch_processor = BatchProcessManager(cluster)
         atexit.register(batch_processor.stop)
