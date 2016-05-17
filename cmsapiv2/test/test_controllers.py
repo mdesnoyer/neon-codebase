@@ -5336,7 +5336,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
 
-        # Set up an initial player
+        # Set up two initial players
         self.player = neondata.BrightcovePlayer(
             player_ref='pl0',
             integration_id=self.integration.integration_id,
@@ -5625,8 +5625,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 'master': {
                     'configuration': {
                         'plugins': [{
-                            'name': 'current',
-                            'options': {}
+                            'name': 'notneon',
+                            'options': {
+                                'color': 'red'
+                            }
                         }],
                         'scripts': ['optimizely.js'],
                         'stylesheets': [],
@@ -5644,17 +5646,31 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 bc_player, self.integration, self.api)
 
         self.assertEqual(patch_mock.call_count, 1)
-        pid, arg = patch_mock.call_args[0]
-        self.assertIn('optimizely.js', arg['scripts'])
+        pid, patch_args = patch_mock.call_args[0]
+        self.assertIn('optimizely.js', patch_args['scripts'], 'Keeps the non-Neon script')
         our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
-        self.assertIn(our_url, arg['scripts'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'current'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'neon'])
-        self.assertNotIn('stylesheets', arg)
-        self.assertEqual(pid, 'pl0')
+        self.assertIn(our_url, patch_args['scripts'], 'Adds this url to scripts')
+        self.assertEqual(1, len([p for p in patch_args['plugins'] if p['name'] == 'notneon']),
+                         'Keeps the non-Neon plugin')
+        self.assertEqual(1, len([p for p in patch_args['plugins'] if p['name'] == 'neon']),
+                         'Has one Neon plugin')
+        self.assertNotIn('stylesheets', patch_args, 'Patch does not use stylesheets')
+        self.assertEqual('pl0', pid, 'Keeps player ref')
 
         self.assertEqual(publish_mock.call_count, 1)
         self.assertEqual(publish_mock.call_args[0][0], 'pl0')
+
+        # Run it again and assert no change
+        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
+            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
+
+            patch_mock = self._future_wrap_mock(_patch)
+            publish_mock = self._future_wrap_mock(_publish)
+            yield controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.integration, self.api)
+
+        self.assertEqual(patch_args, patch_mock.call_args[0][1])
+
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
