@@ -274,6 +274,8 @@ def main():
                                         options.cluster_ip)
         cluster.connect()
 
+        _log.info("self.cluster.master_ip is" % cluster.master_ip)
+
         batch_processor = BatchProcessManager(cluster)
         atexit.register(batch_processor.stop)
         batch_processor.start()
