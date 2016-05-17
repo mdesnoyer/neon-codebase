@@ -3559,8 +3559,8 @@ class ExperimentStrategy(DefaultedStoredObject):
     SEQUENTIAL='sequential'
     MULTIARMED_BANDIT='multi_armed_bandit'
     
-    def __init__(self, account_id, exp_frac=0.01,
-                 holdback_frac=0.01,
+    def __init__(self, account_id, exp_frac=1.0,
+                 holdback_frac=0.05,
                  min_conversion = 50,
                  min_impressions = 500,
                  frac_adjust_rate = 0.0,
