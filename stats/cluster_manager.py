@@ -123,10 +123,13 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
+                ip = cluster._find_master_info()
+                _log.info("ip is %s" % ip)
+
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path,
+                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/*/*/*/*',
                     cleaned_output_path,
                     timeout = (options.batch_period * 10))
                 _log.info('Sucessful cleaning job output to: %s' %
