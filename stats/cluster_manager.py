@@ -111,8 +111,8 @@ class BatchProcessManager(threading.Thread):
                 
                 # hdfs_host == self.get_master_ip()
 
-                _log.info("hdfs_host inside is %s" % hdfs_host)
-                
+                _log.info("hdfs_host inside is %s" % self.cluster.master_ip)
+
                 if hdfs_host == ' ':
                     cleaned_output_path = "%s/%s" % (
                         options.cleaned_output_path,
