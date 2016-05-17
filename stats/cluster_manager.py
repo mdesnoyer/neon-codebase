@@ -128,7 +128,7 @@ class BatchProcessManager(threading.Thread):
                                     options.cluster_ip)
 
                 _log.info('new change')
-                get_ipp = cluster1.find_cluster()
+                get_ipp = cluster1._find_master_info()
                 ip = get_ipp.master_ip
                 _log.info("ip is %s" % ip)
 
