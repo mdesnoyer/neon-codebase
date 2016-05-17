@@ -124,13 +124,11 @@ class BatchProcessManager(threading.Thread):
                         time.strftime("%Y-%m-%d-%H-%M"))
                     _log.info('Output of clean up job goes to %s',cleaned_output_path)
 
-#                cluster1 = stats.cluster.Cluster(options.cluster_type, 20,
-#                                    options.cluster_ip)
 
                 _log.info('new change')
-                get_ipp = stats.cluster.Cluster.master_ip
-#                ip = get_ipp.master_ip
-                _log.info("ip is %s" % get_ipp)
+                get_ipp = stats.cluster.Cluster.find_cluster()
+                ip = get_ipp.master_ip
+                _log.info("ip is %s" % ip)
 
 
                 self.cluster.change_instance_group_size(
