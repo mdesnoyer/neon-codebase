@@ -57,8 +57,6 @@ from utils import statemon
 statemon.define("master_connection_error", int)
 statemon.define("cluster_creation_error", int)
 
-s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
-
 class ClusterException(Exception): pass
 class ClusterInfoError(ClusterException): pass
 class MasterMissingError(ClusterInfoError): pass
@@ -66,6 +64,8 @@ class ClusterConnectionError(ClusterException): pass
 class ClusterCreationError(ClusterException): pass
 class ExecutionError(ClusterException):pass
 class MapReduceError(ExecutionError): pass
+
+s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
 
 def emr_iterator(conn, obj_type, cluster_id=None, **kwargs):
     '''Function that iterates through the responses to list_* functions

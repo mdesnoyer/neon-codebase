@@ -370,6 +370,7 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
     # Figure out the number of reducers to use by aiming for files
     # that are 1GB on average.
     input_data_size = 0
+    s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
     s3AddrMatch = s3AddressRe.match(input_path)
     if s3AddrMatch:
 
