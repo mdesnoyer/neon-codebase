@@ -24,6 +24,7 @@ import logging
 import numpy as np
 import pandas
 import re
+import scipy.stats
 import stats.cluster
 import stats.metrics
 from stats import statutils
@@ -92,7 +93,7 @@ def get_thumbnail_statuses(thumb_ids):
     return dict([(x.get_id(), x)
                  for x in neondata.ThumbnailStatus.get_many(set(thumb_ids))])
 
-def get_key_timepoints(video, video_status, thumb_statuses):
+def get_key_timepoints(video, video_status, thumb_statuses, thumb_info):
     '''Identifies the key times for each thumb turning having valid data
     for calculating the lift. 
 
@@ -103,6 +104,18 @@ def get_key_timepoints(video, video_status, thumb_statuses):
     Returns: dict of thumb_id -> [(on_timestamp, off_timestamp)]
     '''
     TIME_DELAY = timedelta(minutes=5)
+
+    #  If the video is older than 2015-11-20, then we were not
+    #  tracking state properly. So, we have to try and figure out what
+    #  the serving was based on the the loads seen.
+    vid_date = video.publish_date
+    if vid_date is None:
+        # Get it from the request object
+        request = neondata.NeonApiRequest.get(video.job_id,
+                                              video.get_account_id)
+        vid_date = request.publish_date
+    if vid_date and vid_date < '2015-11-20':
+        return estimate_key_timepoints_from_data(video.key, thumb_info)
     
     retval = {}
     if video_status is None:
@@ -195,6 +208,69 @@ def get_key_timepoints(video, video_status, thumb_statuses):
             retval[thumb_id] = data_blocks
         
     return retval
+
+def estimate_key_timepoints_from_data(video_id, thumb_info):
+    '''Looks at the image load data to deduce when each thumbnail
+    has valid data.
+
+    Returns: dict of thumb_id -> [(on_timestamp, off_timestamp)]
+    '''
+    query = '''
+      SELECT
+      cast(floor(servertime/3600)*3600 as timestamp) as hr,
+      thumbnail_id,
+      count(imloadservertime) as imp
+      from EventSequences where tai='{tai}' and
+      servertime is not null and
+      thumbnail_id like '{video_id}%'
+      group by thumbnail_id, hr
+    '''.format(tai=options.pub_id, video_id=video_id)
+    print query
+
+    data = get_query_results(query)
+
+    if data is None:
+        return {}
+
+    # Pivot the data so that rows are time and cols are thumbnail id
+    imp = data.pivot(index='hr', columns='thumbnail_id', values='imp')
+    imp.sort(inplace=True, axis=0)
+    imp.fillna(0.0, inplace=True)
+    imp_sum = imp.sum(axis=0)
+    imp_sum.name = 'imp_sum'
+
+    # Figure out the baseline thumbnail
+    base_id = stats.statutils.get_baseline_thumb(thumb_info,
+                                                 imp_sum,
+                                                 get_baseline_types(),
+                                                 options.min_impressions)
+    if base_id is None:
+        return {}
+
+    # Now, based on the serving fractions in each hour, look for
+    # statistically significant changes relative to the baseline. 
+    # Using the Odds ratio calculation.
+    last_hours = imp.index - pandas.Timedelta(hours=1)
+    last_imp = imp.loc[last_hours].fillna(0.0)
+    last_imp.index += pandas.Timedelta(hours=1)
+    se = (1./imp + 1./last_imp + 1./imp[base_id] + 1./last_imp[base_id])
+    se = se.apply(np.sqrt)
+    odds_ratio = (imp * last_imp[base_id]) / (last_imp * imp[base_id])
+    odds_ratio.apply(np.log)
+    zscore = odds_ratio / se
+    p_value = zscore
+    zscore.apply(scipy.stats.norm(0, 1).cdf)
+    p_value = p_value.where(p_value > 0.5, 1 - p_value)
+
+    import pdb; pdb.set_trace()
+
+    rval = {}
+    for tid in imp.columns:
+        if tid == base_id:
+            rval[tid] = 5
+
+def get_baseline_types():
+    return options.baseline_types.split(',')
 
 def get_event_data(video_id, key_times, metric, null_metric, end_time):
     '''Retrieve from Impala the event counts for the different time periods.
@@ -523,10 +599,13 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
         if proc_count % 10 == 0:
             _log.info('Processed %d of %d videos' % 
                       (proc_count, len(video_objs)))
+
+        thumb_info = thumb_meta.loc[thumb_meta['video_id'] == video.key]
             
         thumb_times = get_key_timepoints(video,
                                          video_statuses.get(video.key, None),
-                                         thumb_statuses)
+                                         thumb_statuses,
+                                         thumb_info)
 
         set_join = lambda x, y: x|y
         key_times = reduce(set_join, [reduce(set_join, [set(y) for y in x],
@@ -545,9 +624,9 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
             continue
         
         base_thumb_id = statutils.get_baseline_thumb(
-            thumb_meta.loc[thumb_meta['video_id'] == video.key],
+            thumb_info,
             imp_data['all_time'].groupby(level='thumbnail_id').sum(),
-            options.baseline_types.split(','),
+            get_baseline_types,
             min_impressions=options.min_impressions)
 
         vstatus = video_statuses.get(video.key, None)
