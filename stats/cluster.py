@@ -923,7 +923,8 @@ class Cluster():
         step_arg.append('--src')
         step_arg.append(hdfs_path_to_copy)
         step_arg.append('--dest')
-        step_arg.append(s3_path)
+#        step_arg.append(s3_path)
+        step_arg.append('s3://test')
 
         _log.info("Copying data from %s to %s in cluster %s" % (hdfs_path_to_copy,s3_path,self.cluster_id))
 
