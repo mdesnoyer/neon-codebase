@@ -330,7 +330,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
     _log.info('Finished building Impala tables')
     return True
 
-def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
+def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=None):
     '''Runs the mapreduce job that cleans the raw events.
 
     The events are output in a format that can be read by hive as an
@@ -341,17 +341,91 @@ def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
     output_path - The output path for the raw data
     timeout - Time in seconds    
     '''
+
+    # Setting up the batch job to run
+
+    _log.info("s3_path from cluster manager is %s" % s3_path)
+
+    # Define extra options for the job
+    extra_ops = {
+        'mapreduce.output.fileoutputformat.compress' : 'true',
+        'avro.output.codec' : 'snappy',
+        'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+        'mapreduce.task.timeout' : 1800000,
+        'mapreduce.reduce.speculative': 'false',
+        'mapreduce.map.speculative': 'false',
+        'io.file.buffer.size': 65536
+        }
+
+    _log.info("extra ops started")
+
+    map_memory_mb = 2048
+
+    # If the requested map memory is different, set it
+    if map_memory_mb is not None:
+        extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
+        extra_ops['mapreduce.map.java.opts'] = (
+            '-Xmx%im' % int(map_memory_mb * 0.8))
+
+    # Figure out the number of reducers to use by aiming for files
+    # that are 1GB on average.
+    input_data_size = 0
+    s3AddrMatch = s3AddressRe.match(input_path)
+    if s3AddrMatch:
+
+        # First figure out the size of the data
+        bucket_name, key_name = s3AddrMatch.groups()
+        s3conn = S3Connection()
+        prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
+        for key in s3conn.get_bucket(bucket_name).list(prefix):
+            input_data_size += key.size
+
+        n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+        extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+
+    # If the cluster's core has larger instances, the memory
+    # allocated in the reduce can get very large. However, we max
+    # out the reduce to 1GB, so limit the reducer to use at most
+    # 5GB of memory.
+    core_group = cluster._get_instance_group_info('CORE')
+    if core_group is None:
+        raise ClusterInfoError('Could not find the CORE instance group')
+
+    if (output_path.startswith("hdfs") and 
+        core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
+                                    'r3.8xlarge', 'i2.8xlarge',
+                                    'i2.4xlarge', 'cr1.8xlarge']):
+        extra_ops['mapreduce.reduce.memory.mb'] = 5000
+        extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
+        _log.info("set memory for reducers")
+
     _log.info("Starting batch event cleaning job done")
+
     try:
         cluster.run_map_reduce_job(options.mr_jar,
                                    'com.neon.stats.RawTrackerMR',
                                    input_path,
                                    output_path,
-                                   map_memory_mb=2048,
+                                   extra_ops,
                                    timeout=timeout)
     except Exception as e:
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')
+        raise
+
+    try:
+        jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
+
+        s3_output_path = ' '
+        get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', output_path)
+        if get_time:
+            s3_output_path = s3_path+get_time.group(2)
+
+        cluster.checkpoint_hdfs_to_s3(jar_location,
+                                      output_path,
+                                      s3_output_path)
+    except Exception as e:
+        _log.Error('Copy from hdfs to S3 failed: %s' % e)
         raise
     
     _log.info("Batch event cleaning job done")

@@ -229,8 +229,7 @@ class Cluster():
                 self._set_requested_core_instances()
 
     def run_map_reduce_job(self, jar, main_class, input_path,
-                           output_path, map_memory_mb=None,
-                           timeout=None, name='Raw Tracker Data Cleaning'):
+                           output_path, extra_ops, timeout=None, name='Raw Tracker Data Cleaning'):
         '''Runs a mapreduce job.
 
         Inputs:
@@ -250,54 +249,6 @@ class Cluster():
         if timeout is not None:
             budget_time = datetime.datetime.now() + \
               datetime.timedelta(seconds=timeout)
-        
-        # Define extra options for the job
-        extra_ops = {
-            'mapreduce.output.fileoutputformat.compress' : 'true',
-            'avro.output.codec' : 'snappy',
-            'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
-            'mapreduce.task.timeout' : 1800000,
-            'mapreduce.reduce.speculative': 'false',
-            'mapreduce.map.speculative': 'false',
-            'io.file.buffer.size': 65536
-        }
-
-        # If the requested map memory is different, set it
-        if map_memory_mb is not None:
-            extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
-            extra_ops['mapreduce.map.java.opts'] = (
-                '-Xmx%im' % int(map_memory_mb * 0.8))
-            
-        
-        # Figure out the number of reducers to use by aiming for files
-        # that are 1GB on average.
-        input_data_size = 0
-        s3AddrMatch = s3AddressRe.match(input_path)
-        if s3AddrMatch:
-
-            # First figure out the size of the data
-            bucket_name, key_name = s3AddrMatch.groups()
-            s3conn = S3Connection()
-            prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
-            for key in s3conn.get_bucket(bucket_name).list(prefix):
-                input_data_size += key.size
-
-            n_reducers = math.ceil(input_data_size / (1073741824. / 2))
-            extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
-        
-        # If the cluster's core has larger instances, the memory
-        # allocated in the reduce can get very large. However, we max
-        # out the reduce to 1GB, so limit the reducer to use at most
-        # 5GB of memory.
-        core_group = self._get_instance_group_info('CORE')
-        if core_group is None:
-            raise ClusterInfoError('Could not find the CORE instance group')
-        if (output_path.startswith("s3") and 
-            core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
-                                        'r3.8xlarge', 'i2.8xlarge',
-                                        'i2.4xlarge', 'cr1.8xlarge']):
-            extra_ops['mapreduce.reduce.memory.mb'] = 5000
-            extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
         
         self.connect()
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
@@ -346,7 +297,7 @@ class Cluster():
                     if job_status != 'RUNNING' and job_status != 'FINISHED':
                         time.sleep(60)
                         continue
-                
+
                 url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
                        "jobs/{job_id}").format(
                            host=host, 
@@ -962,15 +913,13 @@ class Cluster():
         cur_price = prices[-1]
         return cur_price, avg_price
 
-    def checkpoint_hdfs_to_s3(self,hdfs_path_to_copy):
+    def checkpoint_hdfs_to_s3(self,jar_path,hdfs_path_to_copy,s3_path):
         #Does checkpoint of hdfs data from mapreduce output to S3.
 
         emrconn = boto.emr.EmrConnection()
-        name_step = 's3distcp'
-        jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
-
-        s3_path = 's3://neon-tracker-logs-v2/cleaned/'+hdfs_path_to_copy[-16:]
         
+        name_step = 's3distcp'
+
         step_arg = []
         step_arg.append('--src')
         step_arg.append(hdfs_path_to_copy)
@@ -980,7 +929,7 @@ class Cluster():
         _log.info("Copying data from %s to %s in cluster %s" % (hdfs_path_to_copy,s3_path,self.cluster_id))
 
         step = boto.emr.step.JarStep(name=name_step,
-                                     jar=jar_location,
+                                     jar=jar_path,
                                      step_args=step_arg,
                                      action_on_failure='CONTINUE')
 
