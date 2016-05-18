@@ -28,6 +28,7 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
+import math
 
 #logging
 import logging
