@@ -4159,22 +4159,27 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
         header = { 'Content-Type':'application/json' }
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               method='POST', 
-                               callback=self.stop, 
-                               headers=header)
-        response = self.wait() 
-        rjson = json.loads(response.body)
-        refresh_token = rjson['refresh_token']
-        url = '/api/v2/refresh_token' 
-        params = json.dumps({'token': refresh_token }) 
-        time.sleep(1.0) 
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               method='POST', 
-                               callback=self.stop, 
-                               headers=header)
+        with patch('cmsapiv2.apiv2.datetime') as mock_dt:
+            # Fix time
+            mock_dt.utcnow.return_value = datetime.utcnow()
+
+            self.http_client.fetch(self.get_url(url),
+                                   body=params,
+                                   method='POST',
+                                   callback=self.stop,
+                                   headers=header)
+            response = self.wait()
+            rjson = json.loads(response.body)
+            refresh_token = rjson['refresh_token']
+            url = '/api/v2/refresh_token'
+            params = json.dumps({'token': refresh_token })
+
+            mock_dt.utcnow.return_value += timedelta(1)
+            self.http_client.fetch(self.get_url(url),
+                                   body=params,
+                                   method='POST',
+                                   callback=self.stop,
+                                   headers=header)
 
         response = self.wait()
         rjson = json.loads(response.body)
@@ -4193,19 +4198,25 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
         header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
-        rjson1 = json.loads(response.body)
-        refresh_token = rjson1['refresh_token']
-        url = '/api/v2/refresh_token' 
-        params = json.dumps({'token': refresh_token })  
-        header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
+
+        with patch('cmsapiv2.apiv2.datetime') as mock_dt:
+            mock_dt.utcnow.return_value = datetime.utcnow()
+
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
+            rjson1 = json.loads(response.body)
+            refresh_token = rjson1['refresh_token']
+            url = '/api/v2/refresh_token'
+            params = json.dumps({'token': refresh_token })
+            header = { 'Content-Type':'application/json' }
+            # Set time forward one second so token will change
+            mock_dt.utcnow.return_value += timedelta(1)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
         rjson2 = json.loads(response.body)
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2) 
