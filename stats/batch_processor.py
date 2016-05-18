@@ -427,7 +427,7 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
                                       output_path,
                                       s3_output_path)
     except Exception as e:
-        _log.Error('Copy from hdfs to S3 failed: %s' % e)
+        _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
     
     _log.info("Batch event cleaning job done")
