@@ -325,7 +325,6 @@ class Cluster():
                     _log.info('Map reduce job %s complete. Results: %s' % 
                               (main_class, 
                                json.dumps(data, indent=4, sort_keys=True)))
-                    self.checkpoint_hdfs_to_s3(output_path)
                     return
                 elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
                     msg = ('Map reduce job %s failed: %s' %
