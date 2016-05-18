@@ -947,6 +947,7 @@ class Cluster():
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
             _log.info("S3 copy to path %s was unsuccessful" % s3_path)
+            raise MapReduceError('S3 checkpoint failed, cant build impala tables')
             
 
 class ClusterSSHConnection:

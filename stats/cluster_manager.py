@@ -117,7 +117,7 @@ class BatchProcessManager(threading.Thread):
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
 
-                self.last_output_path = options.cleaned_output_path+run_time
+                self.last_output_path = options.cleaned_output_path + run_time
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
                 stats.batch_processor.build_impala_tables(
