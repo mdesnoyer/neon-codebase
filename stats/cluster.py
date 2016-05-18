@@ -346,8 +346,6 @@ class Cluster():
                     if job_status != 'RUNNING' and job_status != 'FINISHED':
                         time.sleep(60)
                         continue
-
-                _log.info("Breaking the infinite loop job_status is %s" % job_status)
                 
                 url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
                        "jobs/{job_id}").format(

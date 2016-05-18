@@ -193,6 +193,8 @@ class BatchProcessManager(threading.Thread):
                     timeout = (options.batch_period * 4))
                 self.last_output_path = data_path
 
+            _log.info('data path is %s' % data_path)
+
         except Exception as e:
             _log.exception('Error building the impala tables')
 
