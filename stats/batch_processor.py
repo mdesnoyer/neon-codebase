@@ -387,7 +387,7 @@ def _get_last_batch_app(rm_response):
     last_app = None
     last_started_time = None
     s3_checkpoint_dir = ' '
-    for app in res['apps']['app']:
+    for app in rm_response['apps']['app']:
         match = re.search(r'S3DistCp: (.*) (->) (.*)',app['name'])
         if match and (last_app is None or last_started_time < app['startedTime']):
             last_app = app
