@@ -386,10 +386,13 @@ def _get_last_batch_app(rm_response):
 
     last_app = None
     last_started_time = None
-    for app in rm_response['apps']['app']:
-        if (app['name'].startswith('S3')):
-            job_name = app['name']
-            last_app = app            
+    s3_checkpoint_dir = ' '
+    for app in res['apps']['app']:
+        match = re.search(r'S3DistCp: (.*) (->) (.*)',app['name'])
+        if match and (last_app is None or last_started_time < app['startedTime']):
+            last_app = app
+            s3_checkpoint_dir = match.group(3)
+            last_started_time = app['startedTime']         
             
     if last_app is None:
         return None
@@ -397,7 +400,7 @@ def _get_last_batch_app(rm_response):
     _log.info('The batch job with id %s is in state %s with '
               'progress of %i%%' % 
               (last_app['id'], last_app['state'], last_app['progress']))
-    return job_name
+    return s3_checkpoint_dir
 
 def get_last_sucessful_batch_output(cluster):
     '''Determines the last sucessful batch output path.
@@ -409,12 +412,10 @@ def get_last_sucessful_batch_output(cluster):
     response = cluster.query_resource_manager(
         '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
 
-    job_name = _get_last_batch_app(response)
+    last_successful_output = _get_last_batch_app(response)
 
-    if job_name is None:
+    if last_successful_output is None:
         return None
-
-    last_successful_output = job_name[job_name.find('s3'):]
 
     _log.info('Found the last successful output directory as %s' % last_successful_output)
 
