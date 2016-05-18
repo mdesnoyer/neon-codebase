@@ -121,7 +121,7 @@ class BatchProcessManager(threading.Thread):
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
                 stats.batch_processor.build_impala_tables(
-                    cleaned_output_path,
+                    self.last_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
                 statemon.state.increment('successful_batch_runs')
