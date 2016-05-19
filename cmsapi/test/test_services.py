@@ -1027,7 +1027,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                             'thumbnail_ref' : 'ext_tid',
                             'callback_url' : 'http://callback',
                             'integration_id' : '61',
-                            'publish_date' : None
+                            'publish_date' : None,
+                            'duration' : None,
+                            'custom_data' : {}
                             })
 
     @tornado.testing.gen_test
@@ -1112,7 +1114,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                             'callback_url' : None,
                             'integration_id' : '61',
                             'publish_date' : None,
-                            'custom_data' : None,
+                            'custom_data' : {},
                             'duration' : None
                             })
 
@@ -1154,7 +1156,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                             'thumbnail_ref' : None,
                             'callback_url' : 'http://callback',
                             'integration_id' : '0',
-                            'publish_date' : None
+                            'publish_date' : None,
+                            'duration' : None,
+                            'custom_data' : {}
                             })
 
     @tornado.testing.gen_test
