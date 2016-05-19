@@ -173,9 +173,12 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
         # Define the serving strategy
         datamock.ExperimentStrategy.get.side_effect = \
           [neondata.ExperimentStrategy('apikey1', exp_frac=0.0),
-           neondata.ExperimentStrategy('apikey2'),
-           neondata.ExperimentStrategy('apikey3'),
-           neondata.ExperimentStrategy('apikey4')]
+           neondata.ExperimentStrategy('apikey2', 
+               exp_frac=0.01, holdback_frac=0.01),
+           neondata.ExperimentStrategy('apikey3',
+               exp_frac=0.01, holdback_frac=0.01),
+           neondata.ExperimentStrategy('apikey4',
+               exp_frac=0.01, holdback_frac=0.01)]
 
         # Process the data
         self.watcher._process_db_data(True)
@@ -575,7 +578,9 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
                                           {(160, 90) : 't2.jpg'})])
         neondata.TrackerAccountIDMapper(
             'tai1', 'key1', neondata.TrackerAccountIDMapper.PRODUCTION).save()
-        neondata.ExperimentStrategy('key1').save()
+        neondata.ExperimentStrategy('key1', 
+            exp_frac=0.01, 
+            holdback_frac=0.01).save()
         self.mastermind = mastermind.core.Mastermind()
         self.directive_publisher = mastermind.server.DirectivePublisher(
             self.mastermind)

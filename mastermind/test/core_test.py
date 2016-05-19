@@ -102,7 +102,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # default setup
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', frac_adjust_rate=1.0))
+            'acct1', ExperimentStrategy('acct1', 
+            exp_frac=0.01, holdback_frac=0.01, frac_adjust_rate=1.0))
         logging.getLogger('mastermind.core').reset_sample_counters()
 
     def tearDown(self):
@@ -649,7 +650,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_baseline_is_also_default_type(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', 
+            exp_frac=0.01, holdback_frac=0.01, 
+            baseline_type='brightcove'))
 
         video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
@@ -673,7 +676,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_baseline_is_neon(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', baseline_type='neon',
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
 
         video_info = VideoInfo('acct1', True, [],score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
@@ -706,7 +709,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_always_show_baseline(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', always_show_baseline=True,
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -730,7 +733,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now don't show the baseline in the experiment
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', always_show_baseline=False,
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
@@ -904,7 +907,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_only_experiment_if_chosen(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', only_exp_if_chosen=True))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.01,
+            holdback_frac=0.01, only_exp_if_chosen=True))
 
         video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         self.assertIsNone(
@@ -1076,6 +1080,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_winner_found_no_override_editor(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', holdback_frac=0.02,
+                                        exp_frac=0.01, 
                                         override_when_done=False))
 
         video_info = VideoInfo(
@@ -1520,6 +1525,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1',
             ExperimentStrategy(
                 'acct1', frac_adjust_rate=0.,
+                holdback_frac=0.01, exp_frac=0.01,
                 experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
@@ -1851,7 +1857,9 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1'))
+            'acct1',
+            ExperimentStrategy('acct1', 
+            holdback_frac=0.01, exp_frac=0.01))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
@@ -1932,7 +1940,9 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
-                'acct2', ExperimentStrategy('acct2', exp_frac=0.5))
+                'acct2', ExperimentStrategy('acct2', 
+                    holdback_frac=0.03, 
+                    exp_frac=0.75))
         self.assertNotEqual(
             orig_directive,
             self.mastermind.get_directives(['acct2_vid1']).next())
@@ -2039,7 +2049,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
           neondata.ExperimentState.COMPLETE
 
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+            'acct1', ExperimentStrategy('acct1', holdback_frac=0.01, exp_frac=1.0))
 
         updated_state = self.mastermind.experiment_state['acct1_vid1']
         self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
@@ -2153,7 +2163,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         self.mastermind = Mastermind()
 
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1'))
+            'acct1', ExperimentStrategy('acct1', 
+            holdback_frac=0.01, exp_frac=0.01))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
@@ -2892,6 +2903,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
             ExperimentStrategy('acct1',
                                experiment_type=ExperimentStrategy.SEQUENTIAL,
                                frac_adjust_rate=0.0,
+                               holdback_frac=0.01,
                                exp_frac=1.0))
 
         # This should not have a winner. Pairwise it would, but on

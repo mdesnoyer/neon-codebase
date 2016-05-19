@@ -41,11 +41,35 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
             'cmsapiv2.authentication.NewAccountHandler.send_email')
         self.send_email_mock = self.send_email_mocker.start()
         self.send_email_mock.return_value = True
+        self.send_email_mocker_two = patch(
+            'cmsapiv2.authentication.ForgotPasswordHandler._send_email')
+        self.send_email_mock_two = self.send_email_mocker_two.start()
+        self.send_email_mock_two.return_value = True
         super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
 
     def tearDown(self): 
         self.send_email_mocker.stop()
+        self.send_email_mocker_two.stop()
+        self.postgresql.clear_all_tables()
         super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(TestBase, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(TestBase, cls).tearDownClass() 
         
     def post_exceptions(self, url, params, exception_mocker): 
         exception_mock = self._future_wrap_mock(exception_mocker.start())
@@ -186,19 +210,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestNewAccountHandler, cls).tearDownClass() 
-
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test
     def test_create_new_account_query(self):
         url = '/api/v2/accounts?customer_name=meisnew&email=a@a.bc'\
               '&admin_user_username=a@a.com'\
@@ -229,13 +241,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
-        self.assertEquals(rjson['serving_enabled'], 0) 
+        self.assertEquals(rjson['serving_enabled'], 1) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
-        self.assertEquals(account.serving_enabled, 0)
+        self.assertEquals(account.serving_enabled, True)
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
@@ -247,6 +259,10 @@ class TestNewAccountHandler(TestAuthenticationBase):
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
+
+        exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
+        self.assertEquals(exps.get_id(), account_id) 
+        self.assertEquals(exps.exp_frac, 1.0)
         
     @tornado.testing.gen_test 
     def test_create_new_account_json(self):
@@ -278,13 +294,13 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['customer_name'], 'meisnew')
-        self.assertEquals(rjson['serving_enabled'], 0) 
+        self.assertEquals(rjson['serving_enabled'], True) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
         self.assertEquals(account.name, 'meisnew')
         self.assertEquals(account.email, 'a@a.bc')
-        self.assertEquals(account.serving_enabled, 0)
+        self.assertEquals(account.serving_enabled, True)
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
@@ -295,10 +311,14 @@ class TestNewAccountHandler(TestAuthenticationBase):
         self.assertEquals(limits.key, account_id) 
         self.assertEquals(limits.video_posts, 0)
 
+        exps = yield neondata.ExperimentStrategy.get(account_id, async=True)
+        self.assertEquals(exps.get_id(), account_id) 
+        self.assertEquals(exps.exp_frac, 1.0)
+        self.assertEquals(exps.holdback_frac, 0.05)
+
     @tornado.testing.gen_test 
     def test_create_new_account_uppercase_username(self):
-        params = json.dumps({'customer_name': 'meisnew', 
-                             'email': 'a@a.bc', 
+        params = json.dumps({'email': 'a@a.bc', 
                              'admin_user_username':'A@A.com', 
                              'admin_user_password':'testacpas', 
                              'admin_user_first_name':'kevin'})
@@ -324,14 +344,14 @@ class TestNewAccountHandler(TestAuthenticationBase):
  
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
-        self.assertEquals(rjson['serving_enabled'], 0) 
+        self.assertEquals(rjson['customer_name'], None)
+        self.assertEquals(rjson['serving_enabled'], True) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
-        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.name, None)
         self.assertEquals(account.email, 'a@a.bc')
-        self.assertEquals(account.serving_enabled, 0)
+        self.assertEquals(account.serving_enabled, True)
 
         user = yield neondata.User.get('a@a.com', 
                    async=True) 
@@ -507,20 +527,7 @@ class TestAccountHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestAccountHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestAccountHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test
     def test_get_acct_does_not_exist(self):
@@ -565,7 +572,7 @@ class TestAccountHandler(TestControllersBase):
                                                 method="GET")
         rjson = json.loads(response.body) 
         self.assertEquals(self.user.neon_api_key, rjson['account_id']) 
-        self.assertEquals(0, rjson['serving_enabled']) 
+        self.assertEquals(1, rjson['serving_enabled']) 
 
     @tornado.testing.gen_test 
     def test_update_acct_base(self): 
@@ -666,32 +673,19 @@ class TestAccountHandler(TestControllersBase):
         params = json.dumps({'rando': '123123abc'})
         self.put_exceptions(url, params, exception_mocker)
 
-class TestNewUserHandler(TestAuthenticationBase):
+class TestAuthUserHandler(TestAuthenticationBase):
     def setUp(self):
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
-        super(TestNewUserHandler, self).setUp()
+        super(TestAuthUserHandler, self).setUp()
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
-        super(TestNewUserHandler, self).tearDown()
+        super(TestAuthUserHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestNewUserHandler, cls).tearDownClass()
- 
     @tornado.testing.gen_test 
     def test_create_new_user_query(self):
         url = '/api/v2/users?username=abcd1234&password=b1234567&access_level=6'
@@ -709,8 +703,10 @@ class TestNewUserHandler(TestAuthenticationBase):
     @tornado.testing.gen_test 
     def test_create_new_user_json(self):
         params = json.dumps({'username': 'abcd1234', 
-                             'password': 'b1234567', 
-                             'access_level': '6'})
+            'password': 'b1234567',
+            'access_level': '6', 
+            'cell_phone_number':'867-5309', 
+            'secondary_email':'rocking@invalid.com'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/users'
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -720,14 +716,134 @@ class TestNewUserHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['username'], 'abcd1234')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
         user = yield neondata.User.get('abcd1234', async=True) 
         self.assertEquals(user.username, 'abcd1234') 
+        self.assertEquals(user.cell_phone_number, '867-5309')
+        self.assertEquals(user.secondary_email, 'rocking@invalid.com')
 
     def test_post_user_exceptions(self):
-        exception_mocker = patch('cmsapiv2.authentication.NewUserHandler.post')
+        exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
         params = json.dumps({'username': '123123abc'})
 	url = '/api/v2/users'
         self.post_exceptions(url, params, exception_mocker)
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_no_user(self): 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'dne@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': 'sdfasdfasdfasdfasdfasdf'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'User was not found')
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_bad_pw_token(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        header = { 'Content-Type':'application/json' }
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': 'ohsobadmeissixteenchars'})
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 401)
+ 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Token mismatch')
+
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_token_expired(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        header = { 'Content-Type':'application/json' }
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid', 'exp' : -1}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': token})
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="PUT", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 401)
+ 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'reset password token has')
+   
+    @tornado.testing.gen_test
+    def test_put_user_reset_password_full(self): 
+        user = neondata.User(username='testuser@test.invalid', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser@test.invalid'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True)
+        params = json.dumps(
+            {'username': 'testuser@test.invalid', 
+             'new_password': 'newpassword', 
+             'reset_password_token': user.reset_password_token})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/users'
+        response = yield self.http_client.fetch(
+            self.get_url(url), 
+            body=params, 
+            method='PUT', 
+            headers=header)
+
+        # verify the password was changed 
+        user = yield user.get('testuser@test.invalid', async=True)
+        self.assertTrue(sha256_crypt.verify('newpassword', user.password_hash))
+        self.assertEqual(None, user.reset_password_token)  
 
 class TestUserHandler(TestControllersBase):
     def setUp(self):
@@ -737,21 +853,6 @@ class TestUserHandler(TestControllersBase):
         self.neon_user.save() 
         super(TestUserHandler, self).setUp()
 
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        super(TestUserHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestUserHandler, cls).tearDownClass()
 
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0) 
@@ -759,7 +860,9 @@ class TestUserHandler(TestControllersBase):
         user = neondata.User(username='testuser', 
                              password='testpassword',
                              first_name='kevin',
-                             last_name='kevin',  
+                             last_name='kevin', 
+                             cell_phone_number='867-5309', 
+                             secondary_email='rocking@invalid.com', 
                              access_level=neondata.AccessLevels.CREATE | 
                                           neondata.AccessLevels.READ)
         
@@ -779,6 +882,8 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(rjson['username'], 'testuser')
         self.assertEquals(rjson['first_name'], 'kevin')
         self.assertEquals(rjson['last_name'], 'kevin')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
 
         user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(user.username, 'testuser') 
@@ -855,6 +960,8 @@ class TestUserHandler(TestControllersBase):
                              'first_name' : 'kevin',  
                              'last_name' : 'kevin',  
                              'title' : 'DOCTOR',  
+                             'cell_phone_number':'867-5309',
+                             'secondary_email':'rocking@invalid.com',
                              'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
@@ -863,10 +970,15 @@ class TestUserHandler(TestControllersBase):
                                                 method='PUT', 
                                                 headers=header)
         self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
         updated_user = yield neondata.User.get('testuser', async=True) 
         self.assertEquals(updated_user.first_name, 'kevin')
         self.assertEquals(updated_user.last_name, 'kevin')
         self.assertEquals(updated_user.title, 'DOCTOR')
+        self.assertEquals(rjson['cell_phone_number'], '867-5309')
+        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
+        self.assertEquals(updated_user.cell_phone_number, '867-5309')
+        self.assertEquals(updated_user.secondary_email, 'rocking@invalid.com')
  
     # token creation can be slow give it some extra time just in case
     @unittest.skip('revisit when access levels are better defined')
@@ -951,20 +1063,8 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestOoyalaIntegrationHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestOoyalaIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
@@ -1126,24 +1226,13 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
     def tearDown(self): 
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestBrightcoveIntegrationHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
-        super(TestBrightcoveIntegrationHandler, cls).tearDownClass() 
 
     @tornado.testing.gen_test 
     def test_post_integration(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc' % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false') % (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1166,18 +1255,19 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
         self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
         self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
-        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
+        self.assertFalse(rjson['uses_bc_gallery'])
  
     @tornado.testing.gen_test 
     def test_post_integration_body_params(self):
-        params = json.dumps({'publisher_id': '123123abc'})
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
                                                 body=params, 
                                                 method='POST', 
                                                 headers=header) 
-	self.assertEquals(response.code, 200)
+        self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
         self.assertEquals(rjson['publisher_id'], '123123abc')
 
@@ -1197,8 +1287,62 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['uses_bc_thumbnail_api'], self.defop.uses_bc_thumbnail_api)
         self.assertEquals(rjson['uses_bc_videojs_player'], self.defop.uses_bc_videojs_player)
         self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
-        self.assertEquals(rjson['uses_bc_gallery'], self.defop.uses_bc_gallery)
- 
+        self.assertFalse(rjson['uses_bc_gallery'])
+
+
+    @tornado.testing.gen_test 
+    def test_post_gallery_required(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = ('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                    % (self.account_id_api_key))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+        self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test 
+    def test_post_gallery(self):
+        params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': True})
+        header = { 'Content-Type':'application/json' }
+        url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url), 
+                                                body=params, 
+                                                method='POST', 
+                                                headers=header) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body)
+        self.assertTrue(rjson['uses_bc_gallery'])
+
+        # Check that uses_bc_thumbnail_api is set
+        self.assertTrue(rjson['uses_bc_thumbnail_api'])
+
+        # Check that the CDN was set properly
+        cdns = neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                self.account_id_api_key,
+                rjson['integration_id']))
+        self.assertItemsEqual(cdns.cdns[0].rendition_sizes,[
+            [120, 67],
+            [120, 90],
+            [160, 90],
+            [160, 120],
+            [210, 118],
+            [320, 180],
+            [374, 210],
+            [320, 240],
+            [460, 260],
+            [480, 270],
+            [622, 350],
+            [480, 360],
+            [640, 360],
+            [640, 480],
+            [960, 540],
+            [1280, 720]])
+        
+        
     @tornado.testing.gen_test 
     def test_get_integration(self):
         url = '/api/v2/%s/integrations/brightcove?integration_id=%s' % (
@@ -1301,8 +1445,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_post_integration_one_playlist_feed_id(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc' \
-                   % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false&playlist_feed_ids=abc') % 
+                (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1319,8 +1464,9 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
  
     @tornado.testing.gen_test 
     def test_post_integration_multiple_playlist_feed_ids(self):
-        url = '/api/v2/%s/integrations/brightcove?publisher_id=123123abc&playlist_feed_ids=abc,def,ghi' \
-                   % (self.account_id_api_key)
+        url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
+                '&uses_bc_gallery=false&playlist_feed_ids=abc,def,ghi') % 
+                (self.account_id_api_key))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1342,6 +1488,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_post_integration_body_playlist_feed_ids(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery' : 'true',
                              'playlist_feed_ids': 'abc,def,ghi,123'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1367,6 +1514,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_post_integration_with_uses_batch_provisioning(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery' : 0,
                              'uses_batch_provisioning': 1})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1383,6 +1531,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_playlist_feed_ids(self):
         params = json.dumps({'publisher_id': '123123abc',
+                             'uses_bc_gallery': True,
                              'playlist_feed_ids': 'abc,def,ghi,123'})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
@@ -1410,7 +1559,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     @tornado.testing.gen_test 
     def test_put_integration_uses_batch_provisioning(self):
         params = json.dumps({'publisher_id': '123123abc',
-                             'uses_batch_provisioning': 1})
+                             'uses_batch_provisioning': 1,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -1445,6 +1595,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             get_videos_mock.return_value = []
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery': False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1470,6 +1621,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             get_videos_mock.return_value = None
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery' : False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1497,6 +1649,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiServerError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1508,7 +1661,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1522,6 +1675,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiNotAuthorizedError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1533,7 +1687,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1547,6 +1701,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiClientError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1558,7 +1713,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1572,6 +1727,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     api.brightcove_api.BrightcoveApiError('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1583,7 +1739,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 400)
+        self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Brightcove credentials are bad')
@@ -1596,6 +1752,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                 get_videos_mock.side_effect = [Exception('test')] 
                 params = json.dumps({
                     'publisher_id': '123123abc',
+                    'uses_bc_gallery' : False,
                     'application_client_id': '5',
                     'application_client_secret': 'some secret'})
                 header = { 'Content-Type':'application/json' }
@@ -1607,7 +1764,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                     method='POST',
                     headers=header)
 
-	self.assertEquals(e.exception.code, 500)
+        self.assertEquals(e.exception.code, 500)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['data'],
                                  'test') 
@@ -1622,6 +1779,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                 {"updated_at" : "2015-04-20T21:18:32.351Z"}]
             params = json.dumps({
                 'publisher_id': '123123abc',
+                'uses_bc_gallery': False,
                 'application_client_id': '5',
                 'application_client_secret': 'some secret'})
             header = { 'Content-Type':'application/json' }
@@ -1673,7 +1831,8 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             params = json.dumps({'publisher_id': '123123abc',
                 'application_client_id': '5',
                 'application_client_secret': 'some secret',
-                'uses_bc_gallery': True})
+                'uses_bc_gallery': True,
+                'uses_bc_videojs_player': 'True'})
             header = {'Content-Type':'application/json'}
             url = '/api/v2/%s/integrations/brightcove' % (
                 self.account_id_api_key)
@@ -1688,6 +1847,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             rjson['integration_id'], async=True)
         self.assertEqual(platform.application_client_id, '5')
         self.assertEqual(platform.uses_bc_gallery, True)
+        self.assertTrue(platform.uses_bc_videojs_player)
         params = json.dumps({'integration_id': rjson['integration_id'],
                              'application_client_id': 'not 5',
                              'application_client_secret': None})
@@ -1705,13 +1865,14 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         params = json.dumps({'integration_id': rjson['integration_id'],
                              'application_client_id': None,
                              'application_client_secret': None,
-                             'uses_bc_gallery': False})
+                             'uses_bc_videojs_player': False})
         response = yield self.http_client.fetch(
             self.get_url(url), body=params, method='PUT', headers=header)
         self.assertEqual(response.code, 200)
         platform = yield neondata.BrightcoveIntegration.get(
             rjson['integration_id'], async=True)
-        self.assertEqual(platform.uses_bc_gallery, False, 'Valid PUT updates this field')
+        self.assertEqual(platform.uses_bc_videojs_player, False,
+                         'Valid PUT updates this field')
 
     def test_get_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.get')
@@ -1727,7 +1888,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
     def test_post_integration_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.BrightcoveIntegrationHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/integrations/brightcove' % '1234234'
+        url = '/api/v2/%s/integrations/brightcove' % '1234234'
         self.post_exceptions(url, params, exception_mocker)  
 
 class TestVideoHandler(TestControllersBase): 
@@ -1741,7 +1902,9 @@ class TestVideoHandler(TestControllersBase):
         neondata.ThumbnailMetadata('testing_vtid_two', width=500,
                                    urls=['d']).save()
         neondata.NeonApiRequest('job1', self.account_id_api_key).save()
-        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, lambda x: x, create_missing=True) 
+        defop = neondata.BrightcoveIntegration.modify(self.test_i_id, 
+            lambda x: x, 
+            create_missing=True) 
         user.modify(self.account_id_api_key, lambda p: p.add_platform(defop))
         self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
         self.cdn_mock = self._future_wrap_mock(
@@ -1765,31 +1928,21 @@ class TestVideoHandler(TestControllersBase):
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
-        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.http_mocker.stop()
         self.verify_account_mocker.stop()
         super(TestVideoHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_post_video(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
-              '&default_thumbnail_url=url.invalid'\
-              '&title=a_title&url=some_url'\
-              '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
+	      '&default_thumbnail_url=url.invalid'\
+	      '&title=%s&url=some_url'\
+              '&thumbnail_ref=ref1' % (self.account_id_api_key, 
+                  self.test_i_id, 
+                  'test')
         cmsdb_download_image_mocker = patch(
             'cmsdb.neondata.VideoMetadata.download_image_from_url') 
         cmsdb_download_image_mock = self._future_wrap_mock(
@@ -1923,334 +2076,465 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_video_exists_in_db(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
-        cmsdb_download_image_mock.side_effect = [self.random_image]
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,
+            '1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals(video.key, internal_video_id)
-        cmsdb_download_image_mocker.stop()
 
     @tornado.testing.gen_test
     def test_post_video_thumbnail_exists_in_db(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch('cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mocker.start())
-        cmsdb_download_image_mock.side_effect = [self.random_image]
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         thumbnail_id = video.thumbnail_ids[0]
         thumbnail = neondata.ThumbnailMetadata.get(thumbnail_id)
         self.assertEquals(thumbnail_id, thumbnail.key) 
-        cmsdb_download_image_mocker.stop()
 
     @tornado.testing.gen_test
     def test_post_video_with_dots(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234a.s.cs&default_thumbnail_url=url.invalid&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        cmsdb_download_image_mocker = patch(
-            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(
-            cmsdb_download_image_mocker.start())
-        cmsdb_download_image_mock.side_effect = [self.random_image] 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234a.s.cs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+             patch(pstr)) as cmsdb_download_image_mock:
+            cmsdb_download_image_mock.side_effect = [self.random_image]
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body)
         internal_video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key, '1234.ascs')
         self.assertNotEquals(rjson['job_id'],'')
         self.assertNotEquals(rjson['video']['video_id'], '1234.ascs')
-        cmsdb_download_image_mocker.stop()
 
+    @tornado.testing.gen_test
     def test_post_failed_to_download_thumbnail(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&url=some_url' \
-                      % (self.account_id_api_key, self.test_i_id)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&default_thumbnail_url=url.invalid'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
         self.im_download_mock.side_effect = neondata.ThumbDownloadError('boom')
-        response = self.http_client.fetch(self.get_url(url),
-                                          body='',
-                                          callback=self.stop,
-                                          method='POST',
-                                          allow_nonstandard_methods=True)
-        response = self.wait()
-        rjson = json.loads(response.body)
-        # TODO ??? should this be a 400 ??? 
-        self.assertEquals(response.code,400)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e: 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        rjson = json.loads(e.exception.response.body)
+        self.assertEquals(e.exception.code,400)
         self.assertEquals(rjson['error']['message'],
                           'failed to download thumbnail')
 
     @tornado.testing.gen_test
     def test_post_video_with_duration(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&duration=1354&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&duration=1354&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,
+            '1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals(1354, video.duration)
 
     @tornado.testing.gen_test
     def test_post_video_with_float_duration(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&duration=1354.54&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&duration=1354.54&url=some_url' % (
+                  self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals(1354.54, video.duration)
 
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_one(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18T06:36:40.123Z&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&publish_date=2015-08-18T06:36:40.123Z'\
+              '&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals('2015-08-18T06:36:40.123Z', video.publish_date)
 
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_two(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18T06:36:40Z&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&publish_date=2015-08-18T06:36:40Z'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals('2015-08-18T06:36:40Z', video.publish_date)
 
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_three(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-08-18&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&publish_date=2015-08-18'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals('2015-08-18', video.publish_date)
 
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_invalid(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:  
-            url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&publish_date=2015-0&url=some_url' % (self.account_id_api_key,                                                      self.test_i_id)
-            self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='',
-                                                    method='POST',
-                                                    allow_nonstandard_methods=True)
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&publish_date=2015-0'\
+                  '&url=some_url' % (
+                      self.account_id_api_key,                                                      
+                      self.test_i_id)
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
         self.assertEquals(e.exception.response.code, 400) 
 
     @tornado.testing.gen_test
     def test_post_video_missing_url(self):
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&title=a_title' % (self.account_id_api_key, self.test_i_id)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='',
-                                                    method='POST',
-                                                    allow_nonstandard_methods=True)
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&title=a_title' % (self.account_id_api_key, 
+                      self.test_i_id)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
         self.assertEquals(e.exception.response.code, 400)
 
     @tornado.testing.gen_test
     def test_post_url_and_reprocess(self):
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&title=a_title&url=some_url&reprocess=True' % (self.account_id_api_key, self.test_i_id)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='',
-                                                    method='POST',
-                                                    allow_nonstandard_methods=True)
+            url = '/api/v2/%s/videos?integration_id=%s'\
+                  '&external_video_ref=1234ascs'\
+                  '&title=a_title&url=some_url'\
+                  '&reprocess=True' % (self.account_id_api_key, self.test_i_id)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
         self.assertEquals(e.exception.response.code, 400)
 
     @tornado.testing.gen_test
     def test_post_video_with_custom_data(self):
         custom_data = urllib.quote(json.dumps({ "a" : 123456 }))
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&custom_data=%s&url=some_url' % (self.account_id_api_key, self.test_i_id, custom_data)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&custom_data=%s&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id, custom_data)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
 
-        internal_video_id = neondata.InternalVideoID.generate(self.account_id_api_key,'1234ascs')
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,
+            '1234ascs')
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertTrue(video.custom_data is not None)
 
+    @tornado.testing.gen_test
     def test_post_video_with_bad_custom_data(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&custom_data=%s&url=some_url' % (self.account_id_api_key, self.test_i_id, 4)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               body='',
-                               method='POST',
-                               callback=self.stop, 
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 400) 
-        rjson = json.loads(response.body)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&custom_data=%s&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id, 4)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.response.code, 400) 
+        rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'not a dictionary') 
 
+    @tornado.testing.gen_test
     def test_post_two_videos(self):
-        # use self.stop/wait to make sure we get the response back and 
-        # not an exception, we don't want no exception
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
         
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               body='',
-                               method='POST',
-                              allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 409) 
-        rjson = json.loads(response.body) 
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (self.account_id_api_key, self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.response.code, 409) 
+        rjson = json.loads(e.exception.response.body) 
         data = rjson['error']['data'] 
         self.assertTrue(first_job_id in data)
 
+    @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess(self):
         # use self.stop/wait to make sure we get the response back and 
         # not an exception, we don't want no exception
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
         
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=true' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               body='',
-                               method='POST',
-                              allow_nonstandard_methods=True)
-        response = self.wait()
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&reprocess=true' % (self.account_id_api_key, 
+                  self.test_i_id)
+
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body)
         self.assertEquals(first_job_id, rjson['job_id'])
 
+    @tornado.testing.gen_test
     def test_post_video_with_vserver_fail(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 500) 
-        rjson = json.loads(response.body)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,400))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.response.code, 500) 
+        rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'Internal Server') 
 
+    @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess_fail(self):
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,200))
-        self.http_client.fetch(self.get_url(url),
-                               callback = self.stop, 
-                               body='',
-                               method='POST',
-                               allow_nonstandard_methods=True)
-        response = self.wait()
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (self.account_id_api_key, 
+                  self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,200))
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
         
-        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&reprocess=1' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(tornado.httpclient.HTTPResponse(x,400))
-        self.http_client.fetch(self.get_url(url),
-                               callback=self.stop,
-                               body='',
-                               method='POST',
-                              allow_nonstandard_methods=True)
-        response = self.wait()
-        self.assertEquals(response.code, 500) 
-        rjson = json.loads(response.body)
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&reprocess=1' % (self.account_id_api_key, 
+                  self.test_i_id)
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(x,400))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='POST',
+                allow_nonstandard_methods=True)
+
+        self.assertEquals(e.exception.response.code, 500) 
+        rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'Internal Server Error') 
 
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
+        vm = neondata.VideoMetadata(
+            neondata.InternalVideoID.generate(self.account_id_api_key,'vid134'))
+        yield vm.save(async=True)
+
+        url = '/api/v2/%s/videos' % (self.account_id_api_key)
+
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
-            vm.save()
-            url = '/api/v2/%s/videos' % (self.account_id_api_key)
             response = yield self.http_client.fetch(self.get_url(url),
                                                     method='GET')
-	    self.assertEquals(e.exception.code, 400)
+
+        self.assertEquals(e.exception.code, 400)
+
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'key not provided') 
-
     @tornado.testing.gen_test
     def test_get_single_video(self):
         vm = neondata.VideoMetadata(
@@ -2305,7 +2589,10 @@ class TestVideoHandler(TestControllersBase):
         request.response = {'error': 'Some error'}
         request.state = neondata.RequestState.FINISHED
         request.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=state,integration_id,testing_enabled,job_id,title,video_id,serving_url,publish_date,thumbnails,duration,custom_data' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?video_id=vid1'\
+              '&fields=state,integration_id,testing_enabled,'\
+              'job_id,title,video_id,serving_url,publish_date,'\
+              'thumbnails,duration,custom_data' % (self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         
@@ -2381,7 +2668,9 @@ class TestVideoHandler(TestControllersBase):
                                  'do not exist .* viddoesnotexist') 
 
     def test_get_multiple_video_dne(self):
-        url = '/api/v2/%s/videos?video_id=viddoesnotexist,vidoerwe,w3asdfa324ad' % (self.account_id_api_key)
+        url = '/api/v2/%s/videos?'\
+              'video_id=viddoesnotexist,vidoerwe,w3asdfa324ad' % (
+                  self.account_id_api_key)
         response = self.http_client.fetch(self.get_url(url),
                                           self.stop, 
                                           method='GET')
@@ -2397,7 +2686,7 @@ class TestVideoHandler(TestControllersBase):
         vm = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
             request_id='job1')
-        vm.save()
+        yield vm.save(async=True)
         url = '/api/v2/%s/videos?video_id=vid1&fields=created' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(self.get_url(url),
@@ -2416,33 +2705,44 @@ class TestVideoHandler(TestControllersBase):
         vm = neondata.VideoMetadata(
             neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
             request_id='job1')
-        vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=created,me_is_invalid' % (self.account_id_api_key)
+        yield vm.save(async=True)
+        url = '/api/v2/%s/videos?video_id=vid1'\
+              '&fields=created,me_is_invalid' % (
+                  self.account_id_api_key)
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    method='GET')
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                method='GET')
+
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'], 'invalid field') 
 
     @tornado.testing.gen_test(timeout=10.0)
     def test_update_video_testing_enabled(self):
-        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'))
-        vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=0' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT', 
-                                                allow_nonstandard_methods=True)
+        vm = neondata.VideoMetadata(neondata.InternalVideoID.generate(
+            self.account_id_api_key,'vid1'))
+        yield vm.save(async=True)
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=0' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT', 
+            allow_nonstandard_methods=True)
+
         rjson = json.loads(response.body)
         self.assertFalse(rjson['testing_enabled'])
         self.assertEquals(response.code, 200)
 
-        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=1' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='PUT', 
-                                                allow_nonstandard_methods=True)
+        url = '/api/v2/%s/videos?video_id=vid1&testing_enabled=1' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='PUT', 
+            allow_nonstandard_methods=True)
+
         rjson = json.loads(response.body)
         self.assertTrue(rjson['testing_enabled'])
         self.assertEquals(response.code, 200)
@@ -2454,9 +2754,12 @@ class TestVideoHandler(TestControllersBase):
             tids=['testing_vtid_one', 'testing_vtid_two'],
             request_id='job1')
         vm.save()
-        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            method='GET')
+
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 1)
@@ -2490,18 +2793,21 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_update_video_does_not_exist(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
-            url = '/api/v2/%s/videos?video_id=vid_does_not_exist&testing_enabled=0' % (self.account_id_api_key)
-            response = yield self.http_client.fetch(self.get_url(url),
-                                                    body='',
-                                                    method='PUT', 
-                                                    allow_nonstandard_methods=True)
+            url = '/api/v2/%s/videos?video_id=vid_does_not_exist'\
+                  '&testing_enabled=0' % (self.account_id_api_key)
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body='',
+                method='PUT', 
+                allow_nonstandard_methods=True)
+
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
                                  'vid_does_not_exist')
 
     @tornado.testing.gen_test
-    def test_update_video_title(self):  
+    def test_update_video_title(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=vid1'\
               '&title=kevinsvid&url=some_url' % (
@@ -2510,20 +2816,17 @@ class TestVideoHandler(TestControllersBase):
 
         self.http_mock.side_effect = lambda x, callback: callback(
             tornado.httpclient.HTTPResponse(x,200))
+
         response = yield self.http_client.fetch(
             self.get_url(url),
-            body='',
             method='POST',
             allow_nonstandard_methods=True)
-
         rjson = json.loads(response.body)
-        job_id = rjson['job_id'] 
+        job_id = rjson['job_id']
         url = '/api/v2/%s/videos?video_id=vid1&title=vidkevinnew' % (
             self.account_id_api_key)
-
         response = yield self.http_client.fetch(
             self.get_url(url),
-            body='',
             method='PUT', 
             allow_nonstandard_methods=True)
 
@@ -2760,6 +3063,33 @@ class TestVideoHandler(TestControllersBase):
             rjson['error']['data'],
             'blah')
 
+    @tornado.testing.gen_test
+    def test_post_video_body(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+           patch(pstr)) as cmock:
+            cmock.side_effect = [self.random_image]
+            body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'de pol\xc3\xb6tica de los EE.UU.-'.decode('utf-8'),
+                'default_thumbnail_url': 'invalid',
+                'thumbnail_ref': 'ref1'
+            }
+            header = {"Content-Type": "application/json"}
+            url = '/api/v2/%s/videos' % (self.account_id_api_key)
+
+            self.http_mock.side_effect = lambda x, callback: callback(
+                tornado.httpclient.HTTPResponse(x,200))
+            response = yield self.http_client.fetch(self.get_url(url),
+                body=json.dumps(body),
+                method='POST',
+                headers=header)
+        self.assertEquals(response.code, 202) 
+        video = yield neondata.VideoMetadata.get('%s_%s' % (
+            self.account_id_api_key, '1234ascs33'), async=True)
+        self.assertEquals(video.url, 'some_url')
+
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
         url = '/api/v2/%s/videos' % '1234234'
@@ -2806,22 +3136,11 @@ class TestThumbnailHandler(TestControllersBase):
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self): 
-        self.postgresql.clear_all_tables()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
         super(TestThumbnailHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
@@ -3012,19 +3331,8 @@ class TestVideoStatsHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoStatsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test
     def test_one_video_id(self): 
@@ -3116,19 +3424,8 @@ class TestThumbnailStatsHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestThumbnailStatsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_account_id_video_id(self): 
@@ -3245,21 +3542,6 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
         super(TestAPIKeyRequired, self).setUp()
-
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequired, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     def make_calls_and_assert_401(self, 
                                   url, 
@@ -3461,7 +3743,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.access_token = token 
         user.save()
 
-        params = json.dumps({'publisher_id': '123123abc', 'token': token})
+        params = json.dumps({'publisher_id': '123123abc', 'token': token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -3481,7 +3764,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.save()
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
-        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -3525,7 +3809,8 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         user.save()
         self.neon_user.users.append('testuser')
         self.neon_user.save() 
-        params = json.dumps({'publisher_id': '123123abc', 'token' : token})
+        params = json.dumps({'publisher_id': '123123abc', 'token' : token,
+                             'uses_bc_gallery': False})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/integrations/brightcove' % (self.neon_user.neon_api_key)
         response = yield self.http_client.fetch(self.get_url(url), 
@@ -3579,21 +3864,6 @@ class TestAPIKeyRequiredAuth(TestAuthenticationBase):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
         self.neon_user.save() 
         super(TestAPIKeyRequiredAuth, self).setUp()
-
-    def tearDown(self):
-        self.postgresql.clear_all_tables()
-        super(TestAPIKeyRequiredAuth, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test 
     def test_create_new_account_god_mode(self): 
@@ -3656,20 +3926,6 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         self.user.save()
         super(TestAuthenticationHandler, self).setUp()
 
-    def tearDown(self): 
-        self.postgresql.clear_all_tables()
-        super(TestAuthenticationHandler, self).tearDown()
- 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     def test_no_username(self): 
         url = '/api/v2/authenticate' 
@@ -3869,29 +4125,16 @@ class TestAuthenticationHandler(TestAuthenticationBase):
 class TestRefreshTokenHandler(TestAuthenticationBase): 
     def setUp(self): 
         self.refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp') 
+        TestRefreshTokenHandler.username = 'kevin' 
+        TestRefreshTokenHandler.password = '12345678'
+        self.user = neondata.User(username=TestRefreshTokenHandler.username, 
+                             password=TestRefreshTokenHandler.password)
+        self.user.save()
         super(TestRefreshTokenHandler, self).setUp()
          
     def tearDown(self): 
         options._set('cmsapiv2.apiv2.refresh_token_exp', self.refresh_token_exp)
         super(TestRefreshTokenHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        TestRefreshTokenHandler.username = 'kevin' 
-        TestRefreshTokenHandler.password = '12345678'
-        cls.user = neondata.User(username=TestRefreshTokenHandler.username, 
-                             password=TestRefreshTokenHandler.password)
-        cls.user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
- 
 
     def test_no_token(self): 
         url = '/api/v2/refresh_token' 
@@ -3915,22 +4158,27 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
         header = { 'Content-Type':'application/json' }
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               method='POST', 
-                               callback=self.stop, 
-                               headers=header)
-        response = self.wait() 
-        rjson = json.loads(response.body)
-        refresh_token = rjson['refresh_token']
-        url = '/api/v2/refresh_token' 
-        params = json.dumps({'token': refresh_token }) 
-        time.sleep(1.0) 
-        self.http_client.fetch(self.get_url(url), 
-                               body=params, 
-                               method='POST', 
-                               callback=self.stop, 
-                               headers=header)
+        with patch('cmsapiv2.apiv2.datetime') as mock_dt:
+            # Fix time
+            mock_dt.utcnow.return_value = datetime.utcnow()
+
+            self.http_client.fetch(self.get_url(url),
+                                   body=params,
+                                   method='POST',
+                                   callback=self.stop,
+                                   headers=header)
+            response = self.wait()
+            rjson = json.loads(response.body)
+            refresh_token = rjson['refresh_token']
+            url = '/api/v2/refresh_token'
+            params = json.dumps({'token': refresh_token })
+
+            mock_dt.utcnow.return_value += timedelta(1)
+            self.http_client.fetch(self.get_url(url),
+                                   body=params,
+                                   method='POST',
+                                   callback=self.stop,
+                                   headers=header)
 
         response = self.wait()
         rjson = json.loads(response.body)
@@ -3949,19 +4197,25 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         params = json.dumps({'username': TestRefreshTokenHandler.username, 
                              'password': TestRefreshTokenHandler.password})
         header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
-        rjson1 = json.loads(response.body)
-        refresh_token = rjson1['refresh_token']
-        url = '/api/v2/refresh_token' 
-        params = json.dumps({'token': refresh_token })  
-        header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
+
+        with patch('cmsapiv2.apiv2.datetime') as mock_dt:
+            mock_dt.utcnow.return_value = datetime.utcnow()
+
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
+            rjson1 = json.loads(response.body)
+            refresh_token = rjson1['refresh_token']
+            url = '/api/v2/refresh_token'
+            params = json.dumps({'token': refresh_token })
+            header = { 'Content-Type':'application/json' }
+            # Set time forward one second so token will change
+            mock_dt.utcnow.return_value += timedelta(1)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
         rjson2 = json.loads(response.body)
         refresh_token2 = rjson2['refresh_token']
         self.assertEquals(refresh_token, refresh_token2) 
@@ -3977,27 +4231,15 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
 
 class TestLogoutHandler(TestAuthenticationBase): 
     def setUp(self): 
-        super(TestLogoutHandler, self).setUp()
-    def tearDown(self): 
-        super(TestLogoutHandler, self).tearDown()
-   
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         TestLogoutHandler.username = 'kevin' 
         TestLogoutHandler.password = '12345678'
         user = neondata.User(username=TestLogoutHandler.username, 
                              password=TestLogoutHandler.password)
         user.save()
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.clear_all_tables()
-        cls.postgresql.stop()
-
+        super(TestLogoutHandler, self).setUp()
+    def tearDown(self): 
+        super(TestLogoutHandler, self).tearDown()
+   
     def test_no_token(self): 
         url = '/api/v2/logout' 
         params = json.dumps({})
@@ -4078,7 +4320,8 @@ class TestAuthenticationHealthCheckHandler(TestAuthenticationBase):
  
 class TestVideoSearchInternalHandler(TestControllersBase): 
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.verify_account_mocker = patch(
@@ -4090,19 +4333,8 @@ class TestVideoSearchInternalHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoSearchInternalHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test 
     def test_search_no_videos(self):
@@ -4263,19 +4495,8 @@ class TestVideoSearchExternalHandler(TestControllersBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
         super(TestVideoSearchExternalHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
     
     @tornado.testing.gen_test 
     def test_search_base(self):
@@ -4361,20 +4582,9 @@ class TestAccountLimitsHandler(TestControllersBase):
         super(TestAccountLimitsHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestAccountLimitsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_search_with_limit(self):
@@ -4398,20 +4608,9 @@ class TestAccountIntegrationsHandler(TestControllersBase):
         super(TestAccountIntegrationsHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestAccountIntegrationsHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test 
     def test_one_integration(self):
@@ -4507,20 +4706,9 @@ class TestBillingAccountHandler(TestControllersBase):
         super(TestBillingAccountHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestBillingAccountHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_post_billing_account_no_account(self):
@@ -4795,20 +4983,9 @@ class TestBillingSubscriptionHandler(TestControllersBase):
         super(TestBillingSubscriptionHandler, self).setUp()
 
     def tearDown(self):
-        self.verify_account_mocker.stop()  
-        self.postgresql.clear_all_tables()
+        self.verify_account_mocker.stop()
         super(TestBillingSubscriptionHandler, self).tearDown()
 
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_post_billing_subscription_no_account(self):
@@ -5089,7 +5266,8 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             async=True)
         self.assertEquals(acct.subscription_information, None)
         self.assertEquals(acct.billed_elsewhere, True)
-        self.assertEquals(acct.serving_enabled, False)
+        # should always serve for them
+        self.assertEquals(acct.serving_enabled, True)
         acct_limits = yield neondata.AccountLimits.get(
             so.neon_api_key,
             async=True)
@@ -5311,14 +5489,118 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             method='GET') 
         print response.body
 
+class TestTelemetrySnippet(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        user = neondata.User('my_user',
+                             access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        user.save()
+        self.account_id = self.acct.neon_api_key
+
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'my_user'
+            }
+        super(TestTelemetrySnippet, self).setUp()
+
+    def tearDown(self):
+        self.token_decode_patcher.stop()  
+        super(TestTelemetrySnippet, self).tearDown()
+
+    @tornado.gen.coroutine
+    def _send_authed_request(self, url):
+        request = tornado.httpclient.HTTPRequest(
+            self.get_url(url),
+            headers={'Authorization' : 'Bearer my_token'})
+        response = yield self.http_client.fetch(request)
+        raise tornado.gen.Return(response) 
+
+    @tornado.testing.gen_test
+    def test_invalid_account_id(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self._send_authed_request(
+                '/api/v2/badacct/telemetry/snippet')
+
+        self.assertEquals(e.exception.code, 401)
+
+    @tornado.testing.gen_test
+    def test_no_integrations(self):
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertNotIn('neonBrightcoveGallery', response.body)
+        self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
+
+    @tornado.testing.gen_test
+    def test_non_gallery_bc_integration(self):
+        neondata.BrightcoveIntegration(self.account_id, 'pub_id').save()
+        
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertNotIn('neonBrightcoveGallery', response.body)
+        self.assertIn('cdn.neon-lab.com/neonoptimizer_dixon.js', response.body)
+
+    @tornado.testing.gen_test
+    def test_gallery_bc_integration(self):
+        neondata.BrightcoveIntegration(self.account_id, 'pub_id',
+                                       uses_bc_gallery=True).save()
+        
+        response = yield self._send_authed_request(
+            '/api/v2/%s/telemetry/snippet' % self.account_id)
+
+        self.assertEquals(response.headers['Content-Type'], 
+                          'text/plain')
+        self.assertEquals(response.code, 200)
+
+        self.assertIn(
+            "var neonPublisherId = '%s';" % self.acct.tracker_account_id,
+            response.body)
+        self.assertIn('neonBrightcoveGallery = true', response.body)
+        self.assertNotIn('insertBefore', response.body)
+        self.assertIn("src='//cdn.neon-lab.com/neonoptimizer_dixon.js'",
+                      response.body)
+
+
 
 class TestBrightcovePlayerHandler(TestControllersBase):
     '''Test the handler and helper classes for BrightcovePlayer'''
 
     def setUp(self):
         super(TestBrightcovePlayerHandler, self).setUp()
-        self.account_id = 'a0'
+
+        # Mock our user authorization
+        self.user = neondata.NeonUserAccount('a0')
+        self.user.save()
+        self.account_id = self.user.neon_api_key
         self.publisher_id = 'p0'
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
+        # Create a mock integration
         self.integration = neondata.BrightcoveIntegration(
             self.account_id,
             self.publisher_id,
@@ -5327,22 +5609,13 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.integration.save()
         self.api = api.brightcove_api.PlayerAPI(self.integration)
 
-        # Mock our user authorization
-        self.user = neondata.NeonUserAccount(self.account_id)
-        self.user.save()
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-
-        # Set up an initial player
+        # Set up two initial players
         self.player = neondata.BrightcovePlayer(
             player_ref='pl0',
             integration_id=self.integration.integration_id,
             name='db name',
             is_tracked=True,
-            published_plugin_version='0.0.0');
+            published_plugin_version='0.0.1');
         self.player.save()
         self.untracked_player = neondata.BrightcovePlayer(
             player_ref='pl2',
@@ -5358,26 +5631,15 @@ class TestBrightcovePlayerHandler(TestControllersBase):
     def tearDown(self):
         self.get_player_mocker.stop()
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestBrightcovePlayerHandler, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_get_players(self):
 
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
-             self.account_id, self.integration.integration_id)
+             self.account_id,
+             self.integration.integration_id)
 
         with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
             get = self._future_wrap_mock(_get)
@@ -5407,18 +5669,21 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(2, len(players))
         self.assertEqual(2, count)
         player0, player1 = players
+        self.assertNotIn('id', player0)
         self.assertEqual('pl0', player0['player_ref'])
         self.assertEqual('Neon Tracking Player', player0['name'])
         self.assertNotIn('description', player0)
         self.assertEqual('pl1', player1['player_ref'])
         self.assertEqual('Neon Player 2: Neoner', player1['name'])
+        self.assertIsNone(neondata.BrightcovePlayer.get('pl1'))
 
     @tornado.testing.gen_test
     def test_get_no_default_player(self):
         # TODO factor these header, etc.
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
-             self.account_id, self.integration.integration_id)
+             self.account_id,
+             self.integration.integration_id)
         with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
             get = self._future_wrap_mock(_get)
             default_bc_player = {
@@ -5454,6 +5719,41 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(count, 2)
 
     @tornado.testing.gen_test
+    def test_get_players_bc_401(self):
+        '''Test that a BrightcoveApiClientError for authorization translates to 401'''
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                get = self._future_wrap_mock(_get)
+                get.side_effect = api.brightcove_api.BrightcoveApiClientError(
+                    401,
+                    'Insufficient access for operation')
+                yield self.http_client.fetch(
+                    self.get_url(url),
+                    headers=headers)
+        self.assertEqual(e.exception.code, 401)
+
+
+    @tornado.testing.gen_test
+    def test_get_players_bc_500(self):
+        '''Test that a BrightcoveApiServerError for authorization translates to 500'''
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players?integration_id={}'.format(
+             self.account_id, self.integration.integration_id)
+        with patch('api.brightcove_api.PlayerAPI.get_players') as _get:
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                get = self._future_wrap_mock(_get)
+                get.side_effect = api.brightcove_api.BrightcoveApiServerError(
+                    500,
+                    'Internal server error')
+                yield self.http_client.fetch(
+                    self.get_url(url),
+                    headers=headers)
+        self.assertEqual(e.exception.code, 500)
+
+    @tornado.testing.gen_test
     def test_put_tracked_player(self):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
@@ -5462,7 +5762,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
-                'player_ref': 'pl0',
+                'id': 'pl0',
                 'name': 'new name'}]
 
             r = yield self.http_client.fetch(
@@ -5476,13 +5776,13 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 }))
             self.assertEqual(1, pub.call_count)
 
-            # This is the change behind the mocked publish_plugin method
-            self.player.published_plugin_version = '0.0.1'
-            self.player.save()
-
+        self.assertEqual(self.get_player.call_args[0][0], 'pl0')
+        self.assertEqual(pub.call_args[0][0]['id'], 'pl0')
         player = json.loads(r.body)
         self.assertTrue(player['is_tracked'])
+        self.assertEqual(player['player_ref'], 'pl0')
         self.assertEqual(player['name'], 'new name')
+        self.assertEqual(pub.call_args[0][2], self.user.tracker_account_id)
 
         # Try with a new player
         with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
@@ -5503,9 +5803,11 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             self.assertEqual(1, pub.call_count)
 
         player = json.loads(r.body)
+        self.assertEqual(player['player_ref'], 'pl-new')
         self.assertEqual(player['name'],'new name')
         self.assertTrue(player['is_tracked'])
         player = yield neondata.BrightcovePlayer.get('pl-new', async=True)
+        self.assertEqual(player.get_id(), 'pl-new')
         self.assertEqual(player.name,'new name')
         self.assertTrue(player.is_tracked)
         self.assertEqual(
@@ -5534,6 +5836,25 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         player = json.loads(r.body)
         self.assertEqual(player['player_ref'], 'pl2')
         self.assertFalse(player['is_tracked'])
+
+    @tornado.testing.gen_test
+    def test_put_player_bc_404(self):
+        '''Test that a BrightcoveApiClientError translates to HTTPError(404)'''
+        self.get_player.side_effect = api.brightcove_api.BrightcoveApiClientError(
+            404,
+            'not found')
+        headers = { 'Content-Type':'application/json' }
+        url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT',
+                headers=headers,
+                body=json.dumps({
+                    'player_ref': 'pl0',
+                    'is_tracked': True,
+                    'integration_id': self.integration.integration_id}))
+        self.assertEqual(e.exception.code, 404)
 
     @tornado.testing.gen_test
     def test_get_plugin_patch(self):
@@ -5591,9 +5912,9 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 "policy_key": "BCpkADawqM2Z5-2XLiQna9qL7qIuHETaqzXl1fdmHcVOFOP6Rf8uUnlhNxNlh9MLNjb5lkodGFv2yBU9suVWdnXZTcFWEMx2qvNACzbVDIyco9fvRTAi43xUeygF_GPQqOUGomo8Bg1s-V7J"
             }
         }
-        account_id = 12345
+        tracker_id = 12345
         patch = controllers.BrightcovePlayerHelper._get_plugin_patch(
-            given, account_id)
+            given, tracker_id)
         expect = {
             'plugins': [
                 {
@@ -5625,8 +5946,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 'master': {
                     'configuration': {
                         'plugins': [{
-                            'name': 'current',
-                            'options': {}
+                            'name': 'notneon',
+                            'options': {
+                                'color': 'red'
+                            }
                         }],
                         'scripts': ['optimizely.js'],
                         'stylesheets': [],
@@ -5641,20 +5964,249 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             patch_mock = self._future_wrap_mock(_patch)
             publish_mock = self._future_wrap_mock(_publish)
             yield controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.integration, self.api)
+                bc_player, self.api, self.user.tracker_account_id)
 
         self.assertEqual(patch_mock.call_count, 1)
-        pid, arg = patch_mock.call_args[0]
-        self.assertIn('optimizely.js', arg['scripts'])
+        pid, patch_args = patch_mock.call_args[0]
+        self.assertIn('optimizely.js', patch_args['scripts'],
+                      'Keeps the non-Neon script')
         our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
-        self.assertIn(our_url, arg['scripts'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'current'])
-        self.assertTrue([p for p in arg['plugins'] if p['name'] == 'neon'])
-        self.assertNotIn('stylesheets', arg)
-        self.assertEqual(pid, 'pl0')
+        self.assertIn(our_url, patch_args['scripts'], 'Adds this url to scripts')
+        self.assertEqual(
+            1,
+            len([p for p in patch_args['plugins'] if p['name'] == 'notneon']),
+            'Keeps the non-Neon plugin')
+        self.assertEqual(
+            1,
+            len([p for p in patch_args['plugins'] if p['name'] == 'neon']),
+            'Has one Neon plugin')
+        self.assertNotIn('stylesheets', patch_args, 'Patch skips stylesheets')
+        self.assertEqual('pl0', pid, 'Keeps player ref')
 
         self.assertEqual(publish_mock.call_count, 1)
         self.assertEqual(publish_mock.call_args[0][0], 'pl0')
+
+        # Run it again and assert no change
+        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
+            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
+
+            patch_mock = self._future_wrap_mock(_patch)
+            publish_mock = self._future_wrap_mock(_publish)
+            yield controllers.BrightcovePlayerHelper.publish_plugin(
+                bc_player, self.api, self.user.tracker_account_id)
+
+        self.assertEqual(patch_args, patch_mock.call_args[0][1])
+
+class TestForgotPasswordHandler(TestAuthenticationBase):
+    def setUp(self):
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+        super(TestForgotPasswordHandler, self).setUp()
+
+    def tearDown(self): 
+        self.verify_account_mocker.stop()
+        super(TestForgotPasswordHandler, self).tearDown()
+
+    @tornado.testing.gen_test 
+    def test_no_user(self):
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'dne@test.invalid'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'User was not found')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_no_secondary(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'No recovery email')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_secondary(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin', 
+                             secondary_email='kevindfenger@gmail.com', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps({'username': 'testuser'}) 
+        url = '/api/v2/users/forgot_password' 
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=params, 
+            method="POST", 
+            headers=header) 
+	self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+            'Reset Password')
+        user = yield neondata.User.get(user.username, async=True)
+        self.assertNotEqual(None, user.reset_password_token) 
+ 
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_phone_not_available(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'cell_phone'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'No cell phone number')
+
+    @tornado.testing.gen_test 
+    def test_non_email_username_with_phone_available(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin', 
+                             cell_phone_number='123-245-3423', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'cell_phone'}) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 501) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'recovery by phone is not ready')
+
+    @tornado.testing.gen_test 
+    def test_invalid_communication_type(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',  
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'carrier_pigeon'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Communication Type not')
+
+    @tornado.testing.gen_test 
+    def test_non_expired_token(self):
+        user = neondata.User(username='testuser', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',
+                             secondary_email='kf@kf.com', 
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        token = JWTHelper.generate_token(
+            {'username' : 'testuser'}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'testuser', 'communication_type' : 'email'})
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/users/forgot_password' 
+            response = yield self.http_client.fetch(
+                self.get_url(url),
+                body=params, 
+                method="POST", 
+                headers=header) 
+	    self.assertEquals(e.exception.code, 400) 
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'There is a password reset comm')
+
+    @tornado.testing.gen_test 
+    def test_existing_token_expired(self):
+        user = neondata.User(username='kevindfenger@gmail.com', 
+                             password='testpassword',
+                             first_name='kevin',
+                             last_name='kevin',
+                             access_level=neondata.AccessLevels.CREATE | 
+                                          neondata.AccessLevels.READ)
+        token = JWTHelper.generate_token(
+            {'username' : 'kevindfenger@gmail.com', 'exp': -1}, 
+            token_type=TokenTypes.RESET_PASSWORD_TOKEN) 
+        user.reset_password_token = token 
+        yield user.save(async=True) 
+        header = { 'Content-Type':'application/json' }
+        params = json.dumps(
+            {'username': 'kevindfenger@gmail.com', 
+             'communication_type' : 'email'})
+        url = '/api/v2/users/forgot_password' 
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body=params, 
+            method="POST", 
+            headers=header) 
+	self.assertEquals(response.code, 200) 
+        rjson = json.loads(response.body)
+        self.assertRegexpMatches(rjson['message'],
+            'Reset Password')
+        user = yield neondata.User.get(user.username, async=True)
+        self.assertNotEqual(None, user.reset_password_token) 
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
