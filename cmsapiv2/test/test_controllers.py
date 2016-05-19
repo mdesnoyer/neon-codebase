@@ -318,8 +318,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test 
     def test_create_new_account_uppercase_username(self):
-        params = json.dumps({'customer_name': 'meisnew', 
-                             'email': 'a@a.bc', 
+        params = json.dumps({'email': 'a@a.bc', 
                              'admin_user_username':'A@A.com', 
                              'admin_user_password':'testacpas', 
                              'admin_user_first_name':'kevin'})
@@ -345,12 +344,12 @@ class TestNewAccountHandler(TestAuthenticationBase):
  
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['customer_name'], 'meisnew')
+        self.assertEquals(rjson['customer_name'], None)
         self.assertEquals(rjson['serving_enabled'], True) 
         account_id = rjson['account_id'] 
         account = yield neondata.NeonUserAccount.get(account_id, 
                       async=True)
-        self.assertEquals(account.name, 'meisnew')
+        self.assertEquals(account.name, None)
         self.assertEquals(account.email, 'a@a.bc')
         self.assertEquals(account.serving_enabled, True)
 
