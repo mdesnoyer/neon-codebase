@@ -184,7 +184,7 @@ class Predictor(object):
 
         Inputs:
         image - numpy array of the image
-        
+
         Returns: predicted valence score
 
         Raises: NotTrainedError if it has been called before train() has.
@@ -194,7 +194,7 @@ class Predictor(object):
     def _predictasync(self, image, *args, **kwargs):
         '''
         Asynchronous prediction using the deepnet Aquila's
-        server. 
+        server.
 
         Inputs:
         image - numpy array of the image, as an N x M x 3
@@ -235,8 +235,8 @@ class Predictor(object):
 
 
 class DeepnetPredictor(Predictor):
-    '''Prediction using the deepnet Aquila (or an arbitrary predictor). 
-    Note, this does not require you provision a feature generator for 
+    '''Prediction using the deepnet Aquila (or an arbitrary predictor).
+    Note, this does not require you provision a feature generator for
     the predictor.
 
     The connection to the server is maintained internally, using the
@@ -249,7 +249,7 @@ class DeepnetPredictor(Predictor):
     def __init__(self, concurrency=10, port=9000,
                  aquila_connection=None):
         '''
-        concurrency - The maximum number of simultaneous requests to 
+        concurrency - The maximum number of simultaneous requests to
         submit.
         port - the port on which to establish the connection.
         aquila_connection - An instance (or singleton) of an object
@@ -294,7 +294,7 @@ class DeepnetPredictor(Predictor):
         construction / connecting. Once the channel reaches a
         ready state for the first time, it unsubscribes itself
         and subscribes the regular check. It is necessary to
-        verify that a server can be connected to. 
+        verify that a server can be connected to.
 
         This function is the _only_ function that can authorize
         requests to begin, which it does by setting the _ready
@@ -317,7 +317,7 @@ class DeepnetPredictor(Predictor):
             self.channel.unsubscribe(self._init_check)
             statemon.state.increment('unable_to_connect')
             _log.debug('Error connecting to server, trying new server')
-            # attempt to connect again -- this will re-add you to the 
+            # attempt to connect again -- this will re-add you to the
             # subscribed functions.
             self._connect(force_refresh=True)
 
@@ -344,12 +344,12 @@ class DeepnetPredictor(Predictor):
     def _predictasync(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
-        timeout: How long the request lasts for before expiring. 
+        timeout: How long the request lasts for before expiring.
         '''
         conn_est = self._ready.wait(20.)  # TODO: do we want a timeout?
         if not conn_est:
             _log.error('Connection not established in time.')
-            # what do we do here? 
+            # what do we do here?
             return
         image = _aquila_prep(image)
         request = aquila_inference_pb2.AquilaRequest()
@@ -362,7 +362,7 @@ class DeepnetPredictor(Predictor):
         # # issues, so let's see if this works.
         # with aquila_inference_pb2.beta_create_AquilaService_stub(self.channel) as stub:
         #     result_future = stub.Regress.future(request, timeout)  # 10 second timeout
-        result_future = self.stub.Regress.future(request, timeout)    
+        result_future = self.stub.Regress.future(request, timeout)
         result_future.add_done_callback(
             lambda result_future: self.async_cb_hand(result_future))
         return result_future
@@ -384,7 +384,7 @@ class DeepnetPredictor(Predictor):
         '''
         Returns True when it is safe to terminate.
         '''
-        with self.cv:
+        with self._cv:
             return self.active == 0
 
     def __del__(self):
@@ -405,7 +405,7 @@ class DeepnetPredictor(Predictor):
 
 class KFlannPredictor(Predictor):
     '''Approximate k nearest neighbour using flann.'''
-    
+
     def __init__(self, feature_generator, k=3, target_precision=0.95,
                  seed=802374, max_images_per_video=6):
         super(KFlannPredictor, self).__init__(feature_generator)
@@ -477,7 +477,7 @@ class KFlannPredictor(Predictor):
         for neighbour in neighbours:
             if len(valid_neighbours) == self.k:
                 break
-            
+
             if neighbour[3] <> video_hash:
                 valid_neighbours.append(neighbour)
         return self.score_neighbours(valid_neighbours)
@@ -508,7 +508,7 @@ class KFlannPredictor(Predictor):
         if k == 1:
             # When k=1, the dimensions get squeezed
             return [(self.scores[idx[0]], dists[0], self.metadata[idx[0]])]
-        
+
         return [(self.scores[i], dist, self.metadata[i])
                 for i, dist in zip(idx[0], dists[0])]
 
