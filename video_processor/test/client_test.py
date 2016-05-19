@@ -1196,7 +1196,11 @@ class SmokeTest(test_utils.neontest.TestCase):
     def _run_job(self, job):
         '''Runs the job'''
         self.job_queue.put(job)
-        
+        # TODO look for a more permanent solution, possibly in smartcrop
+        # from https://github.com/Itseez/opencv/issues/5150, set threads to 0 
+        # in our main thread, otherwise fork screws things up. 
+        cmsdb.cdnhosting.smartcrop.cv2.setNumThreads(0)
+ 
         with options._set_bounded('video_processor.client.dequeue_period', 0.01):
             self.video_client.start()
 
