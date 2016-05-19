@@ -497,7 +497,7 @@ def get_last_sucessful_batch_output(cluster):
     _log.info('Found the last successful output directory as %s' % last_successful_output)
 
 #    return last_successful_output
-     return None   
+    return None
 
 def cleanup_hdfs(cluster, current_hdfs_dir):
     # Cleans up all other HDFS directories except the current one
@@ -524,6 +524,7 @@ def cleanup_hdfs(cluster, current_hdfs_dir):
                continue
             else:
                 hdfs_conn.delete('/mnt/cleaned/'+file, recursive=True)
+                _log.info('Deleted hdfs directory %s' % '/mnt/cleaned/'+file)
 
 
 
