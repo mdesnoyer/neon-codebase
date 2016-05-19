@@ -248,14 +248,13 @@ class NewAccountHandler(APIV2Handler):
     def post(self):
         """handles account endpoint post request""" 
         schema = Schema({ 
-          Required('customer_name') : All(Coerce(str), 
-              Length(min=1, max=1024)),
           Required('email') : All(CustomVoluptuousTypes.Email(),
               Length(min=6, max=1024)),
           Required('admin_user_username') : All(CustomVoluptuousTypes.Email(), 
               Length(min=6, max=512)), 
           Required('admin_user_password') : All(Coerce(str), 
               Length(min=8, max=64)),
+          'customer_name' : All(Coerce(str), Length(min=1, max=1024)),
           'default_width': All(Coerce(int), Range(min=1, max=8192)), 
           'default_height': All(Coerce(int), Range(min=1, max=8192)),
           'default_thumbnail_id': All(Coerce(str), Length(min=1, max=2048)),
@@ -266,7 +265,7 @@ class NewAccountHandler(APIV2Handler):
         args = self.parse_args()
         schema(args) 
         account = neondata.NeonUserAccount(uuid.uuid1().hex, 
-                      name=args['customer_name'])
+                      name=args.get('customer_name', None))
         account.default_size = list(account.default_size) 
         account.default_size[0] = args.get('default_width', 
                                       neondata.DefaultSizes.WIDTH)
