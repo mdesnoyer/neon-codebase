@@ -912,7 +912,7 @@ class Cluster():
         cur_price = prices[-1]
         return cur_price, avg_price
 
-    def checkpoint_hdfs_to_s3(self,jar_path,hdfs_path_to_copy,s3_path):
+    def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path):
         #Does checkpoint of hdfs data from mapreduce output to S3.
 
         emrconn = boto.emr.EmrConnection()
@@ -945,7 +945,7 @@ class Cluster():
         if job_state == 'COMPLETED':
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
-            raise MapReduceError('S3 checkpoint failed, cant build impala tables')
+            raise MapReduceError('S3 checkpoint failed, check mapreduce job logs')
             
 
 class ClusterSSHConnection:

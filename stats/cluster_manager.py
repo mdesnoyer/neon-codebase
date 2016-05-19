@@ -109,7 +109,7 @@ class BatchProcessManager(threading.Thread):
                     'TASK', new_size=self.n_task_instances)
 
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path, 
+                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/2016/05/*', 
                     cleaned_output_path, 
                     options.cleaned_output_path,
                     timeout = (options.batch_period * 10))
@@ -125,6 +125,7 @@ class BatchProcessManager(threading.Thread):
                     self.cluster,
                     timeout = (options.batch_period * 4))
 
+                # Clean up previous HDFS output directories from clean up job, if any
                 stats.batch_processor.cleanup_hdfs(self.cluster, cleaned_output_path)
 
                 statemon.state.increment('successful_batch_runs')
@@ -198,9 +199,6 @@ class BatchProcessManager(threading.Thread):
                     self.cluster,
                     timeout = (options.batch_period * 4))
                 self.last_output_path = data_path
-
-            _log.info('data path is %s' % data_path)
-
         except Exception as e:
             _log.exception('Error building the impala tables')
 

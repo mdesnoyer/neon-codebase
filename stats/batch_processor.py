@@ -344,9 +344,7 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
     timeout - Time in seconds    
     '''
 
-    # Setting up the batch job to run
-
-    _log.info("s3_path from cluster manager is %s" % s3_path)
+    # We set all the mapreduce parameters required for the clean up job here
 
     # Define extra options for the job
     extra_ops = {
@@ -358,8 +356,6 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
         'mapreduce.map.speculative': 'false',
         'io.file.buffer.size': 65536
         }
-
-    _log.info("extra ops started")
 
     map_memory_mb = 2048
 
@@ -419,10 +415,12 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
     try:
         jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
 
+        s3_path = 's3://neon-tracker-logs-v2-test/cleaned'
+
         s3_output_path = ' '
         get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', output_path)
         if get_time:
-            s3_output_path = s3_path+get_time.group(2)
+            s3_output_path = s3_path + get_time.group(2)
 
         cluster.checkpoint_hdfs_to_s3(jar_location,
                                       output_path,
@@ -464,6 +462,7 @@ def _get_last_batch_app(rm_response):
     last_app = None
     last_started_time = None
     s3_checkpoint_dir = ' '
+    
     for app in rm_response['apps']['app']:
         match = re.search(r'S3DistCp: (.*) (->) (.*)',app['name'])
         if match and (last_app is None or last_started_time < app['startedTime']):
@@ -499,21 +498,19 @@ def get_last_sucessful_batch_output(cluster):
     return last_successful_output
 
 def cleanup_hdfs(cluster, current_hdfs_dir):
-    # Cleans up all other HDFS directories except the current one
+    # Cleans up all other HDFS directories except the current one. Access the Namenode using the https
+    # HDFS client. Check for existence of directory and delete the old ones recursively.
 
     get_current_dir_time = ' '
     get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', current_hdfs_dir)
     if get_time:
         get_current_dir_time = get_time.group(2)
 
-    _log.info('current_hdfs_dir is %s' % current_hdfs_dir)
-    _log.info('cluster master ip is %s' % cluster.master_ip)
-
     http_string = 'http://%s:9101' % cluster.master_ip
 
     hdfs_conn = InsecureClient(http_string, user='hadoop')
 
-    file_exists = hdfs_conn.status('/mnt/cleaned',strict=False)
+    file_exists = hdfs_conn.status('/mnt/cleaned', strict=False)
     
     if file_exists:
         list_files = hdfs_conn.list('/mnt/cleaned', status=False)
