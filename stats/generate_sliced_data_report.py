@@ -256,10 +256,10 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
     se = (1./imp + 1./last_imp + 1./imp[base_id] + 1./last_imp[base_id])
     se = se.apply(np.sqrt)
     odds_ratio = (imp * last_imp[base_id]) / (last_imp * imp[base_id])
-    odds_ratio.apply(np.log)
+    odds_ratio = odds_ratio.apply(np.log)
     zscore = odds_ratio / se
-    p_value = zscore
-    zscore.apply(scipy.stats.norm(0, 1).cdf)
+    zscore = zscore.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    p_value = zscore.apply(scipy.stats.norm(0, 1).cdf)
     p_value = p_value.where(p_value > 0.5, 1 - p_value)
 
     import pdb; pdb.set_trace()
