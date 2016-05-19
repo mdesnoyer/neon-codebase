@@ -124,6 +124,9 @@ class BatchProcessManager(threading.Thread):
                     self.last_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
+
+                stats.batch_processor.cleanup_hdfs(self.cluster, cleaned_output_path)
+                
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:

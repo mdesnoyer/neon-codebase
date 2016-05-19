@@ -29,6 +29,7 @@ from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
 import math
+from hdfs import InsecureClient
 
 #logging
 import logging
@@ -496,4 +497,33 @@ def get_last_sucessful_batch_output(cluster):
     _log.info('Found the last successful output directory as %s' % last_successful_output)
 
     return last_successful_output
+
+def cleanup_hdfs(cluster, current_hdfs_dir):
+    # Cleans up all other HDFS directories except the current one
+
+    get_current_dir_time = ' '
+    get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', current_hdfs_dir)
+    if get_time:
+        get_current_dir_time = get_time.group(2)
+
+    _log.info('current_hdfs_dir is %s' % current_hdfs_dir)
+    _log.info('cluster master ip is %s' % cluster.master_ip)
+
+    http_string = 'http://%s:9101' % cluster.master_ip
+
+    hdfs_conn = InsecureClient(http_string, user='hadoop')
+
+    file_exists = hdfs_conn.status('/mnt/cleaned',strict=False)
+    
+    if file_exists:
+        list_files = hdfs_conn.list('/mnt/cleaned', status=False)
+
+        for file in list_files:
+            if file == get_current_dir_time:
+               continue
+            else:
+                hdfs_conn.delete('/mnt/cleaned/'+file, recursive=True)
+
+
+
     
