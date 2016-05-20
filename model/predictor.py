@@ -118,7 +118,7 @@ def _aquila_prep(image):
     # resize the image to 299 x 299
     img = _resize_to(img, w=314, h=314)
     img = _center_crop_to(img, w=299, h=299)
-    return np.array(img)
+    return np.array(img).astype(np.uint8)
 
 
 
@@ -353,7 +353,7 @@ class DeepnetPredictor(Predictor):
             return
         image = _aquila_prep(image)
         request = aquila_inference_pb2.AquilaRequest()
-        request.image_data.extend(image.flatten().tolist())
+        request.image_data = image.flatten().tostring()
         with self._cv:
             while self.active == self.concurrency:
                 self._cv.wait()
