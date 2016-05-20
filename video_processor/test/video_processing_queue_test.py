@@ -119,6 +119,10 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(message, "test")
 
+        rmes = yield self.q.read_message()
+
+        self.assertIsNone(self.q.get_duration(rmes))
+
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

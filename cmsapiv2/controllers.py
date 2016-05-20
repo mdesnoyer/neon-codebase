@@ -1165,7 +1165,7 @@ class VideoHelper(object):
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
         request.api_param = args.get('n_thumbs', None)
-        yield tornado.gen.Task(request.save)
+        yield request.save(async=True)
 
         if request:
             raise tornado.gen.Return(request)
@@ -1210,13 +1210,12 @@ class VideoHelper(object):
                 yield tornado.gen.Task(thumb.save)
 
             # create the api_request
-            api_request = yield tornado.gen.Task(
-                VideoHelper.create_api_request,
+            api_request = yield VideoHelper.create_api_request(
                 args,
                 account_id_api_key)
             # add the job id save the video
             video.job_id = api_request.job_id
-            yield tornado.gen.Task(video.save)
+            yield video.save(async=True)
             raise tornado.gen.Return((video, api_request))
         else:
             reprocess = Boolean()(args.get('reprocess', False))
@@ -1479,7 +1478,7 @@ class VideoHandler(APIV2Handler):
                 
         message = yield sqs_queue.write_message(
                     account.get_processing_priority(), 
-                    api_request.to_json(),
+                    json.dumps(api_request.__dict__),
                     duration)
 
         if message:
