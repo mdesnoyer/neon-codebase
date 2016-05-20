@@ -75,6 +75,9 @@ define("total_video_conversions", default=None,
        help=("File with lines of <video_id>,<# of conversions> that lists "
              "the total number of video conversions, some of which we may "
              "not know about."))
+define("time_block", default=3600, type=int,
+       help=("When backsolving when the thumbs turned off, what's the "
+             "bucket size in seconds"))
 
 
 def get_video_statuses(video_ids):
@@ -217,16 +220,20 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
     '''
     query = '''
       SELECT
-      cast(floor(servertime/3600)*3600 as timestamp) as hr,
+      cast(floor(servertime/{block_size})*{block_size} as timestamp) as hr,
       thumbnail_id,
-      count(imloadservertime) as imp
+      count({imp_type}) as imp,
+      count({conv_type}) as conv
       from EventSequences where tai='{tai}' and
+      {imp_type} is not null and
       servertime is not null and
       thumbnail_id like '{video_id}%'
       group by thumbnail_id, hr
-    '''.format(tai=options.pub_id, video_id=video_id)
-    print query
-
+    '''.format(tai=options.pub_id,
+               video_id=video_id,
+               block_size=options.time_block,
+               imp_type=statutils.impala_col_map[options.impressions],
+               conv_type=statutils.impala_col_map[options.conversions])
     data = get_query_results(query)
 
     if data is None:
@@ -236,6 +243,10 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
     imp = data.pivot(index='hr', columns='thumbnail_id', values='imp')
     imp.sort(inplace=True, axis=0)
     imp.fillna(0.0, inplace=True)
+    conv = data.pivot(index='hr', columns='thumbnail_id', values='conv')
+    conv.sort(inplace=True, axis=0)
+    conv.fillna(0.0, inplace=True)
+    
     imp_sum = imp.sum(axis=0)
     imp_sum.name = 'imp_sum'
 
@@ -247,27 +258,61 @@ def estimate_key_timepoints_from_data(video_id, thumb_info):
     if base_id is None:
         return {}
 
-    # Now, based on the serving fractions in each hour, look for
-    # statistically significant changes relative to the baseline. 
-    # Using the Odds ratio calculation.
-    last_hours = imp.index - pandas.Timedelta(hours=1)
-    last_imp = imp.loc[last_hours].fillna(0.0)
-    last_imp.index += pandas.Timedelta(hours=1)
-    se = (1./imp + 1./last_imp + 1./imp[base_id] + 1./last_imp[base_id])
-    se = se.apply(np.sqrt)
-    odds_ratio = (imp * last_imp[base_id]) / (last_imp * imp[base_id])
-    odds_ratio = odds_ratio.apply(np.log)
-    zscore = odds_ratio / se
-    zscore = zscore.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    p_value = zscore.apply(scipy.stats.norm(0, 1).cdf)
-    p_value = p_value.where(p_value > 0.5, 1 - p_value)
+    
+    first_time = str(imp[base_id].dropna().index[0])
 
-    import pdb; pdb.set_trace()
+    cum_imp = imp.cumsum().fillna(method='ffill')
+    cum_conv = conv.cumsum().fillna(method='ffill')
+    cum_ctr = cum_conv / cum_imp
+    cum_var = (cum_ctr * (1-cum_ctr) / cum_imp)
 
+    # For each thumbnail, find out when we hit statistical
+    # significance and grab that time for returning.
     rval = {}
+    max_sig_time = None
+    MAGIC_FUTURE = datetime(9999,1,1)
     for tid in imp.columns:
         if tid == base_id:
-            rval[tid] = 5
+            # Deal with the baseline later
+            continue
+
+        if cum_imp[base_id].iloc[-1] == 0 or cum_imp[tid].iloc[-1] == 0:
+            rval[tid] = [(None, None)]
+            continue
+
+        zscore = (cum_ctr[base_id] - cum_ctr[tid]) / \
+          (cum_var[base_id] + cum_var[tid]).apply(np.sqrt)
+        p_value = zscore.apply(scipy.stats.norm(0, 1).cdf)
+        p_value = p_value.where(p_value > 0.5, 1 - p_value)
+
+        # Find the regions where we have statistical significance
+        sig = p_value[(p_value > 0.95) & 
+                      (cum_imp[base_id] > options.min_impressions) & 
+                      (cum_imp[tid] > options.min_impressions) & 
+                      (cum_conv[tid] > 20) &
+                      (cum_conv[base_id] > 20)]
+        if len(sig) == 0:
+            # There isn't statistical significance anywhere so use the
+            # final numbers
+            rval[tid] = [(first_time, None)]
+            max_sig_time = MAGIC_FUTURE
+        else:
+            end_time = sig.index[0]
+            rval[tid] = [(first_time, 
+                          str(end_time +
+                              timedelta(seconds=options.time_block)))]
+            if max_sig_time is None or max_sig_time < end_time:
+                max_sig_time = end_time
+
+    # Deal with the baseline, which is going to be the time from start
+    # to max_sig_time
+    if max_sig_time == MAGIC_FUTURE or max_sig_time is None:
+        rval[base_id] = [(first_time, None)]
+    else:
+        rval[base_id] = [(first_time, str(max_sig_time +
+                                    timedelta(seconds=options.time_block)))]
+
+    return rval
 
 def get_baseline_types():
     return options.baseline_types.split(',')
@@ -297,7 +342,7 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
         if len(key_times) == 0:
             max_time = end_time
         else:
-            max_time = max([dateutil.parser.parse(x) for x in 
+            max_time = max([dateutil.parser.parse(str(x)) for x in 
                             key_times] + [end_time])
         
     
@@ -626,7 +671,7 @@ def collect_stats(video_objs, video_statuses, thumb_statuses, thumb_meta,
         base_thumb_id = statutils.get_baseline_thumb(
             thumb_info,
             imp_data['all_time'].groupby(level='thumbnail_id').sum(),
-            get_baseline_types,
+            get_baseline_types(),
             min_impressions=options.min_impressions)
 
         vstatus = video_statuses.get(video.key, None)
@@ -697,7 +742,7 @@ def get_full_stats_table(end_time):
     video_ids = None
     if options.video_ids:
         _log.info('Using video ids from %s' % video_ids)
-        with open(video_id_file) as f:
+        with open(options.video_ids) as f:
             video_ids = [x.strip() for x in f]
                 
     total_video_conversions = get_total_conversions(
