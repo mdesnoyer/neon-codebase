@@ -26,7 +26,6 @@ from StringIO import StringIO
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.postgresql
-import test_utils.redis
 import time
 import tornado.gen
 import tornado.ioloop
@@ -66,7 +65,7 @@ def create_random_image_response():
 ###############################################
 
 def process_neon_api_requests(api_requests, api_key, i_id, t_type,
-                              plattype=neondata.BrightcovePlatform):
+                              plattype=neondata.BrightcoveIntegration):
     #Create thumbnail metadata
     images = {}
     thumbnail_url_to_image = {}
@@ -135,15 +134,9 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
                                         url, 10, 5, "test", i_id)
         vmdata.save()
 
-    def _update_videos(x):
-        x.videos.update(video_map)
-
-    plattype.modify(api_key, i_id, _update_videos)
-
     return images, thumbnail_url_to_image
 
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
-        
     def setUp(self):
         super(TestServices, self).setUp()
         options._set('cmsdb.neondata.wants_postgres', 1)
@@ -368,7 +361,14 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                 'auto_update': False}
         resp = yield self.post_request(url, vals, self.api_key)
         self.assertEquals(resp.code, expected_code)
-        raise tornado.gen.Return(resp)
+        json_body = json.loads(resp.body)
+
+        try: 
+            self.b_id = json_body['integration_id'] 
+        except KeyError: 
+            pass 
+
+        raise tornado.gen.Return(resp.body)
 
     @tornado.gen.coroutine
     def update_brightcove_account(self, rtoken=None, wtoken=None, autoupdate=None):
@@ -480,11 +480,10 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         #set up account and video state for testing
         self.api_key = yield self.create_neon_account()
         json_video_response = yield self.create_brightcove_account()
-        
         #verify account id added to Neon user account
         nuser = neondata.NeonUserAccount.get(self.api_key)
         self.assertIn(self.b_id, nuser.integrations.keys())
-        
+         
         reqs = self._create_neon_api_requests()
         self._process_brightcove_neon_api_requests(reqs)
 
@@ -577,7 +576,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         resp = yield self.get_request(url, self.api_key)
         self.assertEqual(resp.code, 200)
         data = json.loads(resp.body)
-        self.assertEqual(data['neon_api_key'], self.api_key)
         self.assertEqual(data['integration_id'], self.b_id)
 
     @tornado.testing.gen_test
@@ -602,10 +600,8 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         yield self.create_brightcove_account()
 
         # Verify actual contents
-        platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                    self.b_id)
-        self.assertFalse(platform.abtest) # Should default to False
-        self.assertEqual(platform.neon_api_key, self.api_key)
+        platform = neondata.BrightcoveIntegration.get(
+            self.b_id)
         self.assertEqual(platform.integration_id, self.b_id)
         self.assertEqual(platform.account_id, self.a_id)
         self.assertEqual(platform.publisher_id, 'testpubid123')
@@ -618,8 +614,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         new_rtoken = ("newrtoken")
         update_response = yield self.update_brightcove_account(new_rtoken)
         self.assertEqual(update_response.code, 200)
-        platform = neondata.BrightcovePlatform.get(self.api_key,
-                                                   self.b_id)
+        platform = neondata.BrightcoveIntegration.get(self.b_id)
         self.assertEqual(platform.read_token, "newrtoken")
         self.assertFalse(platform.auto_update)
         self.assertEqual(platform.write_token, self.wtoken)
@@ -1888,7 +1883,6 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         url = self.get_url("/healthcheck/video_server")
         response = yield self.get_request(url, self.api_key)
         self.assertEqual(response.code, 200)
-
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

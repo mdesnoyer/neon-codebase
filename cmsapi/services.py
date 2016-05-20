@@ -275,12 +275,18 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         # Loose comparison
         if "brightcove" in i_type:
-            platform_account = yield neondata.BrightcovePlatform.get(self.api_key, i_id, async=True)
+            platform_account = yield neondata.BrightcoveIntegration.get(
+                i_id, 
+                async=True)
         elif "ooyala" in i_type:
-            platform_account = yield neondata.OoyalaPlatform.get(self.api_key, i_id, async=True)
+            platform_account = yield neondata.OoyalaIntegration.get(
+                i_id, 
+                async=True)
         elif "neon" in i_type: 
-            platform_account = yield neondata.NeonPlatform.get(self.api_key, i_id, async=True)
-
+            platform_account = yield neondata.NeonPlatform.get(
+                self.api_key, 
+                i_id, 
+                async=True)
         raise tornado.gen.Return(platform_account)
 
 
@@ -606,7 +612,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
        
         if platform_account:
             # TODO: Filter output in the future.
-            self.send_json_response(platform_account.to_json(), 200)
+            self.send_json_response(platform_account.get_json_data(), 200)
         else:
             data = '{"error":"account not found"}'
             statemon.state.increment('account_not_found')
@@ -1212,7 +1218,8 @@ class CMSAPIHandler(tornado.web.RequestHandler):
 
         try:
             a_id = self.request.uri.split('/')[-2]
-            i_id = InputSanitizer.to_string(self.get_argument("integration_id"))
+            i_id = InputSanitizer.to_string(
+                self.get_argument("integration_id", None))
             p_id = InputSanitizer.to_string(self.get_argument("publisher_id"))
             rtoken = InputSanitizer.to_string(self.get_argument("read_token"))
             wtoken = InputSanitizer.to_string(self.get_argument("write_token"))
@@ -1229,51 +1236,48 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                                     self.api_key)
         #Create and Add Platform Integration
         if na:
-            
-            #Check if integration exists
-            if len(na.integrations) >0 and na.integrations.has_key(i_id):
-                data = '{"error": "integration already exists"}'
-                self.send_json_response(data, 409)
-            else:
-                def _initialize_bc_plat(x):
-                    x.account_id = a_id
-                    x.publisher_id = p_id
-                    x.read_token = rtoken
-                    x.write_token = wtoken
-                    x.auto_update = autosync
-                    x.last_process_date = time.time()
-                    
-                bc = yield neondata.BrightcovePlatform.modify(self.api_key, i_id,
-                                                              _initialize_bc_plat,
-                                                              create_missing=True, 
-                                                              async=True)
-                na.add_platform(bc) 
-                na = yield neondata.NeonUserAccount.save(na, async=True) 
-                #Saved platform
-                if na:
-                    # Verify that the token works by making a call to
-                    # Brightcove
-                    bc_api = bc.get_api()
-                    try:
-                        bc_response = yield bc_api.search_videos(page_size=10,
-                                                                 async=True)
-                    except api.brightcove_api.BrightcoveApiError as e:
-                        _log.error("Error accessing the Brightcove api. "
-                                   "There is probably something wrong with "
-                                   "the token for account %s, integration %s"
-                                   % (self.api_key, bc.integration_id))
-                        data = ('{"error": "Read token given is incorrect'  
-                                ' or brightcove api failed"}')
-                        self.send_json_response(data, 502)
-                        return
-                    
-                    self.send_json_response('{}', 200)
-                else:
-                    data = '{"error": "platform was not added,\
-                                account creation issue"}'
-                    statemon.state.increment('account_not_created')
-                    self.send_json_response(data, 500)
+            def _initialize_bc_plat(x):
+                x.account_id = a_id
+                x.publisher_id = p_id
+                x.read_token = rtoken
+                x.write_token = wtoken
+                x.auto_update = autosync
+                x.last_process_date = time.time()
+                
+            bc = yield neondata.BrightcoveIntegration.modify(
+                i_id,
+                _initialize_bc_plat,
+                create_missing=True, 
+                async=True)
+
+            na.add_platform(bc) 
+            na = yield neondata.NeonUserAccount.save(na, async=True) 
+            #Saved platform
+            if na:
+                # Verify that the token works by making a call to
+                # Brightcove
+                bc_api = bc.get_api()
+                try:
+                    bc_response = yield bc_api.search_videos(page_size=10,
+                                                             async=True)
+                except api.brightcove_api.BrightcoveApiError as e:
+                    _log.error("Error accessing the Brightcove api. "
+                               "There is probably something wrong with "
+                               "the token for account %s, integration %s"
+                               % (self.api_key, bc.integration_id))
+                    data = ('{"error": "Read token given is incorrect'  
+                            ' or brightcove api failed"}')
+                    self.send_json_response(data, 502)
                     return
+                
+                data = {'integration_id' : bc.integration_id}
+                self.send_json_response(data, 200)
+            else:
+                data = '{"error": "platform was not added,\
+                            account creation issue"}'
+                statemon.state.increment('account_not_created')
+                self.send_json_response(data, 500)
+                return
         else:
             _log.error("key=create brightcove account " 
                         "msg= account not found %s" %self.api_key)
@@ -1304,7 +1308,10 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             x.auto_update = autosync
             x.read_token = rtoken
             x.write_token = wtoken
-        bc = yield neondata.BrightcovePlatform.modify(self.api_key, i_id, _update_fields, async=True)
+        bc = yield neondata.BrightcoveIntegration.modify(
+            i_id, 
+            _update_fields, 
+            async=True)
         if not bc:
             _log.error("key=update_brightcove_integration " 
                     "msg=no such account %s integration id %s"\

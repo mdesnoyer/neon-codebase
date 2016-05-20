@@ -42,8 +42,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
     def submit_new_videos(self):
         acct = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                       self.account_lookup_id)
-        self.neon_api_key = acct.neon_api_key
-        self.account_id = acct.account_id
+        self.account_id = self.neon_api_key = acct.neon_api_key
         from_date = datetime.datetime(1970, 1, 1)
         if self.platform.last_process_date is not None: 
             from_date = datetime.datetime.utcfromtimestamp(self.last_process_date)
@@ -68,9 +67,10 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
         '''override from ovp''' 
         return None 
 
-    def get_video_title(self, video):
+    @staticmethod
+    def get_video_title(video):
         '''override from ovp''' 
-        return video.get('title', 'no title')
+        return video.get('title', u'no title')
 
     def get_video_custom_data(self, video):
         '''override from ovp''' 
@@ -97,7 +97,11 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
 
     def get_video_publish_date(self, video):
         '''override from ovp'''
-        return video['pubDate'] / 1000. 
+        publish_date = video.get('pubDate', None)
+        if publish_date is not None:
+            publish_date = datetime.datetime.utcfromtimestamp(
+                int(publish_date) / 1000.0)
+        return publish_date
 
     def get_video_thumbnail_info(self, video):
         '''override from ovp'''
@@ -129,3 +133,7 @@ class FoxIntegration(integrations.ovp.OVPIntegration):
     @tornado.gen.coroutine
     def process_publisher_stream(self):
         yield self.submit_new_videos()
+
+    def _log_statemon_submit_video_error(self):
+        statemon.state.define_and_increment(
+            'submit_video_fox_error.%s' % self.account_id)

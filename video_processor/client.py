@@ -25,6 +25,7 @@ from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import concurrent.futures
 import cv2
+import dateutil.parser
 import ffvideo
 import hashlib
 import json
@@ -34,7 +35,6 @@ import multiprocessing
 import numpy as np 
 from PIL import Image
 import psutil
-import pytube
 import Queue
 import random
 import re
@@ -57,6 +57,7 @@ from utils import pycvutils
 import utils.http
 from utils import statemon
 from video_processor import video_processing_queue
+import youtube_dl
 
 import logging
 _log = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 define('max_bandwidth_per_core', default=15500000.0,
-       help='Max bandwidth in MB/s')
+       help='Max bandwidth in bytes/s')
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
@@ -200,6 +201,18 @@ class VideoProcessor(object):
     def __del__(self):
         # Clean up the executor
         self.executor.shutdown(False)
+
+    @staticmethod
+    def percent_encode_url_path(url):
+        '''
+        Takes a url and re-encodes (i.e., decodes encodes) its path with
+        percent-sign encoding. TODO consider cases: unicode, double-decode
+        '''
+
+        parse = urlparse.urlparse(url)
+        parse = list(parse)
+        parse[2] = urllib.quote(urllib.unquote(parse[2]))
+        return urlparse.urlunparse(parse)
 
     @tornado.gen.coroutine
     def start(self):
@@ -294,29 +307,23 @@ class VideoProcessor(object):
         Download the video file 
         '''
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        ytre = re.compile('(https?:\/\/[A-Za-z]*\.youtu.*be\..+\/watch\?).*(v=.+)') 
 
-        # Get the duration of the video
-        video_duration = self.job_queue.get_duration(self.job_message)
-
-        video_url = self.video_url
-        video_bitrate = None
+        # Get the duration of the video if it was sent in
+        video_duration = self.job_queue.get_duration(
+            self.job_message)
 
         # Find out if we should throttle
         do_throttle = False
-        chunk_time = 0.0
         frac_processing = (float(statemon.state.workers_processing) / 
                            max(statemon.state.running_workers, 1))
         if frac_processing > options.min_load_to_throttle:
-            do_throttle=True
-            chunk_time = float(VideoProcessor.CHUNK_SIZE) / \
-              options.max_bandwidth_per_core
+            do_throttle = True
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
 
         try:
-            s3match = s3re.search(video_url)
+            s3match = s3re.search(self.video_url)
             if s3match:
                 # Get the video from s3 directly
                 try:
@@ -327,7 +334,9 @@ class VideoProcessor(object):
                         s3conn.get_bucket, bucket_name)
                     key = yield self.executor.submit(
                         bucket.get_key, key_name)
-                    yield self._set_job_timeout(video_duration, key.size)
+                    self.video_metadata.duration = video_duration
+                    yield self._set_job_timeout(self.video_metadata.duration,
+                                                key.size)
                     yield self.executor.submit(
                         key.get_contents_to_file, self.tempfile)
                     yield self.executor.submit(self.tempfile.flush)
@@ -337,53 +346,88 @@ class VideoProcessor(object):
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
 
-            ytmatch = ytre.search(video_url) 
-            if ytmatch:
-                watch_portion = ytmatch.group(1) 
-                video_portion = ytmatch.group(2) 
-                youtube = yield self.executor.submit(
-                    pytube.YouTube,
-                    '%s%s' % (watch_portion, video_portion))
-                videos = youtube.filter('mp4')
-                found_videos = []
-                for v in videos:
-                    # they are ordered by resolution ASC, keep
-                    # and replace as we find a better reso up 
-                    # to 720p 
-                    if (v.resolution == '720p' or
-                       v.resolution == '480p' or 
-                       v.resolution == '360p'): 
-                        found_videos.append((int(v.resolution[:-1]), v))
-                found_videos = sorted(found_videos)
-                if found_videos:
-                    video_url = found_videos[-1][1].url
-                else:
-                    msg = 'Could not find a downloadable YouTube video' 
-                    _log.warning(msg)
-                    statemon.state.increment('youtube_video_not_found') 
-                    raise VideoDownloadError(msg)
- 
-            # Use urllib2
-            url_parse = urlparse.urlparse(video_url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = urllib2.Request(urlparse.urlunparse(url_parse),
-                                  headers=self.headers)
-            response = yield self.executor.submit(urllib2.urlopen,
-                                                  req, timeout=self.timeout)
-            try:
-                video_size = int(response.info().getheader('Content-Length',
-                                                           None))
-            except TypeError:
-                video_size = None
-            yield self._set_job_timeout(
-                video_duration,
-                video_size,
-                time_factor=(4.0 if do_throttle else 3.0))
-            yield self._urllib_read(response, do_throttle, chunk_time)
+            # Now try using youtube-dl to download the video. This can
+            # potentially handle a ton of different video sources.
+            def _handle_progress(x):
+                if x['status'] == 'finished':
+                    shutil.move(x['filename'], self.tempfile.name)
+                    
+            dl_params = {}
+            dl_params['ratelimit'] = (options.max_bandwidth_per_core 
+                                      if do_throttle else None)
+            dl_params['restrictfilenames'] = True
+            dl_params['progress_hooks'] = [_handle_progress]
+            dl_params['outtmpl'] = unicode(str(
+                os.path.join(options.video_temp_dir or '/tmp',
+                             '%s_%%(id)s.%%(ext)s' %
+                             self.job_params['api_key'])))
+
+            # Specify for formats that we want in order of preference
+            dl_params['format'] = (
+                'best[ext=mp4][height<=720][protocol^=?http]/'
+                'best[ext=mp4][protocol^=?http]/'
+                'best[height<=720][protocol^=?http]/'
+                'best[protocol^=?http]/'
+                'best/'
+                'bestvideo')
+            dl_params['logger'] = _log
+            
+            with youtube_dl.YoutubeDL(dl_params) as ydl:
+                # Dig down to the real url
+                cur_url = self.video_url
+                found_video = False
+                while not found_video:
+                    video_info = yield self.executor.submit(ydl.extract_info,
+                        cur_url, download=False)
+                    result_type = video_info.get('_type', 'video')
+                    if result_type == 'url':
+                        # Need to step to the next url
+                        cur_url = video_info['url']
+                        continue
+                    elif result_type == 'video':
+                        found_video = True
+                    else:
+                        # They gave us a playlist or other type of url
+                        msg = ('Unhandled video type %s' %
+                               (result_type))
+                        raise youtube_dl.utils.DownloadError(msg)
+
+                # Update information about the video before we download it
+                def _update_title(x):
+                    if x.video_title is None:
+                        x.video_title = video_info.get('title', None)
+                    if x.default_thumbnail is None:
+                        x.default_thumbnail = video_info.get('thumbnail', None)
+                yield neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'], self.job_params['api_key'] ,
+                    _update_title,
+                    async=True)
+
+                # Update some of our metadata if there's better info
+                # from the video
+                self.video_metadata.duration = video_info.get(
+                    'duration', video_duration)
+                if video_info.get('upload_date', None) is not None:
+                    self.video_metadata.publish_date = \
+                      dateutil.parser.parse(video_info['upload_date']).isoformat()
+
+                # Update the timeout
+                yield self._set_job_timeout(
+                    self.video_metadata.duration,
+                    video_info.get('filesize', 
+                                   video_info.get('filesize_approx')))
+                    
+                # Do the real download
+                video_info = yield self.executor.submit(ydl.extract_info,
+                                                        cur_url, download=True)
+                                                              
 
             _log.info('Finished downloading video %s' % self.video_url)
-        except urllib2.URLError as e:
+
+        except (youtube_dl.utils.DownloadError,
+                youtube_dl.utils.ExtractorError, 
+                youtube_dl.utils.UnavailableVideoError,
+                socket.error) as e:
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
@@ -399,12 +443,6 @@ class VideoProcessor(object):
         except boto.exception.BotoServerError as e:
             msg = ("Server error downloading video %s from S3: %s" %
                    (self.video_url, e))
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
-
-        except socket.error as e:
-            msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
@@ -718,6 +756,8 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.publish_date = (video_obj.publish_date or 
+                                      self.video_metadata.publish_date)
         try:
             new_video_metadata = yield tornado.gen.Task(
                 neondata.VideoMetadata.modify,

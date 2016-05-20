@@ -32,10 +32,9 @@ import os
 import pdb
 import pickle
 from PIL import Image
+import psycopg2
 import Queue
-import pytube
 import re
-import redis
 import random
 import request_template
 import signal
@@ -49,7 +48,6 @@ import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
 import test_utils.net
 import test_utils.postgresql
-import test_utils.redis
 from test_utils import sqsmock
 from tornado.concurrent import Future
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
@@ -68,6 +66,8 @@ import utils.ps
 from utils import statemon
 import video_processor.client
 from video_processor import video_processing_queue
+from video_processor.client import VideoClient, VideoProcessor
+import youtube_dl
 
 _log = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                 "test.mp4") 
         self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
                                 "test2.mp4") 
-        # Fill out redis
+        # Fill out database
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
         na.save()
@@ -112,6 +112,18 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             'http://callback.com',
             'http://default_thumb.jpg')
         self.api_request.save() 
+
+        # Mock out the YoutubeDL
+        self.youtube_patcher = patch(
+            'video_processor.client.youtube_dl.YoutubeDL')
+        self.youtube_client_mock = self.youtube_patcher.start()
+        self.youtube_extract_info_mock = \
+            self.youtube_client_mock().__enter__().extract_info
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'video',
+            u'id': 'yces6PZOsgc', 
+            u'title': 'my_video',
+            u'url': 'http://www.video.com/my_video.mp4'}
 
         # Mock the video queue
         self.job_queue_patcher = patch(
@@ -157,6 +169,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
     def tearDown(self):
         self.job_queue_patcher.stop()
+        self.youtube_patcher.stop()
         self.utils_patch.stop()
         self.postgresql.clear_all_tables()
         super(TestVideoClient, self).tearDown()
@@ -223,7 +236,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.api_request.api_method = 'topn'
         self.api_request.api_param = 1 
         self.api_request.save()
-        vprocessor = video_processor.client.VideoProcessor(
+        vprocessor = VideoProcessor(
             job, self.model,
             self.model_version,
             multiprocessing.BoundedSemaphore(1),
@@ -233,27 +246,51 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         return vprocessor
 
     ##### Process video tests ####
-    @patch('video_processor.client.urllib2.urlopen')
     @tornado.testing.gen_test
-    def test_download_video_file(self, mock_client):
-        # Createa a 10MB random string
-        vdata = StringIO('%030x' % random.randrange(16**(10*1024*1024)))
-        vdata.info = MagicMock()
-        mock_client.return_value = vdata
-        
-        vprocessor = self.setup_video_processor("neon")
+    def test_download_video_file(self):
+
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'video',
+            u'upload_date': u'20110620', 
+            u'protocol': u'https', 
+            u'creator': None, 
+            u'format_note': u'hd720', 
+            u'height': 720, 
+            u'like_count': 0, 
+            u'player_url': None, 
+            u'id': 'yces6PZOsgc', 
+            u'view_count': 328}
+
+        vprocessor = self.setup_video_processor("neon",
+                                                'http://www.somefile.com/')
         yield vprocessor.download_video_file()
-        vprocessor.tempfile.seek(0) 
-        self.assertEqual(vprocessor.tempfile.read(), vdata.getvalue()) 
+        args, kwargs = self.youtube_client_mock.call_args
+        found_params = args[0]
+        self.assertTrue(found_params['restrictfilenames'])
+        self.assertGreater(len(found_params['progress_hooks']), 0)
+        # This test is to make sure you are deliberately changing the
+        # format parameters
+        self.assertEquals(found_params['format'],(
+            'best[ext=mp4][height<=720][protocol^=?http]/'
+            'best[ext=mp4][protocol^=?http]/'
+            'best[height<=720][protocol^=?http]/'
+            'best[protocol^=?http]/'
+            'best/'
+            'bestvideo'))
+        self.youtube_extract_info_mock.assert_called_with(
+            'http://www.somefile.com/',
+            download=True)
 
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
-    @patch('video_processor.client.urllib2.urlopen')
+    @patch('video_processor.client.youtube_dl.YoutubeDL.extract_info')
     @tornado.testing.gen_test
     def test_download_video_errors(self, mock_client):
         mock_client.side_effect = [
-            urllib2.URLError('Oops'),
+            youtube_dl.utils.DownloadError('bal'),
+            youtube_dl.utils.ExtractorError('beck'),
+            youtube_dl.utils.UnavailableVideoError('ick'),
             socket.gaierror(),
             IOError()
             ]
@@ -266,7 +303,14 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
-                
+
+        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+            with self.assertRaises(video_processor.client.VideoDownloadError):
+                vprocessor.download_video_file()
+
+        with self.assertLogExists(logging.ERROR, "Error downloading video"):
+            with self.assertRaises(video_processor.client.VideoDownloadError):
+                vprocessor.download_video_file()
         
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
@@ -339,50 +383,46 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(video_processor.client.VideoDownloadError):
                 yield vprocessor.download_video_file()
 
-    @patch('video_processor.client.urllib2.urlopen')
     @tornado.testing.gen_test
-    def test_download_youtube_video(self, mock_urlopen):
+    def test_download_youtube_video_with_duration(self):
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'video',
+                u'upload_date': u'20110620', 
+                u'protocol': u'https', 
+                u'creator': None, 
+                u'format_note': u'hd720', 
+                u'height': 720, 
+                u'like_count': 0, 
+                u'duration': 15, 
+                u'player_url': None, 
+                u'id': 'yces6PZOsgc', 
+                u'view_count': 328}
         vprocessor = self.setup_video_processor(
             "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
         
-        vdata = StringIO('%030x' % random.randrange(16**(10)))
-        vdata.info = MagicMock()
-        vdata.info().getheader.return_value = 819200
-        self.job_queue_mock.get_duration.return_value = None
-        mock_urlopen.return_value = vdata
-        
-        video_one = video_processor.client.pytube.models.Video(
-            'http://www.youtube.com/360.mp4', 
-            'test_filename', 
-            'mp4', 
-            resolution='360p'
-        ) 
-        video_two = video_processor.client.pytube.models.Video(
-            'http://www.youtube.com/720.mp4', 
-            'test_filename', 
-            'mp4', 
-            resolution='720p'
-        ) 
-        video_three = video_processor.client.pytube.models.Video(
-            'http://www.youtube.com/1080.mp4', 
-            'test_filename', 
-            'mp4', 
-            resolution='1080p'
-        ) 
-        youtube_mock = video_processor.client.pytube
-        youtube_mock.YouTube = MagicMock() 
-        youtube_mock.YouTube().filter = MagicMock(
-            return_value=([video_one, video_two, video_three]))
         yield vprocessor.download_video_file()
+        self.assertEquals(vprocessor.video_metadata.duration, 15)
 
-        self.assertEquals(mock_urlopen.call_count, 1)
-        cargs, kwargs = mock_urlopen.call_args
-        self.assertEquals(cargs[0].get_full_url(),
-                          'http://www.youtube.com/720.mp4')
-
-        self.job_hide_mock.assert_called_with(self.job_message,
-                                              3.0*8.0)
-
+    @tornado.testing.gen_test
+    def test_download_youtube_video_missing_duration(self):
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'video',
+                u'upload_date': u'20110620', 
+                u'protocol': u'https', 
+                u'creator': None, 
+                u'format_note': u'hd720', 
+                u'height': 720, 
+                u'like_count': 0, 
+                u'duration': 15, 
+                u'player_url': None, 
+                u'id': 'yces6PZOsgc', 
+                u'view_count': 328}
+        vprocessor = self.setup_video_processor(
+            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
+        
+        yield vprocessor.download_video_file()
+        self.assertEquals(vprocessor.video_metadata.duration, 600.0)
+     
     @tornado.testing.gen_test
     def test_download_youtube_video_not_found(self):
         vprocessor = self.setup_video_processor(
@@ -417,7 +457,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                 self.assertEquals(
                     statemon.state.get('video_processor.client.youtube_video_not_found'),
                     1)
-     
+
     @tornado.testing.gen_test
     def test_process_video(self):
        
@@ -1119,7 +1159,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     def test_db_connection_error_thumb(self, modify_mock):
         modify_mock = self._callback_wrap_mock(modify_mock)
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             {}
             ]
 
@@ -1141,7 +1181,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     def test_db_connection_error_video(self, modify_mock):
         modify_mock = self._callback_wrap_mock(modify_mock)
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             False
             ]
 
@@ -1192,12 +1232,12 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         api_request_mock = self._callback_wrap_mock(api_request_mock)
         api_request_mock.side_effect = [
             # Connection error on setting finalizing state
-            redis.ConnectionError("Connection Error"), 
+            psycopg2.Error("Connection Error"), 
             # Api request missing on setting finalizing state
             None,
             #  Connection error on setting finished state
             self.api_request,
-            redis.ConnectionError("Connection Error"),
+            psycopg2.Error("Connection Error"),
             # Api request missing on setting finished state
             self.api_request,
             None,
@@ -1279,20 +1319,10 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job1', self.api_key,
             'int1', 'vid1',
             'some fun video',
-            'http://video.mp4', None, None,
+            's3://my-videos/test.mp4', None, None,
             'http://callback.com',
             'http://default_thumb.jpg')
         self.api_request.save()
-
-        # Mock out the video download
-        self.test_video_file = os.path.join(os.path.dirname(__file__), 
-                                            "test.mp4") 
-        self.video_download_patcher = patch('video_processor.client.urllib2.urlopen')
-        self.video_download_mock = self.video_download_patcher.start()
-        with open(self.test_video_file, 'rb') as f:
-            self.vid = StringIO(f.read())
-            self.vid.info = MagicMock()
-        self.video_download_mock.side_effect = [self.vid]
 
         # Mock out s3
         self.s3conn = boto_mock.MockConnection()
@@ -1302,15 +1332,38 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.s3conn.create_bucket('host-thumbnails')
         self.s3conn.create_bucket('n3.neon-images.com')
 
-        # Mock out the image download
-        self.im_download_mocker = patch(
-            'cvutils.imageutils.PILImageUtils.download_image')
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start(),
-            require_async_kw=True)
-        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock.side_effect = [self.random_image]
+        # Mock the video queue
+        self.job_queue_patcher = patch(
+            'video_processor.video_processing_queue.' \
+            'VideoProcessingQueue')
+        self.job_queue_mock = self.job_queue_patcher.start()()
+        # Mock out the video download
+        self.client_s3_patcher = patch('video_processor.client.S3Connection')
+        self.mock_conn2 = self.client_s3_patcher.start()
+        self.mock_conn2.return_value = self.s3conn
+        self.test_video_file = os.path.join(os.path.dirname(__file__), 
+        "test.mp4") 
+        self.vid_bucket = self.s3conn.create_bucket('my-videos')
+        vid_key = self.vid_bucket.new_key('test.mp4')
+        vid_key.set_contents_from_file(open(self.test_video_file, 'rb'))
+        utf8key = 'L\xc3\xb6rick_video.mp4'.decode('utf-8')
+        vid_key = self.vid_bucket.new_key(utf8key)
+        vid_key.set_contents_from_file(open(self.test_video_file, 'rb'))
 
+        self.job_queue_mock.get_duration.return_value = 600.0
+
+        self.job_delete_mock = self._future_wrap_mock(
+            self.job_queue_mock.delete_message)
+        self.job_delete_mock.return_value = True
+        
+        self.job_read_mock = self._future_wrap_mock(
+            self.job_queue_mock.read_message)
+        self.job_message = Message()
+        self.job_read_mock.side_effect = [self.job_message, None]
+        
+        
+        self.job_hide_mock = self._future_wrap_mock(
+            self.job_queue_mock.hide_message)
         # Mock out http requests.
         self.http_mocker = patch(
             'video_processor.client.utils.http.send_request')
@@ -1318,8 +1371,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
                                                 require_async_kw=True)
         self.callback_mock = MagicMock()
         self.callback_mock.side_effect = lambda x: HTTPResponse(x, 200)
+        self.job_queue = multiprocessing.Queue() # Queue of job param dics
         def _http_response(request, **kw):
-            if request.url == 'http://callback.com':
+            if request.url.endswith('dequeue'):
+                if not self.job_queue.empty():
+                    body = json.dumps(self.job_queue.get())
+                else:
+                    body = '{}'
+                return HTTPResponse(request, 200, buffer=StringIO(body))
+            elif request.url == 'http://callback.com':
                 return self.callback_mock(request)
             else:
                 return HTTPResponse(request, 200)
@@ -1343,35 +1403,14 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         self.model.choose_thumbnails.return_value = ct_output
 
-        # Mock the video queue
-        self.job_queue_patcher = patch(
-            'video_processor.video_processing_queue.' \
-            'VideoProcessingQueue')
-        self.job_queue_mock = self.job_queue_patcher.start()()
-
-        self.job_queue_mock.get_duration.return_value = 600.0
-
-        self.job_delete_mock = self._future_wrap_mock(
-            self.job_queue_mock.delete_message)
-        self.job_delete_mock.return_value = True
-        
-        self.job_read_mock = self._future_wrap_mock(
-            self.job_queue_mock.read_message)
-        self.job_message = Message()
-        self.job_read_mock.side_effect = [self.job_message, None]
-        
-        
-        self.job_hide_mock = self._future_wrap_mock(
-            self.job_queue_mock.hide_message)
-
         # create the client object
-        self.video_client = video_processor.client.VideoClient(
+        self.video_client = VideoClient(
             'some/dir/my_model.model',
             multiprocessing.BoundedSemaphore(1))
         
     def tearDown(self):
-        self.video_download_patcher.stop()
         self.s3_patcher.stop()
+        self.client_s3_patcher.stop()
         self.http_mocker.stop()
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
@@ -1395,8 +1434,11 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     def _run_job(self, job):
         '''Runs the job'''
         self.job_message.set_body(json.dumps(job))
-        with options._set_bounded('video_processor.client.dequeue_period',
-                                  0.01):
+        # TODO look for a more permanent solution, possibly in smartcrop
+        # from https://github.com/Itseez/opencv/issues/5150, set threads to 0 
+        # in our main thread, otherwise fork screws things up. 
+        cmsdb.cdnhosting.smartcrop.cv2.setNumThreads(0)
+        with options._set_bounded('video_processor.client.dequeue_period', 0.01):
             self.video_client.start()
 
             try:
@@ -1428,13 +1470,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test(timeout=10)
     def test_smoke_test(self):
+        utf8key = 'L\xc3\xb6rick_video.mp4'.decode('utf-8')
+        
         self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://L\xc3\xb6rick_video.mp4'
+            'video_url' : 's3://my-videos/%s' % utf8key
             })
                     
         # Check the api request in the database
@@ -1504,7 +1548,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
 
         # Check the api request in the database
@@ -1522,16 +1566,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_video_processing_error(self):
-        self.video_download_mock.side_effect = [
-            urllib2.URLError('Oops')]
-
+        self.mock_conn2.side_effect = [IOError('Oops')]
+        
         self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
 
         # Check the api request in the database
@@ -1552,7 +1595,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_db_update_error(self, modify_mock):
         modify_mock.side_effect = [
-            redis.ConnectionError("Connection Error")]
+            psycopg2.Error("Connection Error")]
 
         self._run_job({
             'api_key': self.api_key,
@@ -1560,7 +1603,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
 
         # Check the api request in the database
@@ -1586,7 +1629,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
         
         # Check the api request in the database
@@ -1606,7 +1649,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
 
         # Check the api request in the database
@@ -1649,7 +1692,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
     @tornado.testing.gen_test
     def test_unexpected_error(self):
-        self.video_download_mock.side_effect = [Exception('Some bad error')]
+        self.mock_conn.side_effect = [Exception('Some bad error')]
 
         self._run_job({
             'api_key': self.api_key,
@@ -1657,7 +1700,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'job_id' : 'job1',
             'video_title': 'some fun video',
             'callback_url': 'http://callback.com',
-            'video_url' : 'http://video.mp4'
+            'video_url' : 's3://my-videos/test.mp4'
             })
 
         # Check the api request in the database

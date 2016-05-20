@@ -37,7 +37,6 @@ DefaultThumbnail::Init(const rapidjson::Document & document) {
     catch (...) {
     }
 
-    Dealloc();
     return -1;
 }
 
@@ -126,13 +125,11 @@ DefaultThumbnail::ProcessImages(const rapidjson::Value & imgs)
         return 0;
     }
 
-    images.reserve(numOfImages);
-
     for(rapidjson::SizeType i=0; i < numOfImages; i++) {
 
         ScaledImage * img = new ScaledImage();
         // store in vector first, if any error it is deletable from Shutdown()
-        images.push_back(img);
+        images_.push_back(img);
 
         // obtain the specific json fraction
         const rapidjson::Value& imageDocument  = imgs[i];
@@ -155,29 +152,7 @@ DefaultThumbnail::Shutdown()
 {
     accountId = "";
     default_url_ = "";
-    Dealloc();
 }
-
-
-void 
-DefaultThumbnail::Dealloc()
-{
-    for(std::vector<ScaledImage*>::iterator it = images.begin(); 
-            it != images.end(); it ++)
-    {
-        ScaledImage * img = (*it);
-
-        if(img == NULL) {
-            neon_stats[NEON_DEFAULT_THUMBNAIL_SHUTDOWN_NULL_POINTER]++;
-            continue;
-        }
-
-        img->Shutdown();
-        delete img;
-        img = 0;
-    }
-}
-
 
 const char *
 DefaultThumbnail::GetAccountId() const
@@ -197,29 +172,13 @@ DefaultThumbnail::default_url() const
     return default_url_;
 }
 
-// TODO Kevin this needs to be combined with Fraction::GetScaledImage
 const ScaledImage*
 DefaultThumbnail::GetScaledImage(int height, int width) const
 {
-    static const int pixelRange = 6;
-    // iterate through our scaled images to find a size match
-    unsigned numOfImgs = images.size();
+    int image_index = ScaledImage::FindBestSizeMatchImage(width, height, images_);
+    if (image_index > -1)
+        return &images_[image_index];
 
-    // try to find a perfect size match
-    for(unsigned i=0; i < numOfImgs; i++) {
-        if( images[i]->GetHeight() ==  height && images[i]->GetWidth() == width ) {
-              return images[i]; 
-        }
-    }
-
-    // try to find an approximate size
-    for(unsigned i=0; i < numOfImgs; i++) {
-        
-        if( ScaledImage::ApproxEqual(images[i]->GetHeight(), height, pixelRange) &&
-            ScaledImage::ApproxEqual(images[i]->GetWidth(), width, pixelRange)) {
-              return images[i]; 
-        }
-    }
     // otherwise return NULL, and leave it up to the caller to do what they want with it
     return NULL; 
 }

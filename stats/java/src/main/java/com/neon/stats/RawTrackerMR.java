@@ -1287,6 +1287,8 @@ public class RawTrackerMR extends Configured implements Tool {
         AvroKeyOutputFormat.class, AdPlayHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "VideoPlayHive",
         AvroKeyOutputFormat.class, VideoPlayHive.getClassSchema());
+    AvroMultipleOutputs.addNamedOutput(job, "VideoViewPercentageHive",
+        AvroKeyOutputFormat.class, VideoViewPercentageHive.getClassSchema());
     AvroMultipleOutputs.addNamedOutput(job, "EventSequenceHive",
         AvroKeyOutputFormat.class, EventSequenceHive.getClassSchema());
 
