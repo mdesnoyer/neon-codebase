@@ -414,9 +414,7 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
 
     try:
         jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
-
-        s3_path = 's3://neon-tracker-logs-v2-test/cleaned'
-
+        
         s3_output_path = ' '
         get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', output_path)
         if get_time:
@@ -462,7 +460,7 @@ def _get_last_batch_app(rm_response):
     last_app = None
     last_started_time = None
     s3_checkpoint_dir = ' '
-    
+
     for app in rm_response['apps']['app']:
         match = re.search(r'S3DistCp: (.*) (->) (.*)',app['name'])
         if match and (last_app is None or last_started_time < app['startedTime']):
