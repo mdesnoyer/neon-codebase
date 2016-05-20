@@ -6,14 +6,14 @@ Nick Dufour
 12/15/2015
 ==============================================================================
 OVERVIEW......................................................................
-    
+
     The local searcher is the next iteration of the video search, which makes
 a number of changes in addition to "local search." This is a brief outline of
 how the search proceeds:
 
 (1) The video is partitioned into "search frames"
 (2) Samples from the video are obtained via the Metropolis-Hastings Monte
-    Carlo search. 
+    Carlo search.
 (3) The function either executes a sampling or a local search.
     (3a)    Sampling occurs if a local search cannot be conducted. The frame
             is extracted, and the features are added to the set of statistics
@@ -41,14 +41,14 @@ any of the current top thumbnails.
 
     Regions are locally searched if (a) both sides of the region (which are
 search frames) have been sampled and (b) if the estimated score of the region
-is sufficiently high (by averaging the score of the search frames). 
+is sufficiently high (by averaging the score of the search frames).
 
 ==============================================================================
 FEATURE EXTRACTION............................................................
 
     Feature extraction is performed by regional feature generators. Some
 features, like the SAD ("Sum of absolute differences") generator, require
-multiple frames to compute. 
+multiple frames to compute.
 
 ==============================================================================
 COMBINER......................................................................
@@ -56,7 +56,7 @@ COMBINER......................................................................
     The combiner accepts and arbitrary feature vector and returns a combined
 score. The nature of this combination is either multiplicative or additive,
 depending on the combiner used. In the multiplicative case, transfer functions
-are used to move the feature vector to the combined score. 
+are used to move the feature vector to the combined score.
 
     Feature scores are not directly taken from the output of the feature
 generators. Some frames, dictacted by the arguments to the local search, are
@@ -68,13 +68,13 @@ ratio from 0 to 1, where 1 is the best) in the list of observed statistics.
 converts it to a vector of ranked feature values. Alternatively, the combiner
 may instead return a vector of anonymous functions that return these ranks
 when evaluated. This is useful as the rank score may not be the same as more
-'knowledge' is added during processing. 
+'knowledge' is added during processing.
 
     The scores are further modulated either by transfer functions or by
 feature weights. Further, a weight valence is specified indicating which rank
 is the best one. There are many of these, which are described at the beginning
 of the script. For example, one might be "MAXIMIZE," in which case the closer
-a frame is to the top frame as ranked by a particular feature, the better. 
+a frame is to the top frame as ranked by a particular feature, the better.
 
     In the multiplicative setting, the combined feature score varies from 0
 to 1, and multiplies the final valence score (thereby attenuating it by some
@@ -85,16 +85,16 @@ combined score weight.
     Finally, in the multiplicative setting, there is a chance that some
 features are undefined or irrelevant to a particular frame. For instance, if
 a frame has no faces, then its closed eye score will necessarily be zero. Thus
-the combiner may be provided with a dependencies dictionary, which is a 
+the combiner may be provided with a dependencies dictionary, which is a
 dictionary of feature names to [feature_name, lambda] pairs. Given two
-features x and y, and dependencies[x] = [y, lambda_func] the value of x only 
+features x and y, and dependencies[x] = [y, lambda_func] the value of x only
 affects the combined score if lambda_func(y_val) == True.
 
 ==============================================================================
 TRANSFER FUNCTIONS............................................................
 
     In the multiplicative setting, transfer functions are used to map the
-feature value ranks to an appropriate score. They are lambda functions that 
+feature value ranks to an appropriate score. They are lambda functions that
 accept a value x in [0, 1] and map it to a logistic curve. The logistic curve
 can be modulated by specifying a max penalty, whereby the curve is logistic
 and we have:
@@ -107,7 +107,7 @@ the final combined score of an arbitrary image x with valence score v will be
 
     final score = v * f_1(v_1) * ... * f_i(v_i) * ... * f_N(v_N)
 
-if v_i = 0, then this effectively becomes 
+if v_i = 0, then this effectively becomes
 
     final score = v * f_1(v_1) * ... * (1 - 0.2) * ... * f_N(v_N)
                 = v * f_1(v_1) * ... * (    0.8) * ... * f_N(v_N)
@@ -115,7 +115,7 @@ if v_i = 0, then this effectively becomes
 hence this feature can reduce the combined score by a factor of (at most) 0.8.
 It follows that larger max penalties mean that this feature has greater
 importance, since the final score is penalized more if a given frame is ranked
-poorly in terms of that feature. 
+poorly in terms of that feature.
 
 ==============================================================================
 ADDITITIONAL NOTES............................................................
@@ -125,13 +125,13 @@ N thumbnails if the fail certain tests using they are not sufficiently 'far'
 away from the other thumbnails (excluding the one the thumbnail would replace)
 where 'far' is the pairwise Jensen-Shannon divergence of the two ColorName
 histograms.
-    
+
     Frames are sampled randomly from a distribution governed by the knowledge
 of the searcher over the video. This is performed by Metropolis-Hastings
 search, where frames are more likely to be sampled if they are between other
 high scoring frames. This is not strictly a 'true' metropolist-hastings
-search, I just adopted the methodology of sampling from an uncomputable 
-distribution.  
+search, I just adopted the methodology of sampling from an uncomputable
+distribution.
 
 ==============================================================================
 NOTES:
@@ -177,7 +177,7 @@ from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
 from utils.options import define, options
-from model.mcmh import MCMH  # change me
+from model.metropolisHastingsSearch import MCMH  # change me
 from grpc.framework.interfaces.face.face import ExpirationError
 
 _log = logging.getLogger(__name__)
@@ -194,8 +194,8 @@ statemon.define('searching_problem', int)  # problem conducting a search, unspec
 statemon.define('mcmh_sample_error', int)  # problem acquiring a sample from mcmh
 statemon.define('mcmh_search_error', int)  # problem acquiring a local search region
 
-define("text_model_path", 
-       default=os.path.join(__base_path__, 'cvutils', 'data'), 
+define("text_model_path",
+       default=os.path.join(__base_path__, 'cvutils', 'data'),
        help="The location of the text detector models")
 
 MINIMIZE = -1  # flag for statistics where better = smaller
@@ -261,6 +261,7 @@ def sec_to_time(secs):
     h, r = divmod(secs, s2h)
     m, s = divmod(r, s2m)
     return '%02i:%02i:%02i (hh:mm:ss)' % (h, m, s)
+
 
 class Statistics(object):
     """
@@ -444,9 +445,9 @@ class MultiplicativeCombiner(object):
         # feature score weight (w)
         #
         # The multiplicative combiner attenuates ms by fs, depending on the
-        # weight. If w is 1.0, then fs may fully attenuate ms. Otherwise, 
-        # it will attenuate it by at most w. 
-        # 
+        # weight. If w is 1.0, then fs may fully attenuate ms. Otherwise,
+        # it will attenuate it by at most w.
+        #
         # values of w above 1.0 have no meaning.
         self.result_combine = lambda ms, fs, w: ms - ms * (1-fs) * min(1, w)
         self.dependencies = dependencies
@@ -1210,14 +1211,14 @@ class LocalSearcher(object):
             text_filter_params:
                 The parameters used to instantiate the text filter. This is a
                 list of 9 individual parameters:
-                    classifier xml 1 
+                    classifier xml 1
                         - (str) The first level classifier filename. Must be
                         located in options.text_model_path
-                    classifier xml 2 
+                    classifier xml 2
                         - (str) The second level classifier filename. Must be
                         located in options.text_model_path
                     threshold delta [def: 16]
-                        - (int) the number of steps for MSER 
+                        - (int) the number of steps for MSER
                     min area [def: 0.00015]
                         - (float) minimum ratio of the detection area to the
                         total area of the image for acceptance as a text region.
@@ -1229,7 +1230,7 @@ class LocalSearcher(object):
                     non max suppression [def: True]
                         - (bool) whether or not to use non max suppression.
                     min probability difference [def: 0.5]
-                        - (float) minimum probability difference for 
+                        - (float) minimum probability difference for
                         classification to proceed.
                     min probability, step 2 [def: 0.9]
                         - (float) minimum probability for step 2 to proceed.
@@ -1286,16 +1287,16 @@ class LocalSearcher(object):
                                  'trained_classifierNM1.xml')
             tcnm2 = os.path.join(options.text_model_path,
                                  'trained_classifierNM2.xml')
-            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8, 
+            text_filter_params = [tcnm1, tcnm2, 16, 0.00015, 0.003, 0.8,
                                   True, 0.5, 0.9]
         else:
-            text_filter_params[0] = os.path.join(options.text_model_path, 
+            text_filter_params[0] = os.path.join(options.text_model_path,
                                                  text_filter_params[0])
-            text_filter_params[1] = os.path.join(options.text_model_path, 
+            text_filter_params[1] = os.path.join(options.text_model_path,
                                                  text_filter_params[1])
         self.text_filter_params = text_filter_params
         # this, if necessary at all, will be set by update_processing_strategy
-        self.analysis_crop = None 
+        self.analysis_crop = None
         # determine the generators to cache.
         for f in feature_generators:
             gen_name = f.get_feat_name()
@@ -1304,12 +1305,12 @@ class LocalSearcher(object):
                 self.feats_to_cache[gen_name] = f
 
         # create a processing lock, that will be used by the sampling and
-        # the local search threads. 
-        self._proc_lock = threading.Condition()
+        # the local search threads.
+        self._proc_lock = threading.Lock()
         # lock to ensure that the active counts are managed atomically.
         self._act_lock = threading.Lock()
         # create an event object to alert the threads that it is time to
-        # terminate. 
+        # terminate.
         self._terminate = threading.Event()
         self._active_samples = 0
         self._active_searches = 0
@@ -1340,9 +1341,9 @@ class LocalSearcher(object):
         self._reset()
         # handle the text filter parameters
         text_filter_params = processing_strategy.text_filter_params
-        text_filter_params[0] = os.path.join(options.text_model_path, 
+        text_filter_params[0] = os.path.join(options.text_model_path,
                                              text_filter_params[0])
-        text_filter_params[1] = os.path.join(options.text_model_path, 
+        text_filter_params[1] = os.path.join(options.text_model_path,
                                              text_filter_params[1])
         self.processing_time_ratio = processing_strategy.processing_time_ratio
         self._orig_local_search_width = processing_strategy.local_search_width
@@ -1361,12 +1362,12 @@ class LocalSearcher(object):
     @property
     def explore_coef(self):
         '''
-        Determines the rate at which we sample versus search. 
+        Determines the rate at which we sample versus search.
         Right now, as the percentage of the video sampled increases
         the probability of taking a new sample decreases, in favor
         of conducting local searches.
         '''
-        _sfrac = (self.search_algo.n_samples * 1. / 
+        _sfrac = (self.search_algo.n_samples * 1. /
                   self.search_algo.max_samps)
         return 1 - _sfrac  # linear
         # return np.sqrt(1 - _sfrac)  # sqrt
@@ -1383,7 +1384,7 @@ class LocalSearcher(object):
             n = self.n_thumbs
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
-                  'for this run is %i with max thumbs %i', video_name, 
+                  'for this run is %i with max thumbs %i', video_name,
                   rand_seed, n)
         np.random.seed(rand_seed)
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
@@ -1410,7 +1411,7 @@ class LocalSearcher(object):
     def choose_thumbnails_impl(self, video, n=None, video_name=''):
         # start up the threads
         self._inq = Queue(maxsize=2)
-        threads = [threading.Thread(target=self._worker, args=(x,)) 
+        threads = [threading.Thread(target=self._worker, args=(x,))
                    for x in range(self.num_workers)]
         for t in threads:
             t.start()
@@ -1431,7 +1432,7 @@ class LocalSearcher(object):
         f_max_var_rej = lambda: min(0.1,
                                     self.col_stat.percentile(
                                             100. / self.n_thumbs))
-        self.results = ResultsList(n_thumbs=self.n_thumbs, 
+        self.results = ResultsList(n_thumbs=self.n_thumbs,
                            min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
@@ -1460,7 +1461,7 @@ class LocalSearcher(object):
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
         video_time = float(num_frames) / fps
-        self.search_algo = self._search_algo(num_frames, self.local_search_width, 
+        self.search_algo = self._search_algo(num_frames, self.local_search_width,
                                              self.startend_clip)
         start_time = time()
         max_processing_time = self.processing_time_ratio * video_time
@@ -1498,7 +1499,7 @@ class LocalSearcher(object):
         except Exception, e:
             _log.info('Unknown percentage of video searched')
             _log.debug('Exception: %s', e.message)
-        _log.info('Total running time: %s, expected: %s', 
+        _log.info('Total running time: %s, expected: %s',
                   sec_to_time(time() - start_time),
                   sec_to_time(max_processing_time))
         raw_results = self.results.get_results()
@@ -1515,7 +1516,7 @@ class LocalSearcher(object):
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
-                formatted_result = (frame, 1.0, frameno, 
+                formatted_result = (frame, 1.0, frameno,
                                     frameno / float(fps))
                 results.append(formatted_result)
         else:
@@ -1534,7 +1535,7 @@ class LocalSearcher(object):
 
         The items in the input queue `inq` should consist either of
         None or a tuple of the form (request_type, args) where
-        `request_type` is either 'samp' for sample or 'srch' for 
+        `request_type` is either 'samp' for sample or 'srch' for
         local search. The args are provided directly to the corresponding
         functions.
         '''
@@ -1564,21 +1565,25 @@ class LocalSearcher(object):
             req_type, args = item
             if req_type == 'samp':
                 try:
-                    with self._act_lock: self._active_samples += 1
+                    with self._act_lock:
+                        self._active_samples += 1
                     self._take_sample(*(args,))
-                    with self._act_lock: self._active_samples -= 1
+                    with self._act_lock:
+                        self._active_samples -= 1
                 except Exception, e:
-                    _log.warn('Problem sampling frame %i: %s', args, e.message)
+                    _log.error('Problem sampling frame %i: %s', args, e.message)
                     statemon.state.increment('sampling_problem')
             elif req_type == 'srch':
                 try:
-                    with self._act_lock: self._active_searches += 1
+                    with self._act_lock:
+                        self._active_searches += 1
                     self._conduct_local_search(*args)
-                    with self._act_lock: self._active_searches -= 1
+                    with self._act_lock:
+                        self._active_searches -= 1
                 except Exception, e:
                     start = args[0]
                     stop = args[2]
-                    _log.warn('Problem local searching %i <---> %i: %s', 
+                    _log.warn('Problem local searching %i <---> %i: %s',
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 
@@ -1602,6 +1607,9 @@ class LocalSearcher(object):
                 if exception:
                     result_status['error'] = True
                     statemon.state.increment('unable_to_score_frame')
+                    fno = str(frameno) if frameno is not None else 'NA'
+                    _log.warn('Problem obtaining score for frame %s: %s',
+                              fno, exception.message)
                 else:
                     result = result_future.result()
                     inference_result.append(result.valence[0])
@@ -1631,7 +1639,7 @@ class LocalSearcher(object):
         _log.warn('Frame #%s has exceeded the maximum number of retries (%i).', fno, numretry)
         statemon.state.increment('frame_score_attempt_limit_reached')
         return None
-            
+
     def _conduct_local_search(self, start_frame, start_score,
                               end_frame, end_score):
         '''
@@ -1646,7 +1654,7 @@ class LocalSearcher(object):
                 start_frame, start_score, end_frame, end_score, self._active_searches))
             gold, framenos = self.get_search_frame(start_frame)
             if gold is None:
-                _log.error('Could not obtain search interval %i <---> %i', 
+                _log.error('Could not obtain search interval %i <---> %i',
                             start_frame, end_frame)
                 return
             self._searched += 1
@@ -1698,7 +1706,7 @@ class LocalSearcher(object):
                 lower_crop_frac = 0.2  # how much of the lower portion of the
                 # image to crop out
                 text_d = []
-                # Cut out the bottom 20% of the image because it often has 
+                # Cut out the bottom 20% of the image because it often has
                 # tickers
                 text_det_out = cv2.text.textDetect(
                     best_gold[0:int(best_gold.shape[0]*.82), :, :],
@@ -1734,10 +1742,8 @@ class LocalSearcher(object):
                         self.combiner.get_indy_funcs(best_feat_dict)]
             else:
                 meta = None
-            # memcheck()
-            self._proc_lock.notify()
         if self.predictor.async:
-            indi_framescore = self._get_score(best_frame, 
+            indi_framescore = self._get_score(best_frame,
                                               frameno=best_frameno)
         else:
             indi_framescore = self.predictor.predict(best_frame)
@@ -1754,8 +1760,6 @@ class LocalSearcher(object):
                                    framescore, np.max(comb)))
             self.results.accept_replace(best_frameno, framescore, best_gold,
                 np.max(comb), meta=meta, feat_score_func=feat_score_func)
-            # IMPORTANT: Exiting a "with" block does *not* wake up other threads
-            self._proc_lock.notify()
 
     def _take_sample(self, frameno):
         '''
@@ -1774,10 +1778,8 @@ class LocalSearcher(object):
                 self.search_algo.update(frameno, bad=True)
                 return
             frames = self._prep(frames)
-            # get the score the image (asynchronously).
-            self._proc_lock.notify()
         if self.predictor.async:
-            # get the score the image (asynchronously).
+            # get the score the image from the server.
             frame_score = self._get_score(frames[0], frameno)
         else:
             frame_score = self.predictor.predict(frames[0])
@@ -1791,7 +1793,6 @@ class LocalSearcher(object):
                 self.stats[n].push(vals[0])
             # update the knowledge about its variance
             self.col_stat.push(frames[0])
-            self._proc_lock.notify()
 
     def _step(self, force_sample=False):
         '''
@@ -1799,23 +1800,8 @@ class LocalSearcher(object):
         True, then it will force it to take a sample.
         '''
 
-        if force_sample: 
-            if not self.done_sampling:
-                try:
-                    frameno = self.search_algo.get_sample()
-                except Exception, e:
-                    _log.error('ERROR in getting sample from MCMH! %s', e.message)
-                    statemon.state.increment('mcmh_sample_error')
-                    return
-                if frameno is not None:
-                    # then there are still samples to be taken
-                    self._inq.put(('samp', frameno))
-                else:
-                    self.done_sampling = True
-                    _log.info('Finished sampling')
-            return
-        if ((not self.done_sampling) and 
-            (np.random.rand() < self.explore_coef)):
+        if ((force_sample or np.random.rand() < self.explore_coef) and
+            not self.done_sampling):
             try:
                 frameno = self.search_algo.get_sample()
             except Exception, e:
@@ -1825,10 +1811,10 @@ class LocalSearcher(object):
             if frameno is not None:
                 # then there are still samples to be taken
                 self._inq.put(('samp', frameno))
-                return
             else:
                 self.done_sampling = True
                 _log.info('Finished sampling')
+            return
         # okay, let's get a search frame instead.
         try:
             srch_info = self.search_algo.get_search()
