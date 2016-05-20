@@ -284,10 +284,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
-    @patch('video_processor.client.youtube_dl.YoutubeDL.extract_info')
     @tornado.testing.gen_test
-    def test_download_video_errors(self, mock_client):
-        mock_client.side_effect = [
+    def test_download_video_errors(self):
+        self.youtube_extract_info_mock.side_effect = [
             youtube_dl.utils.DownloadError('bal'),
             youtube_dl.utils.ExtractorError('beck'),
             youtube_dl.utils.UnavailableVideoError('ick'),
@@ -306,11 +305,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
 
         with self.assertLogExists(logging.ERROR, "Error downloading video"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
-                vprocessor.download_video_file()
+                yield vprocessor.download_video_file()
         
         with self.assertLogExists(logging.ERROR, "Error saving video to disk"):
             with self.assertRaises(video_processor.client.VideoDownloadError):
@@ -402,6 +401,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 15)
+        self.job_hide_mock.assert_called_with(self.job_message,
+                                              3.0*15)
 
     @tornado.testing.gen_test
     def test_download_youtube_video_missing_duration(self):
@@ -413,7 +414,6 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                 u'format_note': u'hd720', 
                 u'height': 720, 
                 u'like_count': 0, 
-                u'duration': 15, 
                 u'player_url': None, 
                 u'id': 'yces6PZOsgc', 
                 u'view_count': 328}
@@ -422,41 +422,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
         yield vprocessor.download_video_file()
         self.assertEquals(vprocessor.video_metadata.duration, 600.0)
-     
-    @tornado.testing.gen_test
-    def test_download_youtube_video_not_found(self):
-        vprocessor = self.setup_video_processor(
-            "neon", url='http://www.youtube.com/watch?v=9bZkp7q19f0')
-        video_one = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='9231p'
-        ) 
-        video_two = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='1080p'
-        ) 
-        video_three = video_processor.client.pytube.models.Video(
-                'test.invalid', 
-                'test_filename', 
-                'mp4', 
-                resolution='1080p'
-        ) 
-        video_two.download = MagicMock(return_value='blah blah')
-        youtube_mock = video_processor.client.pytube
-        youtube_mock.YouTube = MagicMock() 
-        youtube_mock.YouTube().filter = MagicMock(
-            return_value=([video_one, video_two, video_three]))
 
-        with self.assertLogExists(logging.WARNING, "Could not find a"):
-            with self.assertRaises(video_processor.client.VideoDownloadError):
-                yield vprocessor.download_video_file()
-                self.assertEquals(
-                    statemon.state.get('video_processor.client.youtube_video_not_found'),
-                    1)
+        self.job_hide_mock.assert_called_with(self.job_message,
+                                              3.0*600.0)
 
     @tornado.testing.gen_test
     def test_process_video(self):
@@ -1337,6 +1305,21 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
             'video_processor.video_processing_queue.' \
             'VideoProcessingQueue')
         self.job_queue_mock = self.job_queue_patcher.start()()
+
+        self.job_queue_mock.get_duration.return_value = 600.0
+
+        self.job_delete_mock = self._future_wrap_mock(
+            self.job_queue_mock.delete_message)
+        self.job_delete_mock.return_value = True
+        
+        self.job_read_mock = self._future_wrap_mock(
+            self.job_queue_mock.read_message)
+        self.job_message = Message()
+        self.job_read_mock.side_effect = [self.job_message, None]
+        
+        self.job_hide_mock = self._future_wrap_mock(
+            self.job_queue_mock.hide_message)
+        
         # Mock out the video download
         self.client_s3_patcher = patch('video_processor.client.S3Connection')
         self.mock_conn2 = self.client_s3_patcher.start()
@@ -1350,20 +1333,6 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         vid_key = self.vid_bucket.new_key(utf8key)
         vid_key.set_contents_from_file(open(self.test_video_file, 'rb'))
 
-        self.job_queue_mock.get_duration.return_value = 600.0
-
-        self.job_delete_mock = self._future_wrap_mock(
-            self.job_queue_mock.delete_message)
-        self.job_delete_mock.return_value = True
-        
-        self.job_read_mock = self._future_wrap_mock(
-            self.job_queue_mock.read_message)
-        self.job_message = Message()
-        self.job_read_mock.side_effect = [self.job_message, None]
-        
-        
-        self.job_hide_mock = self._future_wrap_mock(
-            self.job_queue_mock.hide_message)
         # Mock out http requests.
         self.http_mocker = patch(
             'video_processor.client.utils.http.send_request')
@@ -1402,6 +1371,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         load_model_mock.return_value = self.model
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         self.model.choose_thumbnails.return_value = ct_output
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+            'cvutils.imageutils.PILImageUtils.download_image')
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start(),
+            require_async_kw=True)
+        self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock.return_value = self.random_image
 
         # create the client object
         self.video_client = VideoClient(
