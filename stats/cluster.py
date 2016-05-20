@@ -254,104 +254,7 @@ class Cluster():
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
 
-        trackURLRe = re.compile(
-            r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
-        jobidRe = re.compile(r"Job ID: (\S+)")
-        url_parse = trackURLRe.search(stdout)
-        if not url_parse:
-            raise MapReduceError(
-                "Could not find the tracking url. Stdout was: \n%s" % stdout)
-        application_id = url_parse.group(2)
-        host = url_parse.group(1)
-
-        job_id_parse = jobidRe.search(stdout)
-        if not job_id_parse:
-            raise MapReduceError(
-                "Could not find the job id. Stdout was: \n%s" % stdout)
-        job_id = job_id_parse.group(1)
-
-        _log.info('Running map reduce job %s. Tracking URL is %s' %
-                  (job_id, url_parse.group(0)))
-
-        # Sleep so that the job tracker has time to come up
-        time.sleep(60)
-
-        # Now poll the job status until it is done
-        error_count = 0
-        job_status = None
-        while True:
-            if timeout is not None and budget_time < datetime.datetime.now():
-                raise MapReduceError("Map Reduce Job timed out.")
-                
-            try:
-                if job_status != 'RUNNING' and job_status != 'FINISHED':
-                    response = self.query_resource_manager(
-                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
-                    latest_app_time = None
-                    for app in response['apps']['app']:
-                        if (app['name'] == name and (
-                            latest_app_time is None or 
-                            latest_app_time < app['startedTime'])):
-                            latest_app_time = app['startedTime']
-                            job_status = app['state']
-                    if job_status != 'RUNNING' and job_status != 'FINISHED':
-                        time.sleep(60)
-                        continue
-
-                url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
-                       "jobs/{job_id}").format(
-                           host=host, 
-                           port=options.mapreduce_status_port, 
-                           app_id=application_id, 
-                           job_id=job_id)
-                response = urllib2.urlopen(url)
-
-                if url != response.geturl():
-                    # The job is probably done, so we need to look at the
-                    # job history server
-                    data = self.query_history_manager(
-                        '/ws/v1/history/mapreduce/jobs/%s' %
-                        job_id)
-                else:
-                    data = json.load(response)
-
-                data = data['job']
-
-                # Send monitoring data
-                for key, value in data.iteritems():
-                    utils.monitor.send_data('batch_processor.%s' % key, value)
-
-                if data['state'] == 'SUCCEEDED':
-                    _log.info('Map reduce job %s complete. Results: %s' % 
-                              (main_class, 
-                               json.dumps(data, indent=4, sort_keys=True)))
-                    return
-                elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
-                    msg = ('Map reduce job %s failed: %s' %
-                               (main_class,
-                                json.dumps(data, indent=4, sort_keys=True)))
-                    _log.error(msg)
-                    raise MapReduceError(msg)
-
-                error_count = 0
-
-                time.sleep(60)
-            except urllib2.URLError as e:
-                _log.error("Error getting job information: %s" % e)
-                statemon.state.increment('master_connection_error')
-                error_count = error_count + 1
-                if error_count > 5:
-                    _log.error("Tried 5 times and couldn't get there so stop")
-                    raise
-                time.sleep(30)
-            except socket.error as e:
-                _log.error("Error getting job information: %s" % e)
-                statemon.state.increment('master_connection_error')
-                error_count = error_count + 1
-                if error_count > 5:
-                    _log.error("Tried 5 times and couldn't get there so stop")
-                    raise
-                time.sleep(30)
+        self.monitor_job_progress(stdout, budget_time)
 
     def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
                             output_path):
@@ -852,8 +755,7 @@ class Cluster():
         #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-b0d884c7'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
@@ -947,7 +849,108 @@ class Cluster():
             _log.info("S3 copy to path %s was successful" % s3_path)
         else:
             raise MapReduceError('S3 checkpoint to path %s failed, check mapreduce job logs' % s3_path)
-            
+    
+    def monitor_job_progress(self, stdout, budget_time):
+
+        trackURLRe = re.compile(
+            r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
+        jobidRe = re.compile(r"Job ID: (\S+)")
+        url_parse = trackURLRe.search(stdout)
+        if not url_parse:
+            raise MapReduceError(
+                "Could not find the tracking url. Stdout was: \n%s" % stdout)
+        application_id = url_parse.group(2)
+        host = url_parse.group(1)
+
+        job_id_parse = jobidRe.search(stdout)
+        if not job_id_parse:
+            raise MapReduceError(
+                "Could not find the job id. Stdout was: \n%s" % stdout)
+        job_id = job_id_parse.group(1)
+
+        _log.info('Running map reduce job %s. Tracking URL is %s' %
+                  (job_id, url_parse.group(0)))
+
+        # Sleep so that the job tracker has time to come up
+        time.sleep(60)
+
+        # Now poll the job status until it is done
+        error_count = 0
+        job_status = None
+        while True:
+            if timeout is not None and budget_time < datetime.datetime.now():
+                raise MapReduceError("Map Reduce Job timed out.")
+                
+            try:
+                if job_status != 'RUNNING' and job_status != 'FINISHED':
+                    response = self.query_resource_manager(
+                        '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
+                    latest_app_time = None
+                    for app in response['apps']['app']:
+                        if (app['name'] == name and (
+                            latest_app_time is None or 
+                            latest_app_time < app['startedTime'])):
+                            latest_app_time = app['startedTime']
+                            job_status = app['state']
+                    if job_status != 'RUNNING' and job_status != 'FINISHED':
+                        time.sleep(60)
+                        continue
+
+                url = ("http://{host}:{port}/proxy/{app_id}/ws/v1/mapreduce/"
+                       "jobs/{job_id}").format(
+                           host=host, 
+                           port=options.mapreduce_status_port, 
+                           app_id=application_id, 
+                           job_id=job_id)
+                response = urllib2.urlopen(url)
+
+                if url != response.geturl():
+                    # The job is probably done, so we need to look at the
+                    # job history server
+                    data = self.query_history_manager(
+                        '/ws/v1/history/mapreduce/jobs/%s' %
+                        job_id)
+                else:
+                    data = json.load(response)
+
+                data = data['job']
+
+                # Send monitoring data
+                for key, value in data.iteritems():
+                    utils.monitor.send_data('batch_processor.%s' % key, value)
+
+                if data['state'] == 'SUCCEEDED':
+                    _log.info('Map reduce job %s complete. Results: %s' % 
+                              (main_class, 
+                               json.dumps(data, indent=4, sort_keys=True)))
+                    return
+                elif data['state'] in ['FAILED', 'KILLED', 'ERROR', 'KILL_WAIT']:
+                    msg = ('Map reduce job %s failed: %s' %
+                               (main_class,
+                                json.dumps(data, indent=4, sort_keys=True)))
+                    _log.error(msg)
+                    raise MapReduceError(msg)
+
+                error_count = 0
+
+                time.sleep(60)
+            except urllib2.URLError as e:
+                _log.error("Error getting job information: %s" % e)
+                statemon.state.increment('master_connection_error')
+                error_count = error_count + 1
+                if error_count > 5:
+                    _log.error("Tried 5 times and couldn't get there so stop")
+                    raise
+                time.sleep(30)
+            except socket.error as e:
+                _log.error("Error getting job information: %s" % e)
+                statemon.state.increment('master_connection_error')
+                error_count = error_count + 1
+                if error_count > 5:
+                    _log.error("Tried 5 times and couldn't get there so stop")
+                    raise
+                time.sleep(30)
+
 
 class ClusterSSHConnection:
     '''Class that allows an ssh connection to the master cluster node.'''

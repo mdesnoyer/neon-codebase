@@ -420,9 +420,11 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
         if get_time:
             s3_output_path = s3_path + get_time.group(2)
 
-        cluster.checkpoint_hdfs_to_s3(jar_location,
-                                      output_path,
-                                      s3_output_path)
+            cluster.checkpoint_hdfs_to_s3(jar_location,
+                                          output_path,
+                                          s3_output_path)
+        else:
+            _log.error('Incorrect s3 path, the copy step has been skipped')
     except Exception as e:
         _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
@@ -495,29 +497,24 @@ def get_last_sucessful_batch_output(cluster):
 
     return last_successful_output
 
-def cleanup_hdfs(cluster, current_hdfs_dir):
+def cleanup_hdfs(cluster, current_hdfs_dir_time, hdfs_dir):
     # Cleans up all other HDFS directories except the current one. Access the Namenode using the https
     # HDFS client. Check for existence of directory and delete the old ones recursively.
-
-    get_current_dir_time = ' '
-    get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', current_hdfs_dir)
-    if get_time:
-        get_current_dir_time = get_time.group(2)
 
     http_string = 'http://%s:9101' % cluster.master_ip
 
     hdfs_conn = InsecureClient(http_string, user='hadoop')
 
-    file_exists = hdfs_conn.status('/mnt/cleaned', strict=False)
+    file_exists = hdfs_conn.status('/'+hdfs_dir, strict=False)
     
     if file_exists:
-        list_files = hdfs_conn.list('/mnt/cleaned', status=False)
+        list_files = hdfs_conn.list('/'+hdfs_dir, status=False)
 
         for file in list_files:
-            if file == get_current_dir_time:
+            if file == current_hdfs_dir_time:
                continue
             else:
-                delete_status = hdfs_conn.delete('/mnt/cleaned/'+file, recursive=True)
+                delete_status = hdfs_conn.delete('/'+hdfs_dir+'/'+file, recursive=True)
                 if delete_status is True:
                     _log.info('Deleted hdfs directory %s' % '/mnt/cleaned/'+file)
                 else:

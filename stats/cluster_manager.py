@@ -90,34 +90,31 @@ class BatchProcessManager(threading.Thread):
             _log.info('Running batch process.')
             try:
                 run_time = time.strftime("%Y-%m-%d-%H-%M")
+                hdfs_dir = 'mnt/cleaned'
+                s3_output_path = options.cleaned_output_path
 
-                if self.cluster.master_ip == ' ':
-                    cleaned_output_path = "%s/%s" % (
-                        options.cleaned_output_path,
-                        run_time)
-                    _log.info('Output of clean up job goes to %s',cleaned_output_path)
-                else:
-                    hdfs_path = 'hdfs://%s:9000' % self.cluster.master_ip
-                    cleaned_output_path = "%s/%s/%s" % (
-                        hdfs_path,
-                        'mnt/cleaned',
-                        run_time)
-                    _log.info('Output of clean up job goes to %s',cleaned_output_path)
+                hdfs_path = 'hdfs://%s:9000' % self.cluster.master_ip
 
+                cleaned_output_path = "%s/%s/%s" % (
+                    hdfs_path,
+                    hdfs_dir,
+                    run_time)
+                
+                _log.info("Output of clean up job goes to %s" % cleaned_output_path)
 
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
 
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path, 
+                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/2016/05/*', 
                     cleaned_output_path, 
-                    options.cleaned_output_path,
+                    s3_output_path,
                     timeout = (options.batch_period * 10))
 
                 _log.info('Sucessful cleaning job output to: %s' %
                           cleaned_output_path)
 
-                self.last_output_path = options.cleaned_output_path + run_time
+                self.last_output_path = s3_output_path + run_time
                 _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
                 
                 stats.batch_processor.build_impala_tables(
@@ -126,7 +123,7 @@ class BatchProcessManager(threading.Thread):
                     timeout = (options.batch_period * 4))
 
                 # Delete previous HDFS output directories from clean up job, if any
-                stats.batch_processor.cleanup_hdfs(self.cluster, cleaned_output_path)
+                stats.batch_processor.cleanup_hdfs(self.cluster, run_time, hdfs_dir)
 
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
