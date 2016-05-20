@@ -3243,9 +3243,15 @@ class NeonUserAccount(NamespacedStoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_internal_video_ids(self):
-        '''Return the list of internal videos ids for this account.'''
+    def get_internal_video_ids(self, since=None):
+        '''Return the list of internal videos ids for this account.
+
+           Orders by updated_time ASC 
+        '''
         if options.wants_postgres:
+            if since is None: 
+                since = '1969-01-01'
+ 
             rv = True  
             db = PostgresDB()
             conn = yield db.get_connection()
@@ -3253,11 +3259,17 @@ class NeonUserAccount(NamespacedStoredObject):
             # indexed key field, however, as data grows it may become 
             # necessary to store account_id/api_key on the object or table : 
             # index that, and query based on that
-            query = "SELECT _data->>'key' FROM " + VideoMetadata._baseclass_name().lower() + \
-                    " WHERE _data->>'key' LIKE %s" 
+            query = "SELECT _data->>'key' FROM " + \
+                    VideoMetadata._baseclass_name().lower() + \
+                    " WHERE _data->>'key' LIKE %s AND updated_time > %s"\
+                    " ORDER BY updated_time ASC" 
             # what a mess...escaping 'hack' 
-            params = [self.neon_api_key+'%']
-            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+            params = [self.neon_api_key+'%', since]
+            cursor = yield conn.execute(
+                query, 
+                params, 
+                cursor_factory=psycopg2.extensions.cursor)
+
             rv = [i[0] for i in cursor.fetchall()]
 
             db.return_connection(conn)
