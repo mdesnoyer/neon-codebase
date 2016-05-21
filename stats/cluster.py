@@ -254,7 +254,10 @@ class Cluster():
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
 
-        self.monitor_job_progress(stdout, budget_time, timeout)
+        self.monitor_job_progress(stdout, 
+                                  budget_time, 
+                                  name='Raw Tracker Data Cleaning', 
+                                  timeout)
 
     def send_job_to_cluster(self, jar, main_class, extra_ops, input_path,
                             output_path):
@@ -850,7 +853,7 @@ class Cluster():
         else:
             raise MapReduceError('S3 checkpoint to path %s failed, check mapreduce job logs' % s3_path)
     
-    def monitor_job_progress(self, stdout, budget_time, timeout):
+    def monitor_job_progress(self, stdout, budget_time, name, timeout):
 
         trackURLRe = re.compile(
             r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
