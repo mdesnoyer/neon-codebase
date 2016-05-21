@@ -717,7 +717,14 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             return
 
         #Success
-        self.send_json_response(response.body, 201)
+        data = json.loads(response.body)
+        rval = {
+            'job_id' : data['job_id'],
+            'video_id' : video_id,
+            'status' : data['video']['state'],
+            'video_title' : data['video']['title']
+            }
+        self.send_json_response(rval, 201)
     
     @tornado.gen.coroutine
     def create_neon_thumbnail_api_request(self, integration_id):
@@ -839,7 +846,9 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             video_id,
             video_url,
             title,
-            6)
+            6,
+            None,
+            None)
 
     ##### Generic get_video_status #####
 

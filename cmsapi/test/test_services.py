@@ -152,7 +152,13 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
             self.cmsapiv2_patcher.start()().send_request)
         self.mock_cmsapiv2.side_effect = \
           lambda x, **kw: tornado.httpclient.HTTPResponse(
-              x, 200, buffer=StringIO('{"job_id" : "job1"}'))
+              x, 200, buffer=StringIO(json.dumps({
+                  "job_id" : "job1",
+                  'video' : {
+                      'state' : neondata.RequestState.PROCESSING,
+                      'title' : 'my_title'
+                      }
+                  })))
 
         self.api_key = "" # filled later
         self.a_id = "unittester-0"
@@ -878,7 +884,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
 
         response = yield self.post_request(uri, vals, api_key)
 
-        self.assertEqual(response.code, 200)
+        self.assertEqual(response.code, 201)
         response = json.loads(response.body)
         self.assertIsNotNone(response["video_id"])  
         self.assertEqual(response["status"], neondata.RequestState.PROCESSING)
@@ -911,6 +917,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         cargs, kwargs = self.mock_cmsapiv2.call_args
         self.assertEquals(cargs[0].url, '/api/v2/%s/videos' % api_key)
         self.assertEquals(cargs[0].method, 'POST')
+        self.maxDiff = None
         self.assertEquals(json.loads(cargs[0].body),
                           { 'external_video_ref': vid,
                             'title' : 'test_title',
@@ -919,7 +926,9 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
                             'thumbnail_ref' : None,
                             'callback_url' : 'http://callback',
                             'integration_id' : '0',
-                            'publish_date' : None
+                            'publish_date' : None,
+                            'custom_data' : {},
+                            'duration' : None
                             })
         
         
@@ -1047,14 +1056,26 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         
         self.assertEqual(response.code, 201)
 
-        # Make sure the video metadata object is created
-        video = neondata.VideoMetadata.get(
-            neondata.InternalVideoID.generate(api_key, 'vid1'))
-        self.assertEquals(video.custom_data, {'my_id' : 123456,
-                                              'my_string' : 'string'})
-        self.assertEquals(video.url, "http://test.mp4")
-        self.assertEquals(video.integration_id, "61")
-        self.assertEquals(video.duration, 123456.5)
+        # Make sure that the video was submitted to cmsapiv2
+        self.assertEquals(self.mock_cmsapiv2.call_count, 1)
+        cargs, kwargs = self.mock_cmsapiv2.call_args
+        self.assertEquals(cargs[0].url, '/api/v2/%s/videos' % api_key)
+        self.assertEquals(cargs[0].method, 'POST')
+        self.assertEquals(json.loads(cargs[0].body),
+                          { 'external_video_ref': 'vid1',
+                            'title' : 'test_title',
+                            'url' : 'http://test.mp4',
+                            'default_thumbnail_url' : None,
+                            'thumbnail_ref' : None,
+                            'callback_url' : 'http://callback',
+                            'integration_id' : '61',
+                            'publish_date' : None,
+                            'custom_data' : {
+                                'my_id' : 123456,
+                                'my_string' : 'string'
+                                },
+                            'duration' : 123456.5
+                            })
 
     @tornado.testing.gen_test
     def test_create_video_request_bad_custom_data(self):
@@ -1169,7 +1190,7 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         with self.assertRaises(HTTPError) as e:
             response = yield self.post_request(uri, vals, api_key)
         self.assertEqual(e.exception.code, 400)
-        response = json.loads(e.excpetion.response.body)
+        response = json.loads(e.exception.response.body)
         self.assertEqual(response['error'], 
                 'link given is invalid or not a video file')
 
