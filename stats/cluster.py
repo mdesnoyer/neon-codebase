@@ -847,7 +847,45 @@ class Cluster():
         jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
+        _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
+                  step_id)
+
         ssh_conn = ClusterSSHConnection(self)
+
+        # Wait until it is "done". When it is "done" it has actually
+        # only sucessfully loaded the job into the resource manager
+        wait_count = 0
+        while (emrconn.describe_step(self.cluster_id, step_id).status.state in
+               ['PENDING', 'RUNNING']):
+            if wait_count > 80:
+                _log.error('Timeout when waiting for EMR to send the job %s '
+                           'to Haddop' % step_id)
+                _log.error('stderr was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+                _log.error('stdout was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+                _log.error('syslog was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+                raise MapReduceError('Timeout when waiting for EMR to send '
+                                     'job %s to Hadoop' % step_id)
+            time.sleep(15.0)
+            wait_count += 1
+
+        job_state = emrconn.describe_step(self.cluster_id,
+                                          step_id).status.state
+        if (job_state != 'COMPLETED'):
+            _log.error('EMR job could not be added to Hadoop. It is state %s'
+                       % job_state)
+
+            # Get the logs from the cluster
+            _log.error('stderr was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+            _log.error('stdout was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+            _log.error('syslog was:\n %s' %
+                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+            raise MapReduceError('Error loading job into Hadoop. '
+                                 'See earlier logs for job logs')
         
         stdout = self.get_emr_logfile(ssh_conn, step_id, 'stdout')
 
