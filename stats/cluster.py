@@ -819,12 +819,17 @@ class Cluster():
         cur_price = prices[-1]
         return cur_price, avg_price
 
-    def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path):
+    def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path, timeout=None):
         #Does checkpoint of hdfs data from mapreduce output to S3.
+
+
+        if timeout is not None:
+            budget_time = datetime.datetime.now() + \
+              datetime.timedelta(seconds=timeout)
 
         emrconn = boto.emr.EmrConnection()
         
-        name_step = 's3distcp'
+        name_step = 'S3DistCp'
 
         step_arg = []
         step_arg.append('--src')
@@ -842,17 +847,15 @@ class Cluster():
         jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
-        step_status = emrconn.describe_step(self.cluster_id,step_id).status.state
+        ssh_conn = ClusterSSHConnection(self)
+        
+        stdout = self.get_emr_logfile(ssh_conn, step_id, 'stdout')
 
-        while (emrconn.describe_step(self.cluster_id,step_id).status.state in ['RUNNING','PENDING']):
-            time.sleep(120)
-
-        job_state = emrconn.describe_step(self.cluster_id,step_id).status.state
-
-        if job_state == 'COMPLETED':
-            _log.info("S3 copy to path %s was successful" % s3_path)
-        else:
-            raise MapReduceError('S3 checkpoint to path %s failed, check mapreduce job logs' % s3_path)
+        self.monitor_job_progress(stdout, 
+                                  budget_time,
+                                  timeout,
+                                  main_class='S3DistCp',
+                                  name='S3DistCp')
     
     def monitor_job_progress(self, stdout, budget_time, timeout, main_class, name):
 
@@ -891,7 +894,7 @@ class Cluster():
                         '/ws/v1/cluster/apps?stats=RUNNING,ACCEPTED')
                     latest_app_time = None
                     for app in response['apps']['app']:
-                        if (app['name'] == name and (
+                        if (name in app['name'] and (
                             latest_app_time is None or 
                             latest_app_time < app['startedTime'])):
                             latest_app_time = app['startedTime']

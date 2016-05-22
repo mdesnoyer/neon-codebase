@@ -422,7 +422,8 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
 
             cluster.checkpoint_hdfs_to_s3(jar_location,
                                           output_path,
-                                          s3_output_path)
+                                          s3_output_path,
+                                          timeout=timeout)
         else:
             _log.error('Incorrect s3 path, the copy step has been skipped')
     except Exception as e:
