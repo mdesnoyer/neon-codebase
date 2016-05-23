@@ -177,7 +177,7 @@ from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
 from utils.options import define, options
-from model.metropolisHastingsSearch import MCMH  # change me
+from model.metropolisHastingsSearch import MCMH
 from grpc.framework.interfaces.face.face import ExpirationError
 
 _log = logging.getLogger(__name__)

@@ -341,6 +341,29 @@ class DeepnetPredictor(Predictor):
         else:
             _log.debug('Connection status is %s' % str(status))
 
+    def _check_conn(self, status):
+        '''
+        Callback for checking the connection, subsumes the dual callbacks
+        we had before.
+        '''
+        if (status is ChannelConnectivity.TRANSIENT_FAILURE or
+            status is ChannelConnectivity.FATAL_FAILURE):
+            # the connection has been lost
+            self._ready.clear()
+            # unsubscribe yourself
+            self.channel.unsubscribe(self._check_conn)
+            statemon.state.increment('lost_server_connection')
+            _log.warn('Lost connection to server, trying another')
+            self._connect(force_refresh=True)
+        elif self._ready.is_set():
+            return
+        elif status is ChannelConnectivity.READY:
+            _log.debug('Server has been reached')
+            self._ready.set()
+            _log.debug('Ready event is set.')
+            # we're still waiting for the original initial go ahead.
+            return
+
     def _predictasync(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
