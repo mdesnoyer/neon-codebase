@@ -227,9 +227,9 @@ class AquilaConnectionMock():
     return '10.0.66.209'
 
 _log.info('creating predictor')
-predictor = predictor.DeepnetPredictor(port=9000,
-                                       concurrency=22,
-                                       aquila_connection=AquilaConnectionMock())
+# predictor = predictor.DeepnetPredictor(port=9000,
+#                                        concurrency=22,
+#                                        aquila_connection=AquilaConnectionMock())
 
 # with open('/home/ubuntu/predictor', 'r') as f: predictor = dill.load(f)
 
@@ -290,7 +290,7 @@ testing_dir=''
 n_thumbs=10
 startend_clip=0.025
 non_locking = False
-LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
+LSd = getLSd(feature_generators, combiner, filters, feats_to_cache, testing,
             feat_score_weight, local_search_width, local_search_step,
             processing_time_ratio, adapt_improve, use_best_data,
             use_all_data, testing_dir, n_thumbs, startend_clip)
@@ -306,16 +306,16 @@ LS = getLS(feature_generators, combiner, filters, feats_to_cache, testing,
 # _log.info('Manually disabling predictor')
 # predictor.shutdown()
 
-# this is for stupid-ass salesforce
-from glob import glob
-videos = glob('/home/ubuntu/salesforce/*')
-for video in videos:
-  vn = video.split('/')[-1].split('.')[0]
-  vid = cv2.VideoCapture(video)
-  _log.info('Starting Search of %s', vn)
-  res = LS.choose_thumbnails(vid, n_thumbs, video_name=vn)
-  with open('/tmp/LS_results_%s' % vn.replace(' ', '_'), 'w') as f:
-    dill.dump(res, f)
-_log.info('Manually disabling predictor')
-predictor.shutdown()
+# # this is for stupid-ass salesforce
+# from glob import glob
+# videos = glob('/home/ubuntu/salesforce/*')
+# for video in videos:
+#   vn = video.split('/')[-1].split('.')[0]
+#   vid = cv2.VideoCapture(video)
+#   _log.info('Starting Search of %s', vn)
+#   res = LS.choose_thumbnails(vid, n_thumbs, video_name=vn)
+#   with open('/tmp/LS_results_%s' % vn.replace(' ', '_'), 'w') as f:
+#     dill.dump(res, f)
+# _log.info('Manually disabling predictor')
+# predictor.shutdown()
 
