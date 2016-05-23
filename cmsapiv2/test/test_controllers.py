@@ -5624,6 +5624,62 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             is_tracked=False)
         self.untracked_player.save()
 
+        # An example player configuration
+        self.tracked_player_config = {
+            "autoadvance": 0,
+            "autoplay": False,
+            "compatibility": True,
+            "flashHlsDisabledByStudio": False,
+            "fullscreenControl": True,
+            "id": "BkMO9qa8x",
+            "player": {
+                "inactive": False,
+                "template": {
+                    "locked": False,
+                    "name": "single-video-template",
+                    "version": "5.1.14"
+                }
+            },
+            "plugins": [
+                {
+                    "name": "other-plugin-2",
+                    "options": {
+                        "flag": False,
+                    },
+                },
+                {
+                    "name": "neon",
+                    "options": {
+                        "publisher": {
+                            "id": 12345
+                        },
+                    },
+                },
+                {
+                    "name": "other-plugin-1",
+                    "options": {
+                        "flag": True
+                    },
+                },
+            ],
+            "scripts": [
+                "example.js",
+                "another.js",
+                "https://s3.amazonaws.com/neon-cdn-assets/old-version/videojs-neon-tracker.min.js",
+                "other.js"
+            ],
+            "skin": "graphite",
+            "studio_configuration": {
+                "player": {
+                    "adjusted": True
+                }
+            },
+            "stylesheets": [],
+            "video_cloud": {
+                "policy_key": "BCpkADawqM2Z5-2XLiQna9qL7qIuHETaqzXl1fdmHcVOFOP6Rf8uUnlhNxNlh9MLNjb5lkodGFv2yBU9suVWdnXZTcFWEMx2qvNACzbVDIyco9fvRTAi43xUeygF_GPQqOUGomo8Bg1s-V7J"
+            }
+        }
+
         # Mock bc player get
         self.get_player_mocker = patch('api.brightcove_api.PlayerAPI.get_player')
         self.get_player = self._future_wrap_mock(self.get_player_mocker.start())
@@ -5758,12 +5814,16 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_player') as _pub:
             pub = self._future_wrap_mock(_pub)
             pub.side_effect = [True]
             self.get_player.side_effect = [{
                 'id': 'pl0',
-                'name': 'new name'}]
+                'name': 'new name',
+                'branches': {
+                    'master': {
+                        'configuration': self.tracked_player_config
+            }}}]
 
             r = yield self.http_client.fetch(
                 self.get_url(url),
@@ -5777,20 +5837,24 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             self.assertEqual(1, pub.call_count)
 
         self.assertEqual(self.get_player.call_args[0][0], 'pl0')
-        self.assertEqual(pub.call_args[0][0]['id'], 'pl0')
+        our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
+        self.assertEqual(pub.call_args[0][0], 'pl0')
+        self.assertIn(our_url, pub.call_args[0][1]['scripts'])
         player = json.loads(r.body)
         self.assertTrue(player['is_tracked'])
         self.assertEqual(player['player_ref'], 'pl0')
         self.assertEqual(player['name'], 'new name')
-        self.assertEqual(pub.call_args[0][2], self.user.tracker_account_id)
 
         # Try with a new player
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_player') as _pub:
             pub = self._future_wrap_mock(_pub)
-            pub.side_effect = [True]
             self.get_player.side_effect = [{
                 'player_ref': 'pl-new',
-                'name': 'new name'}]
+                'name': 'new name',
+                'branches': {
+                    'master': {
+                        'configuration': self.tracked_player_config
+            }}}]
             r = yield self.http_client.fetch(
                 self.get_url(url),
                 headers=header,
@@ -5819,9 +5883,18 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
 
-        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_plugin') as _pub:
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_player') as _pub:
             pub = self._future_wrap_mock(_pub)
-            pub.side_effect = Exception('shouldnt be called')
+            self.get_player.side_effect = [{
+                'id': 'pl2',
+                'name': 'Player 2',
+                'branches': {
+                    'master': {
+                        'configuration': self.tracked_player_config
+                    }
+                }
+            }]
+
             r = yield self.http_client.fetch(
                 self.get_url(url),
                 headers=header,
@@ -5831,11 +5904,15 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                     'is_tracked': False,
                     'integration_id': self.integration.integration_id
                 }))
-            self.assertEqual(0, pub.call_count)
 
+        self.assertEqual(1, pub.call_count)
         player = json.loads(r.body)
         self.assertEqual(player['player_ref'], 'pl2')
         self.assertFalse(player['is_tracked'])
+        uninstall = controllers.BrightcovePlayerHelper._uninstall_plugin_patch(
+            self.tracked_player_config)
+        self.assertEqual(pub.call_args[0][0], 'pl2')
+        self.assertEqual(pub.call_args[0][1], uninstall)
 
     @tornado.testing.gen_test
     def test_put_player_bc_404(self):
@@ -5857,64 +5934,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(e.exception.code, 404)
 
     @tornado.testing.gen_test
-    def test_get_plugin_patch(self):
-        given = {
-            "autoadvance": 0,
-            "autoplay": False,
-            "compatibility": True,
-            "flashHlsDisabledByStudio": False,
-            "fullscreenControl": True,
-            "id": "BkMO9qa8x",
-            "player": {
-                "inactive": False,
-                "template": {
-                    "locked": False,
-                    "name": "single-video-template",
-                    "version": "5.1.14"
-                }
-            },
-            "plugins": [
-                {
-                    "name": "other-plugin-2",
-                    "options": {
-                        "flag": False,
-                    },
-                },
-                {
-                    "name": "neon",
-                    "options": {
-                        "publisher": {
-                            "id": 12345
-                        },
-                    },
-                },
-                {
-                    "name": "other-plugin-1",
-                    "options": {
-                        "flag": True
-                    },
-                },
-            ],
-            "scripts": [
-                "example.js",
-                "another.js",
-                "https://s3.amazonaws.com/neon-cdn-assets/old-version/videojs-neon-tracker.min.js",
-                "other.js"
-            ],
-            "skin": "graphite",
-            "studio_configuration": {
-                "player": {
-                    "adjusted": True
-                }
-            },
-            "stylesheets": [],
-            "video_cloud": {
-                "policy_key": "BCpkADawqM2Z5-2XLiQna9qL7qIuHETaqzXl1fdmHcVOFOP6Rf8uUnlhNxNlh9MLNjb5lkodGFv2yBU9suVWdnXZTcFWEMx2qvNACzbVDIyco9fvRTAi43xUeygF_GPQqOUGomo8Bg1s-V7J"
-            }
-        }
+    def test_install_plugin_patch(self):
         tracker_id = 12345
-        patch = controllers.BrightcovePlayerHelper._get_plugin_patch(
-            given, tracker_id)
+        patch = controllers.BrightcovePlayerHelper._install_plugin_patch(
+            self.tracked_player_config, tracker_id)
         expect = {
             'plugins': [
                 {
@@ -5935,67 +5958,56 @@ class TestBrightcovePlayerHandler(TestControllersBase):
                 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
             ]
         }
-        self.assertEqual(expect, patch)
+        self.assertEqual(expect['plugins'], patch['plugins'])
+        self.assertEqual(expect['scripts'], patch['scripts'])
 
     @tornado.testing.gen_test
-    def test_publish_plugin(self):
-        bc_player = {
-            'id': 'pl0',
-            'accountId': '2294876105001',
-            'branches': {
-                'master': {
-                    'configuration': {
-                        'plugins': [{
-                            'name': 'notneon',
-                            'options': {
-                                'color': 'red'
-                            }
-                        }],
-                        'scripts': ['optimizely.js'],
-                        'stylesheets': [],
-                    }
-                }
-            }
-        }
+    def test_install_patch(self):
 
-        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
-            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
-
-            patch_mock = self._future_wrap_mock(_patch)
-            publish_mock = self._future_wrap_mock(_publish)
-            yield controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.api, self.user.tracker_account_id)
-
-        self.assertEqual(patch_mock.call_count, 1)
-        pid, patch_args = patch_mock.call_args[0]
-        self.assertIn('optimizely.js', patch_args['scripts'],
+        config = self.tracked_player_config
+        install = controllers.BrightcovePlayerHelper._install_plugin_patch(config, 100)
+        self.assertIn('example.js', install['scripts'],
                       'Keeps the non-Neon script')
         our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
-        self.assertIn(our_url, patch_args['scripts'], 'Adds this url to scripts')
+        self.assertIn(our_url, install['scripts'], 'Adds this url to scripts')
         self.assertEqual(
-            1,
-            len([p for p in patch_args['plugins'] if p['name'] == 'notneon']),
+            2,
+            len([p for p in install['plugins'] if p['name'] != 'neon']),
             'Keeps the non-Neon plugin')
         self.assertEqual(
             1,
-            len([p for p in patch_args['plugins'] if p['name'] == 'neon']),
+            len([p for p in install['plugins'] if p['name'] == 'neon']),
             'Has one Neon plugin')
-        self.assertNotIn('stylesheets', patch_args, 'Patch skips stylesheets')
-        self.assertEqual('pl0', pid, 'Keeps player ref')
+        self.assertNotIn('stylesheets', install, 'Patch skips stylesheets')
 
-        self.assertEqual(publish_mock.call_count, 1)
-        self.assertEqual(publish_mock.call_args[0][0], 'pl0')
+        # Running it again makes no change
+        self.assertEqual(
+            install,
+            controllers.BrightcovePlayerHelper._install_plugin_patch(install, 100))
 
-        # Run it again and assert no change
-        with patch('api.brightcove_api.PlayerAPI.patch_player') as _patch,\
-            patch('api.brightcove_api.PlayerAPI.publish_player') as _publish:
+    def test_uninstall_patch(self):
+        config = self.tracked_player_config
+        uninstall = controllers.BrightcovePlayerHelper._uninstall_plugin_patch(config)
 
-            patch_mock = self._future_wrap_mock(_patch)
-            publish_mock = self._future_wrap_mock(_publish)
-            yield controllers.BrightcovePlayerHelper.publish_plugin(
-                bc_player, self.api, self.user.tracker_account_id)
+        self.assertIn('example.js', uninstall['scripts'],
+                      'Keeps the non-Neon script')
+        our_url = controllers.BrightcovePlayerHelper._get_current_tracking_url()
+        self.assertNotIn(our_url, uninstall['scripts'], 'Remove this url from scripts')
+        self.assertEqual(
+            2,
+            len([p for p in uninstall['plugins'] if p['name'] != 'neon']),
+            'Keeps the non-Neon plugin')
+        self.assertEqual(
+            0,
+            len([p for p in uninstall['plugins'] if p['name'] == 'neon']),
+            'Has no Neon plugin')
+        self.assertNotIn('stylesheets', uninstall, 'Patch skips stylesheets')
 
-        self.assertEqual(patch_args, patch_mock.call_args[0][1])
+        # Running it again makes no change
+        self.assertEqual(
+            uninstall,
+            controllers.BrightcovePlayerHelper._uninstall_plugin_patch(uninstall))
+
 
 class TestForgotPasswordHandler(TestAuthenticationBase):
     def setUp(self):
