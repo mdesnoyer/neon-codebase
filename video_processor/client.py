@@ -903,7 +903,7 @@ class VideoClient(multiprocessing.Process):
             concurrency=options.request_concurrency,
             aquila_connection=aq_con)
         # TODO (nick): Figure out how to get the aquila server to relay the
-        # model version to the local model.
+        #              model version to the local model.
         self.model_version = 'Not Available'
         # note, the model file is no longer a complete model, but is instead
         # an input dictionary for local search.
@@ -912,6 +912,8 @@ class VideoClient(multiprocessing.Process):
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
             raise IOError('Error loading model from %s' % self.model_file)
+        # TODO (someone): How tf are we gonna handle exiting? Remember that
+        #                 gRPC hangs due to a bug at exit.
 
     def run(self):
         ''' run/start method '''
