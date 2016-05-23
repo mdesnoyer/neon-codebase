@@ -15,7 +15,7 @@ from mock import MagicMock, patch
 from monitoring import benchmark_neon_pipeline
 from StringIO import StringIO
 import test_utils.neontest
-import test_utils.redis
+import test_utils.postgresql 
 import tornado
 import tornado.httpclient
 import tornado.testing
@@ -27,7 +27,30 @@ from utils import statemon
 import logging
 _log = logging.getLogger(__name__)
 
-class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
+class ServerAsyncPostgresTest(test_utils.neontest.AsyncHTTPTestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(ServerAsyncPostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+
+class BenchmarkTest(ServerAsyncPostgresTest):
     def setUp(self):
         self.benchmarker = benchmark_neon_pipeline.Benchmarker()
         
@@ -63,10 +86,6 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
                 return self.isp_call_mock(req)
         self.send_request_mock.side_effect = _handle_http_request
         
-
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
         self.api_key = 'apikey'
         options._set('monitoring.benchmark_neon_pipeline.account',
                      self.api_key)
@@ -94,7 +113,6 @@ class BenchmarkTest(test_utils.neontest.AsyncHTTPTestCase):
         self.send_request_patcher.stop()
         self.create_job_patcher.stop()
         statemon.state._reset_values()
-        self.redis.stop()
         super(BenchmarkTest, self).tearDown()
 
     def _check_request_cleanup(self):

@@ -24,7 +24,6 @@ import os
 import Queue
 import random
 import re
-import redis
 import time
 import tornado.httpserver
 import tornado.gen
@@ -946,8 +945,6 @@ class HealthCheckHandler(tornado.web.RequestHandler):
             # if not ret, return 503. yes we can talk to the db but since we
             # couldn't fetch the test accout,  the DB could be in inconsistent
             # state
-        except redis.ConnectionError, e:
-            self.write("Error connecting to the video database")
         except neondata.psycopg2.OperationalError as e: 
             self.write("Error connecting to the video database")
         

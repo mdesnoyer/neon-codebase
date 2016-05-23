@@ -11,7 +11,6 @@ from cmsdb import neondata
 import integrations.brightcove
 import logging
 from mock import patch, MagicMock
-import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
 import tornado.gen

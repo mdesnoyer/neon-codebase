@@ -43,7 +43,7 @@ import test_utils.mock_boto_s3 as boto_mock
 from StringIO import StringIO
 from cmsdb import neondata
 from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
-        YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
+        YoutubePlatform, NeonUserAccount, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \

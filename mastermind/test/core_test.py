@@ -27,10 +27,11 @@ import numpy.random
 import numpy as np
 import pandas
 import test_utils.neontest
-import test_utils.redis
+import test_utils.postgresql
 import tornado.httpclient
-import utils.neon
 import unittest
+import utils.neon
+from utils.options import options
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +44,29 @@ def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
         metadata.phash = phash
     return ThumbnailInfo(metadata, base_impressions, incremental_impressions,
                          base_conversions, incremental_conversions)
+
+class CorePostgresTest(test_utils.neontest.TestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(CorePostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(CorePostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(CorePostgresTest, cls).tearDownClass() 
 
 #TODO(mdesnoyer) what happens when a video is removed from the db?!?
 
@@ -89,12 +113,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         super(TestCurrentServingDirective, self).setUp()
         numpy.random.seed(1984934)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the pg connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get_connection.return_value = None
         logging.getLogger('cmsdb.neondata').propagate = False
 
         # TODO(wiley): Once we actually listen to the priors but keep
@@ -108,8 +131,10 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         logging.getLogger('cmsdb.neondata').propagate = True
+        super(TestCurrentServingDirective, self).tearDown()
 
     def test_serving_directives_with_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -1848,12 +1873,11 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         super(TestUpdatingFuncs, self).setUp()
         numpy.random.seed(1984934)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the PG connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get.return_value = None
 
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
@@ -1870,7 +1894,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         logging.getLogger('mastermind.core').reset_sample_counters()
 
     def test_no_data_yet(self):
@@ -1954,8 +1979,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
-        self.assertGreater(self.redis_mock.call_count, 0)
-        self.redis_mock.reset_mock()
+        self.assertGreater(self.postgres_mock.call_count, 0)
+        self.postgres_mock.reset_mock()
 
         # Repeating the info doesn't produce a change
         self.mastermind.update_video_info(
@@ -1969,7 +1994,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
-        self.assertEqual(self.redis_mock.call_count, 0)
+        self.assertEqual(self.postgres_mock.call_count, 0)
 
     def test_add_new_thumbs(self):
         self.mastermind.update_video_info(
@@ -2153,12 +2178,11 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         super(TestStatUpdating, self).setUp()
         numpy.random.seed(1984935)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the PG connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get.return_value = None
 
         self.mastermind = Mastermind()
 
@@ -2181,7 +2205,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
@@ -2276,21 +2301,12 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                     holdback_frac=0.0,
                     exp_frac=1.0))
 
-class TestExperimentState(test_utils.neontest.TestCase):
+class TestExperimentState(CorePostgresTest):
     def setUp(self):
         super(TestExperimentState, self).setUp()
         numpy.random.seed(1984937)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
-
         self.mastermind = Mastermind()
-
-    def tearDown(self):
-        self.redis.stop()
-        super(TestExperimentState, self).tearDown()
 
     def test_update_stats_when_experiment_not_complete(self):
         self.mastermind.update_experiment_strategy(
@@ -2595,12 +2611,9 @@ class TestExperimentState(test_utils.neontest.TestCase):
                           neondata.ExperimentState.UNKNOWN)
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
 
-class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
+class TestStatusUpdatesInDb(CorePostgresTest):
     def setUp(self):
         super(TestStatusUpdatesInDb, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         # Mock out the http callback
         self.http_patcher = patch('mastermind.core.utils.http')
@@ -2645,7 +2658,6 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.http_patcher.stop()
-        self.redis.stop()
         super(TestStatusUpdatesInDb, self).tearDown()
 
     def _wait_for_db_updates(self):

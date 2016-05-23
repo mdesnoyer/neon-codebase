@@ -11,7 +11,6 @@ from cmsdb import neondata
 import integrations.fox
 import logging
 from mock import patch, MagicMock
-import test_utils.redis
 import test_utils.neontest
 import test_utils.postgresql
 import tornado.gen
@@ -48,7 +47,7 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         options._set('integrations.ingester.poll_period', 0.1)
         options._set('integrations.ingester.service_name', 'fox')
 
-        super(SmokeTesting, self).setUp()
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
 
         self.manager = integrations.ingester.Manager()
 
@@ -57,21 +56,19 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
         options._set('integrations.ingester.poll_period',
                      self.old_poll_cycle)
         self.int_mocker.stop()
-        conn = neondata.DBConnection.get(neondata.VideoMetadata)
-        conn.clear_db() 
-        conn = neondata.DBConnection.get(neondata.ThumbnailMetadata)
-        conn.clear_db()
-
-        super(SmokeTesting, self).tearDown()
+        self.postgresql.clear_all_tables() 
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_correct_platform(self):
@@ -197,55 +194,6 @@ class SmokeTesting(test_utils.neontest.AsyncTestCase):
 
         self.assertEquals(self.process_mock.call_count, 2)
 
-class SmokeTestingPG(SmokeTesting):
-    def setUp(self):
-        statemon.state._reset_values()
-
-        self.int_mocker = patch(
-            'integrations.ingester.integrations.fox.'
-            'FoxIntegration')
-        self.int_mock = self.int_mocker.start()
-        self.process_mock = self._future_wrap_mock(
-            self.int_mock().process_publisher_stream)
-
-        # Build a platform
-        user_id = '234234234dasfds'
-        self.user = neondata.NeonUserAccount(user_id,name='testingaccount')
-        self.user.save()
-        self.integration = neondata.FoxIntegration(self.user.neon_api_key,  
-                                                   last_process_date='2015-10-29T23:59:59Z', 
-                                                   feed_pid_ref='c2vfn5fb8gubhrmd67x7bmv9')
-        self.integration.save()
-        self.integration_id = self.integration.integration_id 
-
-        self.old_poll_cycle = options.get(
-            'integrations.ingester.poll_period')
-        options._set('integrations.ingester.poll_period', 0.1)
-        options._set('integrations.ingester.service_name', 'fox')
-
-        super(test_utils.neontest.AsyncTestCase, self).setUp()
-
-        self.manager = integrations.ingester.Manager()
-
-    def tearDown(self):
-        self.manager.stop()
-        options._set('integrations.ingester.poll_period',
-                     self.old_poll_cycle)
-        self.int_mocker.stop()
-        self.postgresql.clear_all_tables() 
-        super(test_utils.neontest.AsyncTestCase, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
-            
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()

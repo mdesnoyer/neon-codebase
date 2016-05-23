@@ -11,26 +11,50 @@ from api import akamai_api
 import boto.exception
 from cStringIO import StringIO
 import cmsdb.cdnhosting
+from cmsdb import neondata
+from cvutils.imageutils import PILImageUtils
+from cvutils import smartcrop
 import json
 import logging
 from mock import MagicMock, patch
-from cmsdb import neondata
+import numpy as np
 import PIL
 import random
 import re
 import test_utils.mock_boto_s3 as boto_mock
 import test_utils.neontest
-import test_utils.redis
+import test_utils.postgresql
 import tornado.testing
-import unittest
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
+import unittest
+from utils.options import options
 import urlparse
-from cvutils.imageutils import PILImageUtils
 import utils.neon
-from cvutils import smartcrop
-import numpy as np
 
 _log = logging.getLogger(__name__)
+
+class CDNTestBase(test_utils.neontest.AsyncTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super(CDNTestBase, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(CDNTestBase, cls).tearDownClass()
+ 
+    def tearDown(self):
+        self.postgresql.clear_all_tables()
+        super(CDNTestBase, self).tearDown()
 
 class TestAWSHosting(test_utils.neontest.AsyncTestCase):
     ''' 
@@ -355,13 +379,11 @@ class TestAWSHosting(test_utils.neontest.AsyncTestCase):
         self.assertEquals(mock_http.call_count, 1)
 
 
-class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
+class TestAWSHostingWithServingUrls(CDNTestBase):
     ''' 
     Test the ability to host images on an aws cdn (aka S3)
     '''
     def setUp(self):
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
         self.s3conn = boto_mock.MockConnection()
         self.s3_patcher = patch('cmsdb.cdnhosting.S3Connection')
         self.mock_conn = self.s3_patcher.start()
@@ -391,7 +413,6 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.s3_patcher.stop()
         self.cdn_check_patcher.stop()
-        self.redis.stop()
         super(TestAWSHostingWithServingUrls, self).tearDown()
 
     @tornado.testing.gen_test
@@ -571,7 +592,7 @@ class TestAWSHostingWithServingUrls(test_utils.neontest.AsyncTestCase):
         self.assertIsNone(neondata.ThumbnailServingURLs.get('acct1_vid1_tid1'))
         
 
-class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
+class TestAkamaiHosting(CDNTestBase):
     '''
     Test uploading images to Akamai
     '''
@@ -593,16 +614,12 @@ class TestAkamaiHosting(test_utils.neontest.AsyncTestCase):
                 return self.akamai_mock(request, *args, **kwargs)
         self.http_mock.side_effect = _handle_http_request
         
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-
         random.seed(1654984)
         
         self.image = PILImageUtils.create_random_image(480, 640)
 
     def tearDown(self):
         self.http_patcher.stop()
-        self.redis.stop()
         super(TestAkamaiHosting, self).tearDown()
 
     @tornado.testing.gen_test

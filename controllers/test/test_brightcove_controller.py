@@ -15,18 +15,41 @@ import PIL.Image
 import random
 from StringIO import StringIO
 import time
-import test_utils.redis
 import test_utils.mock_boto_s3
 import test_utils.neontest
+import test_utils.postgresql 
 import tornado
 from tornado.gen import YieldPoint, Task
 from tornado.httpclient import HTTPResponse, HTTPRequest, HTTPError
 from tornado.testing import AsyncHTTPTestCase, AsyncTestCase, AsyncHTTPClient
 import unittest
+from utils.options import options
 from cvutils import imageutils
 
+class ServerPostgresTest(test_utils.neontest.TestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(ServerPostgresTest, self).tearDown()
 
-class TestScheduler(test_utils.neontest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super(ServerPostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        options._set('cmsdb.neondata.wants_postgres', 0) 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(ServerPostgresTest, cls).tearDownClass()
+
+class TestScheduler(ServerPostgresTest):
     '''
     ABcontroller testing. Checking the scheduled events to see if they
     are as expected.
@@ -39,8 +62,6 @@ class TestScheduler(test_utils.neontest.TestCase):
         self.controller = \
           controllers.brightcove_controller.BrightcoveABController()
 
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
 
         self.max_interval = 10
 
@@ -65,7 +86,6 @@ class TestScheduler(test_utils.neontest.TestCase):
             self.max_interval)
         
     def tearDown(self):
-        self.redis.stop()
         super(TestScheduler, self).tearDown()
 
     def get_video_task_map(self):

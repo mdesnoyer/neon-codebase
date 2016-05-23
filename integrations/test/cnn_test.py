@@ -8,7 +8,7 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 from cmsdb import neondata
-from cmsdb.neondata import DBConnection, NeonUserAccount
+from cmsdb.neondata import NeonUserAccount
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
 from cStringIO import StringIO
 from cvutils.imageutils import PILImageUtils
@@ -21,7 +21,6 @@ import random
 import string
 import test_utils.neontest
 import test_utils.postgresql
-import test_utils.redis
 import time
 import tornado.gen
 import tornado.httpclient
@@ -171,7 +170,7 @@ class TestParseFeed(test_utils.neontest.TestCase):
 
 class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
     def setUp(self):
-        super(TestSubmitVideo, self).setUp()
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
         self.submit_mocker = patch(
             'integrations.ovp.OVPIntegration.submit_video')
         self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
@@ -191,23 +190,69 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         self.cnn_api_mocker = patch('api.cnn_api.CNNApi.search')
         self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start())
 
+        # Set up one previously uploaded video
+        search_result = self.create_search_response(1)['docs'][0]
+        ext_video_id = search_result['videoId']
+        ext_thumb_ids = CNNIntegration._extract_image_field(search_result, 'id')
+        int_video_id = neondata.InternalVideoID.generate(
+                self.external_integration.neon_api_key, ext_video_id)
+        int_thumb_ids = ['%s_%s' % (int_video_id, ext_thumb_id) for
+                         ext_thumb_id in ext_thumb_ids]
+        video_meta = VideoMetadata(int_video_id, tids=int_thumb_ids)
+        video_meta.save()
+        thumbs_meta = []
+        i = 0
+        for int_thumb_id in int_thumb_ids:
+            xl_url = search_result['relatedMedia']['media'][i][
+                    'cuts']['exlarge16to9']['url']
+            thumb_meta = ThumbnailMetadata(
+                    int_thumb_id, int_video_id, [xl_url],
+                    ttype=ThumbnailType.DEFAULT, rank=i)
+            thumb_meta.save()
+            thumbs_meta.append(thumb_meta)
+            i += 1
+
+        self.previous_video = {
+            'search_result': search_result,
+            'ext_video_id': ext_video_id,
+            'ext_thumb_ids': ext_thumb_ids,
+            'int_video_id': int_video_id,
+            'int_thumb_ids': int_thumb_ids,
+            'video_meta': video_meta,
+            'thumbs_meta': thumbs_meta
+        }
+        self.external_integration.platform.last_process_date = '2015-10-29T23:59:59Z'
+
+        # Mock out the image download
+        self.im_download_mocker = patch(
+                'cvutils.imageutils.PILImageUtils.download_image')
+        self.random_image = PILImageUtils.create_random_image(480, 640)
+        self.im_download_mock = self._future_wrap_mock(
+            self.im_download_mocker.start())
+        self.im_download_mock.side_effect = [self.random_image]
+        # Mock out the image upload
+        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
+        self.cdn_mock = self._future_wrap_mock(
+            self.cdn_mocker.start().create().upload)
+
     def tearDown(self):
-        self.submit_mocker.stop()
+        self.cdn_mocker.stop()
+        self.im_download_mocker.stop()
         self.cnn_api_mocker.stop()
-        conn = DBConnection.get(VideoMetadata)
-        conn.clear_db()
-        conn = DBConnection.get(ThumbnailMetadata)
-        conn.clear_db()
-        super(TestSubmitVideo, self).tearDown()
+        self.submit_mocker.stop()
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        cls.redis = test_utils.redis.RedisServer()
-        cls.redis.start()
+        options._set('cmsdb.neondata.wants_postgres', 1)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        cls.redis.stop()
+        options._set('cmsdb.neondata.wants_postgres', 0)
+        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_submit_success(self):
@@ -343,94 +388,6 @@ class TestSubmitVideo(test_utils.neontest.AsyncTestCase):
         response['results'] = num_of_results
         response['docs'] = _generate_docs()
         return response
-
-
-class TestSubmitVideoPG(TestSubmitVideo):
-
-    def setUp(self):
-        super(test_utils.neontest.AsyncTestCase, self).setUp()
-        self.submit_mocker = patch(
-            'integrations.ovp.OVPIntegration.submit_video')
-        self.submit_mock = self._future_wrap_mock(self.submit_mocker.start())
-        self.submit_mock.return_value = {"job_id": "job1"}
-
-        user_id = '134234adfs'
-        self.user = NeonUserAccount(user_id, name='testingaccount')
-        self.user.save()
-        self.integration = neondata.CNNIntegration(
-            self.user.neon_api_key,
-            last_process_date='2015-10-29T23:59:59Z',
-            api_key_ref='c2vfn5fb8gubhrmd67x7bmv9')
-        self.integration.save()
-
-        self.external_integration = CNNIntegration(
-            self.user.neon_api_key, self.integration)
-        self.cnn_api_mocker = patch('api.cnn_api.CNNApi.search')
-        self.cnn_api_mock = self._future_wrap_mock(self.cnn_api_mocker.start())
-
-        # Set up one previously uploaded video
-        search_result = self.create_search_response(1)['docs'][0]
-        ext_video_id = search_result['videoId']
-        ext_thumb_ids = CNNIntegration._extract_image_field(search_result, 'id')
-        int_video_id = neondata.InternalVideoID.generate(
-                self.external_integration.neon_api_key, ext_video_id)
-        int_thumb_ids = ['%s_%s' % (int_video_id, ext_thumb_id) for
-                         ext_thumb_id in ext_thumb_ids]
-        video_meta = VideoMetadata(int_video_id, tids=int_thumb_ids)
-        video_meta.save()
-        thumbs_meta = []
-        i = 0
-        for int_thumb_id in int_thumb_ids:
-            xl_url = search_result['relatedMedia']['media'][i][
-                    'cuts']['exlarge16to9']['url']
-            thumb_meta = ThumbnailMetadata(
-                    int_thumb_id, int_video_id, [xl_url],
-                    ttype=ThumbnailType.DEFAULT, rank=i)
-            thumb_meta.save()
-            thumbs_meta.append(thumb_meta)
-            i += 1
-
-        self.previous_video = {
-            'search_result': search_result,
-            'ext_video_id': ext_video_id,
-            'ext_thumb_ids': ext_thumb_ids,
-            'int_video_id': int_video_id,
-            'int_thumb_ids': int_thumb_ids,
-            'video_meta': video_meta,
-            'thumbs_meta': thumbs_meta
-        }
-        self.external_integration.platform.last_process_date = '2015-10-29T23:59:59Z'
-
-        # Mock out the image download
-        self.im_download_mocker = patch(
-                'cvutils.imageutils.PILImageUtils.download_image')
-        self.random_image = PILImageUtils.create_random_image(480, 640)
-        self.im_download_mock = self._future_wrap_mock(
-            self.im_download_mocker.start())
-        self.im_download_mock.side_effect = [self.random_image]
-        # Mock out the image upload
-        self.cdn_mocker = patch('cmsdb.cdnhosting.CDNHosting')
-        self.cdn_mock = self._future_wrap_mock(
-            self.cdn_mocker.start().create().upload)
-
-    def tearDown(self):
-        self.cdn_mocker.stop()
-        self.im_download_mocker.stop()
-        self.cnn_api_mocker.stop()
-        self.submit_mocker.stop()
-        self.postgresql.clear_all_tables()
-        super(test_utils.neontest.AsyncTestCase, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
 
     @tornado.testing.gen_test
     def test_when_default_thumb_changes(self):
