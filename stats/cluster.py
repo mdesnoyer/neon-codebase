@@ -826,7 +826,7 @@ class Cluster():
     def monitor_job_progress_hadoop(self, stdout, budget_time, timeout, main_class, name):
 
         trackURLRe = re.compile(
-            r"Tracking URL: https?://(\S+):[0-9]*/proxy/(\S+)/")
+            r"https?://(\S+):[0-9]*/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
