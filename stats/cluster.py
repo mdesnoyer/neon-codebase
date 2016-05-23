@@ -874,7 +874,7 @@ class Cluster():
         job_state = emrconn.describe_step(self.cluster_id,
                                           step_id).status.state
         if (job_state != 'COMPLETED'):
-            _log.error('EMR job could not be added to Hadoop. It is state %s'
+            _log.error('S3DistCp job could not be added to Hadoop. It is state %s'
                        % job_state)
 
             # Get the logs from the cluster
