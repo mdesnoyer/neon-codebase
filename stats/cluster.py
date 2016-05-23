@@ -314,6 +314,8 @@ class Cluster():
 
         self.monitor_job_progress_emr(step_id, emrconn);
 
+        ssh_conn = ClusterSSHConnection(self)
+
         # Get the stdout from the job being loaded up
         return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
 
@@ -785,12 +787,12 @@ class Cluster():
     def checkpoint_hdfs_to_s3(self, jar_path, hdfs_path_to_copy, s3_path, timeout=None):
         #Does checkpoint of hdfs data from mapreduce output to S3.
 
-
         if timeout is not None:
             budget_time = datetime.datetime.now() + \
               datetime.timedelta(seconds=timeout)
 
         emrconn = boto.emr.EmrConnection()
+        ssh_conn = ClusterSSHConnection(self)
         
         name_step = 'S3DistCp'
 
