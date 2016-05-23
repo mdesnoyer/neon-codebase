@@ -939,5 +939,5 @@ class TestOAuth(test_utils.neontest.AsyncTestCase):
 
 
 if __name__ == '__main__':
-    utils.neon.InitNeon()
-    unittest.main()
+    args = utils.neon.InitNeon()
+    unittest.main(argv=[__name__] + args)
