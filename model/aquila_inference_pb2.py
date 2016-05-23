@@ -19,7 +19,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='aquila_inference.proto',
   package='tensorflow.serving',
   syntax='proto3',
-  serialized_pb=_b('\n\x16\x61quila_inference.proto\x12\x12tensorflow.serving\"\'\n\rAquilaRequest\x12\x16\n\nimage_data\x18\x01 \x03(\x02\x42\x02\x10\x01\"!\n\x0e\x41quilaResponse\x12\x0f\n\x07valence\x18\x01 \x03(\x02\x32\x61\n\rAquilaService\x12P\n\x07Regress\x12!.tensorflow.serving.AquilaRequest\x1a\".tensorflow.serving.AquilaResponseb\x06proto3')
+  serialized_pb=_b('\n\x16\x61quila_inference.proto\x12\x12tensorflow.serving\"#\n\rAquilaRequest\x12\x12\n\nimage_data\x18\x01 \x01(\x0c\"!\n\x0e\x41quilaResponse\x12\x0f\n\x07valence\x18\x01 \x03(\x02\x32\x61\n\rAquilaService\x12P\n\x07Regress\x12!.tensorflow.serving.AquilaRequest\x1a\".tensorflow.serving.AquilaResponseb\x06proto3')
 )
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -35,11 +35,11 @@ _AQUILAREQUEST = _descriptor.Descriptor(
   fields=[
     _descriptor.FieldDescriptor(
       name='image_data', full_name='tensorflow.serving.AquilaRequest.image_data', index=0,
-      number=1, type=2, cpp_type=6, label=3,
-      has_default_value=False, default_value=[],
+      number=1, type=12, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b(""),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
-      options=_descriptor._ParseOptions(descriptor_pb2.FieldOptions(), _b('\020\001'))),
+      options=None),
   ],
   extensions=[
   ],
@@ -53,7 +53,7 @@ _AQUILAREQUEST = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=46,
-  serialized_end=85,
+  serialized_end=81,
 )
 
 
@@ -83,8 +83,8 @@ _AQUILARESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=87,
-  serialized_end=120,
+  serialized_start=83,
+  serialized_end=116,
 )
 
 DESCRIPTOR.message_types_by_name['AquilaRequest'] = _AQUILAREQUEST
@@ -105,23 +105,20 @@ AquilaResponse = _reflection.GeneratedProtocolMessageType('AquilaResponse', (_me
 _sym_db.RegisterMessage(AquilaResponse)
 
 
-_AQUILAREQUEST.fields_by_name['image_data'].has_options = True
-_AQUILAREQUEST.fields_by_name['image_data']._options = _descriptor._ParseOptions(descriptor_pb2.FieldOptions(), _b('\020\001'))
 import abc
 import six
 from grpc.beta import implementations as beta_implementations
+from grpc.beta import interfaces as beta_interfaces
 from grpc.framework.common import cardinality
 from grpc.framework.interfaces.face import utilities as face_utilities
 
-class BetaAquilaServiceServicer(six.with_metaclass(abc.ABCMeta, object)):
+class BetaAquilaServiceServicer(object):
   """<fill me in later!>"""
-  @abc.abstractmethod
   def Regress(self, request, context):
-    raise NotImplementedError()
+    context.code(beta_interfaces.StatusCode.UNIMPLEMENTED)
 
-class BetaAquilaServiceStub(six.with_metaclass(abc.ABCMeta, object)):
+class BetaAquilaServiceStub(object):
   """The interface to which stubs will conform."""
-  @abc.abstractmethod
   def Regress(self, request, timeout):
     raise NotImplementedError()
   Regress.future = None
