@@ -5665,7 +5665,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             "scripts": [
                 "example.js",
                 "another.js",
-                "https://s3.amazonaws.com/neon-cdn-assets/old-version/videojs-neon-tracker.min.js",
+                "https://s3.amazonaws.com/neon-cdn-assets/old-version/videojs-neon-plugin.min.js",
                 "other.js"
             ],
             "skin": "graphite",
