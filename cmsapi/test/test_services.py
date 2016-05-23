@@ -506,8 +506,11 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         
         #set up account and video state for testing
         self.api_key = yield self.create_neon_account()
-        json_video_response = yield self.create_brightcove_account(502)
-        vr = json.loads(json_video_response)
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            json_video_response = yield self.create_brightcove_account(502)
+        self.assertEqual(e.exception.code, 502)
+        response = e.exception.response
+        vr = json.loads(response.body)
         self.assertEqual(vr['error'], 
             "Read token given is incorrect or brightcove api failed")
 
