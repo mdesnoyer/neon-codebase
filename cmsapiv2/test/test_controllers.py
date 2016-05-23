@@ -5934,34 +5934,6 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertEqual(e.exception.code, 404)
 
     @tornado.testing.gen_test
-    def test_install_plugin_patch(self):
-        tracker_id = 12345
-        patch = controllers.BrightcovePlayerHelper._install_plugin_patch(
-            self.tracked_player_config, tracker_id)
-        expect = {
-            'plugins': [
-                {
-                    'name': 'other-plugin-2',
-                    'options': {'flag': False}
-                }, {
-                    'name': 'other-plugin-1',
-                    'options': {'flag': True}
-                }, {
-                    'name': 'neon',
-                    'options': {'publisher': {'id': 12345}}
-                }
-            ],
-            'scripts': [
-                'example.js',
-                'another.js',
-                'other.js',
-                'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
-            ]
-        }
-        self.assertEqual(expect['plugins'], patch['plugins'])
-        self.assertEqual(expect['scripts'], patch['scripts'])
-
-    @tornado.testing.gen_test
     def test_install_patch(self):
 
         config = self.tracked_player_config
@@ -6008,6 +5980,13 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             uninstall,
             controllers.BrightcovePlayerHelper._uninstall_plugin_patch(uninstall))
 
+    def test_uninstall_patch_string_equality(self):
+        '''Ensure that plugins are removed by uninstall '''
+        config = self.tracked_player_config
+        config['plugins'][1]['name'] = 'neo'
+        config['plugins'][1]['name'] += 'n'
+        uninstall = controllers.BrightcovePlayerHelper._uninstall_plugin_patch(config)
+        self.assertFalse(any([p for p in uninstall['plugins'] if p['name'] == 'neon']))
 
 class TestForgotPasswordHandler(TestAuthenticationBase):
     def setUp(self):

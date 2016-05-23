@@ -655,9 +655,9 @@ class BrightcovePlayerHelper():
     def _uninstall_plugin_patch(player_config):
         """Make a patch that removes any Neon plugin js or json"""
         plugins = [plugin for plugin in player_config.get('plugins')
-            if plugin['name'] is not 'neon']
+            if plugin['name'] != 'neon']
         scripts = [script for script in player_config.get('scripts')
-            if script.find('videojs-neon-tracker') is -1]
+            if script.find('videojs-neon-tracker') == -1]
         return {
             'plugins': plugins,
             'scripts': scripts
