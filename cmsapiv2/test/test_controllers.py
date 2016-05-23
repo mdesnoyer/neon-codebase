@@ -5957,6 +5957,7 @@ class TestBrightcovePlayerHandler(TestControllersBase):
             install,
             controllers.BrightcovePlayerHelper._install_plugin_patch(install, 100))
 
+    @tornado.testing.gen_test
     def test_uninstall_patch(self):
         config = self.tracked_player_config
         uninstall = controllers.BrightcovePlayerHelper._uninstall_plugin_patch(config)
@@ -5976,10 +5977,10 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         self.assertNotIn('stylesheets', uninstall, 'Patch skips stylesheets')
 
         # Running it again makes no change
-        self.assertEqual(
-            uninstall,
+        self.assertFalse(
             controllers.BrightcovePlayerHelper._uninstall_plugin_patch(uninstall))
 
+    @tornado.testing.gen_test
     def test_uninstall_patch_string_equality(self):
         '''Ensure that plugins are removed by uninstall '''
         config = self.tracked_player_config
@@ -5987,6 +5988,44 @@ class TestBrightcovePlayerHandler(TestControllersBase):
         config['plugins'][1]['name'] += 'n'
         uninstall = controllers.BrightcovePlayerHelper._uninstall_plugin_patch(config)
         self.assertFalse(any([p for p in uninstall['plugins'] if p['name'] == 'neon']))
+
+    @tornado.testing.gen_test
+    def test_no_publish_patch_not_found(self):
+        '''Ensure no call to publish a player is made if no Neon reference found'''
+
+        # Build a player with no reference to Neon's plugin
+        config = {
+            'scripts': [
+                'https://cdn.google.com/google-analytics.min.js',
+                'https://optimizely.js'
+            ],
+            'plugins': [{
+                'name': 'plugin0',
+                'options': {
+                    'flag': True
+                }
+            }]}
+        player = {
+            'name': 'Name of Player',
+            'branches': {
+                'master': {
+                    'configuration': self.tracked_player_config}}}
+        player['branches']['master']['configuration'].update(config)
+        self.get_player.side_effect = [player]
+        headers = { 'Content-Type':'application/json' }
+        with patch('cmsapiv2.controllers.BrightcovePlayerHelper.publish_player') as _pub:
+            pub = self._future_wrap_mock(_pub)
+            url = '/api/v2/{}/integrations/brightcove/players'.format(self.account_id)
+            yield self.http_client.fetch(
+                self.get_url(url),
+                method='PUT',
+                headers=headers,
+                body=json.dumps({
+                    'player_ref': 'pl0',
+                    'is_tracked': False,
+                    'integration_id': self.integration.integration_id}))
+        self.assertEqual(0, pub.call_count)
+        self.assertFalse(controllers.BrightcovePlayerHelper._uninstall_plugin_patch(config))
 
 class TestForgotPasswordHandler(TestAuthenticationBase):
     def setUp(self):

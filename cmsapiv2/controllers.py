@@ -559,7 +559,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         elif player.is_tracked is False:
             patch = BrightcovePlayerHelper._uninstall_plugin_patch(
                 bc_player_config)
-            yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+            if patch:
+                yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
@@ -629,7 +630,7 @@ class BrightcovePlayerHelper():
         to set any subset of fields. For our goal, the "plugins" field is a list
         that will be changed to a json payload that includes the Neon account id
         for tracking. The "scripts" field is a list of urls that includes our
-        our minified javascript tracker url.
+        our minified javascript plugin url.
 
         Grabs the current values of the lists to change, removes any Neon info,
         then addends the Neon js url and json values with current ones.
@@ -641,12 +642,11 @@ class BrightcovePlayerHelper():
 
         # Remove Neon plugins from the config
         patch = BrightcovePlayerHelper._uninstall_plugin_patch(player_config)
+        patch = patch if patch else {'scripts': [], 'plugins': []}
 
-        # Remove any plugin named neon, and append the current one
+        # Append the current plugin
         patch['plugins'].append(BrightcovePlayerHelper._get_current_tracking_json(
             tracker_account_id))
-
-        # Remove any script like *neon-tracker*, and append the current
         patch['scripts'].append(BrightcovePlayerHelper._get_current_tracking_url())
 
         return patch
@@ -657,7 +657,13 @@ class BrightcovePlayerHelper():
         plugins = [plugin for plugin in player_config.get('plugins')
             if plugin['name'] != 'neon']
         scripts = [script for script in player_config.get('scripts')
-            if script.find('videojs-neon-tracker') == -1]
+            if script.find('videojs-neon-') == -1]
+
+        # If nothing changed, signal to caller no need to patch.
+        if(len(plugins) == len(player_config['plugins']) and
+                len(scripts) == len(player_config['scripts'])):
+            return False
+
         return {
             'plugins': plugins,
             'scripts': scripts
@@ -671,7 +677,7 @@ class BrightcovePlayerHelper():
     @staticmethod
     def _get_current_tracking_url():
         """Get the url of the current tracking plugin"""
-        return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
+        return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-plugin.min.js'
 
     @staticmethod
     def _get_current_tracking_json(tracker_account_id):
