@@ -312,7 +312,7 @@ class Cluster():
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
 
-        self.monitor_job_progress_emr(step_id);
+        self.monitor_job_progress_emr(step_id, emrconn);
 
         # Get the stdout from the job being loaded up
         return self.get_emr_logfile(ssh_conn, step_id, 'stdout')
@@ -922,14 +922,12 @@ class Cluster():
                     raise
                 time.sleep(30)
 
-    def monitor_job_progress_emr(self, step_id):
+    def monitor_job_progress_emr(self, step_id, emrconn):
 
         _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
                   step_id)
 
         ssh_conn = ClusterSSHConnection(self)
-
-        emrconn = EmrConnection()
 
         # Wait until it is "done". When it is "done" it has actually
         # only sucessfully loaded the job into the resource manager
