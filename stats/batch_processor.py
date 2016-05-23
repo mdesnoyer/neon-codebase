@@ -502,7 +502,7 @@ def cleanup_hdfs(cluster, current_hdfs_dir_time, hdfs_dir):
     # Cleans up all other HDFS directories except the current one. Access the Namenode using the https
     # HDFS client. Check for existence of directory and delete the old ones recursively.
 
-    http_string = 'http://%s:9101' % cluster.master_ip
+    http_string = 'http://%s:9000' % cluster.master_ip
 
     hdfs_conn = InsecureClient(http_string, user='hadoop')
 
