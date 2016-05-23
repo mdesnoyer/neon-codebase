@@ -887,7 +887,7 @@ class Cluster():
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
         
-        stdout = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+        stdout = self.get_emr_logfile(ssh_conn, step_id, 'syslg')
 
         self.monitor_job_progress(stdout, 
                                   budget_time,
