@@ -836,7 +836,7 @@ class Cluster():
         application_id = url_parse.group(2)
         host = url_parse.group(1)
 
-        if name == 'Raw Tracker Data Cleaning job':
+        if name == 'Raw Tracker Data Cleaning':
             job_id_parse = jobidRe.search(stdout)
         else:
             job_id_parse = jobidRe_s3distcp.search(stdout)
