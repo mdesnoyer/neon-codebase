@@ -828,6 +828,7 @@ class Cluster():
         trackURLRe = re.compile(
             r"https?://(\S+):[0-9]*/proxy/(\S+)/")
         jobidRe = re.compile(r"Job ID: (\S+)")
+        jobidRe_s3distcp = re.compile(r"Running job: (\S+)")
         url_parse = trackURLRe.search(stdout)
         if not url_parse:
             raise MapReduceError(
@@ -835,7 +836,11 @@ class Cluster():
         application_id = url_parse.group(2)
         host = url_parse.group(1)
 
-        job_id_parse = jobidRe.search(stdout)
+        if name == 'Raw Tracker Data Cleaning job':
+            job_id_parse = jobidRe.search(stdout)
+        else:
+            job_id_parse = jobidRe_s3distcp.search(stdout)
+
         if not job_id_parse:
             raise MapReduceError(
                 "Could not find the job id. Stdout was: \n%s" % stdout)
