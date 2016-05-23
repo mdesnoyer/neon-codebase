@@ -93,6 +93,12 @@ from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
 define('video_server', default="localhost:8081", type=str,
        help="host:port of the video processing server")
+define('model_server_port', default=9000, type=int,
+       help="the port currently being used by model servers")
+define('request_concurrency', default=22, type=int,
+       help=("the maximum number of concurrent scoring requests to"
+             " make at a time. Should be less than or equal to the"
+             " server batch size."))
 define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
@@ -879,12 +885,29 @@ class VideoClient(multiprocessing.Process):
 
     def load_model(self):
         ''' load model '''
-        parts = self.model_file.split('/')[-1]
-        version = parts.split('.model')[0]
-        self.model_version = version
-        _log.info('Loading model from %s version %s'
-                  % (self.model_file, self.model_version))
-        self.model = model.load_model(self.model_file)
+        _log.info('Generating predictor instance')
+        # TODO (nick): Make sure you get rid of this eventually.
+        # TODO (mark): Maybe you should replace it when you create the actual
+        #              connection object?
+        class AquilaConnectionMock():
+          def __init__(self):
+            '''Mocks the aquila connection object.'''
+            pass
+          # note: this may need to be a static method?
+          def get_ip(self, force_refresh=False):
+            return '10.0.66.209'
+
+        aq_con = AquilaConnectionMock()
+        predictor = predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aq_con)
+        # TODO (nick): Figure out how to get the aquila server to relay the
+        # model version to the local model.
+        self.model_version = 'Not Available'
+        # note, the model file is no longer a complete model, but is instead
+        # an input dictionary for local search.
+        self.model = model.generate_model(self.model_file, predictor)
         if not self.model:
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
