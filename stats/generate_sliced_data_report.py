@@ -115,7 +115,7 @@ def get_key_timepoints(video, video_status, thumb_statuses, thumb_info):
     if vid_date is None:
         # Get it from the request object
         request = neondata.NeonApiRequest.get(video.job_id,
-                                              video.get_account_id)
+                                              video.get_account_id())
         vid_date = request.publish_date
     if vid_date and vid_date < '2015-11-20':
         return estimate_key_timepoints_from_data(video.key, thumb_info)
