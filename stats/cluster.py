@@ -929,6 +929,8 @@ class Cluster():
 
         ssh_conn = ClusterSSHConnection(self)
 
+        emrconn = EmrConnection()
+
         # Wait until it is "done". When it is "done" it has actually
         # only sucessfully loaded the job into the resource manager
         wait_count = 0
