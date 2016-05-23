@@ -425,7 +425,7 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
                                           s3_output_path,
                                           timeout=timeout)
         else:
-            _log.error('Incorrect s3 path, the copy step has been skipped')
+            _log.error('Incorrect s3 path, the S3 copy step has been skipped')
     except Exception as e:
         _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
