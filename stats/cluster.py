@@ -847,7 +847,7 @@ class Cluster():
         jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
-        _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
+        _log.info('S3DistCp Job id is %s. Waiting for it to be sent to Hadoop' %
                   step_id)
 
         ssh_conn = ClusterSSHConnection(self)
@@ -887,7 +887,7 @@ class Cluster():
             raise MapReduceError('Error loading job into Hadoop. '
                                  'See earlier logs for job logs')
         
-        stdout = self.get_emr_logfile(ssh_conn, step_id, 'stdout')
+        stdout = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
 
         self.monitor_job_progress(stdout, 
                                   budget_time,
