@@ -284,51 +284,15 @@ class DeepnetPredictor(Predictor):
         #   channels?
         self.channel = implementations.insecure_channel(host, self.port)
         # register callback
-        self.channel.subscribe(self._init_check, try_to_connect=True)
+        self.channel.subscribe(self._check_conn, try_to_connect=True)
         self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
             self.channel)
 
-    def _init_check(self, status=None):
+    def _check_conn(self, status):
         '''
-        Serves as the callback to a channel when it is under
-        construction / connecting. Once the channel reaches a
-        ready state for the first time, it unsubscribes itself
-        and subscribes the regular check. It is necessary to
-        verify that a server can be connected to.
-
-        This function is the _only_ function that can authorize
-        requests to begin, which it does by setting the _ready
-        event.
+        Callback for checking the connection, subsumes the dual callbacks
+        we had before.
         '''
-        if self._ready.is_set():
-            # this should be called, the connection has already
-            # been verified. So do nothing for now.
-            return
-        if status is ChannelConnectivity.READY:
-            _log.debug('Server has been reached')
-            self.channel.unsubscribe(self._init_check)
-            self.channel.subscribe(self._check_conn)
-            self._ready.set()
-            _log.debug('Ready event is set.')
-        elif (status is ChannelConnectivity.TRANSIENT_FAILURE or
-            status is ChannelConnectivity.FATAL_FAILURE):
-            # remove yourself from the subscribed functions so you don't
-            # get called a shitton of times.
-            self.channel.unsubscribe(self._init_check)
-            statemon.state.increment('unable_to_connect')
-            _log.debug('Error connecting to server, trying new server')
-            # attempt to connect again -- this will re-add you to the
-            # subscribed functions.
-            self._connect(force_refresh=True)
-
-    def _check_conn(self, status=None):
-        '''
-        Checks the connection, as a callback.
-        '''
-        if not self._ready.is_set():
-            # you should be unsubscribed, te connection isn't
-            # even verified yet! so just be patient.
-            return
         if (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
             # the connection has been lost
@@ -338,8 +302,12 @@ class DeepnetPredictor(Predictor):
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
             self._connect(force_refresh=True)
-        else:
-            _log.debug('Connection status is %s' % str(status))
+        elif self._ready.is_set():
+            pass
+        elif status is ChannelConnectivity.READY:
+            _log.debug('Server has been reached')
+            self._ready.set()
+            _log.debug('Ready event is set.')
 
     def _predictasync(self, image, timeout=10.0):
         '''
