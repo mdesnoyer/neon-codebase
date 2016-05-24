@@ -28,7 +28,6 @@ import mastermind.core
 from mock import MagicMock, patch
 import mock
 import re
-import redis
 import sqlite3
 import stats.db
 from StringIO import StringIO
@@ -36,7 +35,6 @@ import struct
 import socket
 import test_utils.mock_boto_s3
 import test_utils.neontest
-import test_utils.redis
 import test_utils.postgresql 
 import thrift.Thrift
 import time
@@ -50,15 +48,51 @@ from utils import statemon
 STAGING = neondata.TrackerAccountIDMapper.STAGING
 PROD = neondata.TrackerAccountIDMapper.PRODUCTION
 
+class ServerPostgresTest(test_utils.neontest.TestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(ServerPostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(ServerPostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(ServerPostgresTest, cls).tearDownClass()
+ 
+class ServerAsyncPostgresTest(test_utils.neontest.AsyncTestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(ServerAsyncPostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(ServerAsyncPostgresTest, cls).tearDownClass() 
+
 @patch('mastermind.server.neondata')
-class TestVideoDBWatcher(test_utils.neontest.TestCase):
+class TestVideoDBWatcher(ServerPostgresTest):
     def setUp(self):
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_patcher.start()
-        
-        # Mock out the callback sending
         self.callback_patcher = patch('cmsdb.neondata.utils.http')
         self.callback_patcher.start()
         
@@ -76,7 +110,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
         self.callback_patcher.stop()
 
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
@@ -307,13 +340,6 @@ class TestVideoDBWatcher(test_utils.neontest.TestCase):
                          (160, 90))
         self.assertEqual(self.directive_publisher.default_sizes['acct3'],
                          (640, 480))
-
-    def test_connection_error(self, datamock):
-        datamock.NeonUserAccount.iterate_all.side_effect = \
-          [redis.ConnectionError]
-
-        with self.assertRaises(redis.ConnectionError):
-            self.watcher._process_db_data(True)
 
     @patch('cmsdb.neondata.NeonUserAccount.get_internal_video_ids')
     def test_video_metadata_missing(self, get_internal_vids_mock, datamock):
@@ -599,14 +625,12 @@ class TestVideoDBPushUpdatesPG(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         super(TestVideoDBPushUpdatesPG, cls).setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
         super(TestVideoDBPushUpdatesPG, cls).tearDownClass()
 
@@ -893,7 +917,6 @@ class TestStatsDBWatcher(test_utils.neontest.TestCase):
         self.neondata_patcher.stop()
         self.cluster_patcher.stop()
         self.hbase_patcher.stop()
-        neondata.DBConnection.clear_singleton_instance()
         self.sqlite_connect_patcher.stop()
 
         try:
@@ -1736,7 +1759,7 @@ class TestDirectivePublisher(test_utils.neontest.AsyncTestCase):
           self._parse_directive_file(
             bucket.get_key('mastermind').get_contents_as_string())
 
-class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
+class TestPublisherStatusUpdatesInDB(ServerAsyncPostgresTest):
     '''Tests for updates to the database when directives are published.'''
     def setUp(self):
         super(TestPublisherStatusUpdatesInDB, self).setUp()
@@ -1778,8 +1801,6 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
 
         # Start a database
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
 
         # setup neonuser account with apikey = 'acct1'
         self.acc = neondata.NeonUserAccount('myacctid', 
@@ -1840,7 +1861,6 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         options._set('mastermind.server.serving_update_delay',
                      self.old_serving_update_delay)
         self._wait_for_db_updates()
-        self.redis.stop()
         super(TestPublisherStatusUpdatesInDB, self).tearDown()
 
     def _wait_for_db_updates(self):
@@ -2144,124 +2164,9 @@ class TestPublisherStatusUpdatesInDB(test_utils.neontest.AsyncTestCase):
         self.assertIsNotNone(neondata.VideoMetadata.get(
             'acct1_vid1').serving_url)
 
-# TODO delete/replace other class once hotswap is done
-class TestPublisherStatusUpdatesInDBPG(TestPublisherStatusUpdatesInDB):
-    '''Tests for updates to the database when directives are published.'''
+class SmokeTesting(ServerAsyncPostgresTest):
     def setUp(self):
-        super(TestPublisherStatusUpdatesInDB, self).setUp()
-
-        statemon.state._reset_values()
-
-        # Mock out http connections
-        self.http_patcher = patch('cmsdb.neondata.utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(self.http_patcher.start(),
-                                                require_async_kw=True)
-        self.callback_mock = MagicMock()
-        self.isp_mock = MagicMock()
-        def _handle_http(x, **kw):
-            if '/v1/video?' in x.url:
-                return self.isp_mock(x, **kw)
-            else:
-                return self.callback_mock(x, **kw)
-        self.http_mock.side_effect = _handle_http
-
-        self.callback_mock.side_effect = \
-          lambda x, **kw: tornado.httpclient.HTTPResponse(x, 200)
-
-        self.isp_mock.side_effect = \
-          lambda x, **kw: tornado.httpclient.HTTPResponse(
-              x, 200, effective_url='http://somewhere.com/neontnvid.jpg')
-
-        # Mock out the connection to S3
-        self.s3_patcher = patch('mastermind.server.S3Connection')
-        self.s3conn = test_utils.mock_boto_s3.MockConnection()
-        self.s3_patcher.start().return_value = self.s3conn
-        self.s3conn.create_bucket('neon-image-serving-directives-test')
-
-        # Insert a fake filesystem
-        self.filesystem = fake_filesystem.FakeFilesystem()
-        self.real_tempfile = mastermind.server.tempfile
-        mastermind.server.tempfile = fake_tempfile.FakeTempfileModule(
-            self.filesystem)
-        self.real_os = mastermind.server.os
-        mastermind.server.os = fake_filesystem.FakeOsModule(self.filesystem)
-
-        # setup neonuser account with apikey = 'acct1'
-        self.acc = neondata.NeonUserAccount('myacctid', 
-            'acct1', 
-            serving_enabled=True)
-        self.acc.save()
-
-        # Initialize the data in the database that we actually need
-        neondata.VideoMetadata(
-            'acct1_vid1',
-            tids=['acct1_vid1_tid11', 'acct1_vid1_tid12'],
-            request_id='job1',
-            i_id='int1').save()
-
-        request = neondata.BrightcoveApiRequest(
-            'job1', 'acct1', 'vid1',
-            http_callback='http://callback.com')
-        request.state = neondata.RequestState.FINISHED
-        request.response = { 'video_id' : 'vid1' }
-        request.save()
-
-        self.old_serving_update_delay = options.get(
-            'mastermind.server.serving_update_delay')
-        options._set('mastermind.server.serving_update_delay', 0)
-
-        # Create the publisher
-        self.mastermind = mastermind.core.Mastermind()
-        self.publisher = mastermind.server.DirectivePublisher(
-            self.mastermind)
-
-        # Set the state of the publisher and the mastermind core
-        self.mastermind.serving_directive = {
-            'acct1_vid1': (('acct1', 'acct1_vid1'), 
-                           [('tid11', 0.1),
-                            ('tid12', 0.9)])}
-        self.mastermind.video_info = self.mastermind.serving_directive
-        self.publisher.update_tracker_id_map({
-            'tai1' : 'acct1'})
-        self.publisher.add_serving_urls(
-            'acct1_vid1_tid11',
-            neondata.ThumbnailServingURLs('acct1_vid1_tid11',
-                                          base_url = 'http://first_tids.com',
-                                          sizes=[(640, 480), (160,90)]))
-        self.publisher.add_serving_urls(
-            'acct1_vid1_tid12',
-            neondata.ThumbnailServingURLs(
-                'acct1_vid1_tid12',
-                size_map = { (800, 600): 't12_800.jpg',
-                             (160, 90): 't12_160.jpg'}))
-
-        logging.getLogger('mastermind.server').reset_sample_counters()
-
-    def tearDown(self):
-        self.http_patcher.stop()
-        mastermind.server.tempfile = self.real_tempfile
-        mastermind.server.os = self.real_os
-        self.s3_patcher.stop()
-        options._set('mastermind.server.serving_update_delay',
-                     self.old_serving_update_delay)
-        self._wait_for_db_updates()
-        self.postgresql.clear_all_tables()
-        super(TestPublisherStatusUpdatesInDB, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
-
-class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
-    def setUp(self):
-        super(SmokeTestingPG, self).setUp()
+        super(SmokeTesting, self).setUp()
         # Mock out the connection to S3
         self.s3_patcher = patch('mastermind.server.S3Connection')
         self.s3conn = test_utils.mock_boto_s3.MockConnection()
@@ -2365,7 +2270,6 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
             self.mastermind, activity_watcher=self.activity_watcher)
 
     def tearDown(self):
-        neondata.DBConnection.clear_singleton_instance()
         mastermind.server.tempfile = self.real_tempfile
         mastermind.server.os = self.real_os
         self.hbase_patcher.stop()
@@ -2397,20 +2301,7 @@ class SmokeTestingPG(test_utils.neontest.AsyncTestCase):
         self.video_watcher.__del__()
         self.directive_publisher.join(2)
         self.stats_watcher.join(2)
-        super(SmokeTestingPG, self).tearDown()
-
-    @classmethod
-    def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
-        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
-        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        super(SmokeTestingPG, cls).setUpClass()
-
-    @classmethod
-    def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
-        cls.postgresql.stop()
-        super(SmokeTestingPG, cls).tearDownClass()
+        super(SmokeTesting, self).tearDown()
 
     def _add_hbase_entry(self, timestamp, thumb_id, il=None, iv=None, ic=None,
                          vp=None):
