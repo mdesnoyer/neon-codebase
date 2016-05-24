@@ -4500,8 +4500,48 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.verify_account_mocker.stop()  
         super(TestVideoSearchExternalHandler, self).tearDown()
 
-    
-    @tornado.testing.gen_test 
+    @tornado.testing.gen_test
+    def test_title_param(self):
+
+        neondata.VideoMetadata('u0_v0', request_id='j0').save()
+        neondata.NeonApiRequest('j0', title='Title title0 title')
+        neondata.VideoMetadata('u1_v1', request_id='j1').save()
+        neondata.NeonApiRequest('j1', title='Title title1 title')
+        neondata.VideoMetadata('u2_v2', request_id='j2').save()
+        neondata.NeonApiRequest('j2', title='Another title0 title')
+
+        url = '/api/v2/u0/videos/search?fields=video_id,title&query={}'.format(
+            'title0')
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = rjson.loads(response.body)
+        self.assertEqual(1, 2)
+
+
+    @tornado.testing.gen_test
+    def test_since_and_until_param(self):
+
+        # Add a number of videos and get the time at third's creation
+        for i in range(6):
+            c = str(i)
+            neondata.VideoMetadata('u0_v' + c, request_id='j' + c).save()
+            neondata.NeonApiRequest('j' + c, 'u0').save()
+            if i == 3:
+                video = neondata.VideoMetadata.get('u0_v' + c)
+                time_param = dateutil.parser.parse(video.created).strftime('%s.%f')
+
+        url = '/api/v2/u0/videos/search?fields=video_id,created&since={}'.format(
+            time_param)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEqual(2, len(rjson['videos']), 'Two videos after timestamp')
+
+        url = '/api/v2/u0/videos/search?fields=video_id,created&until={}'.format(
+            time_param)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEqual(3, len(rjson['videos']), 'Three videos before timestamp')
+
+    @tornado.testing.gen_test
     def test_search_base(self):
         video = neondata.VideoMetadata('kevin_vid1', request_id='job1')
         yield video.save(async=True)   
