@@ -662,7 +662,7 @@ class BrightcovePlayerHelper():
         # If nothing changed, signal to caller no need to patch.
         if(len(plugins) == len(player_config['plugins']) and
                 len(scripts) == len(player_config['scripts'])):
-            return False
+            return None
 
         return {
             'plugins': plugins,
