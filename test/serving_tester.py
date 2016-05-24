@@ -45,7 +45,6 @@ from StringIO import StringIO
 import subprocess
 import tempfile
 import test_utils.net
-import test_utils.redis
 import time
 import tornado.httpclient
 import tornado.httpserver
@@ -86,7 +85,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
     @classmethod
     def setUpClass(cls):
         random.seed()
-        cls.redis = test_utils.redis.RedisServer()
 
         # Setup randomed parameters so that this run doesn't conflict
         cls.s3disk = tempfile.mkdtemp()
@@ -97,7 +95,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         with open(base_conf_path) as conf_stream:
             params = yaml.load(conf_stream)
 
-            params['cmsdb']['neondata']['dbPort'] = cls.redis.port
             params['cmsapi']['services']['port'] = \
               test_utils.net.find_free_port()
             params['mastermind']['server']['port'] = \
@@ -141,8 +138,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
         logging.getLogger('mrjob.runner').propagate = False
         logging.getLogger('mrjob.sim').propagate = False
 
-        cls.redis.start()
-
         LaunchStatsDb()
         LaunchMastermind()
         LaunchClickLogServer()
@@ -167,7 +162,6 @@ class TestServingSystem(tornado.testing.AsyncTestCase):
                 os.kill(cls._directive_cap.pid, signal.SIGKILL)
             except OSError,e:
                 print "Teardownclass error killing %s" %e
-        cls.redis.stop()
         utils.ps.shutdown_children()
         ClearStatsDb()
         cls.config_file.close()
