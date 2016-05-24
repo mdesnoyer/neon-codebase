@@ -1295,14 +1295,17 @@ class VideoHelper(object):
                          account_id,
                          since=since,
                          until=until,
-                         limit=limit)
+                         limit=limit,
+                         query=query)
 
         videos = search_res['videos']
+        requests = search_res['requests']
         since_time = search_res['since_time']
         until_time = search_res['until_time']
         vid_dict = yield VideoHelper.build_video_dict(
                        videos,
-                       fields)
+                       fields,
+                       requests=requests)
 
         next_page_url = VideoHelper.build_page_url(
             base_url,
@@ -1330,7 +1333,8 @@ class VideoHelper(object):
     @tornado.gen.coroutine
     def build_video_dict(videos,
                          fields,
-                         video_ids=None):
+                         video_ids=None,
+                         requests=None):
         vid_dict = {}
         vid_dict['videos'] = None
         vid_dict['video_count'] = 0
@@ -1342,7 +1346,8 @@ class VideoHelper(object):
             job_ids = [(v.job_id, v.get_account_id())
                           for v in videos]
 
-            requests = yield neondata.NeonApiRequest.get_many(
+            requests = requests if requests else \
+                    yield neondata.NeonApiRequest.get_many(
                            job_ids,
                            async=True)
             for video, request in zip(videos, requests):
