@@ -514,7 +514,7 @@ class TestPlayerAPIIntegration(test_utils.neontest.AsyncTestCase):
         # Confirm that the preview config is altered, master is unchanged
         patched_player = yield api.get_player(self.player_id)
         self.assertEqual(orig_autoplay, patched_player['branches']['master']['configuration']['autoplay'])
-        # self.assertEqual(new_autoplay, patched_player['branches']['preview']['configuration']['autoplay'])
+        self.assertEqual(new_autoplay, patched_player['branches']['preview']['configuration']['autoplay'])
 
         # Publish the player and check the master value for autoplay
         yield api.publish_player(self.player_id)
