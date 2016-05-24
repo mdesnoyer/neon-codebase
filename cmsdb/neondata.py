@@ -2316,16 +2316,17 @@ class StoredObject(object):
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
 
-    @classmethod 
+    @classmethod
     @tornado.gen.coroutine
-    def get_and_execute_select_query(cls, 
-                                     fields, 
+    def get_and_execute_select_query(cls,
+                                     fields,
                                      where_clause=None,
-                                     table_name=None, 
+                                     table_name=None,
+                                     join_clause=None,
                                      wc_params=[],
                                      limit_clause=None,
-                                     order_clause=None, 
-                                     group_clause=None,  
+                                     order_clause=None,
+                                     group_clause=None,
                                      cursor_factory=psycopg2.extensions.cursor): 
         ''' helper function to build up a select query
 
@@ -2360,6 +2361,9 @@ class StoredObject(object):
         csl_fields = ",".join("{0}".format(f) for f in fields) 
         query = "SELECT " + csl_fields + \
                 " FROM " + table_name
+
+        if join_clause:
+            query += " JOIN " + join_clause
         
         if where_clause:
             query += " WHERE " + where_clause
@@ -6225,7 +6229,8 @@ class VideoMetadata(StoredObject):
                       account_id=None, 
                       since=None,
                       until=None, 
-                      limit=25):
+                      limit=25,
+                      query=None):
 
         """Does a basic search over the videometadatas in the DB 
 
@@ -6239,6 +6244,8 @@ class VideoMetadata(StoredObject):
                         defaults to None
            limit      : if specified it limits the search to this many 
                         videos, defaults to 25
+           query      : a title search string that ANDs words
+                        @TODO add features to this if needed
 
            Returns : a dictionary of the following 
                videos - the videos that the search returned 
@@ -6248,6 +6255,7 @@ class VideoMetadata(StoredObject):
         """ 
         where_clause = "" 
         videos = []
+        requests = []
         since_time = None 
         until_time = None  
         wc_params = []
@@ -6255,6 +6263,7 @@ class VideoMetadata(StoredObject):
         
         where_clause = "_data->'job_id' != 'null'"
         order_clause = "ORDER BY created_time DESC" 
+        join_clause = None
         if since: 
             if where_clause: 
                 where_clause += " AND "
@@ -6274,49 +6283,77 @@ class VideoMetadata(StoredObject):
                 where_clause += " AND "
             where_clause += " _data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
- 
+
+        columns = ["v._data",
+                   "v._type",
+                   "v.created_time AS v.created_time_pg",
+                   "v.updated_time AS v.updated_time_pg"]
+
+        # Join request to query searches on video title.
+        if query is not None:
+            join_clause = " JOIN request AS r ON v._data->>'job_id' == r._data->>'job_id'"
+            columns.extend([
+                   "r._data",
+                   "r._type",
+                   "r.created_time AS r.created_time_pg",
+                   "r.updated_time AS r.updated_time_pg"])
+
+            if where_clause:
+                where_clause += " AND "
+            where_clause += " r._data->>'video_title' LIKE %s'"
+            wc_params.append('%' + query + '%')
+
         results = yield cls.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg" ], 
-                    where_clause, 
-                    wc_params=wc_params, 
-                    limit_clause="LIMIT %d" % limit, 
+                    columns,
+                    where_clause,
+                    table_name="videometadata AS v"
+                    wc_params=wc_params,
+                    limit_clause="LIMIT %d" % limit,
      		    order_clause=order_clause,
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
-        def _get_time(result): 
-            # need micros here 
+        def _get_time(result):
+            # need micros here
             created_time = result['created_time_pg']
             cc_tt = time.mktime(created_time.timetuple())
             _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time 
-        
-        try:   
-            do_reverse = False 
-            if since: 
+            return _time
+
+        try:
+            do_reverse = False
+            if since:
                 since_time = _get_time(results[-1])
                 until_time = _get_time(results[0])
                 do_reverse = True
-            else:  
-                since_time = _get_time(results[0]) 
-                until_time = _get_time(results[-1]) 
-        except (KeyError,IndexError): 
+            else:
+                since_time = _get_time(results[0])
+                until_time = _get_time(results[-1])
+        except (KeyError,IndexError):
             pass
-        
+
         for result in results:
-            obj = cls._create(result['_data']['key'], result)
-            videos.append(obj)
+            # Split the columns out for each class by alias.
+            vid_result = {k: v for (k, v) in result.items() if k[0] == 'v'}
+            req_result = {k: v for (k, v) in result.items() if k[0] == 'r'}
+            video = cls._create(result['v._data']['key'], vid_result)
+            videos.append(video)
+            # Conditionally create a request object if the table was joined.
+            if req_result:
+                request = NeonApiRequest._create(
+                    result['r._data']['key'],
+                    req_result)
+                requests.append(request)
 
-        if do_reverse: 
-            videos.reverse() 
+        if do_reverse:
+            videos.reverse()
+            requests.reverse()
 
-        rv['videos'] = videos 
+        rv['videos'] = videos
+        rv['requests'] = requests
         rv['since_time'] = since_time
         rv['until_time'] = until_time
-        raise tornado.gen.Return(rv) 
-         
+        raise tornado.gen.Return(rv)
+
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 
