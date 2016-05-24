@@ -42,7 +42,6 @@ if __name__ == '__main__':
     # Set the options for connecting to the db
     options._set('cmsdb.neondata.db_address', host)
     options._set('cmsdb.neondata.db_port', port)
-    options._set('cmsdb.neondata.wants_postgres', 1)
 
     if options.write:
         user_var = 'CMSDB_WRITE_USER'
