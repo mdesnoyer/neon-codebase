@@ -65,7 +65,7 @@ from utils.options import define, options
 import utils.ps
 from utils import statemon
 import video_processor.client
-from video_processor import video_processing_queue
+import video_processor.video_processing_queue
 from video_processor.client import VideoClient, VideoProcessor
 import youtube_dl
 
@@ -1392,9 +1392,9 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.http_mocker.stop()
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
-        self.model_patcher.stop()
-        self.postgresql.clear_all_tables() 
+        self.model_patcher.stop() 
         self.job_queue_patcher.stop()
+        self.postgresql.clear_all_tables()
         super(SmokeTest, self).tearDown()
 
     @classmethod

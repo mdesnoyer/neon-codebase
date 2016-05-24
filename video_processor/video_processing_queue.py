@@ -1,7 +1,6 @@
 import boto
 import boto.exception
 import boto.sqs
-import boto.sqs.queue
 from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
 from collections import deque

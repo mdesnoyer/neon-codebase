@@ -119,11 +119,14 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
 
         self.assertEqual(message, "test")
 
-        rmes = yield self.q.read_message()
+        for i in range(10):
+            rmes = yield self.q.read_message()
 
-        self.assertIsNone(self.q.get_duration(rmes))
+            if rmes is not None:
+                self.assertIsNone(self.q.get_duration(rmes))
+                return
+        self.fail('Never got a message from the Q')
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
     unittest.main()
-    tornado.ioloop.IOLoop.current().start()
