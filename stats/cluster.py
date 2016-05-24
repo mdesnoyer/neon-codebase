@@ -312,7 +312,7 @@ class Cluster():
         res = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = res.stepids[0].value
 
-        self.monitor_job_progress_emr(step_id, emrconn);
+        self.monitor_job_progress_emr(step_id, emrconn, name='Raw Tracker Data Cleaning');
 
         ssh_conn = ClusterSSHConnection(self)
 
@@ -724,8 +724,7 @@ class Cluster():
         #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-b0d884c7'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
@@ -813,7 +812,7 @@ class Cluster():
         jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
-        self.monitor_job_progress_emr(step_id, emrconn)
+        self.monitor_job_progress_emr(step_id, emrconn, name_step)
         
         # The tracking URL for S3DistCp is going to syslog, so grab it from there
         syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
@@ -930,7 +929,7 @@ class Cluster():
                     raise
                 time.sleep(30)
 
-    def monitor_job_progress_emr(self, step_id, emrconn):
+    def monitor_job_progress_emr(self, step_id, emrconn, name):
 
         _log.info('EMR Job id is %s. Waiting for it to be sent to Hadoop' %
                   step_id)
@@ -939,22 +938,30 @@ class Cluster():
 
         # Wait until it is "done". When it is "done" it has actually
         # only sucessfully loaded the job into the resource manager
-        wait_count = 0
-        while (emrconn.describe_step(self.cluster_id, step_id).status.state in
-               ['PENDING', 'RUNNING']):
-            if wait_count > 80:
-                _log.error('Timeout when waiting for EMR to send the job %s '
-                           'to Haddop' % step_id)
-                _log.error('stderr was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
-                _log.error('stdout was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
-                _log.error('syslog was:\n %s' %
-                       self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
-                raise MapReduceError('Timeout when waiting for EMR to send '
-                                     'job %s to Hadoop' % step_id)
-            time.sleep(15.0)
-            wait_count += 1
+        # For S3 Copy, the step will be running till mapreduce job completes
+        # so keep polling till then
+
+        if name == 'S3DistCp':
+            while (emrconn.describe_step(self.cluster_id, step_id).status.state in
+                   ['PENDING', 'RUNNING']):
+                time.sleep(180)
+        else:
+            wait_count = 0
+            while (emrconn.describe_step(self.cluster_id, step_id).status.state in
+                   ['PENDING', 'RUNNING']):
+                if wait_count > 80:
+                    _log.error('Timeout when waiting for EMR to send the job %s '
+                               'to Haddop' % step_id)
+                    _log.error('stderr was:\n %s' %
+                               self.get_emr_logfile(ssh_conn, step_id, 'stderr'))
+                    _log.error('stdout was:\n %s' %
+                               self.get_emr_logfile(ssh_conn, step_id, 'stdout'))
+                    _log.error('syslog was:\n %s' %
+                               self.get_emr_logfile(ssh_conn, step_id, 'syslog'))
+                    raise MapReduceError('Timeout when waiting for EMR to send '
+                                         'job %s to Hadoop' % step_id)
+                time.sleep(15.0)
+                wait_count += 1
 
         job_state = emrconn.describe_step(self.cluster_id,
                                           step_id).status.state
