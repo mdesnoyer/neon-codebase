@@ -47,8 +47,6 @@ from PIL import Image
 import queries 
 import random
 import re
-import redis as blockingRedis
-import redis.exceptions
 import select
 import socket
 import string
