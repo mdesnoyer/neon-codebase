@@ -169,9 +169,9 @@ class ImpalaTableBuilder(threading.Thread):
             # memory, so make sure we give the job enough.
             hive.execute("SET mapreduce.reduce.memory.mb=16000")
             hive.execute(
-                "SET mapreduce.reduce.java.opts=-Xmx14000m")
+                "SET mapreduce.reduce.java.opts=-Xmx14000m -XX:+UseConcMarkSweepGC")
             hive.execute("SET mapreduce.map.memory.mb=16000")
-            hive.execute("SET mapreduce.map.java.opts=-Xmx14000m")
+            hive.execute("SET mapreduce.map.java.opts=-Xmx14000m -XX:+UseConcMarkSweepGC")
             hive.execute("SET hive.exec.max.dynamic.partitions.pernode=200")
             cmd = ("""
             insert overwrite table %s
