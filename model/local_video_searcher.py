@@ -180,6 +180,8 @@ from utils.options import define, options
 from model.metropolisHastingsSearch import MCMH
 from grpc.framework.interfaces.face.face import ExpirationError
 
+import concurrent.futures
+
 _log = logging.getLogger(__name__)
 
 statemon.define('all_frames_filtered', int)  # no frame has passed all filters
@@ -1596,49 +1598,23 @@ class LocalSearcher(object):
         numretry: The maximum number of times to retry processing the frame.
         timeout: How long to wait for the frame to be returned.
         '''
-        cv = threading.Condition()
-        inference_result = []
-        def done(result_future):
-            '''
-            Callback handler.
-            '''
-            with cv:
-                exception = result_future.exception()
-                if exception:
-                    result_status['error'] = True
-                    statemon.state.increment('unable_to_score_frame')
-                    fno = str(frameno) if frameno is not None else 'NA'
-                    _log.warn('Problem obtaining score for frame %s: %s',
-                              fno, exception.message)
-                else:
-                    result = result_future.result()
-                    inference_result.append(result.valence[0])
-                result_status['done'] = True
-                result_status['active'] = False
-                cv.notify()
         rem_try = numretry
+        fno = str(frameno) if frameno is not None else 'NA'
         if numretry is None:
-            rem_try = -1
+            rem_try = -1  # retry forever
         while rem_try != 0:
-            with cv:
-                result_status = {'active': True, 'error': False, 'done': False}
-                result_future = self.predictor.predict(frame, timeout=timeout)
-                result_future.add_done_callback(
-                    lambda result_future: done(result_future))
-                while result_status['active']:
-                    cv.wait()
-                if result_status['done']:
-                    return inference_result[0]
-                elif result_status['error']:
-                    # one attempt has been made, but there was an issue.
-                    rem_try -= 1
-        if frameno is None:
-            fno = 'N/A'
-        else:
-            fno = str(frameno)
-        _log.warn('Frame #%s has exceeded the maximum number of retries (%i).', fno, numretry)
+            rem_try -= 1
+            result_future = self.predictor.predict(frame, timeout=timeout)
+            concurrent.futures.wait(result_future)
+            if not result_future.exception():
+                return result.valence[0]
+            else:
+                tatemon.state.increment('unable_to_score_frame')
+                _log.warn('Problem obtaining score for frame %s: %s',
+                          fno, exception.message)
+        _log.warn(('Frame #%s has exceeded the maximum number of '
+                   'retries (%i).'), fno, numretry)
         statemon.state.increment('frame_score_attempt_limit_reached')
-        return None
 
     def _conduct_local_search(self, start_frame, start_score,
                               end_frame, end_score):
