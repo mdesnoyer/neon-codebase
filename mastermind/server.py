@@ -411,7 +411,7 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
-        self._last_video_updated_time = '1970-01-01 00:00:00' 
+        self._last_video_updated_time = None 
 
     def __del__(self):
         self.stop()
