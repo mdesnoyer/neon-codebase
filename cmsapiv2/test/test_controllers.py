@@ -4042,25 +4042,28 @@ class TestAuthenticationHandler(TestAuthenticationBase):
             TestAuthenticationHandler.last_name) 
         self.assertEquals(user_info['title'],
             TestAuthenticationHandler.title) 
- 
+
     @tornado.testing.gen_test
-    def test_token_changed(self):  
-        url = '/api/v2/authenticate' 
-        params = json.dumps({'username': TestAuthenticationHandler.username, 
+    def test_token_changed(self):
+        url = '/api/v2/authenticate'
+        params = json.dumps({'username': TestAuthenticationHandler.username,
                              'password': TestAuthenticationHandler.password})
         header = { 'Content-Type':'application/json' }
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
+        with patch('cmsapiv2.apiv2.datetime') as mock_dt:
+            mock_dt.utcnow.return_value = datetime.utcnow()
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
+            rjson = json.loads(response.body)
+            token1 = rjson['access_token']
+            mock_dt.utcnow.return_value += timedelta(1)
+            response = yield self.http_client.fetch(self.get_url(url),
+                                                    body=params,
+                                                    method='POST',
+                                                    headers=header)
         rjson = json.loads(response.body)
-        token1 = rjson['access_token'] 
-        response = yield self.http_client.fetch(self.get_url(url), 
-                                                body=params, 
-                                                method='POST', 
-                                                headers=header)
-        rjson = json.loads(response.body)
-        token2 = rjson['access_token'] 
+        token2 = rjson['access_token']
         self.assertNotEquals(token1, token2)
 
     @tornado.testing.gen_test 
