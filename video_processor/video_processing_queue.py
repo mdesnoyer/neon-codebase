@@ -28,7 +28,7 @@ _log = logging.getLogger(__name__)
 
 from utils.options import define, options
 define('num_queues', default=3, help='Number of queues in the SQS server')
-define('queue_prefix', default="videojobs_priority_", type=str,
+define('queue_prefix', default="testvideojobs_priority_", type=str,
        help="The prefix of the name of each queue")
 define('default_timeout', default=300, help='Default timeout for a message')
 define('region', default='us-east-1', help='region where the queue resides')
