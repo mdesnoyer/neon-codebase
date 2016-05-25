@@ -5251,55 +5251,50 @@ class VideoMetadata(StoredObject):
         wc_params = []
         rv = {}  
         
-        where_clause = "_data->'job_id' != 'null'"
-        order_clause = "ORDER BY created_time DESC" 
+        where_clause = "v._data->'job_id' != 'null'"
+        order_clause = "ORDER BY v.created_time DESC" 
         join_clause = None
         if since: 
             if where_clause: 
                 where_clause += " AND "
-            where_clause += " created_time > to_timestamp(%s)::timestamp"
+            where_clause += " v.created_time > to_timestamp(%s)::timestamp"
             # switch up the order clause so the page starts at the right spot 
-            order_clause = "ORDER BY created_time ASC" 
+            order_clause = "ORDER BY v.created_time ASC" 
             wc_params.append(since) 
 
         if until: 
             if where_clause: 
                 where_clause += " AND "
-            where_clause += " created_time < to_timestamp(%s)::timestamp" 
+            where_clause += " v.created_time < to_timestamp(%s)::timestamp" 
             wc_params.append(until) 
         
         if account_id: 
             if where_clause: 
                 where_clause += " AND "
-            where_clause += " _data->>'key' LIKE %s"
+            where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
 
         columns = ["v._data",
                    "v._type",
-                   "v.created_time AS v.created_time_pg",
-                   "v.updated_time AS v.updated_time_pg"]
+                   "v.created_time AS created_time_pg",
+                   "v.updated_time AS updated_time_pg"]
 
         # Join request to query searches on video title.
         if query is not None:
-            join_clause = " JOIN request AS r ON v._data->>'job_id' == r._data->>'job_id'"
-            columns.extend([
-                   "r._data",
-                   "r._type",
-                   "r.created_time AS r.created_time_pg",
-                   "r.updated_time AS r.updated_time_pg"])
-
+            join_clause = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
             if where_clause:
                 where_clause += " AND "
-            where_clause += " r._data->>'video_title' LIKE %s'"
-            wc_params.append('%' + query + '%')
+            where_clause += " r._data->>'video_title' SIMILIAR TO %s"
+            wc_params.append(query)
 
         results = yield cls.get_and_execute_select_query(
                     columns,
                     where_clause,
-                    table_name="videometadata AS v"
+                    join_clause=join_clause,
+                    table_name="videometadata AS v",
                     wc_params=wc_params,
                     limit_clause="LIMIT %d" % limit,
-     		    order_clause=order_clause,
+                    order_clause=order_clause,
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         def _get_time(result):
@@ -5323,9 +5318,11 @@ class VideoMetadata(StoredObject):
 
         for result in results:
             # Split the columns out for each class by alias.
-            vid_result = {k: v for (k, v) in result.items() if k[0] == 'v'}
-            req_result = {k: v for (k, v) in result.items() if k[0] == 'r'}
-            video = cls._create(result['v._data']['key'], vid_result)
+            # Cut the first 2 characters (e.g., "v.") from the key.
+            vid_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'v'}
+            req_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'r'}
+            import pdb; pdb.set_trace()
+            video = cls._create(vid_result['v._data']['key'], vid_result)
             videos.append(video)
             # Conditionally create a request object if the table was joined.
             if req_result:
