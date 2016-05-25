@@ -203,7 +203,7 @@ def count_unique_index(data, level='video_id'):
     groups = [x for x in data.index.names if x not in level]
     if len(groups) == 0:
         return len(set(data.index))
-    return data.reset_index(level).groupby(level=groups).apply(
+    return data.reset_index().groupby(groups).apply(
         lambda x: len(set(x[level])))
 
 def calc_lift_from_dataframe(data, xtra_conv_col='extra_conversions'):
