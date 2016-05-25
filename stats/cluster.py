@@ -816,11 +816,13 @@ class Cluster():
         jobid = emrconn.add_jobflow_steps(self.cluster_id, [step])
         step_id = jobid.stepids[0].value
 
+        syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+
         timeout_step = 9000
         self.monitor_job_progress_emr(step_id, emrconn, timeout_step)
         
         # The tracking URL for S3DistCp is going to syslog, so grab it from there
-        syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+        # syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
 
         _log.info("Syslog from s3distcp step is : %s" % syslog)
 
