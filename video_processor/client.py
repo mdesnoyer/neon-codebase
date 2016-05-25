@@ -113,7 +113,7 @@ define('max_bandwidth_per_core', default=15500000.0,
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
-define('max_fail_count', default=2, 
+define('max_fail_count', default=3, 
        help='Number of failures allowed before a job is discarded')
 define('max_attempt_count', default=5, 
        help='Number of attempts allowed before a job is discarded')
