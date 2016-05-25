@@ -592,13 +592,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.set_status(status_code)
         exception = kwargs["exc_info"][1]
         if any(isinstance(exception, c) for c in [Invalid,
+                                                  MultipleInvalid, 
                                                   NotAuthorizedError,
                                                   NotFoundError,
                                                   BadRequestError,
                                                   NotImplementedError,
                                                   TooManyRequestsError,
                                                   stripe.error.CardError]):
-            if isinstance(exception, Invalid):
+            if isinstance(exception, Invalid) or \
+               isinstance(exception, MultipleInvalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
