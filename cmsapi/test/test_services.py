@@ -139,7 +139,6 @@ def process_neon_api_requests(api_requests, api_key, i_id, t_type,
 class TestServices(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         super(TestServices, self).setUp()
-        options._set('cmsdb.neondata.wants_postgres', 1)
         #Http Connection pool Mock
         self.cp_async_patcher = \
           patch('utils.http.tornado.httpclient.AsyncHTTPClient')
@@ -177,19 +176,16 @@ class TestServices(test_utils.neontest.AsyncHTTPTestCase):
         self.cp_async_patcher.stop()
         self.cmsapiv2_patcher.stop()
         self.postgresql.clear_all_tables() 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         super(TestServices, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
         super(TestServices, cls).setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
         super(TestServices, cls).tearDownClass()
 

@@ -476,8 +476,8 @@ class BrightcovePlayerHandler(APIV2Handler):
         '''
         # Get the database record. Expect many to be missing, so don't log
         neon_player = yield neondata.BrightcovePlayer.get(
-            bc_player['id'], 
-            async=True, 
+            bc_player['id'],
+            async=True,
             log_missing=False)
         if neon_player:
             # Prefer Brightcove's data since it is potentially newer
@@ -533,14 +533,34 @@ class BrightcovePlayerHandler(APIV2Handler):
             _modify,
             create_missing=True,
             async=True)
+        bc_player_config = bc_player['branches']['master']['configuration']
+
         # If the player is tracked, then send a request to Brightcove's
         # player managament API to put the plugin in the player
         # and publish the player.  We do this any time the user calls
         # this API with is_tracked=True because they are likely to be
         # troubleshooting their setup and publishing several times.
+
+        # Alternatively, if player is not tracked, then send a request
+        # to remove the player from the config and publish the player.
         if player.is_tracked:
-            publish_result = yield BrightcovePlayerHelper.publish_plugin(
-                bc_player, bc, self.account.tracker_account_id)
+            patch = BrightcovePlayerHelper._install_plugin_patch(
+                bc_player_config,
+                self.account.tracker_account_id)
+            yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+            # Published. Update the player with the date and version
+            def _modify(p):
+                p.publish_date = datetime.now().isoformat()
+                p.published_plugin_version = \
+                    BrightcovePlayerHelper._get_current_tracking_version()
+                p.last_attempt_result = None
+            yield neondata.BrightcovePlayer.modify(ref, _modify, async=True)
+
+        elif player.is_tracked is False:
+            patch = BrightcovePlayerHelper._uninstall_plugin_patch(
+                bc_player_config)
+            if patch:
+                yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
@@ -588,38 +608,21 @@ class BrightcovePlayerHelper():
     '''Contain functions that work on Players that are called internally.'''
     @staticmethod
     @tornado.gen.coroutine
-    def publish_plugin(bc_player, bc_api, tracker_account_id):
-        """Update Brightcove player with current plugin and publishes it
+    def publish_player(player_ref, patch, bc_api):
+        """Update Brightcove player with patch and publishes it
 
-        Assumes that the BC player reference by bc_player is valid.
+        Assumes that the BC player referenced by player_ref is valid.
 
         Input-
-        bc_player - Brightcove player dict
+        player_ref - Brightcove player reference
+        patch - Dictionary of player configuration defined by Brightcove
         bc_api - Instance of Brightcove API with appropriate integration
-        tracker_account_id - tracker id for the associated neonuseraccount
         """
-        player_ref = bc_player['id']
-        player_config = bc_player['branches']['master']['configuration']
-
-        # Make the patch json string that will be used to update player
-        patch = BrightcovePlayerHelper._get_plugin_patch(
-            player_config,
-            tracker_account_id)
-
         yield bc_api.patch_player(player_ref, patch)
         yield bc_api.publish_player(player_ref)
 
-        # Success. Update the player with the date and version
-        def _modify(p):
-            p.publish_date = datetime.now().isoformat()
-            p.published_plugin_version = BrightcovePlayerHelper._get_current_tracking_version()
-            p.last_attempt_result = None
-        yield neondata.BrightcovePlayer.modify(player_ref, _modify, async=True)
-
-        raise tornado.gen.Return(True)
-
     @staticmethod
-    def _get_plugin_patch(player_config, tracker_account_id):
+    def _install_plugin_patch(player_config, tracker_account_id):
         """Make a patch that replaces our js and json with the current version
 
         Brightcove player's configuration api allows PUT to replace the entire
@@ -627,7 +630,7 @@ class BrightcovePlayerHelper():
         to set any subset of fields. For our goal, the "plugins" field is a list
         that will be changed to a json payload that includes the Neon account id
         for tracking. The "scripts" field is a list of urls that includes our
-        our minified javascript tracker url.
+        our minified javascript plugin url.
 
         Grabs the current values of the lists to change, removes any Neon info,
         then addends the Neon js url and json values with current ones.
@@ -637,18 +640,30 @@ class BrightcovePlayerHelper():
         tracker_account_id neon tracking id for the publisher
         """
 
-        # Remove any plugin named neon, and append the current one
-        plugins = [plugin for plugin in player_config.get('plugins')
-            if plugin['name'] is not 'neon']
-        plugins.append(BrightcovePlayerHelper._get_current_tracking_json(
+        # Remove Neon plugins from the config
+        patch = BrightcovePlayerHelper._uninstall_plugin_patch(player_config)
+        patch = patch if patch else {'scripts': [], 'plugins': []}
+
+        # Append the current plugin
+        patch['plugins'].append(BrightcovePlayerHelper._get_current_tracking_json(
             tracker_account_id))
+        patch['scripts'].append(BrightcovePlayerHelper._get_current_tracking_url())
 
-        # Remove any script like *neon-tracker*, and append the current
+        return patch
+
+    @staticmethod
+    def _uninstall_plugin_patch(player_config):
+        """Make a patch that removes any Neon plugin js or json"""
+        plugins = [plugin for plugin in player_config.get('plugins')
+            if plugin['name'] != 'neon']
         scripts = [script for script in player_config.get('scripts')
-            if script.find('neon-tracker') is -1]
-        scripts.append(BrightcovePlayerHelper._get_current_tracking_url())
+            if script.find('videojs-neon-') == -1]
 
-        # Return a JSON-string
+        # If nothing changed, signal to caller no need to patch.
+        if(len(plugins) == len(player_config['plugins']) and
+                len(scripts) == len(player_config['scripts'])):
+            return None
+
         return {
             'plugins': plugins,
             'scripts': scripts
@@ -662,7 +677,7 @@ class BrightcovePlayerHelper():
     @staticmethod
     def _get_current_tracking_url():
         """Get the url of the current tracking plugin"""
-        return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-tracker.min.js'
+        return 'https://s3.amazonaws.com/neon-cdn-assets/videojs-neon-plugin.min.js'
 
     @staticmethod
     def _get_current_tracking_json(tracker_account_id):

@@ -158,7 +158,8 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         #patch for download_and_add_thumb
         self.utils_patch = patch('cmsdb.neondata.utils.http.send_request')
-        self.uc = self.utils_patch.start()
+        self.uc = self._future_wrap_mock(self.utils_patch.start(),
+                                         require_async_kw=True)
 
         # create the client object
         self.video_client = video_processor.client.VideoClient(
@@ -176,13 +177,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     def setup_video_processor(self, request_type, url='http://url.com'):
@@ -426,8 +425,9 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
+    @patch('video_processor.client.model.load_model')
     @tornado.testing.gen_test
-    def test_fail_and_retry(self):
+    def test_fail_and_retry(self, model_mock):
         self.youtube_extract_info_mock.side_effect = [
             youtube_dl.utils.DownloadError('bal'),
             youtube_dl.utils.ExtractorError('beck'),
@@ -800,13 +800,11 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
 
@@ -1432,13 +1430,11 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     @tornado.gen.coroutine
@@ -1450,7 +1446,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # in our main thread, otherwise fork screws things up. 
         cmsdb.cdnhosting.smartcrop.cv2.setNumThreads(0)
         with options._set_bounded('video_processor.client.dequeue_period', 0.01):
-            yield self.video_client.start()
+            self.video_client.start()
 
             try:
                 # Wait for the job results to show up in the database. We
