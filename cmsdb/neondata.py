@@ -6260,7 +6260,7 @@ class VideoMetadata(StoredObject):
         until_time = None  
         wc_params = []
         rv = {}  
-        
+
         where_clause = "v._data->'job_id' != 'null'"
         order_clause = "ORDER BY v.created_time DESC" 
         join_clause = None
@@ -6277,7 +6277,7 @@ class VideoMetadata(StoredObject):
                 where_clause += " AND "
             where_clause += " v.created_time < to_timestamp(%s)::timestamp" 
             wc_params.append(until) 
-        
+
         if account_id: 
             if where_clause: 
                 where_clause += " AND "
@@ -6295,7 +6295,6 @@ class VideoMetadata(StoredObject):
             if where_clause:
                 where_clause += " AND "
             where_clause += " r._data->>'video_title' SIMILIAR TO %s"
-            wc_params.append(query)
 
         results = yield cls.get_and_execute_select_query(
                     columns,
@@ -6304,7 +6303,7 @@ class VideoMetadata(StoredObject):
                     table_name="videometadata AS v",
                     wc_params=wc_params,
                     limit_clause="LIMIT %d" % limit,
-                    order_clause=order_clause,
+     		    order_clause=order_clause,
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         def _get_time(result):
@@ -6327,26 +6326,13 @@ class VideoMetadata(StoredObject):
             pass
 
         for result in results:
-            # Split the columns out for each class by alias.
-            # Cut the first 2 characters (e.g., "v.") from the key.
-            vid_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'v'}
-            req_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'r'}
-            import pdb; pdb.set_trace()
-            video = cls._create(vid_result['v._data']['key'], vid_result)
+            video = cls._create(result['v._data']['key'], result)
             videos.append(video)
-            # Conditionally create a request object if the table was joined.
-            if req_result:
-                request = NeonApiRequest._create(
-                    result['r._data']['key'],
-                    req_result)
-                requests.append(request)
 
         if do_reverse:
             videos.reverse()
-            requests.reverse()
 
         rv['videos'] = videos
-        rv['requests'] = requests
         rv['since_time'] = since_time
         rv['until_time'] = until_time
         raise tornado.gen.Return(rv)
