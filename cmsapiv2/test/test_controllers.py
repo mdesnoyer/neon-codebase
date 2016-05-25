@@ -1970,6 +1970,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(cargs[0], 2)
         self.assertDictContainsSubset(json.loads(cargs[1]), job.__dict__)
         self.assertEquals(cargs[2], 16)
+        self.assertEquals(job.api_param, 5)
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
@@ -2169,10 +2170,11 @@ class TestVideoHandler(TestControllersBase):
                           'failed to download thumbnail')
 
     @tornado.testing.gen_test
-    def test_post_video_with_duration(self):
+    def test_post_video_with_duration_and_nthumbs(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
-              '&duration=1354&url=some_url' % (self.account_id_api_key, 
+              '&duration=1354&url=some_url&n_thumbs=10' % (
+                  self.account_id_api_key, 
                   self.test_i_id)
         response = yield self.http_client.fetch(
             self.get_url(url),
@@ -2192,6 +2194,11 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(self.job_write_mock.call_count, 1)
         cargs, kwargs = self.job_write_mock.call_args
         self.assertEquals(cargs[2], 1354.)
+
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+        self.assertEquals(job.api_param, 10)
 
     @tornado.testing.gen_test
     def test_post_video_with_float_duration(self):

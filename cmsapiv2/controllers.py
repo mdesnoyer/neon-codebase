@@ -1164,7 +1164,7 @@ class VideoHelper(object):
         request.default_thumbnail = args.get('default_thumbnail_url', None)
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
-        request.api_param = args.get('n_thumbs', None)
+        request.api_param = int(args.get('n_thumbs', 5))
         yield request.save(async=True)
 
         if request:
@@ -1226,11 +1226,11 @@ class VideoHelper(object):
                     x.fail_count = 0
                     x.attempt_count = 0
                     x.response = {}
-                api_request = yield tornado.gen.Task(
-                    neondata.NeonApiRequest.modify,
+                api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
                     account_id_api_key,
-                    _flag_reprocess)
+                    _flag_reprocess,
+                    async=True)
 
                 raise tornado.gen.Return((video, api_request))
             else:
@@ -1443,7 +1443,8 @@ class VideoHandler(APIV2Handler):
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
           'default_thumbnail_url': All(Any(Coerce(str), unicode), 
               Length(min=1, max=2048)),
-          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512))
+          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 
         args = self.parse_args()

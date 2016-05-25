@@ -256,31 +256,42 @@ class VideoProcessor(object):
             if not isinstance(e, VideoError):
                 new_state = neondata.RequestState.INT_ERROR
                 _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
-                
-            # Flag that the job failed
-            statemon.state.increment('processing_error')
 
             cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
                                                 self.job_params['video_id'],
                                                 err=e.message)
             
             def _write_failure(request):
-                request.state = new_state
-                request.response = cb.to_dict()
                 request.fail_count += 1
-            api_request = yield tornado.gen.Task(
-                neondata.NeonApiRequest.modify,
+                request.response = cb.to_dict()
+                if request.fail_count < options.max_fail_count:
+                    # This job is going to be requeued
+                    request.state = neondata.RequestState.REQUEUED
+                else:
+                    request.state = new_state
+            api_request = yield neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
                 self.job_params['api_key'],
-                _write_failure)
-            
-            # Send the callback to let the client know there was an
-            # error that they might be able to fix
-            if isinstance(e, VideoError):
-                yield api_request.send_callback(async=True)
+                _write_failure,
+                async=True)
 
-            # Let another node pick up the job to try again
-            yield self.job_queue.hide_message(self.job_message, 0)
+            if api_request.state == neondata.RequestState.REQUEUED:
+                # Let another node pick up the job to try again
+                yield self.job_queue.hide_message(self.job_message, 0)
+            
+            else:
+                # It's the final error
+                statemon.state.increment('processing_error')
+            
+                # Send the callback to let the client know there was an
+                # error that they might be able to fix
+                if isinstance(e, VideoError):
+                    yield api_request.send_callback(async=True)
+
+                # Delete the job
+                _log.warn('Job %s for account %s has failed' %
+                          (api_request.job_id, api_request.api_key))
+                yield self.job_queue.delete_message(self.job_message)
        
         finally:
             #Delete the temp video file which was downloaded
@@ -974,11 +985,22 @@ class VideoClient(multiprocessing.Process):
                                (job_id, api_key))
                     statemon.state.increment('dequeue_error')
                     raise DequeueError('Could not set processing')
-                if (api_request.fail_count > options.max_fail_count or 
-                        api_request.try_count > options.max_attempt_count):
-                    _log.error('Job %s for account %s has failed too many '
-                              'times' % (job_id, api_key))
+                if (api_request.fail_count >= options.max_fail_count or 
+                    api_request.try_count >= options.max_attempt_count):
+                    msg = ('Job %s for account %s has failed too many '
+                           'times' % (job_id, api_key))
+                    _log.error(msg)
                     statemon.state.increment('too_many_failures')
+                    
+                    def _write_failure(req):
+                        cb = neondata.VideoCallbackResponse(job_id,
+                                                            req.video_id,
+                                                            err=msg)
+                        req.response = cb.to_dict()
+                        req.state = neondata.RequestState.INT_ERROR
+                    yield neondata.NeonApiRequest.modify(job_id, api_key,
+                                                         _write_failure,
+                                                         async=True)
                     raise UninterestingJob('Job failed')
                 
                 _log.info("key=worker [%s] msg=processing request %s for "

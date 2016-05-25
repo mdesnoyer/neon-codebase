@@ -427,6 +427,39 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                               3.0*600.0)
 
     @tornado.testing.gen_test
+    def test_fail_and_retry(self):
+        self.youtube_extract_info_mock.side_effect = [
+            youtube_dl.utils.DownloadError('bal'),
+            youtube_dl.utils.ExtractorError('beck'),
+            youtube_dl.utils.UnavailableVideoError('ick')]
+
+        self.job_read_mock.side_effect = [self.job_message,
+                                          self.job_message,
+                                          self.job_message]
+
+        with options._set_bounded('video_processor.client.max_fail_count', 2):
+            yield self.video_client.do_work(async=True)
+
+            self.assertEquals(self.video_client.videos_processed, 1)
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertIsNotNone(api_request.response['error'])
+            self.assertEquals(api_request.state,
+                              neondata.RequestState.REQUEUED)
+            self.assertEquals(api_request.fail_count, 1)
+            self.job_hide_mock.assert_called_with(self.job_message, 0)
+            self.job_hide_mock.reset_mock()
+
+            yield self.video_client.do_work(async=True)
+            self.assertEquals(self.video_client.videos_processed, 2)
+            api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+            self.assertIsNotNone(api_request.response['error'])
+            self.assertEquals(api_request.state,
+                              neondata.RequestState.CUSTOMER_ERROR)
+            self.assertEquals(api_request.fail_count, 2)
+            self.job_hide_mock.assert_not_called()
+            self.job_delete_mock.assert_called_with(self.job_message)
+
+    @tornado.testing.gen_test
     def test_process_video(self):
        
         '''
@@ -999,7 +1032,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertRegexpMatches(n_thumbs[0].key, '%s_.+'%self.video_id)
         self.assertEquals(n_thumbs[0].urls, [
             'http://s3.amazonaws.com/host-thumbnails/%s.jpg' %
-            re.sub('_', '/', n_thumbs[0].key)])
+            re.sub('_', '/', n_thumbs[0].key)])        
 
     @tornado.testing.gen_test
     def test_processing_after_requeue(self):
@@ -1408,7 +1441,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
-
+    @tornado.gen.coroutine
     def _run_job(self, job):
         '''Runs the job'''
         self.job_message.set_body(json.dumps(job))
@@ -1417,7 +1450,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # in our main thread, otherwise fork screws things up. 
         cmsdb.cdnhosting.smartcrop.cv2.setNumThreads(0)
         with options._set_bounded('video_processor.client.dequeue_period', 0.01):
-            self.video_client.start()
+            yield self.video_client.start()
 
             try:
                 # Wait for the job results to show up in the database. We
@@ -1520,7 +1553,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         video_meta.serving_url = 'my_serving_url.jpg'
         video_meta.save()
 
-        self._run_job({
+        yield self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1545,15 +1578,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     @tornado.testing.gen_test
     def test_video_processing_error(self):
         self.mock_conn2.side_effect = [IOError('Oops')]
-        
-        self._run_job({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 's3://my-videos/test.mp4'
-            })
+
+        with options._set_bounded('video_processor.client.max_fail_count', 1):
+            yield self._run_job({
+                'api_key': self.api_key,
+                'video_id' : 'vid1',
+                'job_id' : 'job1',
+                'video_title': 'some fun video',
+                'callback_url': 'http://callback.com',
+                'video_url' : 's3://my-videos/test.mp4'
+                })
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1575,14 +1609,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         modify_mock.side_effect = [
             psycopg2.Error("Connection Error")]
 
-        self._run_job({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 's3://my-videos/test.mp4'
-            })
+        with options._set_bounded('video_processor.client.max_fail_count', 1):
+            yield self._run_job({
+                'api_key': self.api_key,
+                'video_id' : 'vid1',
+                'job_id' : 'job1',
+                'video_title': 'some fun video',
+                'callback_url': 'http://callback.com',
+                'video_url' : 's3://my-videos/test.mp4'
+                })
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1601,7 +1636,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.api_request.state = neondata.RequestState.SERVING
         self.api_request.save()
 
-        self._run_job({
+        yield self._run_job({
             'api_key': self.api_key,
             'video_id' : 'vid1',
             'job_id' : 'job1',
@@ -1620,15 +1655,16 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # In this case, we should still allow the video serve, but
         # register it as a customer error in the database.
         self.im_download_mock.side_effect = [IOError('Cannot download')]
-        
-        self._run_job({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 's3://my-videos/test.mp4'
-            })
+
+        with options._set_bounded('video_processor.client.max_fail_count', 1):
+            yield self._run_job({
+                'api_key': self.api_key,
+                'video_id' : 'vid1',
+                'job_id' : 'job1',
+                'video_title': 'some fun video',
+                'callback_url': 'http://callback.com',
+                'video_url' : 's3://my-videos/test.mp4'
+                })
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
@@ -1672,14 +1708,15 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
     def test_unexpected_error(self):
         self.mock_conn.side_effect = [Exception('Some bad error')]
 
-        self._run_job({
-            'api_key': self.api_key,
-            'video_id' : 'vid1',
-            'job_id' : 'job1',
-            'video_title': 'some fun video',
-            'callback_url': 'http://callback.com',
-            'video_url' : 's3://my-videos/test.mp4'
-            })
+        with options._set_bounded('video_processor.client.max_fail_count', 1):
+            yield self._run_job({
+                'api_key': self.api_key,
+                'video_id' : 'vid1',
+                'job_id' : 'job1',
+                'video_title': 'some fun video',
+                'callback_url': 'http://callback.com',
+                'video_url' : 's3://my-videos/test.mp4'
+                })
 
         # Check the api request in the database
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
