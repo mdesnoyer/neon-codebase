@@ -820,6 +820,8 @@ class Cluster():
         # The tracking URL for S3DistCp is going to syslog, so grab it from there
         syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
 
+        _log.info("Syslog from s3distcp step is : %s" % syslog)
+
         self.monitor_job_progress_hadoop(syslog, 
                                          budget_time,
                                          timeout,

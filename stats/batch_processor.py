@@ -523,7 +523,7 @@ def cleanup_hdfs(cluster, current_hdfs_dir_time, hdfs_dir):
                 else:
                     _log.info('Could not delete hdfs directory %s' % '/mnt/cleaned/'+file)
     else:
-        _log.info('No previous run files to clean up from HDFS')
+        _log.info("HDFS base directory %s does not exist" % hdfs_dir)
 
 
 
