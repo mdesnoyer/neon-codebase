@@ -236,7 +236,6 @@ class TestVideoDBWatcher(ServerPostgresTest):
         self.assertFalse(directives.has_key(('apikey1', 'apikey1'+'_10')))
 
         self.assertTrue(self.watcher.is_loaded.is_set())
-
         self.assertNotIn('apikey1' + '_0', 
                          self.directive_publisher.last_published_videos)
 
@@ -2454,6 +2453,11 @@ class SmokeTesting(ServerAsyncPostgresTest):
         self.assertEquals(
             neondata.NeonApiRequest.get('job3', 'key1').state,
             neondata.RequestState.CUSTOMER_ERROR)
+
+        lb_current_time = date.datetime.utcnow() - date.timedelta(hours=12) 
+        self.assertTrue(
+            dateutil.parser.parse(
+                self.video_watcher._last_video_updated_time) > lb_current_time)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
