@@ -493,7 +493,7 @@ class UserHandler(APIV2Handler):
     def get_access_levels(self):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE
+                 HTTPVerbs.PUT : neondata.AccessLevels.NONE
                } 
  
     @classmethod
