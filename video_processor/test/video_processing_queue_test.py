@@ -124,6 +124,7 @@ class TestVideoProcessingQueue(test_utils.neontest.AsyncTestCase):
 
             if rmes is not None:
                 self.assertIsNone(self.q.get_duration(rmes))
+                self.assertNotIn('duration', rmes.message_attributes)
                 return
         self.fail('Never got a message from the Q')
 

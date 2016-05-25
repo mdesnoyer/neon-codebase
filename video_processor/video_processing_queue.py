@@ -169,7 +169,7 @@ class VideoProcessingQueue(object):
         '''
         return self.queue_list[priority]
  
-    def _add_attributes(self, priority, message, duration):
+    def _add_attributes(self, priority, message, duration=None):
         '''Adds priority information to the message. This way, the client that
            reads the message does not need to know about the priority information
            of the queue it comes from, or even that such information exists.
@@ -183,15 +183,17 @@ class VideoProcessingQueue(object):
            The modified message object
         '''
 
-        message.message_attributes = {
-                  "priority": {
-                        "data_type": "Number",
-                        "string_value": str(priority)
-                 }, "duration": {
+        attributes = {
+            "priority": {
+                "data_type": "Number",
+                "string_value": str(priority)
+            }}
+        if duration is not None:
+            attributes["duration"] = {
                         "data_type": "Number",
                         "string_value": str(duration)
                  }
-        }
+        message.message_attributes = attributes
         return message
 
     @run_on_executor
