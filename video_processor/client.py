@@ -117,8 +117,6 @@ define('max_fail_count', default=3,
        help='Number of failures allowed before a job is discarded')
 define('max_attempt_count', default=5, 
        help='Number of attempts allowed before a job is discarded')
-define('timeout_length', default=5.0, help='Amount of time that dequeue_job is '
-       'allowed to run before timing out')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -1037,11 +1035,8 @@ class VideoClient(multiprocessing.Process):
         
         # Register a function to die cleanly on a sigterm
         atexit.register(self.stop)
-        start_time = time.time()
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
-            if(time.time() - start_time > options.timeout_length):
-                raise TimeoutError("The worker timed out")
             self.do_work()
  
         _log.info("stopping worker [%s] " % (self.pid))
