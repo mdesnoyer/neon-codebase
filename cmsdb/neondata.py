@@ -5234,7 +5234,7 @@ class VideoMetadata(StoredObject):
                         defaults to None
            limit      : if specified it limits the search to this many 
                         videos, defaults to 25
-           title_query: regex to apply against title using pg's ~ operator.
+           title_query: regex to apply against title using pg's ~* operator.
                         An invalid regex will raise DataError.
 
            Returns : a dictionary of the following 
@@ -5283,7 +5283,7 @@ class VideoMetadata(StoredObject):
             join_clause = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
             if where_clause:
                 where_clause += " AND "
-            where_clause += " r._data->>'video_title' ~ %s"
+            where_clause += " r._data->>'video_title' ~* %s"
             wc_params.append(title_query)
 
         results = yield cls.get_and_execute_select_query(
