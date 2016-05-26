@@ -8,6 +8,8 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import numpy
+import cv2
 
 _log = logging.getLogger(__name__)
 
@@ -980,6 +982,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                                         HTTPVerbs.POST]
                }
 
+
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
@@ -1151,6 +1154,61 @@ class ThumbnailHandler(APIV2Handler):
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+
+class ImageHandler(APIV2Handler):
+
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        image = self.get_image_from_request()
+        print(type(image))
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        print('get!')
+
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        print('put')
+
+    @tornado.gen.coroutine
+    def is_authorized(request,
+                      access_level_required,
+                      account_required=True,
+                      internal_only=False):
+        raise tornado.gen.Return(True)
+
+    @tornado.gen.coroutine
+    def set_account(request):
+        request.set_account_id()
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            'account_required': [
+                HTTPVerbs.GET,
+                HTTPVerbs.PUT,
+                HTTPVerbs.POST]}
+
+    def get_image_from_request(self):
+        """Extracts the image from the http post request.
+        returns a NxMx3 numpy array
+        """
+        image_body = self.request.files['upload'][0]['body']
+
+        if not image_body:
+            raise Exception('no image no work')
+
+        image = numpy.asarray(bytearray(image_body), dtype="uint8")
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+        image = cv2.resize(image, (227, 227))
+        image = image[:,:,[2,1,0]]
+        image = image.transpose(2,0,1)
+        return image
+
 
 '''*********************************************************************
 VideoHelper
@@ -2576,6 +2634,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',
         AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/images/?$', ImageHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
     (r'/api/v2/videos/search?$', VideoSearchInternalHandler),
