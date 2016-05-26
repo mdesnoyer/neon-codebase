@@ -2560,11 +2560,19 @@ class TelemetrySnippetHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.GET] 
                }
 
+'''*****************************************************************
+BillingSubscriptionHandler 
+*****************************************************************'''
+class BatchHandler(APIV2Handler):
+    def post(self): 
+        pass 
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
+    (r'/api/v2/batch/?$', BatchHandler), 
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
