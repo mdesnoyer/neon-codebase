@@ -396,7 +396,6 @@ def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=No
                                     'i2.4xlarge', 'cr1.8xlarge']):
         extra_ops['mapreduce.reduce.memory.mb'] = 5000
         extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
-        _log.info("set memory for reducers")
 
     _log.info("Starting batch event cleaning job done")
 

@@ -725,10 +725,8 @@ class Cluster():
         #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
-        #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-        #                            'us-east-1d' : 'subnet-abf214f2'}
-
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-b0d884c7'}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
+                                    'us-east-1d' : 'subnet-abf214f2'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
@@ -817,6 +815,8 @@ class Cluster():
         step_id = jobid.stepids[0].value
 
         # The tracking URL for S3DistCp is going to syslog, so grab it from there
+        # Wait until syslog is created and grab the beginning portion of it which 
+        # has the tracking URL
         syslog = ' '
         while True:
             try:
