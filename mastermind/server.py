@@ -106,6 +106,7 @@ statemon.define('need_full_urls', int) # Num of thumbs where full urls had to be
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
+statemon.define('no_account_info', int)
 statemon.define('unexpected_video_handle_error', int) # Error when handling video
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
@@ -382,7 +383,6 @@ class VideoDBWatcher(threading.Thread):
 
         # io_loop for this thread, responsible for doing watcher stuff
         self.io_loop = tornado.ioloop.IOLoop(make_current=False)
-
         # the timer that will fire the watcher every polling delay
         self.timer = utils.sync.PeriodicCoroutineTimer(
              self._initialize_directives, 
@@ -392,8 +392,7 @@ class VideoDBWatcher(threading.Thread):
         # have we ran the initial intialization on this thing 
         self.is_initialized = False
 
-        # how many accounts we have remaining on the big update
-        # self.accounts_remaining = 0   
+        self._account_last_updated_time = {} 
 
     def __del__(self):
         self.stop()
@@ -516,11 +515,22 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 exp_strat)
 
-            video_ids = yield account.get_internal_video_ids(async=True)
+            video_id = None
+            akey = account.neon_api_key
+            since = self._account_last_updated_time.get(
+                akey, 
+                None) 
+            video_ids = yield account.get_internal_video_ids(since=since, async=True)
             for video_id in video_ids:
                 self._schedule_video_update(video_id)
-            
+ 
             yield self.process_queued_video_updates()
+
+            if video_id: 
+                # pull the last video, it will be the most recent one 
+                video = yield neondata.VideoMetadata.get(video_id, async=True)
+                if video:  
+                    self._account_last_updated_time[akey] = video.updated
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -1455,11 +1465,12 @@ class DirectivePublisher(threading.Thread):
         closest_size = [x for x in valid_sizes if
                         (abs(x[0] - default_size[0]) +
                          abs(x[1] - default_size[1])) == mindiff][0]
-        _log.warn('There is no serving thumb of size (%i, %i) for thumb'
-                  '%s. Using (%i, %i) instead'
-                  % (default_size[0], default_size[1],
-                     url_obj.get_thumbnail_id(),
-                     closest_size[0], closest_size[1]))
+        _log.warn_n('There is no serving thumb of size (%i, %i) for thumb'
+                    '%s. Using (%i, %i) instead'
+                    % (default_size[0], default_size[1],
+                       url_obj.get_thumbnail_id(),
+                       closest_size[0], closest_size[1]),
+            50)
         statemon.state.increment('default_serving_thumb_size_mismatch')
         return closest_size
 

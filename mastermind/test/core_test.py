@@ -27,10 +27,11 @@ import numpy.random
 import numpy as np
 import pandas
 import test_utils.neontest
-import test_utils.redis
+import test_utils.postgresql
 import tornado.httpclient
-import utils.neon
 import unittest
+import utils.neon
+from utils.options import options
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +44,27 @@ def build_thumb(metadata=neondata.ThumbnailMetadata(None, None),
         metadata.phash = phash
     return ThumbnailInfo(metadata, base_impressions, incremental_impressions,
                          base_conversions, incremental_conversions)
+
+class CorePostgresTest(test_utils.neontest.TestCase):
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(CorePostgresTest, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(CorePostgresTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(CorePostgresTest, cls).tearDownClass() 
 
 #TODO(mdesnoyer) what happens when a video is removed from the db?!?
 
@@ -89,12 +111,11 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         super(TestCurrentServingDirective, self).setUp()
         numpy.random.seed(1984934)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the pg connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get_connection.return_value = None
         logging.getLogger('cmsdb.neondata').propagate = False
 
         # TODO(wiley): Once we actually listen to the priors but keep
@@ -102,13 +123,16 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # default setup
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', frac_adjust_rate=1.0))
+            'acct1', ExperimentStrategy('acct1', 
+            exp_frac=0.01, holdback_frac=0.01, frac_adjust_rate=1.0))
         logging.getLogger('mastermind.core').reset_sample_counters()
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         logging.getLogger('cmsdb.neondata').propagate = True
+        super(TestCurrentServingDirective, self).tearDown()
 
     def test_serving_directives_with_priors(self):
         self.mastermind.update_experiment_strategy(
@@ -649,7 +673,9 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_baseline_is_also_default_type(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', baseline_type='brightcove'))
+            'acct1', ExperimentStrategy('acct1', 
+            exp_frac=0.01, holdback_frac=0.01, 
+            baseline_type='brightcove'))
 
         video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
@@ -673,7 +699,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_baseline_is_neon(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', baseline_type='neon',
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
 
         video_info = VideoInfo('acct1', True, [],score_type=ScoreType.CLASSICAL)
         video_info.thumbnails.append(
@@ -706,7 +732,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_always_show_baseline(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', always_show_baseline=True,
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
 
         video_info = VideoInfo(
             'acct1', True,
@@ -730,7 +756,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         # Now don't show the baseline in the experiment
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', always_show_baseline=False,
-                                        holdback_frac=0.02))
+                                        exp_frac=0.01, holdback_frac=0.02))
         directive = self.mastermind._calculate_current_serving_directive(
             video_info)[1]
         self.assertAlmostEqual(directive['bc1'], 0.99)
@@ -904,7 +930,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
 
     def test_only_experiment_if_chosen(self):
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', only_exp_if_chosen=True))
+            'acct1', ExperimentStrategy('acct1', exp_frac=0.01,
+            holdback_frac=0.01, only_exp_if_chosen=True))
 
         video_info = VideoInfo('acct1', True, [], score_type=ScoreType.CLASSICAL)
         self.assertIsNone(
@@ -1076,6 +1103,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
     def test_winner_found_no_override_editor(self):
         self.mastermind.update_experiment_strategy(
             'acct1', ExperimentStrategy('acct1', holdback_frac=0.02,
+                                        exp_frac=0.01, 
                                         override_when_done=False))
 
         video_info = VideoInfo(
@@ -1327,8 +1355,8 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertGreater(directive['ctr'], 0.05) # Not enough imp
 
     def test_min_conversion_effect(self):
-        # The min_conversion number will affect how quickly the experiment comes
-        # to conclusion.
+        # The min_conversion number will affect how quickly the
+        # experiment comes to conclusion.
         self.mastermind.update_experiment_strategy(
             'acct1',
             ExperimentStrategy('acct1', exp_frac=1.0, min_conversion = 50))
@@ -1409,6 +1437,49 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
         self.assertEquals(experiment_state, 'complete')
         self.assertLess(value_left, Mastermind.VALUE_THRESHOLD)
 
+    def test_min_impressions(self):
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', exp_frac=1.0, min_impressions=500))
+
+        # Total impressions is lower than 500 for each thumb so the
+        # experiment shouldn't end
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=400),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon'),
+                                               base_conversions=1,
+                                               base_impressions=400)]))
+
+        self.assertEquals(experiment_state, 'running')
+        self.assertEquals(run_frac, {'n1' : 0.5, 'n2': 0.5 })
+
+        # Now the expermeriment should finish
+        self.mastermind.update_experiment_strategy(
+            'acct1',
+            ExperimentStrategy('acct1', exp_frac=1.0, min_impressions=100))
+
+        experiment_state, run_frac, value_left, winner_tid = \
+            self.mastermind._calculate_current_serving_directive(
+            VideoInfo(
+                'acct1', True,
+                [build_thumb(ThumbnailMetadata('n1', 'vid1', rank=0,
+                                               ttype='neon'),
+                                               base_conversions=100,
+                                               base_impressions=400),
+                 build_thumb(ThumbnailMetadata('n2', 'vid1', rank=1,
+                                               ttype='neon'),
+                                               base_conversions=1,
+                                               base_impressions=400)]))
+        self.assertEquals(experiment_state, neondata.ExperimentState.COMPLETE)
+        self.assertEquals(run_frac, {'n1' : 1.0, 'n2': 0.0 })
+
     def test_frac_adjust_rate(self):
         # We can progressively change how the fractions are distributed.
         # frac_adjust_rate=1.0 is true to Thompson Sampling percentage
@@ -1477,6 +1548,7 @@ class TestCurrentServingDirective(test_utils.neontest.TestCase):
             'acct1',
             ExperimentStrategy(
                 'acct1', frac_adjust_rate=0.,
+                holdback_frac=0.01, exp_frac=0.01,
                 experiment_type=ExperimentStrategy.MULTIARMED_BANDIT))
         experiment_state, run_frac, value_left, winner_tid = \
             self.mastermind._calculate_current_serving_directive(
@@ -1799,16 +1871,17 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         super(TestUpdatingFuncs, self).setUp()
         numpy.random.seed(1984934)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the PG connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get.return_value = None
 
         self.mastermind = Mastermind()
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1'))
+            'acct1',
+            ExperimentStrategy('acct1', 
+            holdback_frac=0.01, exp_frac=0.01))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_tid1', 'acct1_vid1',
@@ -1819,7 +1892,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         logging.getLogger('mastermind.core').reset_sample_counters()
 
     def test_no_data_yet(self):
@@ -1889,7 +1963,9 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         logging.getLogger('mastermind.core').reset_sample_counters()
         with self.assertLogExists(logging.INFO, 'strategy has changed'):
             self.mastermind.update_experiment_strategy(
-                'acct2', ExperimentStrategy('acct2', exp_frac=0.5))
+                'acct2', ExperimentStrategy('acct2', 
+                    holdback_frac=0.03, 
+                    exp_frac=0.75))
         self.assertNotEqual(
             orig_directive,
             self.mastermind.get_directives(['acct2_vid1']).next())
@@ -1901,8 +1977,8 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
-        self.assertGreater(self.redis_mock.call_count, 0)
-        self.redis_mock.reset_mock()
+        self.assertGreater(self.postgres_mock.call_count, 0)
+        self.postgres_mock.reset_mock()
 
         # Repeating the info doesn't produce a change
         self.mastermind.update_video_info(
@@ -1916,7 +1992,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
         self.assertEqual(directives[0][0], ('acct1', 'acct1_vid1'))
         self.assertItemsEqual(directives[0][1], [('acct1_vid1_tid1', 0.99),
                                                  ('acct1_vid1_tid2', 0.01)])
-        self.assertEqual(self.redis_mock.call_count, 0)
+        self.assertEqual(self.postgres_mock.call_count, 0)
 
     def test_add_new_thumbs(self):
         self.mastermind.update_video_info(
@@ -1996,7 +2072,7 @@ class TestUpdatingFuncs(test_utils.neontest.TestCase):
           neondata.ExperimentState.COMPLETE
 
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1', exp_frac=1.0))
+            'acct1', ExperimentStrategy('acct1', holdback_frac=0.01, exp_frac=1.0))
 
         updated_state = self.mastermind.experiment_state['acct1_vid1']
         self.assertEqual(updated_state, neondata.ExperimentState.COMPLETE)
@@ -2100,17 +2176,17 @@ class TestStatUpdating(test_utils.neontest.TestCase):
         super(TestStatUpdating, self).setUp()
         numpy.random.seed(1984935)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis_patcher = patch(
-            'cmsdb.neondata.blockingRedis.StrictRedis')
-        self.redis_mock = self.redis_patcher.start()
-        self.redis_mock().get.return_value = None
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
+        # Mock out the PG connection so that it doesn't throw an error
+        self.postgres_patcher = patch(
+            'cmsdb.neondata.PostgresDB._PostgresDB')
+        self.postgres_mock = self.postgres_patcher.start()
+        self.postgres_mock().get.return_value = None
 
         self.mastermind = Mastermind()
 
         self.mastermind.update_experiment_strategy(
-            'acct1', ExperimentStrategy('acct1'))
+            'acct1', ExperimentStrategy('acct1', 
+            holdback_frac=0.01, exp_frac=0.01))
         self.mastermind.update_video_info(
             VideoMetadata('acct1_vid1'),
             [ThumbnailMetadata('acct1_vid1_v1t1', 'acct1_vid1',
@@ -2127,7 +2203,8 @@ class TestStatUpdating(test_utils.neontest.TestCase):
 
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
-        self.redis_patcher.stop()
+        neondata.PostgresDB.instance = None  
+        self.postgres_patcher.stop()
         
     def test_initial_stats_update(self):
         self.mastermind.update_stats_info([
@@ -2222,21 +2299,12 @@ class TestStatUpdating(test_utils.neontest.TestCase):
                     holdback_frac=0.0,
                     exp_frac=1.0))
 
-class TestExperimentState(test_utils.neontest.TestCase):
+class TestExperimentState(CorePostgresTest):
     def setUp(self):
         super(TestExperimentState, self).setUp()
         numpy.random.seed(1984937)
 
-        # Mock out the redis connection so that it doesn't throw an error
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
-
         self.mastermind = Mastermind()
-
-    def tearDown(self):
-        self.redis.stop()
-        super(TestExperimentState, self).tearDown()
 
     def test_update_stats_when_experiment_not_complete(self):
         self.mastermind.update_experiment_strategy(
@@ -2541,12 +2609,9 @@ class TestExperimentState(test_utils.neontest.TestCase):
                           neondata.ExperimentState.UNKNOWN)
         self.assertEquals(len([x for x in self.mastermind.get_directives()]),0)
 
-class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
+class TestStatusUpdatesInDb(CorePostgresTest):
     def setUp(self):
         super(TestStatusUpdatesInDb, self).setUp()
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start()
-        self.addCleanup(neondata.DBConnection.clear_singleton_instance)
 
         # Mock out the http callback
         self.http_patcher = patch('mastermind.core.utils.http')
@@ -2591,7 +2656,6 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
     def tearDown(self):
         self.mastermind.wait_for_pending_modifies()
         self.http_patcher.stop()
-        self.redis.stop()
         super(TestStatusUpdatesInDb, self).tearDown()
 
     def _wait_for_db_updates(self):
@@ -2849,6 +2913,7 @@ class TestStatusUpdatesInDb(test_utils.neontest.AsyncTestCase):
             ExperimentStrategy('acct1',
                                experiment_type=ExperimentStrategy.SEQUENTIAL,
                                frac_adjust_rate=0.0,
+                               holdback_frac=0.01,
                                exp_frac=1.0))
 
         # This should not have a winner. Pairwise it would, but on

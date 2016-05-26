@@ -16,7 +16,6 @@ import datetime
 import functools
 import json
 import re
-import redis
 import signal
 import time
 import tornado

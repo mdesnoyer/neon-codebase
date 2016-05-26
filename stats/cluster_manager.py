@@ -21,6 +21,8 @@ import time
 import threading
 import utils.neon
 import utils.monitor
+from boto.emr import EmrConnection
+from boto.ec2 import EC2Connection
 
 import logging
 _log = logging.getLogger(__name__)
@@ -87,21 +89,42 @@ class BatchProcessManager(threading.Thread):
             # Run the job
             _log.info('Running batch process.')
             try:
-                cleaned_output_path = "%s/%s" % (
-                    options.cleaned_output_path,
-                    time.strftime("%Y-%m-%d-%H-%M"))
+                run_time = time.strftime("%Y-%m-%d-%H-%M")
+                hdfs_dir = 'mnt/cleaned'
+                s3_output_path = options.cleaned_output_path
+
+                hdfs_path = 'hdfs://%s:9000' % self.cluster.master_ip
+
+                cleaned_output_path = "%s/%s/%s" % (
+                    hdfs_path,
+                    hdfs_dir,
+                    run_time)
+                
+                _log.info("Output of clean up job goes to %s" % cleaned_output_path)
 
                 self.cluster.change_instance_group_size(
                     'TASK', new_size=self.n_task_instances)
+
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path,
-                    cleaned_output_path,
+                    self.cluster, options.input_path, 
+                    cleaned_output_path, 
+                    s3_output_path,
                     timeout = (options.batch_period * 10))
+
+                _log.info('Sucessful cleaning job output to: %s' %
+                          cleaned_output_path)
+
+                self.last_output_path = s3_output_path + run_time
+                _log.info("Latest S3 checkpoint is %s" % self.last_output_path)
+                
                 stats.batch_processor.build_impala_tables(
                     cleaned_output_path,
                     self.cluster,
                     timeout = (options.batch_period * 4))
-                self.last_output_path = cleaned_output_path
+
+                # Delete previous HDFS output directories from clean up job, if any
+                stats.batch_processor.cleanup_hdfs(self.cluster, run_time, hdfs_dir)
+
                 statemon.state.increment('successful_batch_runs')
                 statemon.state.last_batch_success = 1
             except Exception as e:
@@ -173,7 +196,6 @@ class BatchProcessManager(threading.Thread):
                     self.cluster,
                     timeout = (options.batch_period * 4))
                 self.last_output_path = data_path
-
         except Exception as e:
             _log.exception('Error building the impala tables')
 

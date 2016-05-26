@@ -24,6 +24,7 @@ import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
 import cv2
+import dateutil.parser
 import ffvideo
 import hashlib
 import json
@@ -33,7 +34,6 @@ import multiprocessing
 import numpy as np 
 from PIL import Image
 import psutil
-import pytube
 import Queue
 import random
 import re
@@ -56,6 +56,7 @@ import utils.neon
 from utils import pycvutils
 import utils.http
 from utils import statemon
+import youtube_dl
 
 import logging
 _log = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ define('extra_workers', default=0,
 define('video_temp_dir', default=None,
        help='Temporary directory to download videos to')
 define('max_bandwidth_per_core', default=15500000.0,
-       help='Max bandwidth in MB/s')
+       help='Max bandwidth in bytes/s')
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
@@ -182,6 +183,18 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+    @staticmethod
+    def percent_encode_url_path(url):
+        '''
+        Takes a url and re-encodes (i.e., decodes encodes) its path with
+        percent-sign encoding. TODO consider cases: unicode, double-decode
+        '''
+
+        parse = urlparse.urlparse(url)
+        parse = list(parse)
+        parse[2] = urllib.quote(urllib.unquote(parse[2]))
+        return urlparse.urlunparse(parse)
+
     def start(self):
         '''
         Actual work done here
@@ -248,9 +261,7 @@ class VideoProcessor(object):
         '''
         Download the video file 
         '''
-        CHUNK_SIZE = 4*1024*1024 # 4MB
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
-        ytre = re.compile('(https?:\/\/[A-Za-z]*\.youtu.*be\..+\/watch\?).*(v=.+)') 
 
         # Find out if we should throttle
         do_throttle = False
@@ -258,7 +269,6 @@ class VideoProcessor(object):
                            max(statemon.state.running_workers, 1))
         if frac_processing > options.min_load_to_throttle:
             do_throttle=True
-            chunk_time = float(CHUNK_SIZE) / options.max_bandwidth_per_core
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
@@ -272,6 +282,7 @@ class VideoProcessor(object):
                     key_name = s3match.group(5)
                     s3conn = S3Connection()
                     bucket = s3conn.get_bucket(bucket_name)
+                    _log.info(key_name)
                     key = bucket.get_key(key_name)
                     key.get_contents_to_file(self.tempfile)
                     self.tempfile.flush()
@@ -281,63 +292,81 @@ class VideoProcessor(object):
                               'Falling back on http: %s' % (self.video_url, e))
                     statemon.state.increment('s3url_download_error')
 
-            ytmatch = ytre.search(self.video_url) 
-            if ytmatch:
-                watch_portion = ytmatch.group(1) 
-                video_portion = ytmatch.group(2) 
-                youtube = pytube.YouTube('%s%s' % 
-                    (watch_portion, video_portion))
-                videos = youtube.filter('mp4')
-                found_video = None
-                for v in videos:
-                    # they are ordered by resolution ASC, keep
-                    # and replace as we find a better reso up 
-                    # to 720p 
-                    if (v.resolution == '720p' or
-                       v.resolution == '480p' or 
-                       v.resolution == '360p'): 
-                        found_video = v 
-                try:
-                    if found_video:  
-                        def _move_file(path):
-                            shutil.move(path, self.tempfile.name)  
-                        found_video.download(os.path.dirname(
-                            self.tempfile.name), on_finish=_move_file) 
-                        self.tempfile.flush()  
+            # Now try using youtube-dl to download the video. This can
+            # potentially handle a ton of different video sources.
+            def _handle_progress(x):
+                if x['status'] == 'finished':
+                    shutil.move(x['filename'], self.tempfile.name)
+                    
+            dl_params = {}
+            dl_params['ratelimit'] = (options.max_bandwidth_per_core 
+                                      if do_throttle else None)
+            dl_params['restrictfilenames'] = True
+            dl_params['progress_hooks'] = [_handle_progress]
+            dl_params['outtmpl'] = unicode(str(
+                os.path.join(options.video_temp_dir or '/tmp',
+                             '%s_%%(id)s.%%(ext)s' %
+                             self.job_params['api_key'])))
+
+            # Specify for formats that we want in order of preference
+            dl_params['format'] = (
+                'best[ext=mp4][height<=720][protocol^=?http]/'
+                'best[ext=mp4][protocol^=?http]/'
+                'best[height<=720][protocol^=?http]/'
+                'best[protocol^=?http]/'
+                'best/'
+                'bestvideo')
+            dl_params['logger'] = _log
+            
+            with youtube_dl.YoutubeDL(dl_params) as ydl:
+                # Dig down to the real url
+                cur_url = self.video_url
+                found_video = False
+                while not found_video:
+                    video_info = ydl.extract_info(cur_url, download=False)
+                    result_type = video_info.get('_type', 'video')
+                    if result_type == 'url':
+                        # Need to step to the next url
+                        cur_url = video_info['url']
+                        continue
+                    elif result_type == 'video':
+                        found_video = True
                     else:
-                        msg = 'Could not find a downloadable YouTube video' 
-                        _log.warning(msg)
-                        statemon.state.increment('youtube_video_not_found') 
-                except Exception as e:
-                    msg = 'Unexpected Error getting YouTube content : %s' % e
-                    _log.error(msg)
-                    statemon.state.increment('youtube_video_download_error')
-                finally: 
-                    return
- 
-            # Use urllib2
-            url_parse = urlparse.urlparse(self.video_url)
-            url_parse = list(url_parse)
-            url_parse[2] = urllib.quote(url_parse[2])
-            req = urllib2.Request(urlparse.urlunparse(url_parse),
-                                  headers=self.headers)
-            response = urllib2.urlopen(req, timeout=self.timeout)
-            last_time = time.time()
-            data = response.read(CHUNK_SIZE)
-            while data != '':
-                if do_throttle:
-                    time_spent = time.time() - last_time
-                    print 'sleep time: %f, %f' % (chunk_time, chunk_time-time_spent)
-                    time.sleep(max(0, chunk_time-time_spent))
-                self.tempfile.write(data)
-                self.tempfile.flush()
-                last_time = time.time()
-                data = response.read(CHUNK_SIZE)
+                        # They gave us a playlist or other type of url
+                        msg = ('Unhandled video type %s' %
+                               (result_type))
+                        raise youtube_dl.utils.DownloadError(msg)
+
+                # Update information about the video before we download it
+                def _update_title(x):
+                    if x.video_title is None:
+                        x.video_title = video_info.get('title', None)
+                    if x.default_thumbnail is None:
+                        x.default_thumbnail = video_info.get('thumbnail', None)
+                neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'], self.job_params['api_key'] ,
+                    _update_title)
+                    
+                # Do the real download
+                video_info = ydl.extract_info(cur_url, download=True)
+
+                # Update some of our metadata if there's better info
+                # from the video
+                self.video_metadata.duration = video_info.get(
+                    'duration', self.video_metadata.duration)
+                if video_info.get('upload_date', None) is not None:
+                    self.video_metadata.publish_date = \
+                      dateutil.parser.parse(video_info['upload_date']).isoformat()
+                                                              
 
             self.tempfile.flush()
 
             _log.info('Finished downloading video %s' % self.video_url)
-        except urllib2.URLError as e:
+
+        except (youtube_dl.utils.DownloadError,
+                youtube_dl.utils.ExtractorError, 
+                youtube_dl.utils.UnavailableVideoError,
+                socket.error) as e:
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
@@ -353,12 +382,6 @@ class VideoProcessor(object):
         except boto.exception.BotoServerError as e:
             msg = ("Server error downloading video %s from S3: %s" %
                    (self.video_url, e))
-            _log.error(msg)
-            statemon.state.increment('video_download_error')
-            raise VideoDownloadError(msg)
-
-        except socket.error as e:
-            msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
@@ -658,6 +681,8 @@ class VideoProcessor(object):
             video_obj.integration_id = self.video_metadata.integration_id
             video_obj.frame_size = self.video_metadata.frame_size
             video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+            video_obj.publish_date = (video_obj.publish_date or 
+                                      self.video_metadata.publish_date)
         try:
             new_video_metadata = neondata.VideoMetadata.modify(
                 self.video_metadata.key,
