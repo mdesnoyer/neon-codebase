@@ -2414,7 +2414,7 @@ class ProcessingStrategy(DefaultedStoredObject):
     parameter for which this is the case, see local_video_searcher.py for
     more elaborate documentation.
     '''
-    def __init__(self, account_id, processing_time_ratio=2.5,
+    def __init__(self, account_id, processing_time_ratio=2.0,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,

@@ -154,7 +154,6 @@ class VideoProcessor(object):
         model: model obj
         '''
 
-        self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
         self.reprocess = reprocess
         self.job_queue = job_queue
@@ -275,7 +274,8 @@ class VideoProcessor(object):
 
             if api_request.state == neondata.RequestState.REQUEUED:
                 # Let another node pick up the job to try again
-                yield self.job_queue.hide_message(self.job_message, 0)
+                yield self.job_queue.hide_message(self.job_message, 
+                                                  options.dequeue_period / 2.0)
             
             else:
                 # It's the final error
