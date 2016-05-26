@@ -96,7 +96,9 @@ def send_request(request, ntries=5, do_logging=True, base_delay=0.2,
         cur_try += 1
         try:
             http_client = tornado.httpclient.AsyncHTTPClient()
-            response = yield http_client.fetch(request)
+            response = yield http_client.fetch(
+                request,
+                ca_certs='/etc/ssl/certs/-certificates.crt')
         except tornado.httpclient.HTTPError as e:
             if e.response:
                 response = e.response

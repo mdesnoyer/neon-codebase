@@ -109,7 +109,7 @@ class VideoProcessingQueue(object):
             self.region = options.region
             self.queue_prefix = options.queue_prefix
 
-            _log.info("Connected to SQS server on region %s" % options.region)
+            _log.debug("Connected to SQS server on region %s" % options.region)
     
     @run_on_executor
     def _create_sqs_server(self, region):
