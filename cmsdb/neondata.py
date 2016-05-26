@@ -5220,7 +5220,7 @@ class VideoMetadata(StoredObject):
                       since=None,
                       until=None, 
                       limit=25,
-                      query=None):
+                      title_query=None):
 
         """Does a basic search over the videometadatas in the DB 
 
@@ -5234,8 +5234,8 @@ class VideoMetadata(StoredObject):
                         defaults to None
            limit      : if specified it limits the search to this many 
                         videos, defaults to 25
-           query      : a title search string that ANDs words
-                        @TODO add features to this if needed
+           title_query: regex to apply against title using pg's ~ operator.
+                        An invalid regex will raise DataError.
 
            Returns : a dictionary of the following 
                videos - the videos that the search returned 
@@ -5245,7 +5245,6 @@ class VideoMetadata(StoredObject):
         """ 
         where_clause = "" 
         videos = []
-        requests = []
         since_time = None 
         until_time = None  
         wc_params = []
@@ -5280,12 +5279,12 @@ class VideoMetadata(StoredObject):
                    "v.updated_time AS updated_time_pg"]
 
         # Join request to query searches on video title.
-        if query is not None:
+        if title_query is not None:
             join_clause = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
             if where_clause:
                 where_clause += " AND "
-            where_clause += " r._data->>'video_title' SIMILIAR TO %s"
-            wc_params.append(query)
+            where_clause += " r._data->>'video_title' ~ %s"
+            wc_params.append(title_query)
 
         results = yield cls.get_and_execute_select_query(
                     columns,
@@ -5317,26 +5316,13 @@ class VideoMetadata(StoredObject):
             pass
 
         for result in results:
-            # Split the columns out for each class by alias.
-            # Cut the first 2 characters (e.g., "v.") from the key.
-            vid_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'v'}
-            req_result = {k[2:]: v for (k, v) in result.items() if k[0] == 'r'}
-            import pdb; pdb.set_trace()
-            video = cls._create(vid_result['v._data']['key'], vid_result)
+            video = cls._create(result['_data']['key'], result)
             videos.append(video)
-            # Conditionally create a request object if the table was joined.
-            if req_result:
-                request = NeonApiRequest._create(
-                    result['r._data']['key'],
-                    req_result)
-                requests.append(request)
 
         if do_reverse:
             videos.reverse()
-            requests.reverse()
 
         rv['videos'] = videos
-        rv['requests'] = requests
         rv['since_time'] = since_time
         rv['until_time'] = until_time
         raise tornado.gen.Return(rv)

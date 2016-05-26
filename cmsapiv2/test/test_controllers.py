@@ -4506,13 +4506,22 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         neondata.VideoMetadata('u0_v1', request_id='j1').save()
         neondata.NeonApiRequest('j1', 'u0', title='Title title1 title').save()
         neondata.VideoMetadata('u0_v2', request_id='j2').save()
-        neondata.NeonApiRequest('j2', 'u0', title='Another title0 title1 title').save()
+        neondata.NeonApiRequest('j2', 'u0',
+                                title='Another title0 title1 title').save()
 
         url = '/api/v2/u0/videos/search?fields=video_id,title&query={}'.format(
-            'title0')
+            '.*title0.*')
         response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
         self.assertEqual(2, len(rjson['videos']))
+
+    @tornado.testing.gen_test
+    def test_invalid_query_param(self):
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            url = '/api/v2/u0/videos/search?fields=video_id,title&query={}'.format(
+                '*title0')  # * here has nothing to repeat.
+            yield self.http_client.fetch(self.get_url(url))
+        self.assertEquals(400, e.exception.code)
 
     @tornado.testing.gen_test
     def test_since_and_until_param(self):

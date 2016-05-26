@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+import sre_constants
 
 _log = logging.getLogger(__name__)
 
@@ -1296,16 +1297,14 @@ class VideoHelper(object):
                          since=since,
                          until=until,
                          limit=limit,
-                         query=query)
+                         title_query=query)
 
         videos = search_res['videos']
-        requests = search_res['requests']
         since_time = search_res['since_time']
         until_time = search_res['until_time']
         vid_dict = yield VideoHelper.build_video_dict(
                        videos,
-                       fields,
-                       requests=requests)
+                       fields)
 
         next_page_url = VideoHelper.build_page_url(
             base_url,
@@ -1333,8 +1332,7 @@ class VideoHelper(object):
     @tornado.gen.coroutine
     def build_video_dict(videos,
                          fields,
-                         video_ids=None,
-                         requests=None):
+                         video_ids=None):
         vid_dict = {}
         vid_dict['videos'] = None
         vid_dict['video_count'] = 0
@@ -1346,8 +1344,7 @@ class VideoHelper(object):
             job_ids = [(v.job_id, v.get_account_id())
                           for v in videos]
 
-            requests = requests if requests else \
-                    yield neondata.NeonApiRequest.get_many(
+            requests = yield neondata.NeonApiRequest.get_many(
                            job_ids,
                            async=True)
             for video, request in zip(videos, requests):
@@ -1936,6 +1933,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
+
         account_id = args.get('account_id', None)
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
@@ -1982,6 +1980,14 @@ class VideoSearchExternalHandler(APIV2Handler):
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
+
+        # Validate query is regex.
+        if query:
+            try:
+                re.compile(query)
+            except sre_constants.error as e:
+                raise BadRequestError(e.message)
+
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
         if fields:
