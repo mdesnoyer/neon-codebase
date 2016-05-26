@@ -1449,17 +1449,6 @@ class VideoHelper(object):
 
         raise tornado.gen.Return(new_video)
 
-    def is_valid_query(query):
-        '''Take a postgres-type posix regex and validate it.
-
-        Reference: https://www.postgresql.org/docs/9.3/static/functions-matching.html#FUNCTIONS-POSIX-TABLE
-
-        input- query- a posix regex allowed by postgres
-        output- true if the regex is valid, else false'''
-
-        # @TODO implement
-        return True;
-
 
 '''*********************************************************************
 VideoHandler
