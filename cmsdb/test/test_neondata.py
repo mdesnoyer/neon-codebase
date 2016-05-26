@@ -2516,7 +2516,55 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         so = neondata.NeonUserAccount('kevinacct')
         yield so.save(async=True) 
         integrations = yield so.get_integrations(async=True)
-        self.assertEquals(len(integrations), 0)  
+        self.assertEquals(len(integrations), 0) 
+
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids(self): 
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(async=True)
+        self.assertEquals(len(video_ids), 1)
+        self.assertEquals(video_ids[0], 'key_vid1')
+ 
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids_multiple(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        i_vid_two = InternalVideoID.generate(api_key, 'vid2')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(async=True)
+        self.assertEquals(len(video_ids), 2)
+        self.assertEquals(video_ids[0], 'key_vid1')
+        self.assertEquals(video_ids[1], 'key_vid2')
+
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids_since_date(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        i_vid_two = InternalVideoID.generate(api_key, 'vid2')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        since_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
+        video = yield VideoMetadata.get(i_vid_two, async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(
+            async=True, 
+            since=since_date)
+        self.assertEquals(len(video_ids), 1)
+        self.assertEquals(video_ids[0], 'key_vid2')
 
 class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self):

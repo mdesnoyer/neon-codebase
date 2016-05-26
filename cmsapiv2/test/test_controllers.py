@@ -116,6 +116,16 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         response = self.wait()
         self.assertEquals(response.code, 400) 
         self.assertIn('application/json', response.headers['Content-Type'])
+
+        exception_mock.side_effect = controllers.MultipleInvalid('blah blah')  
+        self.http_client.fetch(self.get_url(url),
+                               callback=self.stop, 
+                               body=params, 
+                               method='POST', 
+                               headers=header) 
+        response = self.wait()
+        self.assertEquals(response.code, 400) 
+        self.assertIn('application/json', response.headers['Content-Type'])
         exception_mocker.stop()
 
     def get_exceptions(self, url, exception_mocker):

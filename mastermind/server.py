@@ -411,6 +411,8 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
+        self._account_last_updated_time = {} 
+
     def __del__(self):
         self.stop()
         del self._video_updater
@@ -516,10 +518,23 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
 
-            for video_id in account.get_internal_video_ids():
+            video_id = None
+            akey = account.neon_api_key
+            since = self._account_last_updated_time.get(
+                akey, 
+                None) 
+ 
+            for video_id in account.get_internal_video_ids(
+                 since=since):
                 self._schedule_video_update(video_id)
  
-            self.process_queued_video_updates() 
+            self.process_queued_video_updates()
+
+            if video_id: 
+                # pull the last video, it will be the most recent one 
+                video = neondata.VideoMetadata.get(video_id)
+                if video:  
+                    self._account_last_updated_time[akey] = video.updated
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
