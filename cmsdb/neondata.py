@@ -5208,7 +5208,94 @@ class VideoMetadata(StoredObject):
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
         yield VideoMetadata.delete(key, async=True)
+ 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_videos_thumbnails_serving_urls(cls, video_ids):
+        ''' Expects video_ids
+            Returns a dictionary keyed by video_id with 
+              videometadata, thumbnailmetadata, and thumbnailservingurls
+              objects for all of the video_ids 
+        ''' 
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        csl_videos = ",".join("'{0}'".format(v) for v in video_ids)
+        '''
+        query = "SELECT v._data, t._data, ts._data FROM videometadata v \
+                   JOIN thumbnailmetadata t \
+                    ON t._data->>'video_id' = v._data->>'key'\
+                   JOIN thumbnailservingurls ts \
+                    ON replace(ts._data->>'key', \
+                         'thumbnailservingurls_', '') = t._data->>'key'\
+                   WHERE v._data->>'key' IN (%s)" % csl_videos
+        '''
+        # use lateral so we get the nones 
+        # join by key - this will pull WHERE t._data->>'video_id' = q1.video_data->>'key' 
+        query = "SELECT video_data, thumbnail_data, thumbnail_serving_urls_data FROM(\
+                   SELECT v._data AS video_data \
+                    FROM videometadata v \
+                    WHERE v._data->>'key' IN (%s) \
+                   ) q1 LEFT JOIN LATERAL ( \
+                     SELECT t._data AS thumbnail_data \
+                       FROM thumbnailmetadata t \
+                       WHERE t._data->>'video_id' = q1.video_data->>'key' \
+                   ) q2 ON true LEFT JOIN LATERAL ( \
+                     SELECT ts._data AS thumbnail_serving_urls_data \
+                      FROM thumbnailservingurls ts \
+                      WHERE replace(ts._data->>'key', \
+                         'thumbnailservingurls_', '') = thumbnail_data->>'key'\
+                   ) q3 ON true" % csl_videos
+ 
+        obj_dict = {} 
+        for v in video_ids:
+            obj_dict[v] = {} 
+            obj_dict[v]['video'] = None
+            obj_dict[v]['thumbnails'] = {} 
+            obj_dict[v]['thumbnail_serving_urls'] = [] 
+         
+        cursor = yield conn.execute(
+                    query, 
+                    cursor_factory=psycopg2.extensions.cursor)
 
+        for res in cursor.fetchall():
+            try:
+                video = res[0]
+                if video is not None: 
+                    video_id = video['key']  
+                    if obj_dict[video_id]['video'] is None:               
+                        video_obj = VideoMetadata._create(
+                            video_id,
+                            video)
+                        obj_dict[video_id]['video'] = video_obj
+                        for tid in video_obj.thumbnail_ids: 
+                            obj_dict[video_id]['thumbnails'][tid] = None 
+
+                thumbnail = res[1]
+                if thumbnail is not None: 
+                    thumbnail_id = thumbnail['key'] 
+                    thumbnail_obj = ThumbnailMetadata._create(
+                        thumbnail_id, 
+                        thumbnail)
+                    #obj_dict[video_id]['thumbnails'].append(thumbnail_obj)
+                    obj_dict[video_id]['thumbnails'][thumbnail_id] = thumbnail_obj 
+                 
+                
+                thumbnail_serving_url = res[2]
+                if thumbnail_serving_url is not None: 
+                    thumbnail_serving_url_key = thumbnail_serving_url['key']
+                    thumbnail_serving_obj = ThumbnailServingURLs._create(
+                        thumbnail_serving_url_key, 
+                        thumbnail_serving_url)
+                    obj_dict[video_id]['thumbnail_serving_urls'].append(
+                        thumbnail_serving_obj)
+
+            except (KeyError, TypeError): 
+                pass  
+
+        db.return_connection(conn)
+        raise tornado.gen.Return(obj_dict) 
+    
     @classmethod 
     @tornado.gen.coroutine
     def search_videos(cls, 
