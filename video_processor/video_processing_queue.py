@@ -197,7 +197,7 @@ class VideoProcessingQueue(object):
         return message
 
     @run_on_executor
-    def _change_message_visibility(self, message, queue, timeout):
+    def _change_message_visibility(self, queue, message, timeout):
         '''Changes the visiblity of the message based on the information in 
            the body of the message.
 
