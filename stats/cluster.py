@@ -822,13 +822,13 @@ class Cluster():
             try:
                 syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
                 if syslog == ' ':
-                    _log.info('Still inside loop try')
+                    _log.info('Syslog is not populated yet')
                 else:
                     break
             except IOError:
-                _log.info('Still inside loop except')
+                _log.info('Syslog file is not created yet')
             
-            time.sleep(120)
+            time.sleep(60)
 
 
         _log.info("Syslog from s3distcp step is : %s" % syslog)
