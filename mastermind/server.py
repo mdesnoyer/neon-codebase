@@ -411,7 +411,8 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
-        self._last_video_updated_time = None 
+        self._account_last_updated_time = {} 
+        #self._last_video_updated_time = None 
 
     def __del__(self):
         self.stop()
@@ -518,21 +519,23 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
 
-            video_id = None 
+            video_id = None
+            akey = account.neon_api_key
+            since = self._account_last_updated_time.get(
+                akey, 
+                None) 
+ 
             for video_id in account.get_internal_video_ids(
-                 since=self._last_video_updated_time):
+                 since=since):
                 self._schedule_video_update(video_id)
  
             self.process_queued_video_updates()
 
-            try:
+            if video_id: 
                 # pull the last video, it will be the most recent one 
-                video = neondata.VideoMetadata.get(video_id) 
-                self._last_video_updated_time = video.updated  
-            except AttributeError as e: 
-                _log.warn("Unable to add last updated to speed up processing")
-                pass
-
+                video = neondata.VideoMetadata.get(video_id)
+                if video:  
+                    self._account_last_updated_time[akey] = video.updated
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
