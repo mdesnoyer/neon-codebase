@@ -412,7 +412,6 @@ class VideoDBWatcher(threading.Thread):
         self._accounts_options = {}
 
         self._account_last_updated_time = {} 
-        #self._last_video_updated_time = None 
 
     def __del__(self):
         self.stop()
