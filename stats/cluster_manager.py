@@ -106,7 +106,7 @@ class BatchProcessManager(threading.Thread):
                     'TASK', new_size=self.n_task_instances)
 
                 stats.batch_processor.run_batch_cleaning_job(
-                    self.cluster, options.input_path, 
+                    self.cluster, 's3://neon-tracker-logs-v2/v2.2/1930337906/*/*/*', 
                     cleaned_output_path, 
                     s3_output_path,
                     timeout = (options.batch_period * 10))

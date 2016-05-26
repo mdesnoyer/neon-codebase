@@ -817,7 +817,11 @@ class Cluster():
         step_id = jobid.stepids[0].value
 
         # The tracking URL for S3DistCp is going to syslog, so grab it from there
-        syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+        syslog = ' '
+        while syslog == ' ':
+            syslog = self.get_emr_logfile(ssh_conn, step_id, 'syslog')
+            _log.info('Still inside loop')
+            time.sleep(120)
 
         _log.info("Syslog from s3distcp step is : %s" % syslog)
 
