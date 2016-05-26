@@ -467,10 +467,10 @@ class VideoProcessor(object):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
-        api_request = yield tornado.gen.Task(
-            neondata.NeonApiRequest.get,
+        api_request = yield neondata.NeonApiRequest.get(
             self.job_params['job_id'],
-            self.job_params['api_key'])
+            self.job_params['api_key'],
+            async=True)
         if api_request and api_request.state in [
                 neondata.RequestState.FINISHED,
                 neondata.RequestState.SERVING,
@@ -520,8 +520,8 @@ class VideoProcessor(object):
         account_id = self.job_params['api_key']
         
         try:
-            processing_strategy = yield tornado.gen.Task(
-                neondata.ProcessingStrategy.get, account_id)
+            processing_strategy = yield neondata.ProcessingStrategy.get(
+                account_id, async=True)
         except Exception, e:
             _log.error(("Could not fetch processing strategy for account_id "
                         "%s: %s")%(str(account_id), e))
@@ -671,11 +671,11 @@ class VideoProcessor(object):
             else:
                 somebody_else_finished[0] = True
         try:
-            api_request = yield tornado.gen.Task(
-                neondata.NeonApiRequest.modify,
+            api_request = yield neondata.NeonApiRequest.modify(
                 job_id,
                 api_key,
-                _flag_for_finalize)
+                _flag_for_finalize,
+                async=True)
             if api_request is None:
                 raise DBError('Api Request finalizing failed. '
                               'It was not there')
@@ -688,11 +688,11 @@ class VideoProcessor(object):
             raise OtherWorkerCompleted()
 
         # Get the CDN Metadata
-        cdn_metadata = yield tornado.gen.Task(
-            neondata.CDNHostingMetadataList.get,
+        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(
                 api_key,
-                self.video_metadata.integration_id))
+                self.video_metadata.integration_id),
+            async=True)
         if cdn_metadata is None:
             _log.warn_n('No cdn metadata for account %s integration %s. '
                         'Defaulting to Neon CDN'
@@ -734,22 +734,23 @@ class VideoProcessor(object):
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
         try:
-            new_thumb_dict = yield tornado.gen.Task(
-                neondata.ThumbnailMetadata.modify_many,
+            new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],
                 _merge_thumbnails,
-                create_missing=True)
+                create_missing=True,\
+                async=True)
             if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
             statemon.state.increment('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
-        
+
+        @tornado.gen.coroutine
         def _merge_video_data(video_obj):
             # Don't keep the random centerframe or neon thumbnails
-            thumbs = neondata.ThumbnailMetadata.get_many(
-                video_obj.thumbnail_ids)
+            thumbs = yield neondata.ThumbnailMetadata.get_many(
+                video_obj.thumbnail_ids, async=True)
             keep_thumbs = [x.key for x in thumbs if x.type not in [
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
@@ -768,11 +769,11 @@ class VideoProcessor(object):
             video_obj.publish_date = (video_obj.publish_date or 
                                       self.video_metadata.publish_date)
         try:
-            new_video_metadata = yield tornado.gen.Task(
-                neondata.VideoMetadata.modify,
+            new_video_metadata = yield neondata.VideoMetadata.modify(
                 self.video_metadata.key,
                 _merge_video_data,
-                create_missing=True)
+                create_missing=True,
+                async=True)
             if not new_video_metadata:
                 raise DBError('This should not ever happen')
         except Exception, e:
@@ -787,10 +788,10 @@ class VideoProcessor(object):
             # Enable the video to be served if we have any thumbnails available
             def _set_serving_enabled(video_obj):
                 video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            new_video_metadata = yield tornado.gen.Task(
-                neondata.VideoMetadata.modify,
+            new_video_metadata = yield neondata.VideoMetadata.modify(
                 self.video_metadata.key,
-                _set_serving_enabled)
+                _set_serving_enabled,
+                async=True)
             # Everything is fine at this point, so lets mark it finished
             api_request.state = neondata.RequestState.FINISHED
 
@@ -811,11 +812,11 @@ class VideoProcessor(object):
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
         try:
-            sucess = yield tornado.gen.Task(
-                neondata.NeonApiRequest.modify,
+            sucess = yield neondata.NeonApiRequest.modify(
                 api_request.job_id,
                 api_request.api_key,
-                _flag_request_done_in_db)
+                _flag_request_done_in_db,
+                async=True)
             if not sucess:
                 raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
@@ -861,8 +862,7 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = yield tornado.gen.Task(
-            neondata.NeonUserAccount.get, api_key)
+        account = yield neondata.NeonUserAccount.get(api_key, async=True)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)

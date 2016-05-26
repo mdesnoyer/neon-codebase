@@ -446,7 +446,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.assertEquals(api_request.state,
                               neondata.RequestState.REQUEUED)
             self.assertEquals(api_request.fail_count, 1)
-            self.job_hide_mock.assert_called_with(self.job_message, 0)
+            self.job_hide_mock.assert_called_with(self.job_message, 5.0)
             self.job_hide_mock.reset_mock()
 
             yield self.video_client.do_work(async=True)
@@ -1228,7 +1228,8 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     @patch('video_processor.client.neondata.NeonApiRequest.modify')
     @tornado.testing.gen_test
     def test_api_request_update_fail(self, api_request_mock):
-        api_request_mock = self._callback_wrap_mock(api_request_mock)
+        api_request_mock = self._future_wrap_mock(api_request_mock,
+                                                  require_async_kw=True)
         api_request_mock.side_effect = [
             # Connection error on setting finalizing state
             psycopg2.Error("Connection Error"), 

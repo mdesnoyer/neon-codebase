@@ -1142,7 +1142,9 @@ class StoredObject(object):
 
             mappings[key] = cur_obj 
         try:
-            func(mappings)
+            vals = func(mappings)
+            if isinstance(vals, concurrent.futures.Future):
+                yield vals
         finally:
             insert_statements = []
             update_objs = [] 
