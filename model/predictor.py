@@ -257,7 +257,7 @@ class DeepnetPredictor(Predictor):
         of an Aquila server as a string.
         '''
         super(DeepnetPredictor, self).__init__()
-        self.concurrency = concurrency
+        self.concurrency = int(concurrency)
         self.aq_conn = aquila_connection
         self.port = port
         self._cv = threading.Condition()
@@ -323,9 +323,9 @@ class DeepnetPredictor(Predictor):
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data = image.flatten().tostring()
         with self._cv:
-            while self.active == self.concurrency:
+            while self.active >= self.concurrency:
                 self._cv.wait()
-        self.active += 1
+            self.active += 1
         # # it appears to be the case that creating the stub as an attribute can cause some
         # # issues, so let's see if this works.
         # with aquila_inference_pb2.beta_create_AquilaService_stub(self.channel) as stub:
