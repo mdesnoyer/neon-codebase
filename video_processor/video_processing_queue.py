@@ -13,7 +13,6 @@ import os
 import Queue
 import random
 import re
-import redis
 import time
 import tornado
 from tornado import ioloop
