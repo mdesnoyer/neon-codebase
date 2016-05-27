@@ -315,7 +315,7 @@ def get_groupby_select(impression_metric=None, page_regex=None,
                        (col_map[impression_metric],
                        page_regex))
     if host_regex and impression_metric:
-        clauses.append("regexp_extract(parse_url(%s, 'HOST'), '%s', 1) as page_type" %
+        clauses.append("regexp_extract(parse_url(%s, 'HOST'), '%s', 1) as host" %
                        (col_map[impression_metric],
                        host_regex))
     if desktop_mobile_split:
