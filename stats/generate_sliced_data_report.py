@@ -399,7 +399,7 @@ def get_event_data(video_id, key_times, metric, null_metric, end_time):
         data.loc[data[clause].isnull(), clause] = '' 
     if 'page_type' in data.columns:
         data.loc[data['page_type'] == '', 'page_type'] = '<blank>'
-    data = data.set_index(groupby_clauses)
+    data = data.groupby(groupby_clauses).agg(np.sum)
     if len(groupby_clauses) > 1:
         data=data.sortlevel()
     return data
