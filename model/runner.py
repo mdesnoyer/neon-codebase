@@ -48,6 +48,7 @@ if __name__ == '__main__':
     parser.add_argument('--poll_interval', type=int, default=100)
     parser.add_argument('--quiet', '-q', dest='quiet', action='store_true', default=False)
     parser.add_argument('--until', '-u', type=int, default=1000)
+    
     args = parser.parse_args()
 
     conn = StaticGetIp(args.ip)
@@ -126,7 +127,7 @@ if __name__ == '__main__':
                 counts['pending'] += 1
                 counts['requested'] += 1
             request_time = time()
-            r = pred.predict(i)
+            r = pred.predict(i, timeout=25.0)
             cbl = lambda future, request_time=request_time, start_time=start_time: cb(future, request_time, start_time)
             r.add_done_callback(cbl)
         with lock:
