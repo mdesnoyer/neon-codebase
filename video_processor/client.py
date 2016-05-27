@@ -1039,10 +1039,12 @@ class VideoClient(multiprocessing.Process):
 
     def run(self):
         ''' run/start method '''
+        # The worker should ignore the SIGTERM because it will be
+        # killed by the master thread via self.kill_received
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        
         _log.info("starting worker [%s] " % (self.pid))
         
-        # Register a function to die cleanly on a sigterm
-        atexit.register(self.stop)
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
@@ -1112,7 +1114,7 @@ def shutdown_master_process():
 
     # Wait for the workers and force kill if they take too long
     for worker in _workers:
-        worker.join(1800.0) # 30min timeout
+        worker.join(600.0) # 10min timeout to finish the job
         if worker.is_alive():
             print 'Worker is still going. Force kill it'
             # Send a SIGKILL
