@@ -175,6 +175,9 @@ class VideoProcessor(object):
                             self.job_params.get('api_param', None) or 5)
         self.n_thumbs = max(self.n_thumbs, 1)
 
+        # The default thumb url extracted from the video url
+        self.extracted_default_thumbnail = None
+
         self.cv_semaphore = cv_semaphore
 
         integration_id = self.job_params['integration_id'] \
@@ -402,11 +405,10 @@ class VideoProcessor(object):
                         raise youtube_dl.utils.DownloadError(msg)
 
                 # Update information about the video before we download it
+                self.extracted_default_thumbnail = video_info.get('thumbnail')
                 def _update_title(x):
                     if x.video_title is None:
                         x.video_title = video_info.get('title', None)
-                    if x.default_thumbnail is None:
-                        x.default_thumbnail = video_info.get('thumbnail', None)
                 yield neondata.NeonApiRequest.modify(
                     self.job_params['job_id'], self.job_params['api_key'] ,
                     _update_title,
@@ -781,26 +783,32 @@ class VideoProcessor(object):
             statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
+        is_user_default_thumb = api_request.default_thumbnail is not None
         try:
             # A second attempt to save the default thumb
+            api_request.default_thumbnail = (api_request.default_thumbnail or 
+                                             self.extracted_default_thumbnail)
             yield api_request.save_default_thumbnail(cdn_metadata, async=True)
-            
-            # Enable the video to be served if we have any thumbnails available
-            def _set_serving_enabled(video_obj):
-                video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            new_video_metadata = yield neondata.VideoMetadata.modify(
-                self.video_metadata.key,
-                _set_serving_enabled,
-                async=True)
-            # Everything is fine at this point, so lets mark it finished
-            api_request.state = neondata.RequestState.FINISHED
 
         except neondata.ThumbDownloadError, e:
-            _log.warn("Default thumbnail download failed for vid %s" %
-                      video_id)
-            statemon.state.increment('default_thumb_error')
-            err_msg = "Failed to download default thumbnail: %s" % e
-            raise DefaultThumbError(err_msg)
+            # If we extracted the default thumb from the url, then
+            # don't error out if we cannot get thumb
+            if is_user_default_thumb:
+                _log.warn("Default thumbnail download failed for vid %s" %
+                          video_id)
+                statemon.state.increment('default_thumb_error')
+                err_msg = "Failed to download default thumbnail: %s" % e
+                raise DefaultThumbError(err_msg)
+
+        # Enable the video to be served if we have any thumbnails available
+        def _set_serving_enabled(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+        new_video_metadata = yield neondata.VideoMetadata.modify(
+            self.video_metadata.key,
+            _set_serving_enabled,
+            async=True)
+        # Everything is fine at this point, so lets mark it finished
+        api_request.state = neondata.RequestState.FINISHED
 
         # Build the callback response
         cb_response = self.build_callback_response()

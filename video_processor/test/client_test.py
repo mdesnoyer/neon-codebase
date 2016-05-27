@@ -279,9 +279,25 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.youtube_extract_info_mock.assert_called_with(
             'http://www.somefile.com/',
             download=True)
+        self.assertIsNone(vprocessor.extracted_default_thumbnail)
 
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
+
+    @tornado.testing.gen_test
+    def test_default_thumb_found_in_video(self):
+        self.youtube_extract_info_mock.return_value = {
+            u'_type': u'video',
+            u'id': 'yces6PZOsgc', 
+            u'title': 'my_video',
+            u'url': 'http://www.video.com/my_video.mp4',
+            u'thumbnail': 'http://my_default_thumbnail.jpg'}
+
+        vprocessor = self.setup_video_processor("neon",
+                                                'http://www.somefile.com/')
+        yield vprocessor.download_video_file()
+        self.assertEquals(vprocessor.extracted_default_thumbnail,
+                          'http://my_default_thumbnail.jpg')
 
     @tornado.testing.gen_test
     def test_download_video_errors(self):
@@ -1143,7 +1159,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
                                       'some fun video',
                                       'http://video.mp4', None, None, 'pubid',
                                       'http://callback.com', 'int1',
-                                      '').save()
+                                      None).save()
 
         with self.assertLogExists(logging.WARNING, 'No thumbnails extracted'):
             yield self.vprocessor.finalize_response()
@@ -1152,6 +1168,28 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         video_meta = neondata.VideoMetadata.get(self.video_id)
         self.assertFalse(video_meta.serving_enabled)
         self.assertEquals(len(video_meta.thumbnail_ids), 0)
+
+    @tornado.testing.gen_test
+    def test_extracted_default_thumbnail_fail(self):
+        neondata.BrightcoveApiRequest('job1', self.api_key, 'vid1',
+                                      'some fun video',
+                                      'http://video.mp4', None, None, 'pubid',
+                                      'http://callback.com', 'int1',
+                                      None).save()
+        self.vprocessor.extracted_default_thumbnail = \
+          'http://extracted_default.jpg'
+        self.im_download_mock.side_effect = [IOError('Not an image')]
+
+        yield self.vprocessor.finalize_response()
+
+        # The video should still be successful and we don't have a default
+        video_meta = neondata.VideoMetadata.get(self.video_id)
+        self.assertTrue(video_meta.serving_enabled)
+        self.assertEquals(len(video_meta.thumbnail_ids), 3)
+
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
+        
 
     @patch('video_processor.client.neondata.ThumbnailMetadata.modify_many')
     @tornado.testing.gen_test
