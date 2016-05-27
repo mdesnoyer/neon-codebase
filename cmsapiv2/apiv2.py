@@ -791,6 +791,11 @@ class SaveError(Error):
         self.msg = msg
         self.code = code
 
+class SubmissionError(tornado.web.HTTPError):
+    def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+ 
 class NotFoundError(tornado.web.HTTPError):
     def __init__(self,
                  msg='resource was not found',
