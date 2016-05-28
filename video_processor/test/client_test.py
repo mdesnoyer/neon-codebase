@@ -694,6 +694,64 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
 
         # Make sure the job was deleted
         self.job_delete_mock.assert_called_with(self.job_message)
+        
+    @tornado.testing.gen_test
+    def test_dequeue_job_somebody_else_finished(self):
+
+        def _change_job_state(request):
+            request.state = neondata.RequestState.FINISHED
+                      
+        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                             _change_job_state)
+        with self.assertLogExists(logging.INFO, 'Dequeued a job that'):
+            yield self.video_client.do_work(async=True)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+
+    @tornado.testing.gen_test
+    def test_dequeue_job_already_serving(self):
+
+        def _change_job_state(request):
+            request.state = neondata.RequestState.SERVING
+                      
+        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                             _change_job_state)
+        with self.assertLogExists(logging.INFO, 'Dequeued a job that'):
+            yield self.video_client.do_work(async=True)
+
+        # Make sure the job was deleted
+        self.job_delete_mock.assert_called_with(self.job_message)
+
+    @tornado.testing.gen_test
+    def test_dequeue_job_somebody_else_finalizing(self):
+
+        def _change_job_state(request):
+            request.state = neondata.RequestState.FINALIZING
+                      
+        req = neondata.NeonApiRequest.modify('job1', self.api_key, 
+                                             _change_job_state)
+
+        with self.assertLogExists(logging.DEBUG, "Dequeue Successful"):
+            job = yield self.video_client.dequeue_job()
+
+        self.assertEqual(job, {
+            'api_key': self.api_key,
+            'video_id' : 'vid1',
+            'job_id' : 'job1',
+            'video_title': 'some fun video',
+            'callback_url': 'http://callback.com',
+            'video_url' : 'http://video.mp4',
+            'reprocess' : False
+            })
+
+        self.assertEquals(
+            neondata.NeonApiRequest.get('job1', self.api_key).state,
+            neondata.RequestState.PROCESSING)
+
+        # Make sure the job was not deleted yet
+        self.job_delete_mock.assert_not_called()
+    
 
 class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     ''' 

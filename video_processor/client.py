@@ -975,7 +975,8 @@ class VideoClient(multiprocessing.Process):
                     request.try_count +=1
                     if request.state in [neondata.RequestState.SUBMIT,
                                          neondata.RequestState.REPROCESS,
-                                         neondata.RequestState.REQUEUED]:
+                                         neondata.RequestState.REQUEUED,
+                                         neondata.RequestState.FINALIZING]:
                         if request.state in [
                                 neondata.RequestState.REPROCESS]:
                             _log.info('Reprocessing job %s for account %s'
@@ -992,6 +993,10 @@ class VideoClient(multiprocessing.Process):
                                (job_id, api_key))
                     statemon.state.increment('dequeue_error')
                     raise DequeueError('Api Request does not exist.')
+                if api_request.state in [neondata.RequestState.FINISHED,
+                                         neondata.RequestState.SERVING]:
+                    _log.info('Dequeued a job that somebody else finished')
+                    raise UninterestingJob('Somebody else finished')
                 if api_request.state != neondata.RequestState.PROCESSING:
                     _log.error('Job %s for account %s could not set to '
                                'PROCESSING' %
