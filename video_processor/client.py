@@ -277,8 +277,12 @@ class VideoProcessor(object):
 
             if api_request.state == neondata.RequestState.REQUEUED:
                 # Let another node pick up the job to try again
-                yield self.job_queue.hide_message(self.job_message, 
-                                                  options.dequeue_period / 2.0)
+                try:
+                    yield self.job_queue.hide_message(self.job_message, 
+                                                      options.dequeue_period
+                                                      / 2.0)
+                except boto.exception.SQSError as e:
+                    _log.warn('Error hiding message: %s' % e)
             
             else:
                 # It's the final error
@@ -922,8 +926,11 @@ class VideoProcessor(object):
             # Approximate the length of the video
             duration = size * 8.0 / 1024 / 800
 
-        yield self.job_queue.hide_message(self.job_message,
-                                          int(duration * time_factor))
+        try:
+            yield self.job_queue.hide_message(self.job_message,
+                                              int(duration * time_factor))
+        except boto.exception.SQSError as e:
+            _log.warn('Error extending job time: %s' % e)
 
 class VideoClient(multiprocessing.Process):
    

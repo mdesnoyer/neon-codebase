@@ -1,5 +1,4 @@
 import boto
-import boto.exception
 import boto.sqs
 from boto.sqs.message import Message
 from boto.s3.connection import S3Connection
@@ -196,7 +195,7 @@ class VideoProcessingQueue(object):
         return message
 
     @run_on_executor
-    def _change_message_visibility(self, queue, message, timeout):
+    def _change_message_visibility(self, message, timeout):
         '''Changes the visiblity of the message based on the information in 
            the body of the message.
 
@@ -210,8 +209,7 @@ class VideoProcessingQueue(object):
             Returns:
             Void
         '''
-        self.conn.change_message_visibility(queue, message.receipt_handle,
-                                            timeout)
+        message.change_visibility(int(timeout))
 
     @run_on_executor
     def _sqs_write(self, queue, message):
@@ -326,10 +324,7 @@ class VideoProcessingQueue(object):
         message - The message to hide
         timeout - The length of time in seconds to hide it.
         '''
-        yield self._connect_to_server()
-        priority = int(message.message_attributes['priority']['string_value'])
-        queue = self._get_queue(priority)
-        yield self._change_message_visibility(queue, message, timeout)
+        yield self._change_message_visibility(message, timeout)
 
     def get_duration(self, message):
         '''Returns the duration of the job encoded in the message.
