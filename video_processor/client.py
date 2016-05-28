@@ -959,7 +959,6 @@ class VideoClient(multiprocessing.Process):
         self.cur_message = yield self.job_queue.read_message()
         if self.cur_message:
             result = self.cur_message.get_body()
-            _log.info(result)
             if result is not None and result != "{}":
                 try:
                     job_params = tornado.escape.json_decode(result)
