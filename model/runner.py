@@ -45,9 +45,12 @@ if __name__ == '__main__':
     parser.add_argument('--ip', default='localhost')
     parser.add_argument('--port', '-p', type=int, default=9000)
     parser.add_argument('--concurrency', '-c', type=int, default=10)
-    parser.add_argument('--poll_interval', type=int, default=100)
+    parser.add_argument('--poll-interval', type=int, default=100)
     parser.add_argument('--quiet', '-q', dest='quiet', action='store_true', default=False)
-    parser.add_argument('--until', '-u', type=int, default=1000)
+    parser.add_argument('--verbose', '-v', dest='verbose', action='store_true', default=False)
+    parser.add_argument('--until', '-u', type=int, default=None)
+    parser.add_argument('--rps-limit', '-r', type=float, default=None,
+                        help='throttle requests if computed rps exceeds this value')
     
     args = parser.parse_args()
 
@@ -98,9 +101,13 @@ if __name__ == '__main__':
             counts['response'] += 1
             if exo_exception:
                 counts['unknown_error'] += 1
+                print exo_exception
             elif exception:
                 counts['future_exception'] += 1
+                print exception
             elif result:
+                if args.verbose:
+                    print(result)
                 counts['completed'] += 1
                 counts['total_time'] += response_time
             if not counts['response'] % args.poll_interval:
@@ -126,10 +133,19 @@ if __name__ == '__main__':
                     break
                 counts['pending'] += 1
                 counts['requested'] += 1
+
             request_time = time()
-            r = pred.predict(i, timeout=25.0)
+            r = pred.predict(i, timeout=120.0)
             cbl = lambda future, request_time=request_time, start_time=start_time: cb(future, request_time, start_time)
             r.add_done_callback(cbl)
+
+	    # Throttle
+	    if args.rps_limit:
+                with lock:
+   	            while counts['completed'] / (time() - start_time) > args.rps_limit and counts['pending']:
+	    	        lock.wait()
+
+        # Close out pending requests
         with lock:
             while counts['pending']:
                 lock.wait()
