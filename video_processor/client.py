@@ -275,7 +275,13 @@ class VideoProcessor(object):
                 _write_failure,
                 async=True)
 
-            if api_request.state == neondata.RequestState.REQUEUED:
+            if api_request is None:
+                _log.warn('Job %s for account %s was deleted, so ignore' %
+                          (self.job_params['job_id'],
+                           self.job_params['api_key']))
+                yield self.job_queue.delete_message(self.job_message)
+
+            elif api_request.state == neondata.RequestState.REQUEUED:
                 # Let another node pick up the job to try again
                 try:
                     yield self.job_queue.hide_message(self.job_message, 
@@ -683,8 +689,9 @@ class VideoProcessor(object):
                 _flag_for_finalize,
                 async=True)
             if api_request is None:
-                raise DBError('Api Request finalizing failed. '
-                              'It was not there')
+                _log.warn('Job %s was deleted while processing it. Ignoring' %
+                          job_id)
+                return
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
             statemon.state.increment('modify_request_error')

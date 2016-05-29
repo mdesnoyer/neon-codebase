@@ -1344,10 +1344,9 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(video_processor.client.DBError):
                 yield self.vprocessor.finalize_response()
 
-        with self.assertLogExists(logging.ERROR,
-                                  'Api Request finalizing failed'):
-            with self.assertRaises(video_processor.client.DBError):
-                yield self.vprocessor.finalize_response()
+        with self.assertLogExists(logging.WARNING,
+                                  'Job .* was deleted'):
+            yield self.vprocessor.finalize_response()
         
         with self.assertLogExists(logging.ERROR,
                                   'Error writing request state'):

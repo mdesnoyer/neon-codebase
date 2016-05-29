@@ -53,7 +53,8 @@ def send_reprocess_request(client, job):
     
     request = tornado.httpclient.HTTPRequest(
         '/api/v2/{account_id}/videos?external_video_ref={video_id}&reprocess=1'.format(account_id=job.api_key, video_id=job.video_id),
-        method='POST')
+        method='POST',
+        allow_nonstandard_methods=True)
     response = yield client.send_request(request)
 
     if response.error:
