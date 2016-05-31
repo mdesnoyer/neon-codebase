@@ -592,13 +592,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.set_status(status_code)
         exception = kwargs["exc_info"][1]
         if any(isinstance(exception, c) for c in [Invalid,
+                                                  MultipleInvalid, 
                                                   NotAuthorizedError,
                                                   NotFoundError,
                                                   BadRequestError,
                                                   NotImplementedError,
                                                   TooManyRequestsError,
                                                   stripe.error.CardError]):
-            if isinstance(exception, Invalid):
+            if isinstance(exception, Invalid) or \
+               isinstance(exception, MultipleInvalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
@@ -789,6 +791,11 @@ class SaveError(Error):
         self.msg = msg
         self.code = code
 
+class SubmissionError(tornado.web.HTTPError):
+    def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+ 
 class NotFoundError(tornado.web.HTTPError):
     def __init__(self,
                  msg='resource was not found',

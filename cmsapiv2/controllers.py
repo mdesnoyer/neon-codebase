@@ -6,15 +6,15 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from apiv2 import *
+import video_processor.video_processing_queue
 import api.brightcove_api
 import sre_constants
 
+import logging
+from apiv2 import *
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
-define("video_server", default="50.19.216.114", help="thumbnails.neon api", type=str)
-define("video_server_port", default=8081, help="what port the video server is running on", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
 
 statemon.define('put_account_oks', int)
@@ -1180,7 +1180,8 @@ class VideoHelper(object):
         request.default_thumbnail = args.get('default_thumbnail_url', None)
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
-        yield tornado.gen.Task(request.save)
+        request.api_param = int(args.get('n_thumbs', 5))
+        yield request.save(async=True)
 
         if request:
             raise tornado.gen.Return(request)
@@ -1200,11 +1201,6 @@ class VideoHelper(object):
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
         if video is None:
             # make sure we can download the image before creating requests
-            # create the api_request
-            api_request = yield tornado.gen.Task(
-                VideoHelper.create_api_request,
-                args,
-                account_id_api_key)
 
             video = neondata.VideoMetadata(
                 neondata.InternalVideoID.generate(account_id_api_key, video_id),
@@ -1212,7 +1208,7 @@ class VideoHelper(object):
                 publish_date=args.get('publish_date', None),
                 duration=float(args.get('duration', 0.0)) or None,
                 custom_data=args.get('custom_data', None),
-                i_id=api_request.integration_id,
+                i_id=args.get('integration_id', '0'),
                 serving_enabled=False)
 
             default_thumbnail_url = args.get('default_thumbnail_url', None)
@@ -1230,37 +1226,29 @@ class VideoHelper(object):
                 yield tornado.gen.Task(thumb.save)
 
             # create the api_request
-            api_request = yield tornado.gen.Task(
-                VideoHelper.create_api_request,
+            api_request = yield VideoHelper.create_api_request(
                 args,
                 account_id_api_key)
             # add the job id save the video
             video.job_id = api_request.job_id
-            yield tornado.gen.Task(video.save)
-            raise tornado.gen.Return((video,api_request))
+            yield video.save(async=True)
+            raise tornado.gen.Return((video, api_request))
         else:
             reprocess = Boolean()(args.get('reprocess', False))
             if reprocess:
+                # Flag the request to be reprocessed
+                def _flag_reprocess(x):
+                    x.state = neondata.RequestState.REPROCESS
+                    x.fail_count = 0
+                    x.attempt_count = 0
+                    x.response = {}
+                api_request = yield neondata.NeonApiRequest.modify(
+                    video.job_id,
+                    account_id_api_key,
+                    _flag_reprocess,
+                    async=True)
 
-                reprocess_url = 'http://%s:%s/reprocess' % (
-                    options.video_server,
-                    options.video_server_port)
-                # get the neonapirequest
-                api_request = neondata.NeonApiRequest.get(video.job_id,
-                                                          account_id_api_key)
-
-                # send the request to the video server
-                request = tornado.httpclient.HTTPRequest(url=reprocess_url,
-                                                         method="POST",
-                                                         body=api_request.to_json(),
-                                                         request_timeout=30.0,
-                                                         connect_timeout=15.0)
-                response = yield tornado.gen.Task(utils.http.send_request, request)
-                if response and response.code is ResponseCode.HTTP_OK:
-                    raise tornado.gen.Return((video,api_request))
-                else:
-                    raise Exception('unable to communicate with video server',
-                                    ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+                raise tornado.gen.Return((video, api_request))
             else:
                 raise AlreadyExists('job_id=%s' % (video.job_id))
 
@@ -1473,7 +1461,8 @@ class VideoHandler(APIV2Handler):
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
           'default_thumbnail_url': All(Any(Coerce(str), unicode), 
               Length(min=1, max=2048)),
-          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512))
+          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 
         args = self.parse_args()
@@ -1500,17 +1489,18 @@ class VideoHandler(APIV2Handler):
                                _set_serving_enabled)
 
         # add the job
-        vs_job_url = 'http://%s:%s/job' % (options.video_server,
-                                           options.video_server_port)
-        request = tornado.httpclient.HTTPRequest(url=vs_job_url,
-                                                 method="POST",
-                                                 body=api_request.to_json(),
-                                                 request_timeout=30.0,
-                                                 connect_timeout=10.0)
+        sqs_queue = video_processor.video_processing_queue.VideoProcessingQueue()
 
-        response = yield tornado.gen.Task(utils.http.send_request, request)
+        account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
+                                         account_id)
+        duration = new_video.duration
+                
+        message = yield sqs_queue.write_message(
+                    account.get_processing_priority(), 
+                    json.dumps(api_request.__dict__),
+                    duration)
 
-        if response and response.code is ResponseCode.HTTP_OK:
+        if message:
             job_info = {}
             job_info['job_id'] = api_request.job_id
             job_info['video'] = yield self.db2api(new_video,
@@ -1519,8 +1509,7 @@ class VideoHandler(APIV2Handler):
             self.success(job_info,
                          code=ResponseCode.HTTP_ACCEPTED)
         else:
-            raise Exception('unable to communicate with video server',
-                            ResponseCode.HTTP_INTERNAL_SERVER_ERROR)
+            raise SubmissionError('Unable to submit job to queue')
 
     @tornado.gen.coroutine
     def get(self, account_id):
@@ -2611,6 +2600,7 @@ application = tornado.web.Application([
 def main():
     global server
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
+    
     server = tornado.httpserver.HTTPServer(application)
     #utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)

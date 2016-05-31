@@ -2457,7 +2457,8 @@ class SmokeTesting(ServerAsyncPostgresTest):
         lb_current_time = date.datetime.utcnow() - date.timedelta(hours=12) 
         self.assertTrue(
             dateutil.parser.parse(
-                self.video_watcher._last_video_updated_time) > lb_current_time)
+                self.video_watcher._account_last_updated_time['key1']) > \
+                    lb_current_time)
 
 if __name__ == '__main__':
     utils.neon.InitNeon()
