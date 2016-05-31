@@ -8,7 +8,6 @@ if sys.path[0] != __base_path__:
 
 import video_processor.video_processing_queue
 import api.brightcove_api
-import sre_constants
 
 import logging
 from apiv2 import *
@@ -1947,10 +1946,10 @@ class VideoSearchExternalHandler(APIV2Handler):
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'limit': All(Coerce(int), Range(min=1, max=100)),
-          'query': All(Coerce(str), Length(min=1, max=256)),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
-          'until': All(Coerce(float))
+          'until': All(Coerce(float)),
+          Optional('query'): CustomVoluptuousTypes.Regex()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -1958,13 +1957,6 @@ class VideoSearchExternalHandler(APIV2Handler):
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
-
-        # Validate query is regex.
-        if query:
-            try:
-                re.compile(query)
-            except sre_constants.error as e:
-                raise BadRequestError(e.message)
 
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
