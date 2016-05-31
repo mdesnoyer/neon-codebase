@@ -1343,72 +1343,76 @@ class StoredObject(object):
         return cls.format_key(pattern)
 
     @classmethod
-    @tornado.gen.coroutine
-    def get_and_execute_select_query(cls,
-                                     fields,
-                                     where_clause=None,
-                                     table_name=None,
-                                     join_clause=None,
-                                     wc_params=[],
-                                     limit_clause=None,
-                                     order_clause=None,
-                                     group_clause=None,
-                                     cursor_factory=psycopg2.extensions.cursor): 
+    def get_select_query(cls, fields, where_clause=None, table_name=None,
+                         join_clause=None, wc_params=[], limit_clause=None,
+                         order_clause=None, group_clause=None):
         ''' helper function to build up a select query
 
-               fields : an array of the fields you want 
-               where_clause : the portion of the query following WHERE 
-               table_name : defaults to _baseclass_name, but this populates 
-                            the from portion of the query 
-               wc_params : any params you need in the where clause
+               fields : an array of the fields you want
+               where_clause : the portion of the query following WHERE
+               table_name : defaults to _baseclass_name, but this populates
+                            the from portion of the query
 
- 
-               eg fields = ["_data->>'neon_api_key'", 
-                            "_data->>'key'"] 
-                  object_type = neonuseraccount 
-                  where_clause = "_data->'users' ? %s" 
-                  params = [user1] 
-               would execute 
-                  SELECT _data->>'neon_api_key', _data->>'key' 
-                   FROM neonuseraccount 
-                  WHERE _data->'users' ? user1 
-            returns the result array from the query 
-
-            be nice, this will do a fetchall, which can be 
-            memory intensive -- TODO make an option that 
-            operates like get_many does currently 
+               eg fields = ["_data->>'neon_api_key'",
+                            "_data->>'key'"]
+                  object_type = neonuseraccount
+                  where_clause = "_data->'users' ? %s"
+                  params = [user1]
+               would build
+                  SELECT _data->>'neon_api_key', _data->>'key'
+                   FROM neonuseraccount
+                  WHERE _data->'users' ? user1
         '''
-        
-        db = PostgresDB() 
-        conn = yield db.get_connection()
-        if table_name is None: 
+        if table_name is None:
             table_name = cls._baseclass_name().lower()
 
-        csl_fields = ",".join("{0}".format(f) for f in fields) 
-        query = "SELECT " + csl_fields + \
-                " FROM " + table_name
-
+        csl_fields = ",".join("{0}".format(f) for f in fields)
+        query = "SELECT " + csl_fields + " FROM " + table_name
         if join_clause:
             query += " JOIN " + join_clause
-        
         if where_clause:
             query += " WHERE " + where_clause
-
-        if order_clause: 
+        if order_clause:
             query += " " + order_clause
+        if group_clause:
+            query += " " + group_clause
+        if limit_clause:
+            query += " " + limit_clause
 
-        if group_clause: 
-            query += " " + group_clause  
- 
-        if limit_clause: 
-            query += " " + limit_clause 
- 
-        cursor = yield conn.execute(query, 
-                                    wc_params,
-                                    cursor_factory=cursor_factory)
+        return query
+
+
+    @classmethod
+    @tornado.gen.coroutine
+    def explain_query(cls, query, wc_params, cursor_factory):
+        ''' Get database query plan of query.'''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute('EXPLAIN {}'.format(query), wc_params, cursor_factory=cursor_factory)
         rv = cursor.fetchall()
-        db.return_connection(conn) 
-        raise tornado.gen.Return(rv) 
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def execute_select_query(cls, query, wc_params,
+                             cursor_factory=psycopg2.extensions.cursor):
+        ''' helper function to execute a select query
+
+            returns the result array from the query
+
+            be nice, this will do a fetchall, which can be
+            memory intensive -- TODO make an option that
+            operates like get_many does currently
+
+            wc_params : any params you need in the where clause
+        '''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
+        rv = cursor.fetchall()
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -1958,15 +1962,15 @@ class User(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_associated_account_ids(self):
-        results = yield self.get_and_execute_select_query(
-                    [ "_data->>'neon_api_key'" ], 
-                    "_data->'users' ? %s", 
-                    table_name='neonuseraccount', 
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data->>'neon_api_key'" ],
+                        "_data->'users' ? %s",
+                        table_name='neonuseraccount'),
                     wc_params=[self.username])
- 
+
         rv = [i[0] for i in results]
-        raise tornado.gen.Return(rv) 
-        
+        raise tornado.gen.Return(rv)
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -2136,27 +2140,26 @@ class NeonUserAccount(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_integrations(self):
-        rv = [] 
+        rv = []
 
         # due to old data, these could either have account_id or api_key
         # as account_id
-        results = yield self.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg"], 
-                    "_data->>'account_id' IN(%s, %s)", 
-                    table_name='abstractintegration', 
-                    wc_params=[self.neon_api_key, 
-                               self.account_id],
-                    group_clause = "ORDER BY _type",  
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'account_id' IN(%s, %s)",
+                        table_name='abstractintegration',
+                        group_clause = "ORDER BY _type"),
+                    wc_params=[self.neon_api_key, self.account_id],
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         for result in results:
             obj = self._create(result['_data']['key'], result)
             rv.append(obj)
 
-        raise tornado.gen.Return(rv) 
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def get_ovp(cls):
@@ -4217,13 +4220,13 @@ class BrightcovePlayer(NamespacedStoredObject):
         '''Get all players associated to the integration'''
 
         rv = []
-        results = yield self.get_and_execute_select_query(
-                    [ "_data",
-                      "_type",
-                      "created_time AS created_time_pg",
-                      "updated_time AS updated_time_pg"],
-                    "_data->>'integration_id' = '%s' ",
-                    table_name='brightcoveplayer',
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'integration_id' = '%s' ",
+                        table_name='brightcoveplayer'),
                     wc_params=[integration_id])
         for result in results:
             player = self._create(result['_data']['key'], result)
@@ -5291,14 +5294,14 @@ class VideoMetadata(StoredObject):
             where_clause += " r._data->>'video_title' ~* %s"
             wc_params.append(title_query)
 
-        results = yield cls.get_and_execute_select_query(
-                    columns,
-                    where_clause,
-                    join_clause=join_clause,
-                    table_name="videometadata AS v",
+        results = yield cls.execute_select_query(cls.get_select_query(
+                        columns,
+                        where_clause,
+                        join_clause=join_clause,
+                        table_name="videometadata AS v",
+                        limit_clause="LIMIT %d" % limit,
+                        order_clause=order_clause),
                     wc_params=wc_params,
-                    limit_clause="LIMIT %d" % limit,
-                    order_clause=order_clause,
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         def _get_time(result):
