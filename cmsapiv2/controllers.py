@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 import video_processor.video_processing_queue
 import api.brightcove_api
+import cmsapiv2.client
 
 import logging
 from apiv2 import *
@@ -2553,10 +2554,16 @@ class TelemetrySnippetHandler(APIV2Handler):
 BatchHandler 
 *****************************************************************'''
 class BatchHandler(APIV2Handler):
-    def post(self): 
+    @tornado.gen.coroutine
+    def post(self):
         schema = Schema({
           Required('call_info') : All(CustomVoluptuousTypes.Dictionary())
         })
+      
+        args = self.parse_args()
+        schema(args)
+         
+        call_info = args['call_info']
         access_token = call_info.get('access_token', None) 
         refresh_token = call_info.get('refresh_token', None)
         
@@ -2586,7 +2593,7 @@ class BatchHandler(APIV2Handler):
                 response = yield client.send_request(http_req, ntries=2)
                 result['relative_url'] = req['relative_url'] 
                 result['method'] = req['method'] 
-                result['response'] = response
+                result['response'] = json.loads(response.body)
             except AttributeError:
                 result['response'] = 'Malformed Request'
             except Exception: 

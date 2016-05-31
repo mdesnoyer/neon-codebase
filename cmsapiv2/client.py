@@ -57,7 +57,7 @@ class Client(object):
                 request = tornado.httpclient.HTTPRequest(
                     'https://%s/api/v2/refresh_token' % options.auth_host,
                     method='POST',
-                    headers={ 'Content-Type' 'application/json'},
+                    headers={ 'Content-Type' : 'application/json'},
                     body=json.dumps({'token' : self.refresh_token}))
             response = yield utils.http.send_request(
                 request,
