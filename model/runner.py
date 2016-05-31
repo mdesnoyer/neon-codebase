@@ -17,6 +17,8 @@ from time import time
 from itertools import cycle
 _log = logging.getLogger(__name__)
 
+PAYLOAD_ESTIMATED_SIZE = 269376 // 1024  # KB per image
+
 class StaticGetIp(object):
     def __init__(self, ip):
         self.ip = ip
@@ -66,7 +68,7 @@ if __name__ == '__main__':
     lock = threading.Condition()
 
     if not args.quiet:
-        print('Starting with ip:{ip} port:{port} conc:{conc} path:{path} imgct:{imgct} poll every {interval}'.format(
+        print('Starting with ip:{ip}:{port} conc:{conc} path:{path} imgct:{imgct} poll every {interval}'.format(
             ip=args.ip,
             port=args.port,
             conc=args.concurrency,
@@ -85,7 +87,14 @@ if __name__ == '__main__':
             f.write('\n'.join([str(x) for x in requested]))
         with open('/tmp/counts_dict_log', 'w') as f:
             f.write(str(counts))
-        print '%d imgs (%d errors) in %.1fs: peak: %.2fi/s mean: %.2fs/i' % (counts['response'], counts['unknown_error'] + counts['future_exception'], time() - start_time, counts['peak_ips'], counts['total_time'] / max(1, counts['completed']))
+        print '%d imgs (%d errors) in %.1fs: peak: %.2fi/s %.2fKB/s mean: %.2fs/i %.2fKB/s' % (
+            counts['response'],
+            counts['unknown_error'] + counts['future_exception'],
+            time() - start_time,
+            counts['peak_ips'],
+            counts['peak_ips'] * PAYLOAD_ESTIMATED_SIZE,
+            counts['total_time'] / max(1, counts['completed']),
+            counts['total_time'] / max(1, counts['completed']) * PAYLOAD_ESTIMATED_SIZE)
 
     def cb(future, request_time, start_time):
         exo_exception = None
@@ -115,10 +124,17 @@ if __name__ == '__main__':
                 if rate > counts['peak_ips']:
                    counts['peak_ips'] = rate
                 mean_compl_time = counts['total_time'] / max(1, counts['completed'])
-                out = '%i completed in %.1fs, %i error state, rate: %.2fi/s mean: %.2fs/i, most recent: %.2fsec'
+                out = '%i completed in %.1fs, %i error state, rate: %.2fi/s %.2fKB/s mean: %.2fs/i %.2fKB/s, most recent: %.2fsec'
                 if not args.quiet:
-                    print out % (counts['completed'], elapsed_time, counts['future_exception'] + counts['unknown_error'], 
-                                 rate, mean_compl_time, response_time)
+                    print out % (
+                        counts['completed'],
+                        elapsed_time,
+                        counts['future_exception'] + counts['unknown_error'], 
+                        rate,
+                        rate * PAYLOAD_ESTIMATED_SIZE,
+                        mean_compl_time,
+                        rate * PAYLOAD_ESTIMATED_SIZE,
+                        response_time)
                 average_times.append(mean_compl_time)
                 pending.append(counts['pending'])
                 completed.append(counts['completed'])
