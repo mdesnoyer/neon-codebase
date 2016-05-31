@@ -303,6 +303,14 @@ class VideoProcessor(object):
                 _log.warn('Job %s for account %s has failed' %
                           (api_request.job_id, api_request.api_key))
                 yield self.job_queue.delete_message(self.job_message)
+                 
+                # modify accountlimits to have one less video post
+                def _modify_limits(al): 
+                    al.video_posts -= 1 
+                yield neondata.AccountLimits.modify( 
+                    api_request.api_key, 
+                    _modify_limits, 
+                    async=True) 
        
         finally:
             #Delete the temp video file which was downloaded

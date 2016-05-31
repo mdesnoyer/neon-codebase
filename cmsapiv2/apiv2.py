@@ -568,18 +568,22 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             return
 
         try:
-            defined_limit_list = defined_limits_dict[self.request.method]
+            def _modify_limits(al): 
+                defined_limit_list = defined_limits_dict[self.request.method]
+                
+                for dl in defined_limit_list:
+                    values_to_increase = dl['values_to_increase']
+                    values_to_decrease = dl['values_to_decrease']
+    
+                    for v in values_to_increase:
+                        al.__dict__[v[0]] += v[1]
+                    for v in values_to_decrease:
+                        al.__dict__[v[0]] -= v[1]
 
-            for dl in defined_limit_list:
-                values_to_increase = dl['values_to_increase']
-                values_to_decrease = dl['values_to_decrease']
-
-                for v in values_to_increase:
-                    self.account_limits.__dict__[v[0]] += v[1]
-                for v in values_to_decrease:
-                    self.account_limits.__dict__[v[0]] -= v[1]
-
-            yield self.account_limits.save(async=True)
+            self.account_limits = yield neondata.AccountLimits.modify(
+               self.account_limits.key, 
+               _modify_limits, 
+               async=True) 
         except KeyError:
             pass
 

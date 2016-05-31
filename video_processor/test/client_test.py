@@ -449,13 +449,17 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             youtube_dl.utils.ExtractorError('beck'),
             youtube_dl.utils.UnavailableVideoError('ick')]
 
+        yield neondata.AccountLimits(
+            self.api_key, 
+            video_posts=9).save(async=True) 
+
         self.job_read_mock.side_effect = [self.job_message,
                                           self.job_message,
                                           self.job_message]
 
         with options._set_bounded('video_processor.client.max_fail_count', 2):
             yield self.video_client.do_work(async=True)
-
+            
             self.assertEquals(self.video_client.videos_processed, 1)
             api_request = neondata.NeonApiRequest.get('job1', self.api_key)
             self.assertIsNotNone(api_request.response['error'])
@@ -474,6 +478,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
             self.assertEquals(api_request.fail_count, 2)
             self.job_hide_mock.assert_not_called()
             self.job_delete_mock.assert_called_with(self.job_message)
+            acct_limits = yield neondata.AccountLimits.get(
+                self.api_key, 
+                async=True)
+            self.assertEquals(acct_limits.video_posts, 8) 
 
     @tornado.testing.gen_test
     def test_process_video(self):
