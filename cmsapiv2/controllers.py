@@ -1284,7 +1284,7 @@ class VideoHelper(object):
                          since=since,
                          until=until,
                          limit=limit,
-                         title_query=query)
+                         search_query=query)
 
         videos = search_res['videos']
         since_time = search_res['since_time']
@@ -1900,7 +1900,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         schema = Schema({
             'limit': All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            'query': All(Coerce(str), Length(min=1, max=256)),
+            Optional('query'): CustomVoluptuousTypes.Regex(),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float))
@@ -1946,10 +1946,10 @@ class VideoSearchExternalHandler(APIV2Handler):
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'limit': All(Coerce(int), Range(min=1, max=100)),
+          Optional('query'): CustomVoluptuousTypes.Regex()
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
           'until': All(Coerce(float)),
-          Optional('query'): CustomVoluptuousTypes.Regex()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
