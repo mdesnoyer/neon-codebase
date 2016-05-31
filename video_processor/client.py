@@ -23,6 +23,7 @@ import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
 from cmsdb import neondata
+import concurrent.futures
 import cv2
 import dateutil.parser
 import ffvideo
@@ -46,7 +47,6 @@ import tornado.gen
 import tornado.escape
 import tornado.httpclient
 import tornado.httputil
-import tornado.ioloop
 import time
 import urllib
 import urllib2
@@ -56,6 +56,7 @@ import utils.neon
 from utils import pycvutils
 import utils.http
 from utils import statemon
+from video_processor import video_processing_queue
 import youtube_dl
 
 import logging
@@ -64,7 +65,9 @@ _log = logging.getLogger(__name__)
 #Monitoring
 statemon.define('processed_video', int)
 statemon.define('processing_error', int)
+statemon.define('too_many_failures', int)
 statemon.define('dequeue_error', int)
+statemon.define('invalid_jobs', int)
 statemon.define('save_tmdata_error', int)
 statemon.define('save_vmdata_error', int)
 statemon.define('modify_request_error', int)
@@ -86,14 +89,11 @@ statemon.define('other_worker_completed', int)
 statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
-statemon.define('youtube_video_download_error', int) 
 statemon.define('youtube_video_not_found', int) 
 
 # ======== Parameters  =======================#
 from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
-define('video_server', default="localhost:8081", type=str,
-       help="host:port of the video processing server")
 define('serving_url_format',
         default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
@@ -113,6 +113,10 @@ define('max_bandwidth_per_core', default=15500000.0,
 define('min_load_to_throttle', default=0.50,
        help=('Fraction of cores currently working to cause the download to '
              'be throttled'))
+define('max_fail_count', default=3, 
+       help='Number of failures allowed before a job is discarded')
+define('max_attempt_count', default=5, 
+       help='Number of attempts allowed before a job is discarded')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -122,7 +126,11 @@ class DBError(IOError): pass
 
 # For when another worker completed the video
 class OtherWorkerCompleted(Exception): pass 
-    
+
+# TimeoutError Exception
+class TimeoutError(Exception): pass
+class DequeueError(Exception): pass
+class UninterestingJob(Exception): pass
 
 ###########################################################################
 # Process Video File
@@ -136,18 +144,20 @@ class VideoProcessor(object):
     '''
 
     retry_codes = [403, 500, 502, 503, 504]
+    CHUNK_SIZE = 4*1024*1024 # 4MB
 
     def __init__(self, params, model, model_version, cv_semaphore,
-                 reprocess=False):
+                 job_queue, job_message, reprocess=False):
         '''
         @input
         params: dict of request
         model: model obj
         '''
 
-        self.timeout = 300.0 #long running tasks ## -- is this necessary ???
         self.job_params = params
         self.reprocess = reprocess
+        self.job_queue = job_queue
+        self.job_message = job_message
         self.video_url = self.job_params['video_url']
         #get the video file extension
         parsed = urlparse.urlparse(self.video_url)
@@ -164,6 +174,9 @@ class VideoProcessor(object):
         self.n_thumbs = int(self.job_params.get('topn', None) or
                             self.job_params.get('api_param', None) or 5)
         self.n_thumbs = max(self.n_thumbs, 1)
+
+        # The default thumb url extracted from the video url
+        self.extracted_default_thumbnail = None
 
         self.cv_semaphore = cv_semaphore
 
@@ -183,6 +196,12 @@ class VideoProcessor(object):
         self.model_version = model_version
         self.thumbnails = [] # List of (ThumbnailMetadata, pil_image)
 
+        self.executor = concurrent.futures.ThreadPoolExecutor(10)
+
+    def __del__(self):
+        # Clean up the executor
+        self.executor.shutdown(False)
+
     @staticmethod
     def percent_encode_url_path(url):
         '''
@@ -195,6 +214,7 @@ class VideoProcessor(object):
         parse[2] = urllib.quote(urllib.unquote(parse[2]))
         return urlparse.urlunparse(parse)
 
+    @tornado.gen.coroutine
     def start(self):
         '''
         Actual work done here
@@ -202,7 +222,7 @@ class VideoProcessor(object):
         try:
             statemon.state.increment('workers_downloading')
             try:
-                self.download_video_file()
+                yield self.download_video_file()
             finally:
                 statemon.state.decrement('workers_downloading')
 
@@ -212,13 +232,18 @@ class VideoProcessor(object):
             with self.cv_semaphore:
                 statemon.state.increment('workers_cv_processing')
                 try:
-                    self.process_video(self.tempfile.name, n_thumbs=n_thumbs)
+                    yield self.process_video(self.tempfile.name,
+                                             n_thumbs=n_thumbs)
                 finally:
                     statemon.state.decrement('workers_cv_processing')
 
             #finalize response, if success send client and notification
             #response
-            self.finalize_response()
+            yield self.finalize_response()
+
+            # Delete the job from the queue
+            _log.info('Deleting on %s' % self.job_queue)
+            yield self.job_queue.delete_message(self.job_message)
 
         except OtherWorkerCompleted as e:
             statemon.state.increment('other_worker_completed')
@@ -230,45 +255,91 @@ class VideoProcessor(object):
             new_state = neondata.RequestState.CUSTOMER_ERROR
             if not isinstance(e, VideoError):
                 new_state = neondata.RequestState.INT_ERROR
-                _log.error("Unexpected error [%s]: %s" % (os.getpid(), e))
-                
-            # Flag that the job failed
-            statemon.state.increment('processing_error')
+                _log.exception("Unexpected error [%s]: %s" % (os.getpid(), e))
 
             cb = neondata.VideoCallbackResponse(self.job_params['job_id'],
                                                 self.job_params['video_id'],
                                                 err=e.message)
             
             def _write_failure(request):
-                request.state = new_state
-                request.response = cb.to_dict()
                 request.fail_count += 1
-            api_request = neondata.NeonApiRequest.modify(
+                request.response = cb.to_dict()
+                if request.fail_count < options.max_fail_count:
+                    # This job is going to be requeued
+                    request.state = neondata.RequestState.REQUEUED
+                else:
+                    request.state = new_state
+            api_request = yield neondata.NeonApiRequest.modify(
                 self.job_params['job_id'],
                 self.job_params['api_key'],
-                _write_failure)
+                _write_failure,
+                async=True)
+
+            if api_request is None:
+                _log.warn('Job %s for account %s was deleted, so ignore' %
+                          (self.job_params['job_id'],
+                           self.job_params['api_key']))
+                yield self.job_queue.delete_message(self.job_message)
+
+            elif api_request.state == neondata.RequestState.REQUEUED:
+                # Let another node pick up the job to try again
+                try:
+                    yield self.job_queue.hide_message(self.job_message, 
+                                                      options.dequeue_period
+                                                      / 2.0)
+                except boto.exception.SQSError as e:
+                    _log.warn('Error hiding message: %s' % e)
             
-            # Send the callback to let the client know there was an
-            # error that they might be able to fix
-            if isinstance(e, VideoError):
-                api_request.send_callback()
+            else:
+                # It's the final error
+                statemon.state.increment('processing_error')
+            
+                # Send the callback to let the client know there was an
+                # error that they might be able to fix
+                if isinstance(e, VideoError):
+                    yield api_request.send_callback(async=True)
+
+                # Delete the job
+                _log.warn('Job %s for account %s has failed' %
+                          (api_request.job_id, api_request.api_key))
+                yield self.job_queue.delete_message(self.job_message)
        
         finally:
             #Delete the temp video file which was downloaded
             self.tempfile.close()
 
+    @tornado.concurrent.run_on_executor
+    def _urllib_read(self, response, do_throttle, chunk_time):
+        last_time = time.time()
+        data = response.read(VideoProcessor.CHUNK_SIZE)
+        while data != '':
+            if do_throttle:
+                time_spent = time.time() - last_time
+                time.sleep(max(0, chunk_time-time_spent))
+            self.tempfile.write(data)
+            self.tempfile.flush()
+            last_time = time.time()
+            data = response.read(VideoProcessor.CHUNK_SIZE)
+
+        self.tempfile.flush()
+
+    @tornado.gen.coroutine
     def download_video_file(self):
         '''
         Download the video file 
         '''
         s3re = re.compile('((s3://)|(https?://[a-zA-Z0-9\-_]+\.amazonaws\.com/))([a-zA-Z0-9\-_\.]+)/(.+)')
 
+        # Get the duration of the video if it was sent in
+        video_duration = self.job_queue.get_duration(
+            self.job_message)
+
         # Find out if we should throttle
         do_throttle = False
         frac_processing = (float(statemon.state.workers_processing) / 
                            max(statemon.state.running_workers, 1))
         if frac_processing > options.min_load_to_throttle:
-            do_throttle=True
+            do_throttle = True
 
         _log.info('Starting download of video %s. Throttled: %s' % 
                   (self.video_url, do_throttle))
@@ -281,11 +352,16 @@ class VideoProcessor(object):
                     bucket_name = s3match.group(4)
                     key_name = s3match.group(5)
                     s3conn = S3Connection()
-                    bucket = s3conn.get_bucket(bucket_name)
-                    _log.info(key_name)
-                    key = bucket.get_key(key_name)
-                    key.get_contents_to_file(self.tempfile)
-                    self.tempfile.flush()
+                    bucket = yield self.executor.submit(
+                        s3conn.get_bucket, bucket_name)
+                    key = yield self.executor.submit(
+                        bucket.get_key, key_name)
+                    self.video_metadata.duration = video_duration
+                    yield self._set_job_timeout(self.video_metadata.duration,
+                                                key.size)
+                    yield self.executor.submit(
+                        key.get_contents_to_file, self.tempfile)
+                    yield self.executor.submit(self.tempfile.flush)
                     return
                 except boto.exception.S3ResponseError as e:
                     _log.warn('Error getting video url %s via boto. '
@@ -323,7 +399,8 @@ class VideoProcessor(object):
                 cur_url = self.video_url
                 found_video = False
                 while not found_video:
-                    video_info = ydl.extract_info(cur_url, download=False)
+                    video_info = yield self.executor.submit(ydl.extract_info,
+                        cur_url, download=False)
                     result_type = video_info.get('_type', 'video')
                     if result_type == 'url':
                         # Need to step to the next url
@@ -338,28 +415,33 @@ class VideoProcessor(object):
                         raise youtube_dl.utils.DownloadError(msg)
 
                 # Update information about the video before we download it
+                self.extracted_default_thumbnail = video_info.get('thumbnail')
                 def _update_title(x):
                     if x.video_title is None:
                         x.video_title = video_info.get('title', None)
-                    if x.default_thumbnail is None:
-                        x.default_thumbnail = video_info.get('thumbnail', None)
-                neondata.NeonApiRequest.modify(
+                yield neondata.NeonApiRequest.modify(
                     self.job_params['job_id'], self.job_params['api_key'] ,
-                    _update_title)
-                    
-                # Do the real download
-                video_info = ydl.extract_info(cur_url, download=True)
+                    _update_title,
+                    async=True)
 
                 # Update some of our metadata if there's better info
                 # from the video
                 self.video_metadata.duration = video_info.get(
-                    'duration', self.video_metadata.duration)
+                    'duration', video_duration)
                 if video_info.get('upload_date', None) is not None:
                     self.video_metadata.publish_date = \
                       dateutil.parser.parse(video_info['upload_date']).isoformat()
-                                                              
 
-            self.tempfile.flush()
+                # Update the timeout
+                yield self._set_job_timeout(
+                    self.video_metadata.duration,
+                    video_info.get('filesize', 
+                                   video_info.get('filesize_approx')))
+                    
+                # Do the real download
+                video_info = yield self.executor.submit(ydl.extract_info,
+                                                        cur_url, download=True)
+                                                              
 
             _log.info('Finished downloading video %s' % self.video_url)
 
@@ -392,12 +474,15 @@ class VideoProcessor(object):
             statemon.state.increment('video_download_error')
             raise VideoDownloadError(msg)
 
+    @tornado.gen.coroutine
     def process_video(self, video_file, n_thumbs=1):
         ''' process all the frames from the partial video downloaded '''
         # The video might have finished by somebody else so double
         # check that we still want to process it.
-        api_request = neondata.NeonApiRequest.get(self.job_params['job_id'],
-                                                  self.job_params['api_key'])
+        api_request = yield neondata.NeonApiRequest.get(
+            self.job_params['job_id'],
+            self.job_params['api_key'],
+            async=True)
         if api_request and api_request.state in [
                 neondata.RequestState.FINISHED,
                 neondata.RequestState.SERVING,
@@ -447,7 +532,8 @@ class VideoProcessor(object):
         account_id = self.job_params['api_key']
         
         try:
-            processing_strategy = neondata.ProcessingStrategy.get(account_id)
+            processing_strategy = yield neondata.ProcessingStrategy.get(
+                account_id, async=True)
         except Exception, e:
             _log.error(("Could not fetch processing strategy for account_id "
                         "%s: %s")%(str(account_id), e))
@@ -569,9 +655,10 @@ class VideoProcessor(object):
         statemon.state.increment('extract_frame_error')
         raise BadVideoError('Error reading frame %i of video' % frameno)
 
+    @tornado.gen.coroutine
     def finalize_response(self):
         '''
-        Finalize the respon after video has been processed.
+        Finalize the response after video has been processed.
 
         This updates the database and does any callbacks necessary.
         '''
@@ -596,10 +683,15 @@ class VideoProcessor(object):
             else:
                 somebody_else_finished[0] = True
         try:
-            api_request = neondata.NeonApiRequest.modify(job_id, api_key,
-                                                         _flag_for_finalize)
+            api_request = yield neondata.NeonApiRequest.modify(
+                job_id,
+                api_key,
+                _flag_for_finalize,
+                async=True)
             if api_request is None:
-                raise DBError('Api Request finalizing failed.It was not there')
+                _log.warn('Job %s was deleted while processing it. Ignoring' %
+                          job_id)
+                return
         except Exception, e:
             _log.error("Error writing request state to database: %s" % e)
             statemon.state.increment('modify_request_error')
@@ -609,10 +701,11 @@ class VideoProcessor(object):
             raise OtherWorkerCompleted()
 
         # Get the CDN Metadata
-        cdn_metadata = neondata.CDNHostingMetadataList.get(
+        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(
                 api_key,
-                self.video_metadata.integration_id))
+                self.video_metadata.integration_id),
+            async=True)
         if cdn_metadata is None:
             _log.warn_n('No cdn metadata for account %s integration %s. '
                         'Defaulting to Neon CDN'
@@ -627,11 +720,14 @@ class VideoProcessor(object):
             statemon.state.increment('no_thumbs')
             _log.warn("No thumbnails extracted for video %s url %s"\
                     % (self.video_metadata.key, self.video_metadata.url))
+        
         for thumb_meta, image in self.thumbnails:
-            self.video_metadata.add_thumbnail(thumb_meta, image,
-                                              cdn_metadata=cdn_metadata,
-                                              save_objects=False)
-
+            yield self.video_metadata.add_thumbnail(
+                thumb_meta, image,
+                cdn_metadata=cdn_metadata,
+                save_objects=False,
+                async=True)
+            
         # Save the thumbnail and video data into the database
         # TODO(mdesnoyer): do this as a single transaction
         def _merge_thumbnails(t_objs):
@@ -651,21 +747,23 @@ class VideoProcessor(object):
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
         try:
-            new_thumb_dict = neondata.ThumbnailMetadata.modify_many(
+            new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],
                 _merge_thumbnails,
-                create_missing=True)
+                create_missing=True,\
+                async=True)
             if len(self.thumbnails) > 0 and len(new_thumb_dict) == 0:
                 raise DBError("Couldn't change some thumbs")
         except Exception, e:
             _log.error("Error writing thumbnail data to database: %s" % e)
             statemon.state.increment('save_tmdata_error')
             raise DBError("Error writing thumbnail data to database")
-        
+
+        @tornado.gen.coroutine
         def _merge_video_data(video_obj):
             # Don't keep the random centerframe or neon thumbnails
-            thumbs = neondata.ThumbnailMetadata.get_many(
-                video_obj.thumbnail_ids)
+            thumbs = yield neondata.ThumbnailMetadata.get_many(
+                video_obj.thumbnail_ids, async=True)
             keep_thumbs = [x.key for x in thumbs if x.type not in [
                 neondata.ThumbnailType.NEON,
                 neondata.ThumbnailType.CENTERFRAME,
@@ -684,10 +782,11 @@ class VideoProcessor(object):
             video_obj.publish_date = (video_obj.publish_date or 
                                       self.video_metadata.publish_date)
         try:
-            new_video_metadata = neondata.VideoMetadata.modify(
+            new_video_metadata = yield neondata.VideoMetadata.modify(
                 self.video_metadata.key,
                 _merge_video_data,
-                create_missing=True)
+                create_missing=True,
+                async=True)
             if not new_video_metadata:
                 raise DBError('This should not ever happen')
         except Exception, e:
@@ -695,26 +794,32 @@ class VideoProcessor(object):
             statemon.state.increment('save_vmdata_error')
             raise DBError("Error writing video data to database")
         self.video_metadata = new_video_metadata
+        is_user_default_thumb = api_request.default_thumbnail is not None
         try:
             # A second attempt to save the default thumb
-            api_request.save_default_thumbnail(cdn_metadata)
-            
-            # Enable the video to be served if we have any thumbnails available
-            def _set_serving_enabled(video_obj):
-                video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
-            new_video_metadata = neondata.VideoMetadata.modify(
-                self.video_metadata.key,
-                _set_serving_enabled)
-
-            # Everything is fine at this point, so lets mark it finished
-            api_request.state = neondata.RequestState.FINISHED
+            api_request.default_thumbnail = (api_request.default_thumbnail or 
+                                             self.extracted_default_thumbnail)
+            yield api_request.save_default_thumbnail(cdn_metadata, async=True)
 
         except neondata.ThumbDownloadError, e:
-            _log.warn("Default thumbnail download failed for vid %s" %
-                      video_id)
-            statemon.state.increment('default_thumb_error')
-            err_msg = "Failed to download default thumbnail: %s" % e
-            raise DefaultThumbError(err_msg)
+            # If we extracted the default thumb from the url, then
+            # don't error out if we cannot get thumb
+            if is_user_default_thumb:
+                _log.warn("Default thumbnail download failed for vid %s" %
+                          video_id)
+                statemon.state.increment('default_thumb_error')
+                err_msg = "Failed to download default thumbnail: %s" % e
+                raise DefaultThumbError(err_msg)
+
+        # Enable the video to be served if we have any thumbnails available
+        def _set_serving_enabled(video_obj):
+            video_obj.serving_enabled = len(video_obj.thumbnail_ids) > 0
+        new_video_metadata = yield neondata.VideoMetadata.modify(
+            self.video_metadata.key,
+            _set_serving_enabled,
+            async=True)
+        # Everything is fine at this point, so lets mark it finished
+        api_request.state = neondata.RequestState.FINISHED
 
         # Build the callback response
         cb_response = self.build_callback_response()
@@ -726,9 +831,11 @@ class VideoProcessor(object):
             request.response = cb_response
             request.callback_state = neondata.CallbackState.NOT_SENT
         try:
-            sucess = neondata.NeonApiRequest.modify(api_request.job_id,
-                                                    api_request.api_key,
-                                                    _flag_request_done_in_db)
+            sucess = yield neondata.NeonApiRequest.modify(
+                api_request.job_id,
+                api_request.api_key,
+                _flag_request_done_in_db,
+                async=True)
             if not sucess:
                 raise DBError('Api Request finished failed. It was not there')
         except Exception, e:
@@ -737,12 +844,11 @@ class VideoProcessor(object):
             raise DBError("Error finishing api request")
 
         # Send the notifications
-        self.send_notifiction_response(api_request)
+        yield self.send_notifiction_response(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
         
-
     def build_callback_response(self):
         '''
         build the dict that defines the callback response
@@ -764,6 +870,7 @@ class VideoProcessor(object):
             self.video_metadata.get_serving_url(save=False))
         return cresp.to_dict()
 
+    @tornado.gen.coroutine
     def send_notifiction_response(self, api_request):
         '''
         Send Notification to endpoint
@@ -774,7 +881,7 @@ class VideoProcessor(object):
         title = self.job_params['video_title']
         i_id = self.video_metadata.integration_id
         job_id  = self.job_params['job_id']
-        account = neondata.NeonUserAccount.get(api_key)
+        account = yield neondata.NeonUserAccount.get(api_key, async=True)
         if account is None:
             _log.error('Could not get the account for api key %s' %
                        api_key)
@@ -803,9 +910,34 @@ class VideoProcessor(object):
             body=urllib.urlencode(request_dict), 
             request_timeout=60.0, 
             connect_timeout=10.0)
-        response = utils.http.send_request(request)
+        response = yield utils.http.send_request(request, async=True)
         if response.error:
             _log.error("Notification response not sent to %r " % request)
+
+    @tornado.gen.coroutine
+    def _set_job_timeout(self, duration=None, size=None,
+                         time_factor=3.0):
+        '''Set the job timeout so that this worker gets the job for this time.
+
+        Inputs:
+        duration - Duration of the video in seconds
+        size - Size of the video file in bytes
+        time_factor - How long the job should run as a multiple of the video 
+                      length.
+        '''
+        if not duration:
+            if not size:
+                # Do not set a timeout because we have no idea
+                return
+
+            # Approximate the length of the video
+            duration = size * 8.0 / 1024 / 800
+
+        try:
+            yield self.job_queue.hide_message(self.job_message,
+                                              int(duration * time_factor))
+        except boto.exception.SQSError as e:
+            _log.warn('Error extending job time: %s' % e)
 
 class VideoClient(multiprocessing.Process):
    
@@ -821,69 +953,91 @@ class VideoClient(multiprocessing.Process):
         self.model = None
         self.cv_semaphore = cv_semaphore
         self.videos_processed = 0
+        self.job_queue = video_processing_queue.VideoProcessingQueue()
 
+    @tornado.gen.coroutine
     def dequeue_job(self):
-        ''' Blocking http call to global queue to dequeue work
+        ''' Asynchronous call to dequeue work
             Change state to PROCESSING after dequeue
         '''
-        _log.debug("Dequeuing job [%s] " % (self.pid))
-        headers = {'X-Neon-Auth' : options.server_auth} 
+        _log.debug("Dequeuing job [%s] " % (self.pid)) 
         result = None
-        dequeue_url = 'http://%s/dequeue' % options.video_server
-        req = tornado.httpclient.HTTPRequest(
-                                            url=dequeue_url,
-                                            method="GET",
-                                            headers=headers,
-                                            request_timeout=60.0,
-                                            connect_timeout=10.0)
-
-        response = utils.http.send_request(req)
-        if not response.error:
-            result = response.body
-             
+        job_params = None
+        self.cur_message = yield self.job_queue.read_message()
+        if self.cur_message:
+            result = self.cur_message.get_body()
             if result is not None and result != "{}":
                 try:
                     job_params = tornado.escape.json_decode(result)
-                    #Change Job State
-                    api_key = job_params['api_key']
-                    job_id  = job_params['job_id']
-                    job_params['reprocess'] = False
-                    def _change_job_state(request):
-                        if request.state in [neondata.RequestState.SUBMIT,
-                                             neondata.RequestState.REPROCESS,
-                                             neondata.RequestState.REQUEUED]:
-                            if request.state in [
-                                    neondata.RequestState.REPROCESS]:
-                                _log.info('Reprocessing job %s for account %s'
-                                          % (job_id, api_key))
-                                job_params['reprocess'] = True
-                            request.state = \
-                                neondata.RequestState.PROCESSING
-                            request.model_version = self.model_version
-                                
-                    api_request = neondata.NeonApiRequest.modify(
-                        job_id, api_key, _change_job_state)
-                    if api_request is None:
-                        _log.error('Could not get job %s for %s' %
-                                   (job_id, api_key))
-                        statemon.state.increment('dequeue_error')
-                        return False
-                    if api_request.state != neondata.RequestState.PROCESSING:
-                        _log.info('Job %s for account %s ignored' %
-                                  (job_id, api_key))
-                        return False
-                    _log.info("key=worker [%s] msg=processing request %s for "
-                              "%s." % (self.pid, job_id, api_key))
-                    return job_params
-                except Exception,e:
-                    _log.error("key=worker [%s] msg=db error %s" %(
-                        self.pid, e.message))
-                    return False
-            return result
+                except ValueError as e:
+                    _log.warning('Job body %s was not JSON' % result)
+                    statemon.state.increment('invalid_jobs')
+                    raise UninterestingJob()
+                #Change Job State
+                api_key = job_params['api_key']
+                job_id  = job_params['job_id']
+                job_params['reprocess'] = False
+                def _change_job_state(request):
+                    request.try_count +=1
+                    if request.state in [neondata.RequestState.SUBMIT,
+                                         neondata.RequestState.REPROCESS,
+                                         neondata.RequestState.REQUEUED,
+                                         neondata.RequestState.FINALIZING]:
+                        if request.state in [
+                                neondata.RequestState.REPROCESS]:
+                            _log.info('Reprocessing job %s for account %s'
+                                      % (job_id, api_key))
+                            job_params['reprocess'] = True
+                        request.state = \
+                            neondata.RequestState.PROCESSING
+                        request.model_version = self.model_version
+
+                api_request = neondata.NeonApiRequest.modify(
+                    job_id, api_key, _change_job_state)
+                if api_request is None:
+                    _log.error('Could not get job %s for %s' %
+                               (job_id, api_key))
+                    statemon.state.increment('dequeue_error')
+                    raise DequeueError('Api Request does not exist.')
+                if api_request.state in [neondata.RequestState.FINISHED,
+                                         neondata.RequestState.SERVING]:
+                    _log.info('Dequeued a job that somebody else finished')
+                    raise UninterestingJob('Somebody else finished')
+                if api_request.state != neondata.RequestState.PROCESSING:
+                    _log.error('Job %s for account %s could not set to '
+                               'PROCESSING' %
+                               (job_id, api_key))
+                    statemon.state.increment('dequeue_error')
+                    raise DequeueError('Could not set processing')
+                if (api_request.fail_count >= options.max_fail_count or 
+                    api_request.try_count >= options.max_attempt_count):
+                    msg = ('Job %s for account %s has failed too many '
+                           'times' % (job_id, api_key))
+                    _log.error(msg)
+                    statemon.state.increment('too_many_failures')
+                    
+                    def _write_failure(req):
+                        cb = neondata.VideoCallbackResponse(job_id,
+                                                            req.video_id,
+                                                            err=msg)
+                        req.response = cb.to_dict()
+                        req.state = neondata.RequestState.INT_ERROR
+                    yield neondata.NeonApiRequest.modify(job_id, api_key,
+                                                         _write_failure,
+                                                         async=True)
+                    raise UninterestingJob('Job failed')
+                
+                _log.info("key=worker [%s] msg=processing request %s for "
+                          "%s." % (self.pid, job_id, api_key))
+            if job_params is not None:
+                _log.debug("Dequeue Successful")
+                raise tornado.gen.Return(job_params)
+
+            _log.warning('Job body %s was uninteresting' % result)
+            statemon.state.increment('invalid_jobs')
+            raise UninterestingJob('Job did not have parameters')
         else:
-            _log.error("Dequeue Error")
-            statemon.state.increment('dequeue_error')
-        return False
+            raise Queue.Empty()
 
     ##### Model Methods #####
 
@@ -895,6 +1049,7 @@ class VideoClient(multiprocessing.Process):
         _log.info('Loading model from %s version %s'
                   % (self.model_file, self.model_version))
         self.model = model.load_model(self.model_file)
+
         if not self.model:
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
@@ -902,23 +1057,24 @@ class VideoClient(multiprocessing.Process):
 
     def run(self):
         ''' run/start method '''
-        _log.info("starting worker [%s] " % (self.pid))
+        # The worker should ignore the SIGTERM because it will be
+        # killed by the master thread via self.kill_received
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         
-        # Register a function to die cleanly on a sigterm
-        atexit.register(self.stop)
+        _log.info("starting worker [%s] " % (self.pid))
         
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
-
+ 
         _log.info("stopping worker [%s] " % (self.pid))
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def do_work(self):   
         ''' do actual work here'''
         try:
-            job = self.dequeue_job()
-            if not job or job == "{}": #string match
-                raise Queue.Empty
+            job = yield self.dequeue_job()
 
             # TODO(mdesnoyer): Only load the model once. Right now,
             # there's a memory problem so we load the model for every
@@ -927,10 +1083,13 @@ class VideoClient(multiprocessing.Process):
             vprocessor = VideoProcessor(job, self.model,
                                         self.model_version,
                                         self.cv_semaphore,
+                                        self.job_queue,
+                                        self.cur_message,
                                         job['reprocess'])
             statemon.state.increment('workers_processing')
+
             try:
-                vprocessor.start()
+                yield vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
             self.videos_processed += 1
@@ -938,12 +1097,20 @@ class VideoClient(multiprocessing.Process):
         except Queue.Empty:
             _log.debug("Q,Empty")
             time.sleep(options.dequeue_period * random.random())
+
+        except DequeueError:
+            # Already logged
+            time.sleep(options.dequeue_period * random.random())
+
+        except UninterestingJob:
+            if self.cur_message:
+                yield self.job_queue.delete_message(self.cur_message)
         
-        except Exception,e:
+        except Exception as e:
             statemon.state.increment('unknown_exception')
-            _log.exception("key=worker [%s] "
-                    " msg=exception %s" %(self.pid, e.message))
-            time.sleep(options.dequeue_period)
+            _log.exception("Unexpected exception [%s]: %s"
+                           % (self.pid, e))
+            time.sleep(options.dequeue_period * random.random())
 
     def stop(self):
         self.kill_received.set()
@@ -965,12 +1132,11 @@ def shutdown_master_process():
 
     # Wait for the workers and force kill if they take too long
     for worker in _workers:
-        worker.join(1800.0) # 30min timeout
+        worker.join(600.0) # 10min timeout to finish the job
         if worker.is_alive():
             print 'Worker is still going. Force kill it'
             # Send a SIGKILL
             utils.ps.send_signal_and_wait(signal.SIGKILL, [worker.pid])
-    
 
 if __name__ == "__main__":
     utils.neon.InitNeon()
@@ -982,6 +1148,7 @@ if __name__ == "__main__":
 
     cv_slots = max(multiprocessing.cpu_count() - 1, 1)
     cv_semaphore = multiprocessing.BoundedSemaphore(cv_slots)
+
 
     # Manage the workers 
     try:

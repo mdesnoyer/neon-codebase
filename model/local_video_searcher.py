@@ -929,7 +929,7 @@ class ResultsList(object):
         '''
         old = self.results[idx]
         self.results[idx] = res
-        _log.info('%s is replacing %s' % (res, old))
+        _log.debug('%s is replacing %s' % (res, old))
         self._update_dists(idx)
         self._update_min()
         self._write_testing_frame(res, 'accept', idx)

@@ -342,6 +342,7 @@ class AkamaiNetstorage(object):
             action_string += "&quick-delete=%s" % qd_confirm
 
         encoded_url = urllib.quote(url)
+    
         
         length = 0
         if (body):
@@ -359,6 +360,7 @@ class AkamaiNetstorage(object):
                 headers=headers,
                 request_timeout=30.0,
                 connect_timeout=15.0)
+            _log.debug('Uploading Akamai object to %s' % req.url)
             response = yield utils.http.send_request(
                 req,
                 ntries=1,

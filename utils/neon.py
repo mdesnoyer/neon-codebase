@@ -13,6 +13,7 @@ import os
 import rpdb2
 import signal
 import socket
+import tornado.httpclient
 import threading
 
 from . import logs
@@ -29,6 +30,9 @@ def InitNeon(usage='%prog [options]'):
     EnableRunningDebugging()
 
     socket.setdefaulttimeout(30)
+    if os.path.exists('/etc/ssl/certs/ca-certificates.crt'):
+        tornado.httpclient.AsyncHTTPClient.configure(None, defaults=dict(
+            ca_certs="/etc/ssl/certs/ca-certificates.crt"))
 
     magent = monitor.MonitoringAgent()
     magent.start()

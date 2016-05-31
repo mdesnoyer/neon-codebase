@@ -7,6 +7,8 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import api.brightcove_api
+from boto.sqs.message import Message
+import boto.exception
 from cmsapiv2.apiv2 import *
 from cmsapiv2 import controllers
 from cmsapiv2 import authentication
@@ -14,7 +16,6 @@ from datetime import datetime, timedelta
 import json
 import stripe
 import tornado.gen
-import tornado.ioloop
 import tornado.testing
 import tornado.httpclient
 import test_utils.postgresql
@@ -24,6 +25,7 @@ import utils.neon
 import utils.http
 import urllib
 import test_utils.neontest
+from test_utils import sqsmock
 import uuid
 import jwt
 from mock import patch, DEFAULT, MagicMock
@@ -33,6 +35,7 @@ from StringIO import StringIO
 from cvutils.imageutils import PILImageUtils
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse 
 from tornado.httputil import HTTPServerRequest
+import video_processor.video_processing_queue
 from utils.options import options
 
 class TestBase(test_utils.neontest.AsyncHTTPTestCase): 
@@ -1901,7 +1904,10 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
 
 class TestVideoHandler(TestControllersBase): 
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user = neondata.NeonUserAccount(
+            uuid.uuid1().hex,
+            name='testingme',
+            processing_priority=2)
         user.save()
         self.account_id_api_key = user.neon_api_key
         self.test_i_id = 'testvideohiid'
@@ -1924,40 +1930,38 @@ class TestVideoHandler(TestControllersBase):
         self.im_download_mock = self._future_wrap_mock(
             self.im_download_mocker.start())
         self.im_download_mock.side_effect = [self.random_image]
-        self.http_mocker = patch('utils.http.send_request')
-        self.http_mock = self._future_wrap_mock(
-              self.http_mocker.start()) 
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
         self.maxDiff = 5000
+
+        # Mock the video queue
+        self.job_queue_patcher = patch(
+            'video_processor.video_processing_queue.' \
+            'VideoProcessingQueue')
+        self.job_queue_mock = self.job_queue_patcher.start()()
+        self.job_write_mock = self._future_wrap_mock(
+            self.job_queue_mock.write_message)
+        self.job_write_mock.side_effect = ['message']
+        
         super(TestVideoHandler, self).setUp()
 
     def tearDown(self): 
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
-        self.http_mocker.stop()
         self.verify_account_mocker.stop()
+        self.job_queue_patcher.stop()
+
         super(TestVideoHandler, self).tearDown()
-    
+
+    @patch('cmsdb.neondata.VideoMetadata.download_image_from_url')
     @tornado.testing.gen_test
-    def test_post_video(self):
-        url = '/api/v2/%s/videos?integration_id=%s'\
-              '&external_video_ref=1234ascs'\
-	      '&default_thumbnail_url=url.invalid'\
-	      '&title=%s&url=some_url'\
-              '&thumbnail_ref=ref1' % (self.account_id_api_key, 
-                  self.test_i_id, 
-                  'test')
-        cmsdb_download_image_mocker = patch(
-            'cmsdb.neondata.VideoMetadata.download_image_from_url') 
-        cmsdb_download_image_mock = self._future_wrap_mock(
-            cmsdb_download_image_mocker.start())
+    def test_post_video(self, cmsdb_download_image_mock):
+        url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1&duration=16' % (self.account_id_api_key, self.test_i_id)
+        cmsdb_download_image_mock = self._future_wrap_mock(cmsdb_download_image_mock)
         cmsdb_download_image_mock.side_effect = [self.random_image]
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
                                                 method='POST',
@@ -1965,7 +1969,16 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         self.assertNotEquals(rjson['job_id'],'')
-        cmsdb_download_image_mocker.stop()
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertDictContainsSubset(json.loads(cargs[1]), job.__dict__)
+        self.assertEquals(cargs[2], 16)
+        self.assertEquals(job.api_param, 5)
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
@@ -1985,9 +1998,6 @@ class TestVideoHandler(TestControllersBase):
               '&default_thumbnail_url=url.invalid'\
               '&title=a_title&url=some_url'\
               '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
 
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body='',
@@ -2029,9 +2039,6 @@ class TestVideoHandler(TestControllersBase):
                   '&title=a_title&url=some_url'\
                   '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
     
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
-    
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2072,8 +2079,6 @@ class TestVideoHandler(TestControllersBase):
               '&default_thumbnail_url=url.invalid'\
               '&title=a_title&url=some_url'\
               '&thumbnail_ref=ref1' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         with self.assertRaises(tornado.httpclient.HTTPError) as e: 
             yield self.http_client.fetch(self.get_url(url),
                                          body='',
@@ -2092,8 +2097,6 @@ class TestVideoHandler(TestControllersBase):
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2117,8 +2120,6 @@ class TestVideoHandler(TestControllersBase):
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2144,8 +2145,6 @@ class TestVideoHandler(TestControllersBase):
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2179,13 +2178,12 @@ class TestVideoHandler(TestControllersBase):
                           'failed to download thumbnail')
 
     @tornado.testing.gen_test
-    def test_post_video_with_duration(self):
+    def test_post_video_with_duration_and_nthumbs(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
-              '&duration=1354&url=some_url' % (self.account_id_api_key, 
+              '&duration=1354&url=some_url&n_thumbs=10' % (
+                  self.account_id_api_key, 
                   self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2201,6 +2199,15 @@ class TestVideoHandler(TestControllersBase):
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals(1354, video.duration)
 
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[2], 1354.)
+
+        job = yield neondata.NeonApiRequest.get(rjson['job_id'],
+                                                self.account_id_api_key,
+                                                async=True)
+        self.assertEquals(job.api_param, 10)
+
     @tornado.testing.gen_test
     def test_post_video_with_float_duration(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
@@ -2208,8 +2215,6 @@ class TestVideoHandler(TestControllersBase):
               '&duration=1354.54&url=some_url' % (
                   self.account_id_api_key, self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2225,6 +2230,36 @@ class TestVideoHandler(TestControllersBase):
         video = neondata.VideoMetadata.get(internal_video_id)
         self.assertEquals(1354.54, video.duration)
 
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[2], 1354.54)
+
+    @tornado.testing.gen_test
+    def test_post_video_no_duration(self):
+        url = '/api/v2/%s/videos?integration_id=%s'\
+              '&external_video_ref=1234ascs'\
+              '&url=some_url' % (
+                  self.account_id_api_key, self.test_i_id)
+
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            body='',
+            method='POST',
+            allow_nonstandard_methods=True)
+
+        self.assertEquals(response.code, 202) 
+        rjson = json.loads(response.body) 
+        self.assertNotEquals(rjson['job_id'],'')
+
+        internal_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'1234ascs')
+        video = neondata.VideoMetadata.get(internal_video_id)
+        self.assertIsNone(video.duration)
+
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertIsNone(cargs[2])
+
     @tornado.testing.gen_test
     def test_post_video_with_publish_date_valid_one(self):
         url = '/api/v2/%s/videos?integration_id=%s'\
@@ -2232,8 +2267,6 @@ class TestVideoHandler(TestControllersBase):
               '&publish_date=2015-08-18T06:36:40.123Z'\
               '&url=some_url' % (self.account_id_api_key, 
                   self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
 
         response = yield self.http_client.fetch(
             self.get_url(url),
@@ -2257,8 +2290,6 @@ class TestVideoHandler(TestControllersBase):
               '&publish_date=2015-08-18T06:36:40Z'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2280,8 +2311,6 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&publish_date=2015-08-18'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2306,8 +2335,6 @@ class TestVideoHandler(TestControllersBase):
                   '&url=some_url' % (
                       self.account_id_api_key,                                                      
                       self.test_i_id)
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2317,8 +2344,6 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_missing_url(self):
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/videos?integration_id=%s'\
@@ -2334,8 +2359,6 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_url_and_reprocess(self):
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             url = '/api/v2/%s/videos?integration_id=%s'\
@@ -2357,8 +2380,6 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&custom_data=%s&url=some_url' % (self.account_id_api_key, 
                   self.test_i_id, custom_data)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2381,8 +2402,6 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&custom_data=%s&url=some_url' % (self.account_id_api_key, 
                   self.test_i_id, 4)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:  
             response = yield self.http_client.fetch(
                 self.get_url(url),
@@ -2400,8 +2419,6 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2417,8 +2434,6 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:  
             response = yield self.http_client.fetch(
                 self.get_url(url),
@@ -2433,15 +2448,13 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess(self):
-        # use self.stop/wait to make sure we get the response back and 
-        # not an exception, we don't want no exception
+        self.job_write_mock.side_effect = [True, True]
+        
         url = '/api/v2/%s/videos?integration_id=%s'\
-              '&external_video_ref=1234ascs'\
+              '&external_video_ref=1234ascs&duration=31'\
               '&url=some_url' % (self.account_id_api_key, 
                   self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2452,14 +2465,17 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
         self.assertNotEquals(first_job_id,'')
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertEquals(cargs[2], 31)
+        self.job_write_mock.reset_mock()
         
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
               '&reprocess=true' % (self.account_id_api_key, 
                   self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
@@ -2469,40 +2485,23 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body)
         self.assertEquals(first_job_id, rjson['job_id'])
-
-    @tornado.testing.gen_test
-    def test_post_video_with_vserver_fail(self):
-        url = '/api/v2/%s/videos?integration_id=%s'\
-              '&external_video_ref=1234ascs'\
-              '&url=some_url' % (self.account_id_api_key, 
-                  self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,400))
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
-            response = yield self.http_client.fetch(
-                self.get_url(url),
-                body='',
-                method='POST',
-                allow_nonstandard_methods=True)
-
-        self.assertEquals(e.exception.response.code, 500) 
-        rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Internal Server') 
+        self.assertEquals(self.job_write_mock.call_count, 1)
+        cargs, kwargs = self.job_write_mock.call_args
+        self.assertEquals(cargs[0], 2)
+        self.assertEquals(cargs[2], 31)
 
     @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess_fail(self):
+        self.job_write_mock.side_effect = ['message', None]
+        
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
               '&url=some_url' % (self.account_id_api_key, 
                   self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
-        response = yield self.http_client.fetch(
-            self.get_url(url),
-            body='',
-            method='POST',
-            allow_nonstandard_methods=True)
-
+        response = yield self.http_client.fetch(self.get_url(url),
+                                                body='',
+                                                method='POST',
+                                                allow_nonstandard_methods=True)
         self.assertEquals(response.code, 202) 
         rjson = json.loads(response.body) 
         first_job_id = rjson['job_id']  
@@ -2512,15 +2511,13 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&reprocess=1' % (self.account_id_api_key, 
                   self.test_i_id)
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,400))
-        with self.assertRaises(tornado.httpclient.HTTPError) as e:  
-            response = yield self.http_client.fetch(
-                self.get_url(url),
-                body='',
-                method='POST',
-                allow_nonstandard_methods=True)
-
+        with self.assertLogExists(logging.ERROR, 'Unable to submit job'):
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                yield self.http_client.fetch(self.get_url(url),
+                                             body='',
+                                             method='POST',
+                                             allow_nonstandard_methods=True)
+        response = e.exception.response
         self.assertEquals(e.exception.response.code, 500) 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
@@ -2822,9 +2819,6 @@ class TestVideoHandler(TestControllersBase):
                   self.account_id_api_key, 
                   self.test_i_id)
 
-        self.http_mock.side_effect = lambda x, callback: callback(
-            tornado.httpclient.HTTPResponse(x,200))
-
         response = yield self.http_client.fetch(
             self.get_url(url),
             method='POST',
@@ -2872,9 +2866,6 @@ class TestVideoHandler(TestControllersBase):
                   '&title=a_title&url=some_url'\
                   '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
     
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
-    
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -2910,9 +2901,6 @@ class TestVideoHandler(TestControllersBase):
                   '&default_thumbnail_url=url.invalid'\
                   '&title=a_title&url=some_url'\
                   '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
-    
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
     
             response = yield self.http_client.fetch(
                 self.get_url(url),
@@ -2996,9 +2984,6 @@ class TestVideoHandler(TestControllersBase):
                   '&title=a_title&url=some_url'\
                   '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
     
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
-    
             response = yield self.http_client.fetch(
                 self.get_url(url),
                 body='',
@@ -3056,9 +3041,6 @@ class TestVideoHandler(TestControllersBase):
                       '&title=a_title&url=some_url'\
                       '&thumbnail_ref=ref1' % (so.neon_api_key, self.test_i_id)
         
-                self.http_mock.side_effect = lambda x, callback: callback(
-                    tornado.httpclient.HTTPResponse(x,200))
-        
                 yield self.http_client.fetch(
                     self.get_url(url),
                     body='',
@@ -3086,9 +3068,6 @@ class TestVideoHandler(TestControllersBase):
             }
             header = {"Content-Type": "application/json"}
             url = '/api/v2/%s/videos' % (self.account_id_api_key)
-
-            self.http_mock.side_effect = lambda x, callback: callback(
-                tornado.httpclient.HTTPResponse(x,200))
             response = yield self.http_client.fetch(self.get_url(url),
                 body=json.dumps(body),
                 method='POST',
