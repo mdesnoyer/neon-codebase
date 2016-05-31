@@ -1155,21 +1155,48 @@ class ThumbnailHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
+def ExactlyOne(*validators, **kwargs):
+    '''Valid if exactly one of the validators returns true'''
+    # @TODO implement
+    return Any(*validators, **kwargs)
 
-class ImageHandler(APIV2Handler):
+def does_account_own_tag(account_id, tag_id):
+    '''True if Neon user account owns the given tag'''
+    return True
+
+class DirectThumbnailHandler(ThumbnailHandler):
+    '''Handle multipart form POST directly from user xor url'''
 
     @tornado.gen.coroutine
     def post(self, account_id):
-        image = self.get_image_from_request()
-        print(type(image))
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Optional('external_ref'): All(Coerce(str), Length(min=1, max=64)),
+            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
+            ExactlyOne({
+                Optional('url'): All(Coerce(str), Url(), Length(min=1, max=2048)),
+                Optional('upload'): object}): object
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
 
-    @tornado.gen.coroutine
-    def get(self, account_id):
-        print('get!')
+        if args.get('url'):
+            # @TODO submit to url service?
+            # @TODO add oauth based creds for Dropbox
+            # @TODO inline download
+            return
 
-    @tornado.gen.coroutine
-    def put(self, account_id):
-        print('put')
+        image = self.get_image_from_body(
+            self.request.files['upload'][0]['body'])
+
+        thumbnail = neondata.ThumbnailMetadata(
+            None,
+            account_id=account_id,
+            external_id=external_ref)
+
+        # @TODO skip saving until implemented fully.
+        # yield thumbnail.save(async=True)
 
     @tornado.gen.coroutine
     def is_authorized(request,
@@ -1182,27 +1209,11 @@ class ImageHandler(APIV2Handler):
     def set_account(request):
         request.set_account_id()
 
-    @classmethod
-    def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
-            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
-            'account_required': [
-                HTTPVerbs.GET,
-                HTTPVerbs.PUT,
-                HTTPVerbs.POST]}
-
-    def get_image_from_request(self):
+    def get_image_from_request(self, body):
         """Extracts the image from the http post request.
         returns a NxMx3 numpy array
         """
-        image_body = self.request.files['upload'][0]['body']
-
-        if not image_body:
-            raise Exception('no image no work')
-
-        image = numpy.asarray(bytearray(image_body), dtype="uint8")
+        image = numpy.asarray(bytearray(body), dtype="uint8")
         image = cv2.imdecode(image, cv2.IMREAD_COLOR)
         image = cv2.resize(image, (227, 227))
         image = image[:,:,[2,1,0]]
@@ -2633,8 +2644,8 @@ application = tornado.web.Application([
         OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',
         AccountIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnail/?$', DirectThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/images/?$', ImageHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
     (r'/api/v2/videos/search?$', VideoSearchInternalHandler),
