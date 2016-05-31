@@ -31,13 +31,17 @@ class Client(object):
 
     Handles authentication behind the scenes so you don't have to.
     '''
-    def __init__(self, username, password):
+    def __init__(self, 
+                 username=None, 
+                 password=None, 
+                 access_token=None,
+                 refresh_token=None):
         '''Create the client that will connect with the given user/pass.'''
         self.username = username
         self.password = password
         
-        self.access_token = None
-        self.refresh_token = None
+        self.access_token = access_token
+        self.refresh_token = refresh_token
 
     @tornado.gen.coroutine
     def _authenticate(self):
@@ -51,11 +55,10 @@ class Client(object):
                                      'password' : self.password}))
             else:
                 request = tornado.httpclient.HTTPRequest(
-                    'https://%s/api/v2/authenticate' % options.auth_host,
+                    'https://%s/api/v2/refresh_token' % options.auth_host,
                     method='POST',
-                    headers={ 'Authorization' : 
-                              'Bearer %s' % self.refresh_token},
-                    body='')
+                    headers={ 'Content-Type' 'application/json'},
+                    body=json.dumps({'token' : self.refresh_token}))
             response = yield utils.http.send_request(
                 request,
                 no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
