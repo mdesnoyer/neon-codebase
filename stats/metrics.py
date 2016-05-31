@@ -168,13 +168,13 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     # Get the data from videos where there was a statistically
     # significant lift
     sig_data = all_data.copy()
-    sig_data = sig_data.groupby(level=sig_data.index_names).filter(
+    sig_data = sig_data.groupby(level=sig_data.index.names).filter(
         lambda x: np.any(x['p_value']>0.95))
 
     neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
                             (sig_data['p_value'] > 0.95)]
 
-    lots_of_clicks = all_data.groupby(level=all_data.index_names).filter(
+    lots_of_clicks = all_data.groupby(level=all_data.index.names).filter(
         lambda x: np.sum(x['tot_conv']) > 100)
 
     cap_runaways = all_data.copy()
