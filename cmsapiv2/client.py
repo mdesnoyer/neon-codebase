@@ -46,19 +46,26 @@ class Client(object):
     @tornado.gen.coroutine
     def _authenticate(self):
         while self.access_token is None:
-            if self.refresh_token is None:
+            if self.refresh_token is None and \
+               self.username is not None and \
+               self.password is not None:
                 request = tornado.httpclient.HTTPRequest(
                     'https://%s/api/v2/authenticate' % options.auth_host,
                     method='POST',
                     headers={'Content-Type' : 'application/json'},
                     body=json.dumps({'username' : self.username,
                                      'password' : self.password}))
-            else:
+            elif self.refresh_token is not None:
                 request = tornado.httpclient.HTTPRequest(
                     'https://%s/api/v2/refresh_token' % options.auth_host,
                     method='POST',
                     headers={ 'Content-Type' : 'application/json'},
                     body=json.dumps({'token' : self.refresh_token}))
+            else: 
+                raise tornado.httpclient.HTTPError(
+                    ResponseCode.HTTP_UNAUTHORIZED, 
+                    'Unauthorized') 
+
             response = yield utils.http.send_request(
                 request,
                 no_retry_codes=[ResponseCode.HTTP_UNAUTHORIZED],
@@ -69,15 +76,17 @@ class Client(object):
                     raise response.error
                 else:
                     # Refresh token could be old
-                    self.refresh_token = None
-                    continue
+                    if self.username and self.password: 
+                        self.refresh_token = None
+                        continue
+                    else:
+                        raise response.error
                 
             # Parse the access and refresh tokens
             data = json.loads(response.body)
             self.access_token = data['access_token']
             self.refresh_token = data['refresh_token']
                 
-
     @tornado.gen.coroutine
     def send_request(self, request, cur_try=0, **send_kwargs):
         '''Sends a request to the APIv2

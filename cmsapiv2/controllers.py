@@ -2590,14 +2590,24 @@ class BatchHandler(APIV2Handler):
                     http_req.headers = {"Content-Type" : "application/json"}
                     http_req.body = json.dumps(req.get('body', None))
                 
-                response = yield client.send_request(http_req, ntries=2)
-                result['relative_url'] = req['relative_url'] 
-                result['method'] = req['method'] 
-                result['response'] = json.loads(response.body)
+                response = yield client.send_request(http_req)
+                if response.error:
+                    error = { 'error' : 
+                        { 
+                            'message' : response.reason, 
+                            'code' : response.code 
+                        } 
+                    }
+                    result['response'] = error 
+                else:  
+                    result['relative_url'] = req['relative_url'] 
+                    result['method'] = req['method'] 
+                    result['response'] = json.loads(response.body)
+                    result['response_code'] = response.code
             except AttributeError:
                 result['response'] = 'Malformed Request'
-            except Exception: 
-                result['response'] = 'Unknown Error' 
+            except Exception as e: 
+                result['response'] = 'Unknown Error Occurred' 
             finally: 
                 output['results'].append(result)
                  
