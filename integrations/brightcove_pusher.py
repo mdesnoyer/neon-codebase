@@ -176,8 +176,10 @@ class ServingURLHandler(tornado.web.RequestHandler):
             except TypeError:
                 pass
         else:
-            width = max(x.get('width') for x in image_response['sources'])
-            height = max(x.get('height') for x in image_response['sources'])
+            width = max([x.get('width') for x in image_response['sources']] or
+                        [None])
+            height = max([x.get('height') for x in image_response['sources']]
+                         or [None])
 
         if (width is None or height is None):
             width, height = yield self._get_size_from_existing_image(
@@ -334,6 +336,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         '''
         neonServingRe = re.compile('neon-images.com/v1/client')
         if ('src' not in image_response or 
+            image_response['src'] is None or
             neonServingRe.search(image_response['src']) is not None):
             raise tornado.gen.Return((None, None))
 

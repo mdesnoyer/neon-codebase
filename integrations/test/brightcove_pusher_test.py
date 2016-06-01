@@ -290,6 +290,41 @@ class TestCMSAPIPush(BaseTest):
             'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
 
     @tornado.testing.gen_test
+    def test_thumbnail_no_source(self):
+        self.get_video_images_mock.side_effect = [{
+            'poster' : {
+                'asset_id' : 'poster1',
+                'remote' : False,
+                'sources' : [ {
+                    'height' : 360,
+                    'width' : 480
+                    }],
+                'src' : 'http://some_bc_url.com/poster.jpg'
+            },
+            'thumbnail' : {
+                'asset_id' : 'thumborig',
+                'remote' : False,
+                'sources' : [],
+                'src' : None
+            }}]
+
+        response = yield self.submit_callback({
+            'serving_url': 'http://neon-images.com/neonvid_vid1.jpg',
+            'video_id' : 'vid1',
+            'processing_state' : 'serving'})
+        self.assertEquals(response.code, 200)
+
+        # Make sure the poster was updated
+        self.add_poster_mock.assert_called_with(
+            'vid1',
+            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
+
+        # Make sure the thumbnail was updated
+        self.add_thumbnail_mock.assert_called_with(
+            'vid1',
+            'http://neon-images.com/neonvid_vid1.jpg?width=160&height=90')
+
+    @tornado.testing.gen_test
     def test_must_ingest_image(self):
         # No thumbs attached to the video
         neondata.VideoMetadata('acct1_vid1', tids=[]).save()
