@@ -332,7 +332,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
     def _get_size_from_existing_image(self, image_response):
         '''Downloads the image in the account in order to get the image size.
         '''
-        neonServingRe = re.compile(neondata.ThumbnailServingURLs.FNAME_REGEX)
+        neonServingRe = re.compile('neon-images.com/v1/client')
         if ('src' not in image_response or 
             neonServingRe.search(image_response['src']) is not None):
             raise tornado.gen.Return((None, None))
