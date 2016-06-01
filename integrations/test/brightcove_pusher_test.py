@@ -244,12 +244,12 @@ class TestCMSAPIPush(BaseTest):
             'processing_state' : 'serving'})
         self.assertEquals(response.code, 200)
 
-        # Make sure the poster was updated
+        # Make sure the poster was updated and the size came from the image
         self.update_poster_mock.assert_called_with(
             'vid1', 'poster1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
-        # Make sure the thumbnail was added
+        # Make sure the thumbnail was added with default sizes
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
             'http://neon-images.com/neonvid_vid1.jpg?width=160&height=90')
