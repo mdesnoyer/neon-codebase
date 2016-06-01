@@ -32,7 +32,6 @@ import utils.sync
 
 from utils.options import define, options
 define('api_key', default=None, help='api key to backfill')
-define('integration_id', default='0', help='integration id to processes.')
 define('worker_multiplier', default=1.0, 
        help=('Multiplier by the number of cores to figure out how many '
              'workers to use'))
@@ -95,22 +94,8 @@ def process_one_video(internal_video_id):
 
 def process_account(api_key, pool):
     account = neondata.NeonUserAccount.get(api_key)
-
-    platform_types = dict((x.get_ovp(), x) for x in 
-                          [neondata.NeonPlatform,
-                           neondata.BrightcovePlatform,
-                           neondata.YoutubePlatform,
-                           neondata.OoyalaPlatform])
-    integration_id = options.integration_id
-    _log.info('Processing integration %s for account %s' %
-              (integration_id, api_key))
-    plattype = platform_types[account.integrations[options.integration_id]]
-    plat = plattype.get(api_key, integration_id)
     
-    if plat is None:
-        _log.error('Could not get platform %s %s' % 
-                   (api_key, integration_id))
-        return
+    _log.info('Processing account %s' % (api_key))
 
     # Submit each video
     results = pool.imap_unordered(process_one_video,
