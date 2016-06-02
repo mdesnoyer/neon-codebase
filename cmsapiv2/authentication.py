@@ -143,13 +143,16 @@ class LogoutHandler(APIV2Handler):
             payload = JWTHelper.decode_token(access_token)
             username = payload['username'].lower()
 
-            def _update_user(u):
-                u.access_token = None
-                u.refresh_token = None
+            if username:
+                def _update_user(u):
+                    u.access_token = None
+                    u.refresh_token = None
 
-            yield tornado.gen.Task(neondata.NeonUserAccount.modify, username, _update_user)
-            statemon.state.increment('successful_logouts')
-            self.success(json.dumps({'message' : 'successfully logged out user'}))
+                yield tornado.gen.Task(neondata.NeonUserAccount.modify, username, _update_user)
+                statemon.state.increment('successful_logouts')
+                self.success(json.dumps({'message' : 'successfully logged out user'}))
+            else:
+                _log.error('Logout called with no user.')
         except jwt.ExpiredSignatureError:
             statemon.state.increment('token_expiration_logout')
             self.success(json.dumps({'message' : 'logged out expired user'}))
@@ -280,16 +283,17 @@ class NewAccountHandler(APIV2Handler):
         else:
             # If args are not valid against this schema,
             # try using the loginless account creation.
-            AccountHelper.save_loginless_account()
+            account = yield AccountHelper.save_loginless_account()
 
             # Generate and return tokens.
             access_token = JWTHelper.generate_token(
-                { 'username' : username },
+                {'account_id': account.get_id()},
                 token_type=TokenTypes.ACCESS_TOKEN)
             refresh_token = JWTHelper.generate_token(
-                { 'username' : username },
+                {'account_id': account.get_id()},
                 token_type=TokenTypes.REFRESH_TOKEN)
             self.success({
+                'account_ids': [account.get_id()],
                 'access_token': access_token,
                 'refresh_token': refresh_token})
             return
@@ -297,8 +301,8 @@ class NewAccountHandler(APIV2Handler):
         account = AccountHelper.create_account_with_args(args)
 
         # Check if email is claimed.
-        username = args.get('admin_user_username').lower()
-        password = args.get('admin_user_password')
+        username = args['admin_user_username'].lower()
+        password = args['admin_user_password']
         is_address_claimed = yield AccountHelper.is_address_claimed(username)
         if is_address_claimed:
             raise AlreadyExists('User with that email already exists.')
@@ -358,7 +362,9 @@ class AccountHelper(object):
         account.save()
 
         # Save other account objects that are based on the Neon api key.
-        AccountHelper.save_default_objects(account)
+        yield AccountHelper.save_default_objects(account)
+
+        raise tornado.gen.Return(account)
 
     @staticmethod
     @tornado.gen.coroutine

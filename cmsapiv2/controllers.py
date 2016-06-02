@@ -2063,7 +2063,7 @@ class UserHandler(APIV2Handler):
             raise NotFoundError()
 
         if self.user.username != username:
-            raise NotAuthorizedError('Can not view another users account')
+            raise NotAuthorizedError('Cannot view another users account')
 
         result = yield self.db2api(user)
 
@@ -2088,7 +2088,7 @@ class UserHandler(APIV2Handler):
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
-                raise NotAuthorizedError('Can not update another\
+                raise NotAuthorizedError('Cannot update another\
                                users account')
 
         def _update_user(u):

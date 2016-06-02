@@ -188,27 +188,34 @@ class Postgresql(object):
         self.old_name = options.get('cmsdb.neondata.db_name')
         options._set('cmsdb.neondata.db_port', self.port)
         options._set('cmsdb.neondata.db_name', self.dbname)
-    
-    def clear_all_tables(self): 
+
+    def clear_all_tables(self):
         with closing(psycopg2.connect(**self.dsn(database='postgres', dbname=self.dbname))) as conn:
             conn.autocommit = True
             with closing(conn.cursor()) as cursor:
-                cursor.execute("DELETE FROM abstractintegration")
-                cursor.execute("DELETE FROM abstractplatform")
-                cursor.execute("DELETE FROM cdnhostingmetadatalist")
-                cursor.execute("DELETE FROM experimentstrategy")
-                cursor.execute("DELETE FROM neonapikey")
-                cursor.execute("DELETE FROM neonapirequest")
-                cursor.execute("DELETE FROM neonuseraccount")
-                cursor.execute("DELETE FROM neonplatform")
-                cursor.execute("DELETE FROM users")
-                cursor.execute("DELETE FROM request")
-                cursor.execute("DELETE FROM thumbnailmetadata")
-                cursor.execute("DELETE FROM thumbnailservingurls")
-                cursor.execute("DELETE FROM thumbnailstatus")
-                cursor.execute("DELETE FROM videometadata")
-                cursor.execute("DELETE FROM videostatus")
-        neondata.PostgresPubSub.instance = None  
+                for table in ['abstractintegration',
+                   'abstractplatform',
+                   'accountlimits',
+                   # Omit billing plan. It has static rows.
+                   'brightcoveplayer',
+                   'cdnhostingmetadatalist',
+                   'experimentstrategy',
+                   'neonapikey',
+                   'neonapirequest',
+                   'neonplatform',
+                   'neonuseraccount',
+                   'processingstrategy',
+                   'request',
+                   'thumbnailmetadata',
+                   'thumbnailservingurls',
+                   'thumbnailstatus',
+                   'trackeraccountidmapper',
+                   'users',
+                   'verification',
+                   'videometadata',
+                   'videostatus']:
+                    cursor.execute('DELETE FROM %s' % table)
+        neondata.PostgresPubSub.instance = None
 
     def stop(self, _signal=signal.SIGINT):
         options._set('cmsdb.neondata.db_port', self.old_port)

@@ -222,7 +222,6 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
     def tearDown(self):
         self.verify_account_mocker.stop()
-        self.postgresql.clear_all_tables()
         super(TestNewAccountHandler, self).tearDown()
 
     @tornado.testing.gen_test
@@ -345,7 +344,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['message'],
-                                 r'(?i)account verification email sent to')
+                                 '(?i)account verification email sent to')
 
         # verifier row gets created
         verifier = yield neondata.Verification.get('a@a.bc', async=True)
@@ -424,10 +423,19 @@ class TestNewAccountHandler(TestAuthenticationBase):
             self.get_url(url),
             method='POST',
             allow_nonstandard_methods=True)
-        self.assertIn('access_token', response)
-        self.assertIn('refresh_token', response)
-
-        self.assertTrue(False)
+        body = json.loads(response.body)
+        self.assertIn('account_ids', body)
+        account_id = body['account_ids'][0]
+        self.assertIn('access_token', body)
+        self.assertIn('refresh_token', body)
+        # Assert database-backed objects were saved.
+        self.assertIsNotNone(neondata.NeonUserAccount.get(account_id))
+        # One mapper for each of prod, stage.
+        mappers = neondata.TrackerAccountIDMapper.get_all()
+        self.assertEqual(2, len(mappers))
+        (self.assertEqual(account_id, mapper.value) for mapper in mappers)
+        self.assertIsNotNone(neondata.AccountLimits.get(account_id))
+        self.assertIsNotNone(neondata.ExperimentStrategy.get(account_id))
 
     @tornado.testing.gen_test
     def test_create_new_account_invalid_email(self):
@@ -522,7 +530,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
         rjson = json.loads(e.exception.response.body)
         self.assertEquals(e.exception.code, 500)
         self.assertRegexpMatches(rjson['error']['data'],
-                                 'unable to send verification')
+                                 '(?i)Unable to send verification')
         ses_mocker.stop()
         self.send_email_mocker.start()
 
@@ -558,7 +566,7 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'resource was not found')
+                                 '(?i)resource was not found')
 
     @tornado.testing.gen_test
     def test_post_acct_not_implemented(self):
@@ -572,7 +580,7 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 501)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'access levels are not defined')
+                                 '(?i)access levels are not defined')
 
     @tornado.testing.gen_test
     def test_delete_acct_not_implemented(self):
@@ -583,7 +591,7 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 501)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'access levels are not defined')
+                                 '(?i)access levels are not defined')
 
     @tornado.testing.gen_test
     def test_get_acct_does_exist(self):
@@ -644,7 +652,7 @@ class TestAccountHandler(TestControllersBase):
 	    self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Content-Type must be JSON')
+                                 '(?i)Content-Type must be JSON')
 
     @tornado.testing.gen_test
     def test_update_acct_width_only(self):
@@ -680,7 +688,7 @@ class TestAccountHandler(TestControllersBase):
         self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'resource was not found')
+                                 '(?i)resource was not found')
 
     def test_get_acct_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.AccountHandler.get')
@@ -767,7 +775,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
 	    self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'User was not found')
+                                 '(?i)User was not found')
 
     @tornado.testing.gen_test
     def test_put_user_reset_password_bad_pw_token(self):
@@ -800,7 +808,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Token mismatch')
+                                 '(?i)Token mismatch')
 
     @tornado.testing.gen_test
     def test_put_user_reset_password_token_expired(self):
@@ -833,7 +841,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'reset password token has')
+                                 '(?i)reset password token has')
 
     @tornado.testing.gen_test
     def test_put_user_reset_password_full(self):
@@ -940,7 +948,7 @@ class TestUserHandler(TestControllersBase):
                                                     method='GET')
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Can not view')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)Cannot view')
 
     @tornado.testing.gen_test(timeout=10.0)
     def test_get_user_does_not_exist(self):
@@ -963,7 +971,7 @@ class TestUserHandler(TestControllersBase):
                                                     method='GET')
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'resource was not')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)resource was not')
 
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0)
@@ -1026,7 +1034,7 @@ class TestUserHandler(TestControllersBase):
                                                     headers=header)
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Can not set')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)Cannot set')
 
     # token creation can be slow give it some extra time just in case
     @tornado.testing.gen_test(timeout=10.0)
@@ -1064,7 +1072,7 @@ class TestUserHandler(TestControllersBase):
 
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Can not update')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)Cannot update')
 
 
 class TestOoyalaIntegrationHandler(TestControllersBase):
@@ -1150,7 +1158,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
         response = self.wait()
         self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'idontexist')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)idontexist')
 
     @tornado.testing.gen_test
     def test_put_integration(self):
@@ -1181,7 +1189,7 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
 
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'unable to find')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)unable to find')
 
     @tornado.testing.gen_test
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -1252,7 +1260,6 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestBrightcoveIntegrationHandler, self).tearDown()
 
-
     @tornado.testing.gen_test
     def test_post_integration(self):
         url = (('/api/v2/%s/integrations/brightcove?publisher_id=123123abc'
@@ -1313,7 +1320,6 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(rjson['uses_bc_smart_player'], self.defop.uses_bc_smart_player)
         self.assertFalse(rjson['uses_bc_gallery'])
 
-
     @tornado.testing.gen_test
     def test_post_gallery_required(self):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
@@ -1365,7 +1371,6 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
             [640, 480],
             [960, 540],
             [1280, 720]])
-
 
     @tornado.testing.gen_test
     def test_get_integration(self):
@@ -1444,7 +1449,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
                                                     allow_nonstandard_methods=True)
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'unable to find')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)unable to find')
 
     @tornado.testing.gen_test
     def test_put_integration_ensure_old_info_not_nulled(self):
@@ -1688,7 +1693,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Brightcove credentials are bad')
+                                 '(?i)Brightcove credentials are bad')
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             with patch('api.brightcove_api.CMSAPI') as gvp:
@@ -1714,7 +1719,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Brightcove credentials are bad')
+                                 '(?i)Brightcove credentials are bad')
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             with patch('api.brightcove_api.CMSAPI') as gvp:
@@ -1740,7 +1745,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Brightcove credentials are bad')
+                                 '(?i)Brightcove credentials are bad')
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             with patch('api.brightcove_api.CMSAPI') as gvp:
@@ -1766,7 +1771,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Brightcove credentials are bad')
+                                 '(?i)Brightcove credentials are bad')
 
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             with patch('api.brightcove_api.CMSAPI') as gvp:
@@ -1791,7 +1796,7 @@ class TestBrightcoveIntegrationHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 500)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['data'],
-                                 'test')
+                                 '(?i)test')
 
     @tornado.testing.gen_test
     def test_post_and_put_integration_client_id_and_secret(self):
@@ -2426,7 +2431,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(e.exception.response.code, 400)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'not a dictionary')
+                                 '(?i)not a dictionary')
 
     @tornado.testing.gen_test
     def test_post_two_videos(self):
@@ -2535,7 +2540,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(e.exception.response.code, 500)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'Internal Server Error')
+                                 '(?i)Internal Server Error')
 
     @tornado.testing.gen_test
     def test_get_without_video_id(self):
@@ -2553,7 +2558,7 @@ class TestVideoHandler(TestControllersBase):
 
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'key not provided')
+                                 '(?i)key not provided')
     @tornado.testing.gen_test
     def test_get_single_video(self):
         vm = neondata.VideoMetadata(
@@ -2684,7 +2689,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'do not exist .* viddoesnotexist')
+                                 '(?i)do not exist .* viddoesnotexist')
 
     def test_get_multiple_video_dne(self):
         url = '/api/v2/%s/videos?'\
@@ -2698,7 +2703,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(response.code, 404)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 r'do not exist with id')
+                                 r'(?i)do not exist with id')
 
     @tornado.testing.gen_test
     def test_get_single_video_with_fields(self):
@@ -2735,7 +2740,7 @@ class TestVideoHandler(TestControllersBase):
 
         self.assertEquals(e.exception.code, 400)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'invalid field')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)invalid field')
 
     @tornado.testing.gen_test(timeout=10.0)
     def test_update_video_testing_enabled(self):
@@ -2823,7 +2828,7 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'vid_does_not_exist')
+                                 '(?i)vid_does_not_exist')
 
     @tornado.testing.gen_test
     def test_update_video_title(self):
@@ -2957,7 +2962,7 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(
             rjson['error']['message'],
-            'Your subscription is not valid')
+            '(?i)Your subscription is not valid')
 
     @tornado.testing.gen_test
     def test_post_video_sub_check_subscription_state(self):
@@ -3065,7 +3070,7 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(
             rjson['error']['data'],
-            'blah')
+            '(?i)blah')
 
     @tornado.testing.gen_test
     def test_post_video_body(self):
@@ -3213,7 +3218,7 @@ class TestThumbnailHandler(TestControllersBase):
                                                     method='GET')
         self.assertEquals(e.exception.code, 404)
         rjson = json.loads(e.exception.response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'does not exist')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)does not exist')
 
     @tornado.testing.gen_test
     def test_thumbnail_update_enabled(self):
@@ -3316,7 +3321,7 @@ class TestHealthCheckHandler(TestControllersBase):
         response = self.wait()
         self.assertEquals(response.code, 500)
         rjson = json.loads(response.body)
-        self.assertRegexpMatches(rjson['error']['message'], 'Internal Server')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)Internal Server')
 
 
 class TestVideoStatsHandler(TestControllersBase):
@@ -3516,7 +3521,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.assertEquals(response.code, 400)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'list exceeds limit')
+                                 '(?i)list exceeds limit')
 
     def test_video_id_and_thumbnail_id(self):
         url = '/api/v2/%s/stats/thumbnails?video_id=1&thumbnail_id=abc' % (self.account_id_api_key)
@@ -3528,7 +3533,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.assertEquals(response.code, 400)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can only have')
+                                 '(?i)you can only have')
 
     def test_no_video_id_or_thumbnail_id(self):
         url = '/api/v2/%s/stats/thumbnails' % (self.account_id_api_key)
@@ -3540,7 +3545,7 @@ class TestThumbnailStatsHandler(TestControllersBase):
         self.assertEquals(response.code, 400)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'thumbnail_id or video_id is required')
+                                 '(?i)thumbnail_id or video_id is required')
 
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
@@ -3659,7 +3664,7 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
                  ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
                ]
         for url, method in urls:
-            self.make_calls_and_assert_401(url, method, message='you can not access this resource')
+            self.make_calls_and_assert_401(url, method, message='You cannot access this resource.')
 
     def test_with_valid_token_wrong_access_level_nua_level(self):
         user = neondata.User(username='testuser',
@@ -3683,7 +3688,7 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
                  ('/api/v2/%s/thumbnails?token=%s' % (self.neon_user.neon_api_key, user.access_token), 'POST')
                ]
         for url, method in urls:
-            self.make_calls_and_assert_401(url, method, message='you can not access this resource')
+            self.make_calls_and_assert_401(url, method, message='You cannot access this resource.')
 
     def test_401_with_expired_token(self):
         user = neondata.User(username='testuser',
@@ -3802,7 +3807,7 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         self.assertEquals(response.code, 401)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'you can not access')
+                                 '(?i)You cannot access')
 
     @tornado.testing.gen_test
     def test_create_brightcove_integration_all_normal_mode(self):
@@ -3844,7 +3849,7 @@ class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
         self.assertEquals(e.exception.code, 401)
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'internal only resource')
+                                 '(?i)internal only resource')
 
     @tornado.testing.gen_test
     def test_internal_search_access_level_internal_only(self):
@@ -3948,7 +3953,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'required key not.*username')
+                                 '(?i)required key not.*username')
 
     def test_no_password(self):
         url = '/api/v2/authenticate'
@@ -3963,7 +3968,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'required key not.*password')
+                                 '(?i)required key not.*password')
 
     def test_invalid_user_dne(self):
         url = '/api/v2/authenticate'
@@ -3982,7 +3987,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 401)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'User is Not Authorized')
+                                 '(?i)User is Not Authorized')
 
     def test_invalid_user_wrong_password(self):
         url = '/api/v2/authenticate'
@@ -3998,7 +4003,7 @@ class TestAuthenticationHandler(TestAuthenticationBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 401)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'User is Not Authorized')
+                                 '(?i)User is Not Authorized')
 
     @tornado.testing.gen_test
     def test_token_returned(self):
@@ -4161,7 +4166,7 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
         self.assertRegexpMatches(rjson['error']['message'],
-                                 'required key not')
+                                 '(?i)required key not')
 
     def test_refresh_token_expired(self):
         refresh_token_exp = options.get('cmsapiv2.apiv2.refresh_token_exp')
@@ -4265,7 +4270,7 @@ class TestLogoutHandler(TestAuthenticationBase):
         response = self.wait()
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 400)
-        self.assertRegexpMatches(rjson['error']['message'], 'key not provided')
+        self.assertRegexpMatches(rjson['error']['message'], '(?i)key not provided')
 
     @tornado.testing.gen_test
     def test_proper_logout(self):
@@ -4312,7 +4317,7 @@ class TestLogoutHandler(TestAuthenticationBase):
                                                 headers=header)
         rjson = json.loads(response.body)
         self.assertRegexpMatches(rjson['message'],
-                                 'logged out expired user')
+                                 '(?i)logged out expired user')
         self.assertEquals(response.code, 200)
         options._set('cmsapiv2.apiv2.access_token_exp', token_exp)
 
@@ -4905,7 +4910,7 @@ class TestBillingAccountHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(
             rjson['error']['data'],
-            'Unknown')
+            '(?i)Unknown')
 
     @tornado.testing.gen_test
     def test_get_billing_account_recognized_invalid(self):
@@ -4926,7 +4931,7 @@ class TestBillingAccountHandler(TestControllersBase):
         rjson = json.loads(e.exception.response.body)
         self.assertRegexpMatches(
             rjson['error']['message'],
-            'No billing')
+            '(?i)No billing')
 
     @tornado.testing.gen_test
     def test_get_billing_account_customer_exists(self):

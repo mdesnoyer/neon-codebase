@@ -216,43 +216,61 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         try:
             payload = JWTHelper.decode_token(access_token)
-            username = payload['username']
+            username = payload.get('username')
+            account_id = payload.get('account_id')
 
-            user = yield neondata.User.get(username, async=True)
-            if user:
-                request.user = user
+            if username:
+                user = yield neondata.User.get(username, async=True)
+                if user:
+                    request.user = user
 
-                def _check_internal_only():
-                    al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
-                    if internal_only:
-                        if user.access_level & al_internal_only is \
-                                neondata.AccessLevels.INTERNAL_ONLY_USER:
-                            return True
-                        return False
-                    return True
+                    def _check_internal_only():
+                        al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
+                        if internal_only:
+                            if user.access_level & al_internal_only is \
+                                    neondata.AccessLevels.INTERNAL_ONLY_USER:
+                                return True
+                            return False
+                        return True
 
-                if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
-                        neondata.AccessLevels.GLOBAL_ADMIN:
-                    raise tornado.gen.Return(True)
-
-                elif account_required and account and username in account.users:
-                    if not _check_internal_only():
-                        raise NotAuthorizedError('internal only resource')
-                    if user.access_level & access_level_required is \
-                            access_level_required:
+                    if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
+                            neondata.AccessLevels.GLOBAL_ADMIN:
                         raise tornado.gen.Return(True)
-                else:
-                    if internal_only:
+
+                    elif account_required and account and username in account.users:
                         if not _check_internal_only():
-                            raise NotAuthorizedError('internal only resource')
-                    if not account_required:
+                            raise NotAuthorizedError('Internal only resource.')
                         if user.access_level & access_level_required is \
-                               access_level_required:
+                                access_level_required:
                             raise tornado.gen.Return(True)
+                    else:
+                        if internal_only:
+                            if not _check_internal_only():
+                                raise NotAuthorizedError('Internal only resource.')
+                        if not account_required:
+                            if user.access_level & access_level_required is \
+                                   access_level_required:
+                                raise tornado.gen.Return(True)
 
-                raise NotAuthorizedError('you can not access this resource')
+                    raise NotAuthorizedError('You cannot access this resource.')
+                raise NotAuthorizedError('user does not exist')
+            elif account_id:
+                # Handle account not associated with any user.
+                if account_id != self.account.get_id():
+                    # Mismatch of token and path.
+                    raise NotAuthorizedError('You cannot access this resource.')
+                account = yield neondata.NeonUserAccount.get(
+                    account_id,
+                    async=True)
+                if account:
+                    # No account-only acccessor is an internal account.
+                    if internal_only:
+                        raise NotAuthorizedError('Internal only resource.')
+                    raise tornado.gen.Return(True)
+                raise NotAuthorizedError('Account does not exist.')
+            else:
+                raise jwt.InvalidTokenError
 
-            raise NotAuthorizedError('user does not exist')
 
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('access token is expired, please refresh the token')
