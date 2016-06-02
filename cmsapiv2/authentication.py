@@ -205,27 +205,32 @@ class RefreshTokenHandler(APIV2Handler):
         refresh_token = args.get('token')
         try:
             payload = JWTHelper.decode_token(refresh_token)
+            if payload.get('username'):
+                username = payload['username'].lower()
+                user = yield neondata.User.get(username, async=True)
+                account_ids = yield user.get_associated_account_ids(async=True)
 
-            username = payload['username'].lower()
-            user = yield neondata.User.get(username, async=True)
-            account_ids = yield user.get_associated_account_ids(async=True)
+                access_token = JWTHelper.generate_token(
+                    {'username': username},
+                    token_type=TokenTypes.ACCESS_TOKEN)
 
-            access_token = JWTHelper.generate_token(
-                { 'username' : username },
-                token_type=TokenTypes.ACCESS_TOKEN)
+                def _update_user(u):
+                    u.access_token = access_token
 
-            def _update_user(u):
-                u.access_token = access_token
-
-            yield neondata.User.modify(username,
-                _update_user,
-                async=True)
+                yield neondata.User.modify(username,
+                    _update_user,
+                    async=True)
+            elif payload.get('account_id'):
+                account_id = payload.get('account_id')
+                account = yield neondata.NeonUserAccount.get(account_id, async=True)
+                if not account:
+                    raise jwt.InvalidTokenError('Malformed refresh token')
+                account_ids = [account.get_id()]
 
             result = {
-                       'access_token' : access_token,
-                       'refresh_token' : refresh_token,
-                       'account_ids' : account_ids
-                     }
+                'access_token': access_token,
+                'refresh_token': refresh_token,
+                'account_ids': account_ids}
 
             self.success(json.dumps(result))
 
