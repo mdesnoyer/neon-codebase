@@ -70,13 +70,8 @@ class AuthenticateHandler(APIV2Handler):
         api_accessor = yield neondata.User.get(username, async=True)
         result = None
 
-        access_token = JWTHelper.generate_token(
-            { 'username' : username },
-            token_type=TokenTypes.ACCESS_TOKEN)
-
-        refresh_token = JWTHelper.generate_token(
-            { 'username' : username },
-            token_type=TokenTypes.REFRESH_TOKEN)
+        access_token, refresh_token = AccountHelper.get_auth_tokens(
+            {'username': username})
 
         def _update_tokens(x):
             x.access_token = access_token
@@ -227,6 +222,10 @@ class RefreshTokenHandler(APIV2Handler):
                     raise jwt.InvalidTokenError('Malformed refresh token')
                 account_ids = [account.get_id()]
 
+                access_token = JWTHelper.generate_token(
+                    {'account_id': account.get_id()},
+                    token_type=TokenTypes.ACCESS_TOKEN)
+
             result = {
                 'access_token': access_token,
                 'refresh_token': refresh_token,
@@ -290,13 +289,10 @@ class NewAccountHandler(APIV2Handler):
             # try using the loginless account creation.
             account = yield AccountHelper.save_loginless_account()
 
+            access_token, refresh_token = AccountHelper.get_auth_tokens(
+                {'account_id': account.get_id()})
+
             # Generate and return tokens.
-            access_token = JWTHelper.generate_token(
-                {'account_id': account.get_id()},
-                token_type=TokenTypes.ACCESS_TOKEN)
-            refresh_token = JWTHelper.generate_token(
-                {'account_id': account.get_id()},
-                token_type=TokenTypes.REFRESH_TOKEN)
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
@@ -509,6 +505,13 @@ class AccountHelper(object):
                 (user.username, e))
             raise Exception('unable to send verification email')
         return True
+
+    @staticmethod
+    def get_auth_tokens(payload):
+        """Generate token pair (access, refresh) encoding dict payload"""
+        return (
+            JWTHelper.generate_token(payload, token_type=TokenTypes.ACCESS_TOKEN),
+            JWTHelper.generate_token(payload, token_type=TokenTypes.REFRESH_TOKEN))
 
 
 '''****************************************************************
