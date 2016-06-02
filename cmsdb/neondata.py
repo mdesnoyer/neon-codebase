@@ -5228,7 +5228,7 @@ class VideoMetadata(StoredObject):
                       since=None,
                       until=None, 
                       limit=25,
-                      title_query=None):
+                      search_query=None):
 
         """Does a basic search over the videometadatas in the DB 
 
@@ -5242,8 +5242,8 @@ class VideoMetadata(StoredObject):
                         defaults to None
            limit      : if specified it limits the search to this many 
                         videos, defaults to 25
-           title_query: regex to apply against title using pg's ~* operator.
-                        An invalid regex will raise DataError.
+           search_query: search to apply against fields using pg's ~* operator.
+                         An invalid regex will raise DataError.
 
            Returns : a dictionary of the following 
                videos - the videos that the search returned 
@@ -5287,12 +5287,12 @@ class VideoMetadata(StoredObject):
                    "v.updated_time AS updated_time_pg"]
 
         # Join request to query searches on video title.
-        if title_query is not None:
+        if search_query is not None:
             join_clause = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
             if where_clause:
                 where_clause += " AND "
             where_clause += " r._data->>'video_title' ~* %s"
-            wc_params.append(title_query)
+            wc_params.append(search_query)
 
         results = yield cls.execute_select_query(cls.get_select_query(
                         columns,
