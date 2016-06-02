@@ -25,6 +25,15 @@ class TestCase(unittest.TestCase):
     def tearDown(self):
         utils.statemon.state._reset_values()
 
+    def assertRegexpMatches(self, subject, regexp, message=None):
+        '''Always assert with case insensitivity.'''
+
+        # Look for a string pattern that starts with not (?.
+        if(type(regexp) == str and regexp[0:2] != '(?'):
+            # Prepend (?i).
+            regexp = '(?i)' + regexp
+        super(TestCase, self).assertRegexpMatches(subject, regexp, message)
+
     @contextmanager
     def assertLogExists(self, level, regexp):
         '''Asserts that a log message was written at a given level.
