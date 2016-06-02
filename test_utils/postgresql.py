@@ -189,39 +189,32 @@ class Postgresql(object):
         options._set('cmsdb.neondata.db_port', self.port)
         options._set('cmsdb.neondata.db_name', self.dbname)
 
+    def get_user_tables(self):
+        '''Get a list of table name for user tables in the cmsdb public schema'''
+        with closing(psycopg2.connect(**self.dsn(database='postgres', dbname=self.dbname))) as conn:
+            conn.autocommit = True
+            with closing(conn.cursor()) as cursor:
+                cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")
+                rows = cursor.fetchall()
+        return [columns[0] for columns in rows]
+
+
     def clear_all_tables(self):
         with closing(psycopg2.connect(**self.dsn(database='postgres', dbname=self.dbname))) as conn:
             conn.autocommit = True
             with closing(conn.cursor()) as cursor:
-                for table in ['abstractintegration',
-                   'abstractplatform',
-                   'accountlimits',
-                   # Omit billing plan. It has static rows.
-                   'brightcoveplayer',
-                   'cdnhostingmetadatalist',
-                   'experimentstrategy',
-                   'neonapikey',
-                   'neonapirequest',
-                   'neonplatform',
-                   'neonuseraccount',
-                   'processingstrategy',
-                   'request',
-                   'thumbnailmetadata',
-                   'thumbnailservingurls',
-                   'thumbnailstatus',
-                   'trackeraccountidmapper',
-                   'users',
-                   'verification',
-                   'videometadata',
-                   'videostatus']:
-                    cursor.execute('DELETE FROM %s' % table)
+                # Billing plan has static content that isn't changed in a test.
+                skips = {'billingplans'}
+                tables = {t for t in self.get_user_tables() if t not in skips}
+                for table in tables:
+                    cursor.execute('TRUNCATE %s' % table)
         neondata.PostgresPubSub.instance = None
 
     def stop(self, _signal=signal.SIGINT):
         options._set('cmsdb.neondata.db_port', self.old_port)
         options._set('cmsdb.neondata.db_name', self.old_name)
-        neondata.PostgresDB.instance = None  
-        neondata.PostgresPubSub.instance = None  
+        neondata.PostgresDB.instance = None
+        neondata.PostgresPubSub.instance = None
         self.terminate(_signal)
         self.cleanup()
 
