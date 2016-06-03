@@ -734,20 +734,50 @@ class Cluster():
             return default
         raise KeyError('No tag %s' % tag_name)
 
+    # def _find_master_info(self):
+    #     '''Find the ip address and id of the master node.'''
+    #     conn = EmrConnection(self.cluster_region)
+        
+    #     self.master_ip = None
+    #     self.master_id = \
+    #       conn.describe_cluster(self.cluster_id).masterinstanceid
+    #     for instance in emr_iterator(conn, 'instances', self.cluster_id):
+    #         if (instance.status.state == 'RUNNING' and 
+    #             instance.ec2instanceid == self.master_id):
+    #             if options.use_public_ip and instance.publicipaddress:
+    #                 self.master_ip = instance.publicipaddress
+    #             else:
+    #                 self.master_ip = instance.privateipaddress
+
+    #     if self.master_ip is None:
+    #         raise MasterMissingError("Could not find the master ip")
+    #     _log.info("Found master ip address %s" % self.master_ip)
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
-        conn = EmrConnection(self.cluster_region)
+        conn = EmrConnection()
+        ec2conn = EC2Connection()
         
         self.master_ip = None
-        self.master_id = \
-          conn.describe_jobflow(self.cluster_id).masterinstanceid
-        for instance in emr_iterator(conn, 'instances', self.cluster_id):
-            if (instance.status.state == 'RUNNING' and 
-                instance.ec2instanceid == self.master_id):
-                if options.use_public_ip and instance.publicipaddress:
-                    self.master_ip = instance.publicipaddress
+
+        # Get the master instance group
+        master_group = None
+        for igroup in emr_iterator(conn, 'instance_groups', self.cluster_id):
+            if igroup.instancegrouptype == 'MASTER':
+                master_group = igroup
+                break
+        if master_group is None:
+            raise MasterMissingError("Could not find master instance group")
+                                     
+        for instance in emr_iterator(conn, 'instances', self.cluster_id,
+                                     instance_group_id=master_group.id):
+            instance_info = ec2conn.get_only_instances([instance.ec2instanceid])
+            if (instance_info and instance_info[0].state == 'running'):
+                self.master_id = instance.ec2instanceid
+                if options.use_public_ip and instance_info[0].ip_address:
+                    self.master_ip = instance_info[0].ip_address
                 else:
-                    self.master_ip = instance.privateipaddress
+                    self.master_ip = instance_info[0].private_ip_address
+                break
 
         if self.master_ip is None:
             raise MasterMissingError("Could not find the master ip")
@@ -856,8 +886,8 @@ class Cluster():
                        'cluster-role' : Cluster.ROLE_BOOTING})
 
         _log.info('Waiting until cluster %s is ready' % self.cluster_id)
-        cur_state = conn.describe_jobflow(self.cluster_id)
-        while cur_state.state != 'WAITING':
+        cur_state = conn.describe_cluster(self.cluster_id)
+        while cur_state.status.state != 'WAITING':
             if cur_state.state in ['TERMINATING', 'TERMINATED',
                              'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
@@ -867,7 +897,7 @@ class Cluster():
 
             _log.debug('Cluster is booting. State: %s' % cur_state.state)
             time.sleep(30.0)
-            cur_state = conn.describe_jobflow(self.cluster_id)
+            cur_state = conn.describe_cluster(self.cluster_id)
 
         _log.info('Making the new cluster primary')
         for cluster in emr_iterator(conn, 'clusters',
