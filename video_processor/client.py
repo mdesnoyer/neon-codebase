@@ -51,6 +51,7 @@ import urllib
 import urllib2
 import urlparse
 from cvutils.imageutils import PILImageUtils
+import utils.autoscale
 import utils.neon
 from utils import pycvutils
 import utils.http
@@ -95,6 +96,8 @@ define('video_server', default="localhost:8081", type=str,
        help="host:port of the video processing server")
 define('model_server_port', default=9000, type=int,
        help="the port currently being used by model servers")
+define('model_autoscale_groups', default='AquilaOnDemand', type=str,
+       help="Comma separated list of autscaling group names")
 define('request_concurrency', default=22, type=int,
        help=("the maximum number of concurrent scoring requests to"
              " make at a time. Should be less than or equal to the"
@@ -886,6 +889,7 @@ class VideoClient(multiprocessing.Process):
     def load_model(self):
         ''' load model '''
         _log.info('Generating predictor instance')
+        
         # TODO (nick): Make sure you get rid of this eventually.
         # TODO (mark): Maybe you should replace it when you create the actual
         #              connection object?

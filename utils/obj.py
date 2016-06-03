@@ -24,3 +24,38 @@ def full_object_str(obj, exclude=[]):
             s = '%s: %s' % (name, val)
         field_strs.append(s)
     return '<%s> {%s}' % (obj.__class__.__name__, ','.join(field_strs))
+
+class KeyedSingleton(type):
+    '''A Singleton metaclass that is keyed by type and a key that is passed in.
+
+    To use, set the __metaclass__ property of your class. e.g.
+
+    class MyClass(BaseClass):
+        __metaclass__ = utils.obj.Singleton
+
+    Then, every time you call MyClass(key), you get the same object
+
+    The key can be any python object that can be used as a key in a dictionary.
+    '''
+    _instances = {}
+    def __call__(cls, key, *args, **kwargs):
+        single_key = (cls, key)
+        if single_key not in cls._instances:
+            cls._instances[single_key] = super(KeyedSingleton, cls).__call__(
+                *args, **kwargs)
+        return cls._instances[single_key]
+
+class Singleton(KeyedSingleton):
+    '''A Singleton metaclass so that only one version of the object type exists.
+
+    To use, set the __metaclass__ property of your class. e.g.
+
+    class MyClass(BaseClass):
+        __metaclass__ = utils.obj.Singleton
+
+    Then, every time you call MyClass(), you get the same object
+    '''
+    def __call__(cls, *args, **kwargs):
+        super(Singleton, cls).__call__(None, *args, **kwargs)
+
+

@@ -15,12 +15,14 @@ if sys.path[0] != __base_path__:
 import boto
 import concurrent.futures
 import functools
+import itertools
 import logging
 import random
 import threading
 import tornado.ioloop
 import tornado.gen
 import utils.aws
+import utils.obj
 from utils.options import define, options
 import utils.sync
 
@@ -31,28 +33,38 @@ define('refresh_rate', default=120.0, type=float,
 class NoValidHostsError(Exception): pass
 
 class RefresherThread(threading.Thread):
+    __metaclass__ = utils.obj.Singleton
+    
     def __init__(self):
         self._lock = threading.RLock()
         self._timers = {} # name -> timer
         self.ioloop = tornado.ioloop.IOLoop()
         self.daemon = True
 
-    def start(self):
+        self.start()
+
+    def run(self):
         self.ioloop.make_current()
         self.ioloop.start()
 
-    def add_group_to_monitor(self, group):
+    def add_group_to_monitor(self, group_name):
         '''Adds an AutoScaleGroup to monitor'''
         self.ioloop.add_callback(
-            self._add_group_to_monitor_impl, group)
+            self._add_group_to_monitor_impl, group_name)
 
-    def _add_group_to_monitor_impl(self, group):
-        timer = utils.sync.PeriodicCoroutineTimer(group._refresh_data,
-                                                  options.refresh_rate*1000,
-                                                  self.ioloop)
+    def _add_group_to_monitor_impl(self, group_name):
+        timer = utils.sync.PeriodicCoroutineTimer(
+            lambda x:self._refresh_data(group_name),
+            options.refresh_rate*1000,
+            self.ioloop)
         with self._lock:
-            self._timers[group.name] = timer
+            self._timers[group_name] = timer
         timer.start()
+
+    @tornado.gen.coroutine
+    def _refresh_data(self, group_name):
+        group = AutoScaleGroup(group_name)
+        yield group._refresh_data()
 
     def stop_monitoring_group(self, group_name):
         with self._lock:
@@ -64,6 +76,7 @@ class RefresherThread(threading.Thread):
 
 class AutoScaleGroup(object):
     '''Class that watches an autoscaling group.'''
+    __metaclass__ = utils.obj.KeyedSingleton
 
     def __init__(self, name):
         self.name = name # The autoscaling group name
@@ -74,6 +87,13 @@ class AutoScaleGroup(object):
         self._lock = threading.RLock()
 
         self._executor = concurrent.futures.ThreadPoolExecutor(10)
+
+        # Start monitoring this group
+        RefresherThread().add_group_to_monitor(name)
+
+    def __del__(self):
+        # Stop monitoring this group
+        RefresherThread().stop_monitoring_group(self.name)
 
     @tornado.gen.coroutine
     def _refresh_data(self):
@@ -104,17 +124,56 @@ class AutoScaleGroup(object):
 
         Inputs:
         force_refresh - Whether to check the instance group details before returning the ip.
+        only_cur_az - If true, only returns IPs from this AZ
         '''
         if force_refresh:
             yield self._refresh_data()
 
+        ips = yield self._get_ip_list()
+                    
+        try:
+            raise tornado.gen.Return(random.choice(ips))
+        except IndexError:
+            raise NoValidHostsError()
+
+    @tornado.gen.coroutine
+    def _get_ip_list(self, only_cur_az=False):
+        '''Returns a list of ip addresses.
+
+        Inputs:
+        only_cur_az - If True only return IPs for this AZ
+        '''
+        cur_az = yield self._executor.submit(utils.aws.get_current_az)
+
         with self._lock:
             # Pick an ip from this AZ if we can
             ips = [x['ip'] for x in self._instances 
-                   if x['zone'] == utils.aws.get_current_az()]
-            if len(ips) == 0:
+                   if x['zone'] == cur_az]
+            if len(ips) == 0 and not only_cur_az:
                 ips = [x['ip'] for x in self._instances]
-            try:
-                raise tornado.gen.Return(random.choice(ips))
-            except IndexError:
-                raise NoValidHostsError()
+
+        raise tornado.gen.Return(ips)
+
+
+class MultipleAutoScaleGroups(object):
+    '''Class that watches many autoscaling groups.'''
+    def __init__(self, names):
+        self.groups = [AutoScaleGroup(x) for x in names]
+            
+
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_ip(self, force_refresh=False):
+        if force_refresh:
+            yield [x._refresh_data() for x in self.groups]
+
+        ip_lists = yield [x._get_ip_list(True) for x in self.groups]
+        ips = list(itertools.chain.from_iterable(ip_lists))
+        if len(ips) == 0:
+            ip_lists = yield [x._get_ip_list(False) for x in self.groups]
+            ips = list(itertools.chain.from_iterable(ip_lists))
+
+        try:
+            raise tornado.gen.Return(random.choice(ips))
+        except IndexError:
+            raise NoValidHostsError()
