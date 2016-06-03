@@ -5298,26 +5298,14 @@ class VideoMetadata(StoredObject):
             if where_clause:
                 where_clause += " AND "
 
-            def _build(query):
-                """Build and return search clause, param."""
-
-                # Use heuristic for deciding if regex.
-                special_chars = ['*', '+', '^', '$', '.']
-                if any([c in query for c in special_chars]):
-                    try:
-                        # Treat input as regex if it is a valid one.
-                        re.compile(query)
-                        return (" r._data->>'video_title' ~* %s",
-                                query)
-                    except sre_constants.error:
-                        pass
-                # Fall back to simple pattern-in-string search.
-                return (" r._data->>'video_title' ILIKE %s",
-                       "%" + query + "%")
-
-            _clause, _query = _build(search_query)
-            where_clause += _clause
-            wc_params.append(_query)
+            # Assume it's a regex.
+            try:
+                re.compile(search_query)
+            except sre_constants.error:
+                # Escape its special characters if not valid.
+                search_query = re.escape(search_query)
+            where_clause += " r._data->>'video_title' ~* %s"
+            wc_params.append(search_query)
 
         query = cls.get_select_query(
             columns,

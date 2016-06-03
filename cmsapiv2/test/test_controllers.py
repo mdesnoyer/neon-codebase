@@ -4591,17 +4591,17 @@ class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
                                 title='Title title0 title').save()
         neondata.VideoMetadata('u0_v1', request_id='j1').save()
         neondata.NeonApiRequest('j1', 'u0',
-                                title='Title2 title1 title').save()
+                                title='*.*.* Title2 title1 title *.*.*').save()
         neondata.VideoMetadata('u0_v2', request_id='j2').save()
         neondata.NeonApiRequest('j2', 'u0',
-                                title='Another title0 title1 title').save()
+                                title='Another title0 title1 title?').save()
         self.url = self.get_url(
             '/api/v2/u0/videos/search?fields=video_id,title&query={}')
 
     @tornado.testing.gen_test
     def test_regex(self):
         '''Allow POSIX features.'''
-        response = yield self.http_client.fetch(self.url.format('T.*title0.*'))
+        response = yield self.http_client.fetch(self.url.format('^[A|T].*title0.*'))
         rjson = json.loads(response.body)
         self.assertEqual(2, len(rjson['videos']))
 
@@ -4611,6 +4611,16 @@ class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
         response = yield self.http_client.fetch(self.url.format('.*title2.*'))
         rjson = json.loads(response.body)
         self.assertEqual(1, len(rjson['videos']), 'Matches "Title2" in request j1')
+
+    @tornado.testing.gen_test
+    def test_special_character_in_param(self):
+        '''Handle pattern that has special characters'''
+        response = yield self.http_client.fetch(self.url.format('*.*.*'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']))
+        response = yield self.http_client.fetch(self.url.format('?'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']))
 
     @tornado.testing.gen_test
     def test_instring_query_param(self):
