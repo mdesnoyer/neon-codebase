@@ -156,7 +156,7 @@ class IntegrationHelper():
 
     @staticmethod
     @tornado.gen.coroutine
-    def create_integration(acct, args, integration_type, cdn=None): 
+    def create_integration(acct, args, integration_type, cdn=None):
         """Creates an integration for any integration type.
 
         Keyword arguments:
@@ -182,19 +182,19 @@ class IntegrationHelper():
             integration.publisher_id = args['publisher_id']
 
             integration.read_token = args.get(
-                'read_token', 
+                'read_token',
                 integration.read_token)
             integration.write_token = args.get(
-                'write_token', 
+                'write_token',
                 integration.write_token)
             integration.application_client_id = args.get(
-                'application_client_id', 
+                'application_client_id',
                 integration.application_client_id)
             integration.application_client_secret = args.get(
-                'application_client_secret', 
+                'application_client_secret',
                 integration.application_client_secret)
             integration.callback_url = args.get(
-                'callback_url', 
+                'callback_url',
                 integration.callback_url)
             playlist_feed_ids = args.get('playlist_feed_ids', None)
 
@@ -202,25 +202,25 @@ class IntegrationHelper():
                 integration.playlist_feed_ids = playlist_feed_ids.split(',')
 
             integration.id_field = args.get(
-                'id_field', 
+                'id_field',
                 integration.id_field)
             integration.uses_batch_provisioning = Boolean()(args.get(
-                'uses_batch_provisioning', 
+                'uses_batch_provisioning',
                 integration.uses_batch_provisioning))
             integration.uses_bc_gallery = Boolean()(args.get(
-                'uses_bc_gallery', 
+                'uses_bc_gallery',
                 integration.uses_bc_gallery))
             integration.uses_bc_thumbnail_api = Boolean()(args.get(
-                'uses_bc_thumbnail_api', 
+                'uses_bc_thumbnail_api',
                 integration.uses_bc_thumbnail_api))
             integration.uses_bc_videojs_player = Boolean()(args.get(
-                'uses_bc_videojs_player', 
+                'uses_bc_videojs_player',
                 integration.uses_bc_videojs_player))
             integration.uses_bc_smart_player = Boolean()(args.get(
-                'uses_bc_smart_player', 
+                'uses_bc_smart_player',
                 integration.uses_bc_smart_player))
             integration.last_process_date = args.get(
-                'last_process_date', 
+                'last_process_date',
                 integration.last_process_date)
         else:
             raise ValueError('Unknown integration type')
@@ -306,8 +306,8 @@ class IntegrationHelper():
             if client_secret and not client_id:
                 raise BadRequestError(
                     'App secret cannot be valued if id is not also valued')
-            # TODO validate with BC that keys are valid and the granted 
-            # permissions are as expected. (This is implemented in the 
+            # TODO validate with BC that keys are valid and the granted
+            # permissions are as expected. (This is implemented in the
             # Oauth feature branch. Need to invoke it here after merge)
         elif integration_type is neondata.IntegrationType.OOYALA:
             # Implement for Ooyala
@@ -334,7 +334,7 @@ class OoyalaIntegrationHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
 
-        acct = yield neondata.NeonUserAccount.get( 
+        acct = yield neondata.NeonUserAccount.get(
             args['account_id'],
             async=True)
         integration = yield tornado.gen.Task(
@@ -445,11 +445,11 @@ class BrightcovePlayerHandler(APIV2Handler):
         schema(args)
         integration_id = args['integration_id']
         integration = yield neondata.BrightcoveIntegration.get(
-            integration_id, 
+            integration_id,
             async=True)
         if not integration:
             raise NotFoundError(
-                'BrighcoveIntegration does not exist for player reference:%s', 
+                'BrighcoveIntegration does not exist for player reference:%s',
                 args['player_ref'])
 
         # Retrieve the list of players from Brightcove api
@@ -726,7 +726,7 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        publisher_id = args.get('publisher_id')  
+        publisher_id = args.get('publisher_id')
 
         # Check credentials with Brightcove's CMS API.
         client_id = args.get('application_client_id')
@@ -737,29 +737,29 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             integration_type=neondata.IntegrationType.BRIGHTCOVE)
 
         acct = yield neondata.NeonUserAccount.get(
-            args['account_id'], 
+            args['account_id'],
             async=True)
 
-        if not acct: 
+        if not acct:
             raise NotFoundError('Neon Account required.')
 
-        app_id = args.get('application_client_id', None) 
+        app_id = args.get('application_client_id', None)
         app_secret = args.get('application_client_secret', None)
- 
-        if app_id or app_secret: 
+
+        if app_id or app_secret:
             # Check credentials with Brightcove's CMS API.
             IntegrationHelper.validate_oauth_credentials(
                 client_id=app_id,
                 client_secret=app_secret,
                 integration_type=neondata.IntegrationType.BRIGHTCOVE)
             # Excecute a search and get last_processed_date
-            
+
             lpd = yield self._get_last_processed_date(
                 publisher_id,
-                app_id, 
+                app_id,
                 app_secret)
 
-            if lpd: 
+            if lpd:
                 args['last_process_date'] = lpd
             else:
                 raise BadRequestError('Brightcove credentials are bad, ' \
@@ -788,10 +788,10 @@ class BrightcoveIntegrationHandler(APIV2Handler):
                     [960, 540],
                     [1280, 720]])
             args['uses_bc_thumbnail_api'] = True
-            
+
         integration = yield IntegrationHelper.create_integration(
-            acct, 
-            args, 
+            acct,
+            args,
             neondata.IntegrationType.BRIGHTCOVE,
             cdn=cdn)
 
@@ -804,9 +804,9 @@ class BrightcoveIntegrationHandler(APIV2Handler):
         """handles a brightcove endpoint get request"""
 
         schema = Schema({
-            Required('account_id') : All(Coerce(str), 
+            Required('account_id') : All(Coerce(str),
                 Length(min=1, max=256)),
-            Required('integration_id') : All(Coerce(str), 
+            Required('integration_id') : All(Coerce(str),
                 Length(min=1, max=256)),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
         })
@@ -855,23 +855,23 @@ class BrightcoveIntegrationHandler(APIV2Handler):
             neondata.IntegrationType.BRIGHTCOVE)
 
         # Check credentials with Brightcove's CMS API.
-        app_id = args.get('application_client_id', None) 
-        app_secret = args.get('application_client_secret', None) 
-        if app_id and app_secret: 
+        app_id = args.get('application_client_id', None)
+        app_secret = args.get('application_client_secret', None)
+        if app_id and app_secret:
             IntegrationHelper.validate_oauth_credentials(
-                app_id, 
+                app_id,
                 app_secret,
                 neondata.IntegrationType.BRIGHTCOVE)
 
             # just run a basic search to see that the creds are ok
             lpd = yield self._get_last_processed_date(
                 integration.publisher_id,
-                app_id, 
+                app_id,
                 app_secret)
 
-            if not lpd: 
+            if not lpd:
                 raise BadRequestError('Brightcove credentials are bad, ' \
-                    'application_id or application_secret are wrong.')  
+                    'application_id or application_secret are wrong.')
 
         def _update_integration(p):
             p.read_token = args.get('read_token', integration.read_token)
@@ -911,45 +911,45 @@ class BrightcoveIntegrationHandler(APIV2Handler):
     @tornado.gen.coroutine
     def _get_last_processed_date(self, publisher_id, app_id, app_secret):
         """calls out to brightcove with the sent in app_id
-             and app_secret to get the 4th most recent video 
+             and app_secret to get the 4th most recent video
              so that we can set a reasonable last_process_date
-             on this video  
+             on this video
 
-           raises on unknown exceptions 
-           returns none if a video search could not be completed 
+           raises on unknown exceptions
+           returns none if a video search could not be completed
         """
         rv = None
 
         bc_cms_api = api.brightcove_api.CMSAPI(
-            publisher_id, 
-            app_id, 
-            app_secret) 
-        try: 
-            # return the fourth oldest video  
+            publisher_id,
+            app_id,
+            app_secret)
+        try:
+            # return the fourth oldest video
             videos = yield bc_cms_api.get_videos(
-                limit=1, 
-                offset=3, 
+                limit=1,
+                offset=3,
                 sort='-updated_at')
 
-            if videos and len(videos) is not 0: 
+            if videos and len(videos) is not 0:
                 video = videos[0]
-                rv = video['updated_at'] 
-            else: 
+                rv = video['updated_at']
+            else:
                 rv = datetime.utcnow().strftime(
                     '%Y-%m-%dT%H:%M:%SZ')
-        except (api.brightcove_api.BrightcoveApiServerError, 
+        except (api.brightcove_api.BrightcoveApiServerError,
                 api.brightcove_api.BrightcoveApiClientError,
-                api.brightcove_api.BrightcoveApiNotAuthorizedError, 
-                api.brightcove_api.BrightcoveApiError) as e: 
+                api.brightcove_api.BrightcoveApiNotAuthorizedError,
+                api.brightcove_api.BrightcoveApiError) as e:
             _log.error('Brightcove Error occurred trying to get \
                         last_processed_date : %s' % e)
-            pass 
-        except Exception as e: 
+            pass
+        except Exception as e:
             _log.error('Unknown Error occurred trying to get \
                         last_processed_date: %s' % e)
-            raise  
-        
-        raise tornado.gen.Return(rv)  
+            raise
+
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def _get_default_returned_fields(cls):
@@ -996,7 +996,7 @@ class ThumbnailHandler(APIV2Handler):
           Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('video_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('url') : All(Coerce(str), Length(min=1, max=2048)),
-          'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024)) 
+          'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1004,25 +1004,25 @@ class ThumbnailHandler(APIV2Handler):
         video_id = args['video_id']
         internal_video_id = neondata.InternalVideoID.generate(
             account_id_api_key, video_id)
-        external_thumbnail_id = args.get('thumbnail_ref', None) 
+        external_thumbnail_id = args.get('thumbnail_ref', None)
 
         video = yield neondata.VideoMetadata.get(
-            internal_video_id, 
+            internal_video_id,
             async=True)
 
-        current_thumbnails = yield neondata.ThumbnailMetadata.get_many( 
-            video.thumbnail_ids, 
+        current_thumbnails = yield neondata.ThumbnailMetadata.get_many(
+            video.thumbnail_ids,
             async=True)
 
         cdn_key = neondata.CDNHostingMetadataList.create_key(
-            account_id_api_key, 
+            account_id_api_key,
             video.integration_id)
 
         cdn_metadata = yield neondata.CDNHostingMetadataList.get(
-            cdn_key, 
+            cdn_key,
             async=True)
 
-        # ranks can be negative 
+        # ranks can be negative
         min_rank = 1
         for thumb in current_thumbnails:
             if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
@@ -1032,12 +1032,12 @@ class ThumbnailHandler(APIV2Handler):
 
         new_thumbnail = neondata.ThumbnailMetadata(
             None,
-            internal_vid=internal_video_id, 
+            internal_vid=internal_video_id,
             external_id=external_thumbnail_id,
-            ttype=neondata.ThumbnailType.CUSTOMUPLOAD, 
+            ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
             rank=cur_rank)
 
-        # upload image to cdn 
+        # upload image to cdn
         yield video.download_and_add_thumbnail(
             new_thumbnail,
             image_url=args['url'],
@@ -1047,11 +1047,11 @@ class ThumbnailHandler(APIV2Handler):
         # save the thumbnail
         yield new_thumbnail.save(async=True)
 
-        # save the video 
+        # save the video
         new_video = yield neondata.VideoMetadata.modify(
-            internal_video_id, 
+            internal_video_id,
             lambda x: x.thumbnail_ids.append(new_thumbnail.key),
-            async=True) 
+            async=True)
 
         if new_video:
             statemon.state.increment('post_thumbnail_oks')
@@ -1155,11 +1155,6 @@ class ThumbnailHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
-def ExactlyOne(*validators, **kwargs):
-    '''Valid if exactly one of the validators returns true'''
-    # @TODO implement
-    return Any(*validators, **kwargs)
-
 def does_account_own_tag(account_id, tag_id):
     '''True if Neon user account owns the given tag'''
     return True
@@ -1173,7 +1168,7 @@ class DirectThumbnailHandler(ThumbnailHandler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Optional('external_ref'): All(Coerce(str), Length(min=1, max=64)),
             Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
-            ExactlyOne({
+            CustomVoluptuousTypes.ExactlyOne({
                 Optional('url'): All(Coerce(str), Url(), Length(min=1, max=2048)),
                 Optional('upload'): object}): object
         })
@@ -1525,19 +1520,19 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint post request"""
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Required('external_video_ref'): All(Any(Coerce(str), unicode), 
+          Required('external_video_ref'): All(Any(Coerce(str), unicode),
               Length(min=1, max=512)),
           'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
           'reprocess': Boolean(),
           'integration_id': All(Coerce(str), Length(min=1, max=256)),
-          'callback_url': All(Any(Coerce(str), unicode), 
+          'callback_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
-          'title': All(Any(Coerce(str), unicode), 
-              Length(min=1, max=2048)), 
+          'title': All(Any(Coerce(str), unicode),
+              Length(min=1, max=2048)),
           'duration': All(Coerce(float), Range(min=0.0, max=86400.0)),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': All(Any(Coerce(str), unicode), 
+          'default_thumbnail_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512))
         })
@@ -1684,14 +1679,14 @@ class VideoHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(self):
-        return { 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
                  HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, 
+                 'account_required'  : [HTTPVerbs.GET,
                                         HTTPVerbs.PUT,
                                         HTTPVerbs.POST],
-                 'subscription_required' : [HTTPVerbs.POST]  
+                 'subscription_required' : [HTTPVerbs.POST]
                }
 
     @classmethod
@@ -2164,7 +2159,7 @@ class UserHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
-        username = args.get('username') 
+        username = args.get('username')
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
@@ -2176,10 +2171,10 @@ class UserHandler(APIV2Handler):
             u.last_name = args.get('last_name', u.last_name)
             u.title = args.get('title', u.title)
             u.cell_phone_number = args.get(
-                'cell_phone_number', 
+                'cell_phone_number',
                 u.cell_phone_number)
             u.secondary_email = args.get(
-                'secondary_email', 
+                'secondary_email',
                 u.secondary_email)
 
         user_internal = yield neondata.User.modify(
@@ -2204,35 +2199,35 @@ class UserHandler(APIV2Handler):
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['username', 'created', 'updated', 
-                'first_name', 'last_name', 'title', 
+        return ['username', 'created', 'updated',
+                'first_name', 'last_name', 'title',
                 'secondary_email', 'cell_phone_number',
                 'access_level' ]
-    
+
     @classmethod
     def _get_passthrough_fields(cls):
         return ['username', 'created', 'updated',
-                'first_name', 'last_name', 'title', 
+                'first_name', 'last_name', 'title',
                 'secondary_email', 'cell_phone_number',
                 'access_level' ]
 
 '''*****************************************************************
-BillingAccountHandler 
+BillingAccountHandler
 *****************************************************************'''
 class BillingAccountHandler(APIV2Handler):
-    """This talks to a sevice and creates a billing account with our 
+    """This talks to a sevice and creates a billing account with our
           external billing integration (currently stripe).
 
-       This acts as an upreate function, essentially always call 
-        post, to save account information on the recurly side of 
-        things. 
+       This acts as an upreate function, essentially always call
+        post, to save account information on the recurly side of
+        things.
     """
     @tornado.gen.coroutine
     def post(self, account_id):
         schema = Schema({
           Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
           Required('billing_token_ref') : All(
-              Coerce(str), 
+              Coerce(str),
               Length(min=1, max=512))
         })
         args = self.parse_args()
@@ -2240,12 +2235,12 @@ class BillingAccountHandler(APIV2Handler):
         schema(args)
         billing_token_ref = args.get('billing_token_ref')
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
-      
+
         customer_id = None
 
         @tornado.gen.coroutine
@@ -2257,94 +2252,94 @@ class BillingAccountHandler(APIV2Handler):
             cid = customer.id
             _log.info('New Stripe customer %s created with id %s' % (
                 account.email, cid))
-            raise tornado.gen.Return(customer) 
+            raise tornado.gen.Return(customer)
 
         try:
-            if account.billing_provider_ref: 
+            if account.billing_provider_ref:
                 customer = yield self.executor.submit(
-                    stripe.Customer.retrieve, 
+                    stripe.Customer.retrieve,
                     account.billing_provider_ref)
-             
-                customer.email = account.email or customer.email 
+
+                customer.email = account.email or customer.email
                 customer.source = billing_token_ref
-                customer_id = customer.id 
+                customer_id = customer.id
                 yield self.executor.submit(customer.save)
             else:
-                customer = yield _create_account() 
-        except stripe.error.InvalidRequestError as e: 
+                customer = yield _create_account()
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
-                # this is here just in case the ref got 
+                # this is here just in case the ref got
                 # screwed up, it should rarely if ever happen
-                customer = yield _create_account() 
+                customer = yield _create_account()
             else:
                 _log.error('Invalid request error we do not handle %s' % e)
-                raise 
-        except Exception as e: 
+                raise
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
-            raise  
-       
-        def _modify_account(a): 
+            raise
+
+        def _modify_account(a):
             a.billed_elsewhere = False
             a.billing_provider_ref = customer.id
 
-        yield neondata.NeonUserAccount.modify( 
+        yield neondata.NeonUserAccount.modify(
             account.neon_api_key,
-            _modify_account, 
-            async=True) 
- 
+            _modify_account,
+            async=True)
+
         result = yield self.db2api(customer)
 
-        self.success(result) 
+        self.success(result)
 
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256))
-        }) 
+        })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
 
-        if not account.billing_provider_ref: 
-            raise NotFoundError('No billing account found - no ref.')     
+        if not account.billing_provider_ref:
+            raise NotFoundError('No billing account found - no ref.')
 
         try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
-        except stripe.error.InvalidRequestError as e: 
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
-                raise NotFoundError('No billing account found - not in stripe') 
-            else: 
+                raise NotFoundError('No billing account found - not in stripe')
+            else:
                 _log.error('Unknown invalid error occurred talking'\
                            ' to Stripe %s' % e)
-                raise Exception('Unknown Stripe Error')  
-        except Exception as e: 
+                raise Exception('Unknown Stripe Error')
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise
 
         result = yield self.db2api(customer)
-        self.success(result) 
+        self.success(result)
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['id', 'account_balance', 'created', 'currency', 
-                'default_source', 'delinquent', 'description', 
+        return ['id', 'account_balance', 'created', 'currency',
+                'default_source', 'delinquent', 'description',
                 'discount', 'email', 'livemode', 'subscriptions',
                 'metadata', 'sources']
-    
+
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['id', 'account_balance', 'created', 'currency', 
-                'default_source', 'delinquent', 'description', 
+        return ['id', 'account_balance', 'created', 'currency',
+                'default_source', 'delinquent', 'description',
                 'discount', 'email', 'livemode']
 
     @classmethod
@@ -2352,30 +2347,30 @@ class BillingAccountHandler(APIV2Handler):
     def _convert_special_field(cls, obj, field):
         if field == 'subscriptions':
             retval = obj.subscriptions.to_dict()
-        elif field == 'sources': 
+        elif field == 'sources':
             retval = obj.sources.to_dict()
-        elif field == 'metadata': 
-            retval = obj.metadata.to_dict() 
+        elif field == 'metadata':
+            retval = obj.metadata.to_dict()
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
-             
+
 
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET] 
+        return {
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.POST, HTTPVerbs.GET]
                }
 
 '''*****************************************************************
-BillingSubscriptionHandler 
+BillingSubscriptionHandler
 *****************************************************************'''
 class BillingSubscriptionHandler(APIV2Handler):
-    """This talks to recurly and creates a billing subscription with our 
-          recurly integration. 
+    """This talks to recurly and creates a billing subscription with our
+          recurly integration.
     """
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -2386,64 +2381,64 @@ class BillingSubscriptionHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = account_id = str(account_id)
         schema(args)
-        plan_type = args.get('plan_type') 
+        plan_type = args.get('plan_type')
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
-            async=True)
-       
-        billing_plan = yield neondata.BillingPlans.get(
-            plan_type, 
+            account_id,
             async=True)
 
-        if not billing_plan: 
-            raise NotFoundError('No billing plan for that plan_type')       
-  
-        if not account: 
+        billing_plan = yield neondata.BillingPlans.get(
+            plan_type,
+            async=True)
+
+        if not billing_plan:
+            raise NotFoundError('No billing plan for that plan_type')
+
+        if not account:
             raise NotFoundError('Neon Account was not found')
 
-        if not account.billing_provider_ref: 
+        if not account.billing_provider_ref:
             raise NotFoundError(
                 'There is not a billing account set up for this account')
-        try: 
+        try:
             original_plan_type = account.subscription_information['plan']['id']
-        except TypeError: 
-            original_plan_type = None 
+        except TypeError:
+            original_plan_type = None
 
-        try: 
+        try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
-            # get all subscriptions, they are sorted 
-            # by most recent, if there are not any, just 
+            # get all subscriptions, they are sorted
+            # by most recent, if there are not any, just
             # submit the new one, otherwise cancel the most
-            # recent and submit the new one 
+            # recent and submit the new one
             cust_subs = yield self.executor.submit(
                 customer.subscriptions.all)
-           
+
             if len(cust_subs['data']) > 0:
                 cancel_me = cust_subs['data'][0]
                 yield self.executor.submit(cancel_me.delete)
 
             if plan_type == 'demo':
-                subscription = stripe.Subscription(id='canceled') 
-                def _modify_account(a): 
-                    a.subscription_information = None 
+                subscription = stripe.Subscription(id='canceled')
+                def _modify_account(a):
+                    a.subscription_information = None
                     a.billed_elsewhere = True
                     a.billing_provider_ref = None
                     a.verify_subscription_expiry = None
                 # cancel all the things!
-                cards = yield self.executor.submit( 
-                    customer.sources.all, 
-                    object='card') 
-                for card in cards: 
+                cards = yield self.executor.submit(
+                    customer.sources.all,
+                    object='card')
+                for card in cards:
                     yield self.executor.submit(card.delete)
-                _log.info('Subscription downgraded for account %s' % 
+                _log.info('Subscription downgraded for account %s' %
                      account.neon_api_key)
-            else: 
+            else:
                 subscription = yield self.executor.submit(
-                    customer.subscriptions.create, 
+                    customer.subscriptions.create,
                     plan=plan_type)
                 def _modify_account(a):
                     a.serving_enabled = True
@@ -2454,132 +2449,132 @@ class BillingSubscriptionHandler(APIV2Handler):
                         'cmsapiv2.apiv2.check_subscription_interval'))
                         ).strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
- 
-                _log.info('New subscription created for account %s' % 
+
+                _log.info('New subscription created for account %s' %
                     account.neon_api_key)
 
             yield neondata.NeonUserAccount.modify(
-                account.neon_api_key, 
-                _modify_account, 
+                account.neon_api_key,
+                _modify_account,
                 async=True)
-             
-        except stripe.error.InvalidRequestError as e: 
+
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
                 _log.error('Billing mismatch for account %s' % account.email)
                 raise NotFoundError('No billing account found in Stripe')
- 
+
             _log.error('Unhandled InvalidRequestError\
                  occurred talking to Stripe %s' % e)
             raise
-        except stripe.error.CardError as e: 
-            raise  
-        except Exception as e:  
+        except stripe.error.CardError as e:
+            raise
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
-            raise 
- 
+            raise
+
         billing_plan = yield neondata.BillingPlans.get(
-            plan_type.lower(), 
-            async=True) 
-               
-        # only update limits if we have actually changed the plan type 
+            plan_type.lower(),
+            async=True)
+
+        # only update limits if we have actually changed the plan type
         if original_plan_type != plan_type.lower():
-            def _modify_limits(a): 
+            def _modify_limits(a):
                 a.populate_with_billing_plan(billing_plan)
-                
+
             yield neondata.AccountLimits.modify(
                 account.neon_api_key,
-                _modify_limits,  
-                create_missing=True, 
-                async=True) 
- 
+                _modify_limits,
+                create_missing=True,
+                async=True)
+
         result = yield self.db2api(subscription)
 
-        self.success(result) 
+        self.success(result)
 
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
           Required('account_id') : Any(str, unicode, Length(min=1, max=256))
-        }) 
+        })
         args = self.parse_args()
         args['account_id'] = str(account_id)
         schema(args)
 
         account = yield neondata.NeonUserAccount.get(
-            account_id, 
+            account_id,
             async=True)
 
-        if not account: 
+        if not account:
             raise NotFoundError('Neon Account required.')
 
-        if not account.billing_provider_ref: 
-            raise NotFoundError('No billing account found - no ref.')     
+        if not account.billing_provider_ref:
+            raise NotFoundError('No billing account found - no ref.')
 
         try:
             customer = yield self.executor.submit(
-                stripe.Customer.retrieve, 
+                stripe.Customer.retrieve,
                 account.billing_provider_ref)
 
             cust_subs = yield self.executor.submit(
                 customer.subscriptions.all)
 
-            most_recent_sub = cust_subs['data'][0] 
-        except stripe.error.InvalidRequestError as e: 
+            most_recent_sub = cust_subs['data'][0]
+        except stripe.error.InvalidRequestError as e:
             if 'No such customer' in str(e):
                 raise NotFoundError('No billing account found - not in stripe')
-            else: 
+            else:
                 _log.error('Unknown invalid error occurred talking'\
                            ' to Stripe %s' % e)
-                raise Exception('Unknown Stripe Error') 
-        except IndexError: 
-            raise NotFoundError('A subscription was not found.')  
-        except Exception as e: 
+                raise Exception('Unknown Stripe Error')
+        except IndexError:
+            raise NotFoundError('A subscription was not found.')
+        except Exception as e:
             _log.error('Unknown error occurred talking to Stripe %s' % e)
             raise
 
         result = yield self.db2api(most_recent_sub)
- 
-        self.success(result) 
+
+        self.success(result)
 
     @classmethod
     def _get_default_returned_fields(cls):
-        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+        return ['id', 'application_fee_percent', 'cancel_at_period_end',
                 'canceled_at', 'current_period_end', 'current_period_start',
-                'customer', 'discount', 'ended_at', 'plan', 
-                'quantity', 'start', 'tax_percent', 'trial_end', 
-                'trial_start'] 
-    
+                'customer', 'discount', 'ended_at', 'plan',
+                'quantity', 'start', 'tax_percent', 'trial_end',
+                'trial_start']
+
     @classmethod
     def _get_passthrough_fields(cls):
-        return ['id', 'application_fee_percent', 'cancel_at_period_end', 
+        return ['id', 'application_fee_percent', 'cancel_at_period_end',
                 'canceled_at', 'current_period_end', 'current_period_start',
-                'customer', 'discount', 'ended_at', 'metadata', 'plan', 
-                'quantity', 'start', 'tax_percent', 'trial_end', 
+                'customer', 'discount', 'ended_at', 'metadata', 'plan',
+                'quantity', 'start', 'tax_percent', 'trial_end',
                 'trial_start']
- 
+
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
-        if field == 'metadata': 
-            retval = obj.metadata.to_dict() 
+        if field == 'metadata':
+            retval = obj.metadata.to_dict()
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
- 
+
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.POST] 
+        return {
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE,
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.POST]
                }
 
 '''*********************************************************************
 TelemetrySnippetHandler : class responsible for creating the telemetry snippet
    HTTP Verbs     : get
 *********************************************************************'''
-class TelemetrySnippetHandler(APIV2Handler): 
+class TelemetrySnippetHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         '''Generates a telemetry snippet for a given account'''
@@ -2594,7 +2589,7 @@ class TelemetrySnippetHandler(APIV2Handler):
         # Find out if there is a Gallery integration
         integrations = yield self.account.get_integrations(async=True)
 
-        using_gallery = any([x.uses_bc_gallery for x in integrations if 
+        using_gallery = any([x.uses_bc_gallery for x in integrations if
                              isinstance(x, neondata.BrightcoveIntegration)])
 
         # Build the snippet
@@ -2624,9 +2619,9 @@ class TelemetrySnippetHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(cls):
-        return { 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 'account_required'  : [HTTPVerbs.GET] 
+        return {
+                 HTTPVerbs.GET : neondata.AccessLevels.READ,
+                 'account_required'  : [HTTPVerbs.GET]
                }
 
 '''*********************************************************************
@@ -2644,7 +2639,6 @@ application = tornado.web.Application([
         OptimizelyIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',
         AccountIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnail/?$', DirectThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
@@ -2654,7 +2648,7 @@ application = tornado.web.Application([
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
