@@ -895,7 +895,7 @@ class Cluster():
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
-            _log.debug('Cluster is booting. State: %s' % cur_state.state)
+            _log.debug('Cluster is booting. State: %s' % cur_state.status.state)
             time.sleep(30.0)
             cur_state = conn.describe_cluster(self.cluster_id)
 
