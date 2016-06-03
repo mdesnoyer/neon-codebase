@@ -754,8 +754,8 @@ class Cluster():
     #     _log.info("Found master ip address %s" % self.master_ip)
     def _find_master_info(self):
         '''Find the ip address and id of the master node.'''
-        conn = EmrConnection()
-        ec2conn = EC2Connection()
+        conn = EmrConnection(self.cluster_region)
+        ec2conn = EC2Connection(self.cluster_region)
         
         self.master_ip = None
 
