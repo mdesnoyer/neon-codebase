@@ -14,7 +14,6 @@ import logging
 from mock import patch, MagicMock
 
 import test_utils.neontest
-import test_utils.redis
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import tornado.ioloop
 import utils.neon

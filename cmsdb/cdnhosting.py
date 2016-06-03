@@ -160,6 +160,7 @@ class CDNHosting(object):
         # we need to avoid source cropping (and smart cropping) thumbnails
         # that come directly from the client.
         new_serving_thumbs = [] # (url, width, height)
+        
         if self.source_crop is not None and do_source_crop:
             if not self.resize:
                 _log.error(('Crop source specified but no desired final ',
