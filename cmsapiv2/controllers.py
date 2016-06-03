@@ -1899,7 +1899,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         schema = Schema({
             'limit': All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            Optional('query'): Any(CustomVoluptuousTypes.Regex(), str),
+            Optional('query'):  str,
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float))
