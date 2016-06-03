@@ -28,6 +28,8 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 import time
 import urllib2
+import math
+from hdfs import InsecureClient
 
 #logging
 import logging
@@ -167,9 +169,9 @@ class ImpalaTableBuilder(threading.Thread):
             # memory, so make sure we give the job enough.
             hive.execute("SET mapreduce.reduce.memory.mb=16000")
             hive.execute(
-                "SET mapreduce.reduce.java.opts=-Xmx14000m")
+                "SET mapreduce.reduce.java.opts=-Xmx14000m -XX:+UseConcMarkSweepGC")
             hive.execute("SET mapreduce.map.memory.mb=16000")
-            hive.execute("SET mapreduce.map.java.opts=-Xmx14000m")
+            hive.execute("SET mapreduce.map.java.opts=-Xmx14000m -XX:+UseConcMarkSweepGC")
             hive.execute("SET hive.exec.max.dynamic.partitions.pernode=200")
             cmd = ("""
             insert overwrite table %s
@@ -330,7 +332,7 @@ def build_impala_tables(input_path, cluster, timeout=None):
     _log.info('Finished building Impala tables')
     return True
 
-def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
+def run_batch_cleaning_job(cluster, input_path, output_path, s3_path, timeout=None):
     '''Runs the mapreduce job that cleans the raw events.
 
     The events are output in a format that can be read by hive as an
@@ -341,17 +343,90 @@ def run_batch_cleaning_job(cluster, input_path, output_path, timeout=None):
     output_path - The output path for the raw data
     timeout - Time in seconds    
     '''
+
+    # We set all the mapreduce parameters required for the clean up job here
+
+    # Define extra options for the job
+    extra_ops = {
+        'mapreduce.output.fileoutputformat.compress' : 'true',
+        'avro.output.codec' : 'snappy',
+        'mapreduce.job.reduce.slowstart.completedmaps' : '1.0',
+        'mapreduce.task.timeout' : 1800000,
+        'mapreduce.reduce.speculative': 'false',
+        'mapreduce.map.speculative': 'false',
+        'io.file.buffer.size': 65536
+        }
+
+    map_memory_mb = 2048
+
+    # If the requested map memory is different, set it
+    if map_memory_mb is not None:
+        extra_ops['mapreduce.map.memory.mb'] = map_memory_mb
+        extra_ops['mapreduce.map.java.opts'] = (
+            '-Xmx%im' % int(map_memory_mb * 0.8))
+
+    # Figure out the number of reducers to use by aiming for files
+    # that are 1GB on average.
+    input_data_size = 0
+    s3AddressRe = re.compile(r's3://([^/]+)/(\S+)')
+    s3AddrMatch = s3AddressRe.match(input_path)
+    if s3AddrMatch:
+
+        # First figure out the size of the data
+        bucket_name, key_name = s3AddrMatch.groups()
+        s3conn = S3Connection()
+        prefix = re.compile('([^\*]*)\*').match(key_name).group(1)
+        for key in s3conn.get_bucket(bucket_name).list(prefix):
+            input_data_size += key.size
+
+        n_reducers = math.ceil(input_data_size / (1073741824. / 2))
+        extra_ops['mapreduce.job.reduces'] = str(int(n_reducers))
+
+    # If the cluster's core has larger instances, the memory
+    # allocated in the reduce can get very large. However, we max
+    # out the reduce to 1GB, so limit the reducer to use at most
+    # 5GB of memory.
+    core_group = cluster._get_instance_group_info('CORE')
+    if core_group is None:
+        raise ClusterInfoError('Could not find the CORE instance group')
+
+    if (output_path.startswith("hdfs") and 
+        core_group.instancetype in ['r3.2xlarge', 'r3.4xlarge',
+                                    'r3.8xlarge', 'i2.8xlarge',
+                                    'i2.4xlarge', 'cr1.8xlarge']):
+        extra_ops['mapreduce.reduce.memory.mb'] = 5000
+        extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
+
     _log.info("Starting batch event cleaning job done")
+
     try:
         cluster.run_map_reduce_job(options.mr_jar,
                                    'com.neon.stats.RawTrackerMR',
                                    input_path,
                                    output_path,
-                                   map_memory_mb=2048,
+                                   extra_ops,
                                    timeout=timeout)
     except Exception as e:
         _log.error('Error running the batch cleaning job: %s' % e)
         statemon.state.increment('stats_cleaning_job_failures')
+        raise
+
+    try:
+        jar_location = 's3://us-east-1.elasticmapreduce/libs/s3distcp/1.0/s3distcp.jar'
+        
+        s3_output_path = ' '
+        get_time = re.search(r'(.*)(\d{4}-\d{2}-\d{2}-\d{2}-\d{2})', output_path)
+        if get_time:
+            s3_output_path = s3_path + get_time.group(2)
+
+            cluster.checkpoint_hdfs_to_s3(jar_location,
+                                          output_path,
+                                          s3_output_path,
+                                          timeout=timeout)
+        else:
+            _log.error('Incorrect s3 path, the S3 copy step has been skipped')
+    except Exception as e:
+        _log.error('Copy from hdfs to S3 failed: %s' % e)
         raise
     
     _log.info("Batch event cleaning job done")
@@ -386,11 +461,14 @@ def _get_last_batch_app(rm_response):
 
     last_app = None
     last_started_time = None
+    s3_checkpoint_dir = ' '
+
     for app in rm_response['apps']['app']:
-        if (app['name'] == 'Raw Tracker Data Cleaning' and 
-            (last_app is None or last_started_time < app['startedTime'])):
+        match = re.search(r'S3DistCp: (.*) (->) (.*)',app['name'])
+        if match and (last_app is None or last_started_time < app['startedTime']):
             last_app = app
-            last_started_time = app['startedTime']            
+            s3_checkpoint_dir = match.group(3)
+            last_started_time = app['startedTime']         
             
     if last_app is None:
         return None
@@ -398,7 +476,7 @@ def _get_last_batch_app(rm_response):
     _log.info('The batch job with id %s is in state %s with '
               'progress of %i%%' % 
               (last_app['id'], last_app['state'], last_app['progress']))
-    return last_app
+    return s3_checkpoint_dir
 
 def get_last_sucessful_batch_output(cluster):
     '''Determines the last sucessful batch output path.
@@ -409,29 +487,43 @@ def get_last_sucessful_batch_output(cluster):
 
     response = cluster.query_resource_manager(
         '/ws/v1/cluster/apps?finalStatus=SUCCEEDED')
-    app = _get_last_batch_app(response)
 
-    if app is None:
+    last_successful_output = _get_last_batch_app(response)
+
+    if last_successful_output is None:
         return None
 
-    # Check the config on the history server to get the path
-    query = ('/ws/v1/history/mapreduce/jobs/job_%s/conf' % 
-             re.compile(r'application_(\S+)').search(app['id']).group(1))
-    try:
-        conf = cluster.query_history_manager(query)
-    except urllib2.HTTPError as e:
-        _log.warn('Could not get the job history for job %s. HTTP Code %s' %
-                  (app['id'], e.code))
-        return None
+    _log.info('Found the last successful output directory as %s' % last_successful_output)
 
-    if not 'conf' in conf:
-        raise UnexpectedInfo('Unexpected response from the history server: %s'
-                             % conf)
-    for prop in conf['conf']['property']:
-        if prop['name'] == 'mapreduce.output.fileoutputformat.outputdir':
-            _log.info('Found the last sucessful output directory as %s' %
-                      prop['value'])
-            return prop['value']
+    return last_successful_output
 
-    return None
+def cleanup_hdfs(cluster, current_hdfs_dir_time, hdfs_dir):
+    # Cleans up all other HDFS directories except the current one. Access the Namenode using the https
+    # HDFS client. Check for existence of directory and delete the old ones recursively.
+
+    _log.info("Deleting all old HDFS directories except current %s" % current_hdfs_dir_time)
+
+    http_string = 'http://%s:9101' % cluster.master_ip
+
+    hdfs_conn = InsecureClient(http_string, user='hadoop')
+
+    file_exists = hdfs_conn.status('/'+hdfs_dir, strict=False)
+    
+    if file_exists:
+        list_files = hdfs_conn.list('/'+hdfs_dir, status=False)
+
+        for file in list_files:
+            if file == current_hdfs_dir_time:
+               continue
+            else:
+                delete_status = hdfs_conn.delete('/'+hdfs_dir+'/'+file, recursive=True)
+                if delete_status is True:
+                    _log.info('Deleted hdfs directory %s' % '/mnt/cleaned/'+file)
+                else:
+                    _log.info('Could not delete hdfs directory %s' % '/mnt/cleaned/'+file)
+    else:
+        _log.info("HDFS base directory %s does not exist" % hdfs_dir)
+
+
+
     

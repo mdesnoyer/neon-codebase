@@ -5,7 +5,7 @@ AB Controller for Brightcove
 Listens for updates from mastermind
 
 On recieveing an update, schedules a task to be executed at time 't'
-Tasks can include -- push thumbnail X in to brightcove account A 
+Tasks can include -- push thumbnail X in to brightcove account A
 
 '''
 import os,os.path
@@ -14,16 +14,12 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api.brightcove_api import BrightcoveApi
 from boto.s3.connection import S3Connection
-from cmsdb.neondata import VideoMetadata, ThumbnailMetadata, \
-      AbstractPlatform, InternalVideoID, ThumbnailID, BrightcoveIntegration, \
-      NeonApiRequest
-import datetime
+from cmsdb.neondata import VideoMetadata, AbstractPlatform, InternalVideoID, BrightcoveIntegration
 from heapq import heappush, heappop
 import itertools
 import json
-from multiprocessing.pool import ThreadPool
+import logging
 import random
 import re
 import time
@@ -35,7 +31,6 @@ import tornado.httpserver
 import tornado.gen
 import tornado.httpclient
 import urllib
-from cvutils.imageutils import PILImageUtils
 import utils.neon
 
 from utils.options import define, options
@@ -48,7 +43,6 @@ define('directive_address',
 define("thumbnail_sampling_period", default=304,
        help="Period, in seconds for checking brightcove for new thumbs")
 
-import logging
 _log = logging.getLogger(__name__)
 
 #Monitoring vars
@@ -617,7 +611,7 @@ class BrightcoveABController(object):
             time_dist.append(pair)
      
         return time_dist
-  
+
 ###################################################################################
 # MAIN
 ###################################################################################

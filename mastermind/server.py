@@ -106,6 +106,7 @@ statemon.define('need_full_urls', int) # Num of thumbs where full urls had to be
 statemon.define('account_default_serving_url_missing', int) # mising default
 statemon.define('no_videometadata', int) # mising videometadata 
 statemon.define('no_thumbnailmetadata', int) # mising thumb metadata 
+statemon.define('no_account_info', int)
 statemon.define('unexpected_video_handle_error', int) # Error when handling video
 statemon.define('default_serving_thumb_size_mismatch', int) # default thumb size missing 
 statemon.define('pending_modifies', int)
@@ -410,6 +411,8 @@ class VideoDBWatcher(threading.Thread):
         # for enabled/abtest on account (api_key) -> (abtest, serving_enabled)
         self._accounts_options = {}
 
+        self._account_last_updated_time = {} 
+
     def __del__(self):
         self.stop()
         del self._video_updater
@@ -515,10 +518,23 @@ class VideoDBWatcher(threading.Thread):
                 account.neon_api_key,
                 neondata.ExperimentStrategy.get(account.neon_api_key))
 
-            for video_id in account.get_internal_video_ids():
+            video_id = None
+            akey = account.neon_api_key
+            since = self._account_last_updated_time.get(
+                akey, 
+                None) 
+ 
+            for video_id in account.get_internal_video_ids(
+                 since=since):
                 self._schedule_video_update(video_id)
  
-            self.process_queued_video_updates() 
+            self.process_queued_video_updates()
+
+            if video_id: 
+                # pull the last video, it will be the most recent one 
+                video = neondata.VideoMetadata.get(video_id)
+                if video:  
+                    self._account_last_updated_time[akey] = video.updated
 
         statemon.state.increment('videodb_batch_update')
         self.is_loaded.set()
@@ -542,9 +558,15 @@ class VideoDBWatcher(threading.Thread):
             return
         
         thumb_ids = sorted(set(video_metadata.thumbnail_ids))
-        
-        acct_abtest, acct_serving_enabled = self._accounts_options[
+
+        try:
+            acct_abtest, acct_serving_enabled = self._accounts_options[
                 video_metadata.get_account_id()] 
+        except KeyError as e:
+            _log.warn_n('Could not find account info for %s' %
+                        video_metadata.get_account_id())
+            statemon.state.increment('no_account_info')
+            return
  
         account_id = video_id.split('_')[0]
         in_sub_list = account_id in self._account_subscribers 
@@ -1426,11 +1448,12 @@ class DirectivePublisher(threading.Thread):
         closest_size = [x for x in valid_sizes if
                         (abs(x[0] - default_size[0]) +
                          abs(x[1] - default_size[1])) == mindiff][0]
-        _log.warn('There is no serving thumb of size (%i, %i) for thumb'
-                  '%s. Using (%i, %i) instead'
-                  % (default_size[0], default_size[1],
-                     url_obj.get_thumbnail_id(),
-                     closest_size[0], closest_size[1]))
+        _log.warn_n('There is no serving thumb of size (%i, %i) for thumb'
+                    '%s. Using (%i, %i) instead'
+                    % (default_size[0], default_size[1],
+                       url_obj.get_thumbnail_id(),
+                       closest_size[0], closest_size[1]),
+            50)
         statemon.state.increment('default_serving_thumb_size_mismatch')
         return closest_size
 

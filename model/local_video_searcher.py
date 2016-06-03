@@ -971,7 +971,7 @@ class ResultsList(object):
         '''
         old = self.results[idx]
         self.results[idx] = res
-        _log.info('%s is replacing %s' % (res, old))
+        _log.debug('%s is replacing %s' % (res, old))
         self._update_dists(idx)
         self._update_min()
         self._write_testing_frame(res, 'accept', idx)
@@ -1519,7 +1519,7 @@ class LocalSearcher(object):
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
                 formatted_result = (frame, 1.0, frameno,
-                                    frameno / float(fps))
+                                    frameno / float(fps), '')
                 results.append(formatted_result)
         else:
             _log.debug('%i thumbs found', len(raw_results))

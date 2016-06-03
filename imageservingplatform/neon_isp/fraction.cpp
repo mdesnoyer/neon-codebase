@@ -149,33 +149,12 @@ Fraction::ProcessImages(const rapidjson::Value & imgs)
 
 // Iterate throgugh the images to find the appropriate image for a given
 // height & width
-// TODO Kevin this needs to be combined with DefaultThumbnail::GetScaledImage
 const ScaledImage*
-Fraction::GetScaledImage(int height, int width) const{
-
-    static const int pixelRange = 6; 
-
-    // go through all images again and pick the first approximate fit
-    unsigned numOfImages = images_.size();
-
-    if(numOfImages == 0)
-        return 0; 
-
-    // try to find an exact fit
-    for(unsigned i=0; i < numOfImages; i++){
-        if(images_[i].GetHeight() == height &&
-           images_[i].GetWidth() == width)
-             return &images_[i];
-    }
-
-    // otherwise try to find pick an approximate fit
-    for(unsigned i=0; i < numOfImages; i++){
-        if(ScaledImage::ApproxEqual(images_[i].GetHeight(), height, pixelRange) &&
-           ScaledImage::ApproxEqual(images_[i].GetWidth(), width, pixelRange)) { 
-            return &images_[i];
-        } 
-    }
-    
+Fraction::GetScaledImage(int height, int width) const
+{
+    int image_index = ScaledImage::FindBestSizeMatchImage(width, height, images_);
+    if (image_index > -1)
+        return &images_[image_index];
     // no fit found
     return 0;
 }
