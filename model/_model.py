@@ -131,3 +131,19 @@ def load_model(filename):
     
     return model 
 
+def generate_model(ls_inp_filename, predictor):
+    '''
+    Given a filename pointing to an input dict for 
+    local video searcher and a functioning instance
+    of the predictor, generates a new model.
+
+    ls_inp_filename: A filename that contains a pickled dictionary of the
+        inputs required for local search (the combiner, face finder, etc)
+    predictor: an instance of the predictor.
+    '''
+    with open(ls_inp_filename) as f:
+        ls_in_dict = pickle.load(ls_inp_filename)
+    loc_srch = LocalSearcher(predictor, **ls_in_dict)
+    model = Model(predictor, vid_searcher=loc_srch)
+    model.restore_additional_data(ls_inp_filename)
+    return model

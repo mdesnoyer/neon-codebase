@@ -23,6 +23,11 @@ how the search proceeds:
             the best is valence scored. It is then potentially added to the
             results list.
 
+Updates:
+    Local searcher is now updated to work with asynchronous prediction (e.g.,
+    from a deepnet running on a different server). This is done by having two
+    distinct threads, performing sampling and local searches simultaneoulsy
+    by extracting them from priority queues.
 ==============================================================================
 LOCAL SEARCH..................................................................
 
@@ -151,12 +156,15 @@ import heapq
 import logging
 import os
 import sys
-from time import time
+from time import time, sleep
 from itertools import permutations
 from collections import OrderedDict as odict
 from collections import defaultdict as ddict
 from random import getrandbits
 import shutil
+import threading
+from Queue import Queue
+import psutil
 
 __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
@@ -169,14 +177,24 @@ from model.colorname import ColorName
 from utils import statemon
 from utils import pycvutils
 from utils.options import define, options
-from model.metropolisHastingsSearch import MCMH_rpl
+from model.metropolisHastingsSearch import MCMH
+from grpc.framework.interfaces.face.face import ExpirationError
+
+import concurrent.futures
 
 _log = logging.getLogger(__name__)
 
-statemon.define('all_frames_filtered', int)
-statemon.define('cv_video_read_error', int)
-statemon.define('video_processing_error', int)
-statemon.define('low_number_of_frames_seen', int)
+statemon.define('all_frames_filtered', int)  # no frame has passed all filters
+statemon.define('cv_video_read_error', int)  # opencv video read error
+statemon.define('video_processing_error', int)  # other video processing error, otherwise unspecified
+statemon.define('low_number_of_frames_seen', int)  # insufficient samples taken
+statemon.define('low_number_of_regions_searched', int)  # insufficient regions searched
+statemon.define('unable_to_score_frame', int)  # within-retry-limit error
+statemon.define('frame_score_attempt_limit_reached', int)  # retry limit exceeded
+statemon.define('sampling_problem', int)  # problem taking a sample, unspecified
+statemon.define('searching_problem', int)  # problem conducting a search, unspecified
+statemon.define('mcmh_sample_error', int)  # problem acquiring a sample from mcmh
+statemon.define('mcmh_search_error', int)  # problem acquiring a local search region
 
 define("text_model_path",
        default=os.path.join(__base_path__, 'cvutils', 'data'),
@@ -229,6 +247,22 @@ def get_feat_score_transfer_func(max_penalty, median=0.3):
     L = calcL(k, x0, c)
     Z = calcZ(k, x0, c)
     return lambda x: Z + (L / (1 + np.exp(-k * (x - x0))))
+
+
+# utilities
+def memcheck():
+    pvused = psutil.virtual_memory().percent
+    psused = psutil.swap_memory().percent
+    _log.debug('VMem Used: %.2f, Swap Used: %.2f', pvused, psused)
+
+
+def sec_to_time(secs):
+    secs = int(secs)
+    s2m = 60
+    s2h = 60 * 60
+    h, r = divmod(secs, s2h)
+    m, s = divmod(r, s2m)
+    return '%02i:%02i:%02i (hh:mm:ss)' % (h, m, s)
 
 
 class Statistics(object):
@@ -377,6 +411,8 @@ class MultiplicativeCombiner(object):
     '''
     Multiplicatively combines feature scores
     '''
+    name = 'Multiplicative combiner'
+    weight_domain = [0, 1]
 
     def __init__(self, penalties=ddict(lambda: 0.999), weight_valence=dict(),
                  combine=lambda x: np.prod(x),
@@ -402,7 +438,6 @@ class MultiplicativeCombiner(object):
         self.weight_valence = weight_valence
         # compute the transfer functions
         self._trans_funcs = dict()
-        self.name = 'Multiplicative combiner'
         for feat in weight_valence:
             max_pen = 1 - penalties[feat]
             self._trans_funcs[feat] = get_feat_score_transfer_func(max_pen)
@@ -410,7 +445,13 @@ class MultiplicativeCombiner(object):
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
-        self.result_combine = lambda ms, fs, w: ms * fs
+        #
+        # The multiplicative combiner attenuates ms by fs, depending on the
+        # weight. If w is 1.0, then fs may fully attenuate ms. Otherwise,
+        # it will attenuate it by at most w.
+        #
+        # values of w above 1.0 have no meaning.
+        self.result_combine = lambda ms, fs, w: ms - ms * (1-fs) * min(1, w)
         self.dependencies = dependencies
 
     def _set_stats_dict(self, stats_dict):
@@ -552,6 +593,8 @@ class AdditiveCombiner(object):
     weights or (2) attempts to deduce the weight given the global statistics
     object.
     '''
+    name = 'Additive Combiner'
+    weight_domain = [-np.inf, np.inf]
 
     def __init__(self, weight_dict=ddict(lambda: 1.), weight_valence=dict(),
                  combine=lambda x: np.sum(x)):
@@ -570,7 +613,6 @@ class AdditiveCombiner(object):
         self.weight_dict = weight_dict
         self.weight_valence = weight_valence
         self._combine = combine
-        self.name = 'Additive Combiner'
         # the combiner exports a combination function for use in the results
         # objects, it accepts model score (ms), feature score (fs) and
         # feature score weight (w)
@@ -1066,7 +1108,7 @@ class LocalSearcher(object):
                  n_thumbs=5,
                  feat_score_weight=0.,
                  mixing_samples=40,
-                 search_algo=MCMH_rpl,
+                 search_algo=MCMH,
                  max_variety=True,
                  feature_generators=None,
                  feats_to_cache=None,
@@ -1200,22 +1242,38 @@ class LocalSearcher(object):
 
         '''
         self.predictor = predictor
+        if self.predictor.async:
+            # you're using an asynchronous predictor, so create a lock
+            self._result_lock = threading.Lock()
         self.processing_time_ratio = processing_time_ratio
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
         self.n_thumbs = n_thumbs
         self._feat_score_weight = feat_score_weight
         self.mixing_samples = mixing_samples
-        self.search_algo = search_algo(local_search_width, clip=startend_clip)
+        self._search_algo = search_algo
         self.generators = odict()
         self.feats_to_cache = odict()
         self.combiner = combiner
+        if ((self._feat_score_weight < combiner.weight_domain[0]) or
+            (self._feat_score_weight > combiner.weight_domain[1])):
+            _log.warn('Feature score weight %f is outside the domain '
+                      'for %s, which is %s', float(self._feat_score_weight),
+                      combiner.name, combiner.weight_domain)
         self.startend_clip = startend_clip
         self.filters = filters
         self.max_variety = max_variety
         self.use_all_data = use_all_data
         self.use_best_data = use_best_data
         self.filter_text_thresh = filter_text_thresh
+        # the explore coefficient relates the probability of
+        # sampling vs. searching.
+        # the number of workers to use -- set it to the maximum number of
+        # requests the predictor is allowed to issue.
+        self.num_workers = self.predictor.concurrency
+        self.done_sampling = False
+        self.done_searching = False
+
         if adapt_improve:
             _log.warn(('WARNING: adaptive improvement is enabled, but is '
                        'an experimental feature'))
@@ -1225,7 +1283,6 @@ class LocalSearcher(object):
             TESTING = True
             global TESTING_DIR
             TESTING_DIR = testing_dir
-        self._reset()
         self.filter_text = filter_text
         if text_filter_params is None:
             tcnm1 = os.path.join(options.text_model_path,
@@ -1240,15 +1297,26 @@ class LocalSearcher(object):
             text_filter_params[1] = os.path.join(options.text_model_path,
                                                  text_filter_params[1])
         self.text_filter_params = text_filter_params
-        self.analysis_crop = None  # this, if necessary at all, will be set
-        # by update_processing_strategy
-
+        # this, if necessary at all, will be set by update_processing_strategy
+        self.analysis_crop = None
         # determine the generators to cache.
         for f in feature_generators:
             gen_name = f.get_feat_name()
             self.generators[gen_name] = f
             if gen_name in feats_to_cache:
                 self.feats_to_cache[gen_name] = f
+
+        # create a processing lock, that will be used by the sampling and
+        # the local search threads.
+        self._proc_lock = threading.Lock()
+        # lock to ensure that the active counts are managed atomically.
+        self._act_lock = threading.Lock()
+        # create an event object to alert the threads that it is time to
+        # terminate.
+        self._terminate = threading.Event()
+        self._active_samples = 0
+        self._active_searches = 0
+        self._reset()
 
     def _reset(self):
         self.cur_frame = None
@@ -1261,6 +1329,9 @@ class LocalSearcher(object):
         self.num_frames = None
         self._queue = []
         self._searched = 0
+        self.done_sampling = False
+        self.done_searching = False
+        self._terminate.clear()
         # it's not necessary to reset the search algo, since it will be reset
         # internally when the self.__getstate__() method is called.
 
@@ -1291,14 +1362,32 @@ class LocalSearcher(object):
         self.filter_text_thresh = processing_strategy.filter_text_thresh
 
     @property
+    def explore_coef(self):
+        '''
+        Determines the rate at which we sample versus search.
+        Right now, as the percentage of the video sampled increases
+        the probability of taking a new sample decreases, in favor
+        of conducting local searches.
+        '''
+        _sfrac = (self.search_algo.n_samples * 1. /
+                  self.search_algo.max_samps)
+        return 1 - _sfrac  # linear
+        # return np.sqrt(1 - _sfrac)  # sqrt
+        # return (1 - _sfrac) ** 2  # pow 2
+
+
+    @property
     def min_score(self):
         return self.results.min
 
     def choose_thumbnails(self, video, n=None, video_name='',):
         self._reset()
+        if n is None:
+            n = self.n_thumbs
         rand_seed = int(1000*time()) % 2 ** 32
         _log.info('Beginning thumbnail selection for video %s, random seed '
-                  'for this run is %i', video_name, rand_seed)
+                  'for this run is %i with max thumbs %i', video_name,
+                  rand_seed, n)
         np.random.seed(rand_seed)
         thumbs = self.choose_thumbnails_impl(video, n, video_name)
         return thumbs
@@ -1322,6 +1411,12 @@ class LocalSearcher(object):
             raise Exception("Could not create testing dir!")
 
     def choose_thumbnails_impl(self, video, n=None, video_name=''):
+        # start up the threads
+        self._inq = Queue(maxsize=2)
+        threads = [threading.Thread(target=self._worker, args=(x,))
+                   for x in range(self.num_workers)]
+        for t in threads:
+            t.start()
         # instantiate the statistics objects required
         # for computing the running stats.
         for gen_name in self.feats_to_cache.keys():
@@ -1339,7 +1434,8 @@ class LocalSearcher(object):
         f_max_var_rej = lambda: min(0.1,
                                     self.col_stat.percentile(
                                             100. / self.n_thumbs))
-        self.results = ResultsList(n_thumbs=n, min_acceptable=f_min_var_acc,
+        self.results = ResultsList(n_thumbs=self.n_thumbs,
+                           min_acceptable=f_min_var_acc,
                            max_rejectable=f_max_var_rej,
                            feat_score_weight=self._feat_score_weight,
                            adapt_improve=self.adapt_improve,
@@ -1359,11 +1455,6 @@ class LocalSearcher(object):
         # account for the case where the video is very short
         search_divisor = (self._orig_local_search_width /
                           self._orig_local_search_step)
-        # self.local_search_width = min(self.orig_local_search_width,
-        #                                 max(search_divisor, (((
-        #                                     self.num_frames/search_divsor)/
-        #                                     self.n_thumbs) *
-        #                                     search_divisor)))
         self.local_search_width = min(self._orig_local_search_width,
                                       max(search_divisor,
                                           self.num_frames / self.n_thumbs))
@@ -1372,45 +1463,49 @@ class LocalSearcher(object):
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
         video_time = float(num_frames) / fps
-        self.search_algo.start(num_frames, self.local_search_width)
+        self.search_algo = self._search_algo(num_frames, self.local_search_width,
+                                             self.startend_clip)
         start_time = time()
         max_processing_time = self.processing_time_ratio * video_time
         _log.info('Starting search of %s with %i frames, for %s seconds' % (
             video_name, num_frames, max_processing_time))
         self._mix()
         while (time() - start_time) < max_processing_time:
-            r = self._step()
-            if not r:
-                # you've searched as much as possible
-                break
-        if len(self._queue):
-            _log.info('If time remains, will begin searching from queue')
-        while (time() - start_time) < max_processing_time:
-            if not len(self._queue):
-                _log.info('No analyses remain to be done.')
-                break
-            mean_score, (start_frame, end_frame, start_score,
-                         end_score) = heapq.heappop(self._queue)
-            try:
-                self._conduct_local_search(start_frame, end_frame,
-                                           start_score, end_score,
-                                           from_queue=True)
-            except Exception as e:
-                _log.debug('Problem conducting local search of %i <---> %i'
-                           ' (from queue) Error: %s', start_frame,
-                           end_frame, e)
+            if self.done_sampling and self.done_searching:
+                if not self._active_searches:
+                    break
+                _log.info_n('Waiting for %i local searches to complete...' % self._active_searches,
+                            100)
+                sleep(0.5)
+            else:
+                self._step()
+        _log.info('Halting worker threads')
+        self._terminate.set()
+        for t in threads:
+            t.join()
+        try:
+            perc_samp = self.search_algo.n_samples * 100. / self.search_algo.max_samps
+            _log.info('%.2f%% of video sampled' % perc_samp)
+            if perc_samp < 30:
+                # this is considered a 'low number' of sampled frames
+                statemon.state.increment('low_number_of_frames_seen')
+        except Exception, e:
+            _log.info('Unknown percentage of video sampled')
+            _log.debug('Exception: %s', e.message)
+        try:
+            perc_srch = self._searched * 100. / (self.search_algo.max_samps - 1)
+            _log.info('%.2f%% of video searched' % perc_srch)
+            if perc_srch < 5:
+                # this is considered a 'low number' of regions searched
+                statemon.state.increment('low_number_of_regions_searched')
+        except Exception, e:
+            _log.info('Unknown percentage of video searched')
+            _log.debug('Exception: %s', e.message)
+        _log.info('Total running time: %s, expected: %s',
+                  sec_to_time(time() - start_time),
+                  sec_to_time(max_processing_time))
         raw_results = self.results.get_results()
         # format it into the expected format
-        try:
-            perc_samp = self.search_algo.n_samples * 100. / self.search_algo.N
-            _log.info('%.2f%% of video sampled' % perc_samp)
-        except:
-            _log.info('Unknown percentage of video sampled')
-        try:
-            perc_srch = self._searched * 100. / (self.search_algo.N - 1)
-            _log.info('%.2f%% of video searched' % perc_srch)
-        except:
-            _log.info('Unknown percentage of video searched')
         results = []
         if not len(raw_results):
             _log.debug('No suitable frames have been found for video %s!'
@@ -1418,8 +1513,8 @@ class LocalSearcher(object):
             # increment the statemon
             statemon.state.increment('all_frames_filtered')
             # select which frames to use
-            frames = np.linspace(self.search_algo.buffer,
-                                 self.num_frames - self.search_algo.buffer,
+            frames = np.linspace(int(self.num_frames * self.startend_clip),
+                                 int(self.num_frames * (1 - self.startend_clip)),
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
@@ -1434,230 +1529,281 @@ class LocalSearcher(object):
                 results.append(formatted_result)
         return results
 
-    def _conduct_local_search(self, start_frame, end_frame,
-                              start_score, end_score, from_queue=False):
+    def _worker(self, workerno=None):
+        '''
+        The worker function, which dequeues requests from the input
+        queue and issues requests to either the sampler or the local
+        searcher.
+
+        The items in the input queue `inq` should consist either of
+        None or a tuple of the form (request_type, args) where
+        `request_type` is either 'samp' for sample or 'srch' for
+        local search. The args are provided directly to the corresponding
+        functions.
+        '''
+        if workerno is None:
+            workerno = 'N/A'
+        else:
+            workerno = str(workerno)
+        _log.debug('Worker %s starting', workerno)
+        while True:
+            while True:
+                # attempt to get an item from the input queue, with a timeout.
+                # following either the timeout or obtaining an item from the
+                # queue, check to see if you should terminate based on the
+                # termination event. If the event is not set, and you have
+                # obtained an item, then break and begin analysis of that
+                # item. Otherwise, try again.
+                try:
+                    item = self._inq.get(True, 2)  # 2 second timeout
+                except:
+                    item = None
+                if self._terminate.is_set():
+                    # terminate
+                    _log.debug('Worker %s terminating.', workerno)
+                    return
+                if item is not None:
+                    break
+            req_type, args = item
+            if req_type == 'samp':
+                try:
+                    with self._act_lock:
+                        self._active_samples += 1
+                    self._take_sample(*(args,))
+                    with self._act_lock:
+                        self._active_samples -= 1
+                except Exception, e:
+                    _log.error('Problem sampling frame %i: %s', args, e.message)
+                    statemon.state.increment('sampling_problem')
+            elif req_type == 'srch':
+                try:
+                    with self._act_lock:
+                        self._active_searches += 1
+                    self._conduct_local_search(*args)
+                    with self._act_lock:
+                        self._active_searches -= 1
+                except Exception, e:
+                    start = args[0]
+                    stop = args[2]
+                    _log.warn('Problem local searching %i <---> %i: %s',
+                        start, stop, e.message)
+                    statemon.state.increment('searching_problem')
+
+    def _get_score(self, frame, frameno=None, numretry=1, timeout=10.):
+        '''
+        Acquires the score for a frame.
+
+        frame: The frame to process, as an openCV-style array.
+        frameno: The frame number (if provided)
+        numretry: The maximum number of times to retry processing the frame.
+        timeout: How long to wait for the frame to be returned.
+        '''
+        rem_try = numretry
+        fno = str(frameno) if frameno is not None else 'NA'
+        if numretry is None:
+            rem_try = -1  # retry forever
+        while rem_try != 0:
+            rem_try -= 1
+            result_future = self.predictor.predict(frame, timeout=timeout)
+            concurrent.futures.wait(result_future)
+            if not result_future.exception():
+                return result.valence[0]
+            else:
+                tatemon.state.increment('unable_to_score_frame')
+                _log.warn('Problem obtaining score for frame %s: %s',
+                          fno, exception.message)
+        _log.warn(('Frame #%s has exceeded the maximum number of '
+                   'retries (%i).'), fno, numretry)
+        statemon.state.increment('frame_score_attempt_limit_reached')
+
+    def _conduct_local_search(self, start_frame, start_score,
+                              end_frame, end_score):
         '''
         Given the frames that are already the best, determine whether it makes
         sense to proceed with local search.
         '''
-        if not from_queue:
-            if not self._should_search(start_frame, end_frame, start_score,
-                                       end_score):
+        with self._proc_lock:
+            if self._terminate.is_set():
+                # do not proceed
                 return
-        if not from_queue:
-            _log.debug('Local search of %i [%.3f] <---> %i [%.3f]' % (
-                start_frame, start_score, end_frame, end_score))
-        else:
-            _log.debug(('Local search of %i [%.3f] <---> %i [%.3f] '
-                        '[from queue]') % (
-                           start_frame, start_score, end_frame, end_score))
-        gold, framenos = self.get_search_frame(start_frame)
-        if gold is None:
-            # uh-oh, something went wrong! In this case, the search region
-            # will not be searched again, and so we don't have to worry about
-            # updating the knowledge of the search algo.
-            # --- TODO --- #
-            # Add an error case here!
-            # ---      --- #
-            return
-        self._searched += 1
-        frames = self._prep(gold)
-        frame_feats = dict()
-        allowed_frames = np.ones(len(frames)).astype(bool)
-        # obtain the features required for the filter.
+            _log.debug('Local search of %i [%.3f] <---> %i [%.3f], %i active searches' % (
+                start_frame, start_score, end_frame, end_score, self._active_searches))
+            gold, framenos = self.get_search_frame(start_frame)
+            if gold is None:
+                _log.error('Could not obtain search interval %i <---> %i',
+                            start_frame, end_frame)
+                return
+            self._searched += 1
+            frames = self._prep(gold)
+            frame_feats = dict()
+            allowed_frames = np.ones(len(frames)).astype(bool)
+            # obtain the features required for the filter.
 
-        for f in self.filters:
-            fgen = self.generators[f.feature]
-            feats = fgen.generate_many(frames)
-            if f.feature in self.feats_to_cache:
-                frame_feats[f.feature] = feats
-            accepted = f.filter(feats)
-            n_rej = np.sum(np.logical_not(accepted))
-            n_acc = np.sum(accepted)
-            _log.debug(('Filter for feature %s has '
-                        'has rejected %i frames, %i remain' % (
-                            f.feature, n_rej, n_acc)))
-            if not np.any(accepted):
-                _log.debug('No frames accepted by filters')
-                return
-            # filter the current features across all feature
-            # dicts, as well as the framenos
-            acc_idxs = list(np.nonzero(accepted)[0])
-            for k in frame_feats.keys():
-                frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
-            framenos = [framenos[x] for x in acc_idxs]
-            frames = [frames[x] for x in acc_idxs]
-            gold = [gold[x] for x in acc_idxs]
-            #     frame_feats[k] = [x for n, x in enumerate(frame_feats[k])
-            #                         if accepted[n]]
-            # framenos = [x for n, x in enumerate(frames) if accepted[n]]
-            # frames = [x for n, x in enumerate(frames) if accepted[n]]
-        # ---------- START OF TEXT PROCESSING
-        # filter text too
-        if self.filter_text:
-            lower_crop_frac = 0.2  # how much of the lower portion of the
-            # image to crop out
-            text_d = []
-            for cframe in frames:
+            for f in self.filters:
+                fgen = self.generators[f.feature]
+                feats = fgen.generate_many(frames)
+                if f.feature in self.feats_to_cache:
+                    frame_feats[f.feature] = feats
+                accepted = f.filter(feats)
+                n_rej = np.sum(np.logical_not(accepted))
+                n_acc = np.sum(accepted)
+                if np.any(np.logical_not(accepted)):
+                    _log.debug(('Filter for feature %s has '
+                                'has rejected %i frames, %i remain' % (
+                                    f.feature, n_rej, n_acc)))
+                if not np.any(accepted):
+                    _log.debug('No frames accepted by filters')
+                    return
+                # filter the current features across all feature
+                # dicts, as well as the framenos
+                acc_idxs = list(np.nonzero(accepted)[0])
+                for k in frame_feats.keys():
+                    frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
+                framenos = [framenos[x] for x in acc_idxs]
+                frames = [frames[x] for x in acc_idxs]
+                gold = [gold[x] for x in acc_idxs]
+            for k, f in self.generators.iteritems():
+                if k in frame_feats:
+                    continue
+                if k in self.feats_to_cache:
+                    feats = f.generate_many(frames)
+                    frame_feats[k] = feats
+            # get the combined scores
+            comb = self.combiner.combine_scores(frame_feats)
+            comb = np.array(comb)
+            best_frameno = framenos[np.argmax(comb)]
+            best_frame = frames[np.argmax(comb)]
+            best_gold = gold[np.argmax(comb)]
+            # unbind gold, so that you don't have a MEMORY CATASTROPHE
+            del gold
+            # ---------- START OF TEXT PROCESSING
+            if self.filter_text:
+                # check if the gold version of the best frame has too much text
+                lower_crop_frac = 0.2  # how much of the lower portion of the
+                # image to crop out
+                text_d = []
                 # Cut out the bottom 20% of the image because it often has
                 # tickers
                 text_det_out = cv2.text.textDetect(
-                    cframe[0:int(cframe.shape[0]*.82), :, :],
+                    best_gold[0:int(best_gold.shape[0]*.82), :, :],
                     *self.text_filter_params)
-                text_d.append(text_det_out)
-            masks = [x[1] for x in text_d]
-            # accept only those where tet occupies a sufficiently small amount
-            # of the image.
-            accepted = [(np.sum(x > 0) * 1./ x.size) < self.filter_text_thresh
-                        for x in masks]
-            n_rej = np.sum(np.logical_not(accepted))
-            n_acc = np.sum(accepted)
-            _log.debug(('Filter for feature %s has '
-                        'has rejected %i frames, %i remain' % (
-                            'fancy text detect', n_rej, n_acc)))
-            if not np.any(accepted):
-                _log.debug('No frames accepted by filters')
-                return
-            # filter the current features across all feature
-            # dicts, as well as the framenos
-            acc_idxs = list(np.nonzero(accepted)[0])
-            for k in frame_feats.keys():
-                frame_feats[k] = [frame_feats[k][x] for x in acc_idxs]
-            framenos = [framenos[x] for x in acc_idxs]
-            frames = [frames[x] for x in acc_idxs]
-            gold = [gold[x] for x in acc_idxs]
-        # ---------- END OF TEXT PROCESSING
-        for k, f in self.generators.iteritems():
-            if k in frame_feats:
-                continue
-            if k in self.feats_to_cache:
-                feats = f.generate_many(frames)
-                frame_feats[k] = feats
-        # get the combined scores
-        comb = self.combiner.combine_scores(frame_feats)
-        comb = np.array(comb)
-        best_frameno = framenos[np.argmax(comb)]
-        best_frame = frames[np.argmax(comb)]
-        best_gold = gold[np.argmax(comb)]
-        best_feat_dict = {x: frame_feats[x][np.argmax(comb)] for x in
-                          frame_feats.keys()}
-        feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
-        indi_framescore = self.predictor.predict(best_frame)
-        inter_framescore = (start_score + end_score) / 2
-        # interpolate the framescore
-        flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
-        inter_framescore = (1 - flambda) * start_score + flambda * end_score
-        framescore = (indi_framescore + inter_framescore) / 2
-        if self.use_all_data:
-            # save the data from the analysis, for frames that were not
-            # filtered out.
-            for featName, cfeats in frame_feats.iteritems():
-                if featName not in self.feats_to_cache:
-                    continue
-                for cfidx, fval in enumerate(cfeats):
-                    if ((framenos[cfidx] == start_frame) and
-                            (framenos[cfidx] == end_frame)):
-                        # then it's already been measured
+                mask = text_det_out[1]
+                if (np.sum(mask > 0) * 1./mask.size) > self.filter_text_thresh:
+                    _log.debug('Best frame rejected by text filtering.')
+                    return
+            # ---------- END OF TEXT PROCESSING
+            best_feat_dict = {x: frame_feats[x][np.argmax(comb)] for x in
+                              frame_feats.keys()}
+            feat_score_func = self.combiner.combine_scores_func(best_feat_dict)
+            if self.use_all_data:
+                # save the data from the analysis, for frames that were not
+                # filtered out.
+                for featName, cfeats in frame_feats.iteritems():
+                    if featName not in self.feats_to_cache:
                         continue
-                    self.stats[featName].push(fval)
-        elif (self.use_best_data and
-                  (best_frameno != start_frame) and
-                  (best_frameno != end_frame)):
-            # save the data from the best identified thumb
-            for featName, featVal in best_feat_dict.iteritems():
-                self.stats[featName].push(featVal)
-
-        _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
-                    ' is %i with interp score %.3f and with feature score '
-                    '%.3f') % (start_frame,
-                               start_score, end_frame, end_score, best_frameno,
-                               framescore, np.max(comb)))
-        # the selected frame (whatever it may be) will be assigned
-        # the score equal to mean of its boundary frames.
-        # push the frame into the results object. Ensure that the analysis
-        # frame is not inserted, but rather the best "gold" frame (i.e., one
-        # that has not been cropped in accordance with analysis_crop)
-        # if best_frameno == 2353:
-        #     import ipdb
-        #     ipdb.set_trace()
-        if TESTING:
-            meta = [best_feat_dict,
-                    self.combiner.get_indy_funcs(best_feat_dict)]
+                    for cfidx, fval in enumerate(cfeats):
+                        if ((framenos[cfidx] == start_frame) and
+                                (framenos[cfidx] == end_frame)):
+                            # then it's already been measured
+                            continue
+                        self.stats[featName].push(fval)
+            elif (self.use_best_data and
+                      (best_frameno != start_frame) and
+                      (best_frameno != end_frame)):
+                # save the data from the best identified thumb
+                for featName, featVal in best_feat_dict.iteritems():
+                    self.stats[featName].push(featVal)
+            if TESTING:
+                meta = [best_feat_dict,
+                        self.combiner.get_indy_funcs(best_feat_dict)]
+            else:
+                meta = None
+        if self.predictor.async:
+            indi_framescore = self._get_score(best_frame,
+                                              frameno=best_frameno)
         else:
-            meta = None
-        self.results.accept_replace(best_frameno, framescore, best_gold,
-                                    np.max(comb), meta=meta,
-                                    feat_score_func=feat_score_func)
+            indi_framescore = self.predictor.predict(best_frame)
+        with self._proc_lock:
+            inter_framescore = (start_score + end_score) / 2
+            # interpolate the framescore
+            flambda = (best_frameno - start_frame) * 1. / (start_frame - end_frame)
+            inter_framescore = (1 - flambda) * start_score + flambda * end_score
+            framescore = (indi_framescore + inter_framescore) / 2
+            _log.debug(('Best frame from interval %i [%.3f] <---> %i [%.3f]'
+                        ' is %i with interp score %.3f and with feature score '
+                        '%.3f') % (start_frame,
+                                   start_score, end_frame, end_score, best_frameno,
+                                   framescore, np.max(comb)))
+            self.results.accept_replace(best_frameno, framescore, best_gold,
+                np.max(comb), meta=meta, feat_score_func=feat_score_func)
 
     def _take_sample(self, frameno):
         '''
         Takes a sample, updating the estimates of mean score, mean image
         variance, mean frame xdiff, etc.
         '''
-        frames = self.get_seq_frames(
-                [frameno, frameno + self.local_search_step])
-        if frames is None:
-            # uh-oh, something went wrong! Update the knowledge state of the
-            # search algo with the knowledge that the frame is bad.
-            self.search_algo.update(frameno, bad=True)
-            return
-        frames = self._prep(frames)
-        # get the score the image.
-        frame_score = self.predictor.predict(frames[0])
-        # extract all the features we want to cache
-        for n, f in self.feats_to_cache.iteritems():
-            vals = f.generate_many(frames, fonly=True)
-            self.stats[n].push(vals[0])
-        # update the knowledge about its variance
-        self.col_stat.push(frames[0])
-        self.stats['score'].push(frame_score)
-        _log.debug('Took sample at %i, score is %.3f' % (frameno, frame_score))
-        # update the search algo's knowledge
-        self.search_algo.update(frameno, frame_score)
+        with self._proc_lock:
+            if self._terminate.is_set():
+                # do not proceed
+                return
+            frames = self.get_seq_frames(
+                    [frameno, frameno + self.local_search_step])
+            if frames is None:
+                # uh-oh, something went wrong! Update the knowledge state of the
+                # search algo with the knowledge that the frame is bad.
+                self.search_algo.update(frameno, bad=True)
+                return
+            frames = self._prep(frames)
+        if self.predictor.async:
+            # get the score the image from the server.
+            frame_score = self._get_score(frames[0], frameno)
+        else:
+            frame_score = self.predictor.predict(frames[0])
+        with self._proc_lock:
+            self.stats['score'].push(frame_score)
+            _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)
+            self.search_algo.update(frameno, frame_score)
+            # extract all the features we want to cache
+            for n, f in self.feats_to_cache.iteritems():
+                vals = f.generate_many(frames, fonly=True)
+                self.stats[n].push(vals[0])
+            # update the knowledge about its variance
+            self.col_stat.push(frames[0])
 
-    def _should_search(self, start_frame, end_frame, start_score, end_score):
+    def _step(self, force_sample=False):
         '''
-        Accepts a start frame score and the end frame score and returns True /
-        False indicating if this region should be searched.
+        Takes a single step in the search. If force_sample is
+        True, then it will force it to take a sample.
+        '''
 
-        Regions are searched if and only if:
-            - the mean of their score exceeds the min of the results.
-            - mean of their scores exceeds the mean score observed so far.
-        '''
-        mean_score = (start_score + end_score) / 2.
-        if mean_score > self.min_score:
-            if mean_score > self.stats['score'].percentile(35.):
-                _log.debug('Interval should be searched')
-                return True
+        if ((force_sample or np.random.rand() < self.explore_coef) and
+            not self.done_sampling):
+            try:
+                frameno = self.search_algo.get_sample()
+            except Exception, e:
+                _log.error('ERROR in getting sample from MCMH! %s', e.message)
+                statemon.state.increment('mcmh_sample_error')
+                return
+            if frameno is not None:
+                # then there are still samples to be taken
+                self._inq.put(('samp', frameno))
             else:
-                _log.debug('Interval can be in results but does not exceed'
-                           ' mean observed score data')
-        else:
-            _log.debug('Interval cannot be admitted to results')
-        _log.debug('Placing rejected interval into queue')
-        heapq.heappush(self._queue, (-mean_score, (start_frame, end_frame,
-                                                   start_score, end_score)))
-        return False
-
-    def _step(self):
-        r = self.search_algo.get()
-        if r is None:
-            return False
-        action, meta = r
-        if action == 'sample':
-            try:
-                self._take_sample(meta)
-            except Exception as e:
-                _log.error('Problem obtaining sample of %s! '
-                           'Error: %s', str(meta), e.message)
-                self.search_algo.update(meta, 0, bad=True)
-        else:
-            try:
-                self._conduct_local_search(*meta)
-            except Exception as e:
-                _log.debug('Problem conducting local search of %i <---> %i'
-                           ' Error: %s', meta[0], meta[1], e)
-        return True
+                self.done_sampling = True
+                _log.info('Finished sampling')
+            return
+        # okay, let's get a search frame instead.
+        try:
+            srch_info = self.search_algo.get_search()
+        except Exception, e:
+            _log.error('ERROR getting search region from MCMH! %s', e.message)
+            statemon.state.increment('mcmh_search_error')
+            return
+        if srch_info is None:
+            if self.done_sampling:
+                self.done_searching = True
+                _log.info('Finished searching')
+            return
+        self._inq.put(('srch', srch_info))
 
     def _update_color_stats(self, images):
         '''
@@ -1674,23 +1820,15 @@ class LocalSearcher(object):
 
     def _mix(self):
         '''
-        'mix' takes a number of equispaced samples from the video. This is
+        'mix' takes a number of samples from the video. This is
         inspired from the notion of mixing for a Markov chain.
         '''
-        _log.info('Mixing before search begins for %i frames' % (
-            self.mixing_samples))
-        num_frames = self.mixing_samples
-        samples = np.linspace(0, self.num_frames,
-                              self.mixing_samples + 2).astype(int)
-        samples = samples[1:-1]  # trim off ends
-        samples = [self.search_algo.get_nearest(x) for x in samples]
-        samples = list(np.unique(samples))
-        _log.info('Taking %i initial samples' % (len(samples)))
-        # we need to be able to compute the SAD, so we need to
-        # also insert local search steps
-        for frameno in samples:
-            self._take_sample(frameno)
+        _log.info('Taking %i initial samples' % (self.mixing_samples))
+        for i in range(self.mixing_samples):
+            self._step(force_sample=True)
 
+    # -------------------------------------------------------------------------
+    # OBTAINING FRAMES FROM THE VIDEO
     def _get_frame(self, f):
         try:
             more_data, self.cur_frame = pycvutils.seek_video(
@@ -1711,8 +1849,6 @@ class LocalSearcher(object):
             frame = None
         return frame
 
-    # -------------------------------------------------------------------------
-    # OBTAINING FRAMES FROM THE VIDEO
     def get_seq_frames(self, framenos):
         '''
         Acquires a series of frames, in sorted order.
@@ -1750,7 +1886,7 @@ class LocalSearcher(object):
         frames = self.get_region_frames(start_frame, num,
                                         self.local_search_step)
         frameno = range(start_frame,
-                        start_frame + self.local_search_width + 1,
+                        start_frame + self.local_search_width,
                         self.local_search_step)
         return frames, frameno
 
