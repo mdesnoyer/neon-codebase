@@ -1286,7 +1286,7 @@ class VideoHelper(object):
                          limit=limit,
                          search_query=query)
 
-        videos = search_res['videos']
+        videos = search_res['videos'] or []
         since_time = search_res['since_time']
         until_time = search_res['until_time']
         vid_dict = yield VideoHelper.build_video_dict(
@@ -1326,29 +1326,28 @@ class VideoHelper(object):
         new_videos = []
         vid_counter = 0
         index = 0
-        if videos:
-            videos = [x for x in videos if x and x.job_id]
-            job_ids = [(v.job_id, v.get_account_id())
-                          for v in videos]
+        videos = [x for x in videos if x and x.job_id]
+        job_ids = [(v.job_id, v.get_account_id())
+                      for v in videos]
 
-            requests = yield neondata.NeonApiRequest.get_many(
-                           job_ids,
-                           async=True)
-            for video, request in zip(videos, requests):
-                if video is None or request is None and video_ids:
-                    new_videos.append({'error': 'video does not exist',
-                                       'video_id': video_ids[index] })
-                    index += 1
-                    continue
+        requests = yield neondata.NeonApiRequest.get_many(
+                       job_ids,
+                       async=True)
+        for video, request in zip(videos, requests):
+            if video is None or request is None and video_ids:
+                new_videos.append({'error': 'video does not exist',
+                                   'video_id': video_ids[index] })
+                index += 1
+                continue
 
-                new_video = yield VideoHelper.db2api(video,
-                                                     request,
-                                                     fields)
-                new_videos.append(new_video)
-                vid_counter += 1
+            new_video = yield VideoHelper.db2api(video,
+                                                 request,
+                                                 fields)
+            new_videos.append(new_video)
+            vid_counter += 1
 
-            vid_dict['videos'] = new_videos
-            vid_dict['video_count'] = vid_counter
+        vid_dict['videos'] = new_videos
+        vid_dict['video_count'] = vid_counter
 
         raise tornado.gen.Return(vid_dict)
 
@@ -1900,7 +1899,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         schema = Schema({
             'limit': All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            Optional('query'): CustomVoluptuousTypes.Regex(),
+            Optional('query'): Any(CustomVoluptuousTypes.Regex(), str),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float))
@@ -1946,7 +1945,7 @@ class VideoSearchExternalHandler(APIV2Handler):
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'limit': All(Coerce(int), Range(min=1, max=100)),
-          Optional('query'): CustomVoluptuousTypes.Regex()
+          Optional('query'): Any(CustomVoluptuousTypes.Regex(), str),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
           'until': All(Coerce(float)),
@@ -1965,13 +1964,13 @@ class VideoSearchExternalHandler(APIV2Handler):
 
         base_url = '/api/v2/%s/videos/search' % account_id
         vid_dict = yield VideoHelper.get_search_results(
-                       account_id,
-                       since,
-                       until,
-                       query,
-                       limit,
-                       fields,
-                       base_url=base_url)
+            account_id,
+            since,
+            until,
+            query,
+            limit,
+            fields,
+            base_url=base_url)
 
         self.success(vid_dict)
 
