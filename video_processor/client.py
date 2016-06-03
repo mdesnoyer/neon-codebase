@@ -1053,23 +1053,12 @@ class VideoClient(multiprocessing.Process):
     def load_model(self):
         ''' load model '''
         _log.info('Generating predictor instance')
-        
-        # TODO (nick): Make sure you get rid of this eventually.
-        # TODO (mark): Maybe you should replace it when you create the actual
-        #              connection object?
-        class AquilaConnectionMock():
-          def __init__(self):
-            '''Mocks the aquila connection object.'''
-            pass
-          # note: this may need to be a static method?
-          def get_ip(self, force_refresh=False):
-            return '10.0.66.209'
-
-        aq_con = AquilaConnectionMock()
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
         predictor = predictor.DeepnetPredictor(
             port=options.model_server_port,
             concurrency=options.request_concurrency,
-            aquila_connection=aq_con)
+            aquila_connection=aquila_conn)
         # TODO (nick): Figure out how to get the aquila server to relay the
         #              model version to the local model.
         self.model_version = 'Not Available'
