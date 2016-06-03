@@ -285,14 +285,11 @@ class NewAccountHandler(APIV2Handler):
             schema(args)
         # If not email, then provide a loginless account.
         else:
-            # If args are not valid against this schema,
-            # try using the loginless account creation.
             account = yield AccountHelper.save_loginless_account()
 
+            # Generate and return tokens.
             access_token, refresh_token = AccountHelper.get_auth_tokens(
                 {'account_id': account.get_id()})
-
-            # Generate and return tokens.
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
