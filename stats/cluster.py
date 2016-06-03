@@ -888,10 +888,10 @@ class Cluster():
         _log.info('Waiting until cluster %s is ready' % self.cluster_id)
         cur_state = conn.describe_cluster(self.cluster_id)
         while cur_state.status.state != 'WAITING':
-            if cur_state.state in ['TERMINATING', 'TERMINATED',
+            if cur_state.status.state in ['TERMINATING', 'TERMINATED',
                              'TERMINATED_WITH_ERRORS', 'FAILED']:
                 msg = ('Cluster could not start because: %s',
-                           cur_state.laststatechangereason)
+                           cur_state.status.statechangereason.message)
                 _log.error(msg)
                 raise ClusterCreationError(msg)
 
