@@ -16,6 +16,7 @@ from grpc.beta import implementations
 from grpc.beta.interfaces import ChannelConnectivity
 import hashlib
 import logging
+import model.errors
 import numpy as np
 from PIL import Image
 import os
@@ -32,8 +33,7 @@ _log = logging.getLogger(__name__)
 
 statemon.define('lost_server_connection', int)  # lost the server connection
 statemon.define('unable_to_connect', int)  # could not connect to server in the first place
-
-class PredictionError(Exception): pass
+statemon.define('good_deepnet_connection', int)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -198,7 +198,7 @@ class Predictor(object):
                           e)
                 delay = (1 << cur_try) * 0.2 * random.random()
                 time.sleep(delay)
-        raise PredictionError(str(e))
+        raise model.errors.PredictionError(str(e))
 
     def predictasync(self, image, *args, **kwargs):
         '''
@@ -365,6 +365,7 @@ class DeepnetPredictor(Predictor):
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
             self._consequtive_connection_failures += 1
+            statemon.state.good_deepnet_connection = 0
             time.sleep((self._consequtive_connection_failures << 1) * 0.1 *
                        random.random())
             self._reconnect(force_refresh=True)
@@ -374,6 +375,7 @@ class DeepnetPredictor(Predictor):
             _log.debug('Server has been reached')
             self._ready.set()
             self._consequtive_connection_failures = 0
+            statemon.state.good_deepnet_connection = 1
             _log.debug('Ready event is set.')
 
     def predictasync(self, image, timeout=10.0):
@@ -383,7 +385,8 @@ class DeepnetPredictor(Predictor):
         '''
         if self._shutting_down:
             fut = concurrent.futures.Future()
-            fut.set_exception(PredictionError('Object is shutting down.'))
+            fut.set_exception(model.errors.PredictionError(
+                'Object is shutting down.'))
             return fut
         conn_est = self._ready.wait(20.)  # TODO: do we want a timeout?
         if not conn_est:

@@ -1690,7 +1690,7 @@ class LocalSearcher(object):
                 meta = None
         try:
             indi_framescore = self.predictor.predict(best_frame)
-        except model.predictor.PredictionError as e:
+        except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
             _log.warn('Problem obtaining score localsearch frame %s: %s',
                       (best_frameno, e))
@@ -1728,7 +1728,7 @@ class LocalSearcher(object):
             frames = self._prep(frames)
         try:
             frame_score = self.predictor.predict(frames[0])
-        except model.predictor.PredictionError as e:
+        except model.errors.PredictionError as e:
             statemon.state.increment('unable_to_score_frame')
             _log.warn('Problem obtaining score for frame %s: %s',
                       (frameno, e))
