@@ -13,6 +13,7 @@ if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
 import boto
+import boto.exception
 import concurrent.futures
 import functools
 import itertools
@@ -24,11 +25,16 @@ import tornado.gen
 import utils.aws
 import utils.obj
 from utils.options import define, options
+from utils import statemon
 import utils.sync
 
 define('refresh_rate', default=120.0, type=float,
        help=('Rate (in seconds) at which to refresh autoscale info '
              'automatically'))
+
+statemon.define('ip_list_connection_lost', int)
+
+_log = logging.getLogger(__name__)
 
 class NoValidHostsError(Exception): pass
 
@@ -69,9 +75,12 @@ class RefresherThread(threading.Thread):
 
     def stop_monitoring_group(self, group_name):
         with self._lock:
-            timer = self._timers[group_name]
-            timer.stop()
-            del self._timers[group_name]
+            try:
+                timer = self._timers[group_name]
+                timer.stop()
+                del self._timers[group_name]
+            except KeyError:
+                pass
 
     
 
@@ -90,7 +99,7 @@ class AutoScaleGroup(object):
         self._executor = concurrent.futures.ThreadPoolExecutor(10)
 
         # Start monitoring this group
-        #RefresherThread().add_group_to_monitor(name)
+        RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
         # Stop monitoring this group
@@ -99,23 +108,30 @@ class AutoScaleGroup(object):
     @tornado.gen.coroutine
     def _refresh_data(self):
         '''Refreshes the list of known ips.'''
-        auto_conn = yield self._executor.submit(boto.connect_autoscale)
-        ec2conn = yield self._executor.submit(boto.connect_ec2)
-        groups = yield self._executor.submit(auto_conn.get_all_groups,
-                                             names=[self.name])
+        try:
+            auto_conn = yield self._executor.submit(boto.connect_autoscale)
+            ec2conn = yield self._executor.submit(boto.connect_ec2)
+            groups = yield self._executor.submit(auto_conn.get_all_groups,
+                                                 names=[self.name])
 
-        instance_info = []
-        id_zone = [(x.instance_id, x.availability_zone)
-                   for x in groups[0].instances if
-                   x.lifecycle_state == 'InService']
-        for i in range(0, len(id_zone), 10):
-            chunk = id_zone[i:i+10]
-            instances = yield self._executor.submit(ec2conn.get_only_instances,
-                instance_ids=zip(*chunk)[0])
-            instance_info.extend([{'id': y[0],
-                                   'ip': x.private_ip_address,
-                                   'zone': y[1]} 
-                                   for x, y in zip(instances, chunk)])
+            instance_info = []
+            id_zone = [(x.instance_id, x.availability_zone)
+                       for x in groups[0].instances if
+                       x.lifecycle_state == 'InService']
+            for i in range(0, len(id_zone), 10):
+                chunk = id_zone[i:i+10]
+                instances = yield self._executor.submit(
+                    ec2conn.get_only_instances,
+                    instance_ids=zip(*chunk)[0])
+                instance_info.extend([{'id': y[0],
+                                       'ip': x.private_ip_address,
+                                       'zone': y[1]} 
+                                       for x, y in zip(instances, chunk)])
+            statemon.state.ip_list_connection_lost = 0
+        except (boto.exception.BotoClientError, boto.exception.BotoServerError) as e:
+            _log.error('Could not refresh autoscale data: %s' % e)
+            statemon.state.ip_list_connection_lost = 1
+            return
             
         with self._lock:
             self._instance_info = instance_info
@@ -132,6 +148,9 @@ class AutoScaleGroup(object):
         '''
         if force_refresh or self._instance_info is None:
             yield self._refresh_data()
+        if self._instance_info is None:
+            # There was a connection issue, but that's logged separately
+            raise NoValidHostsError()
 
         ips = yield self._get_ip_list()
                     
@@ -164,12 +183,12 @@ class MultipleAutoScaleGroups(object):
     '''Class that watches many autoscaling groups.'''
     def __init__(self, names):
         self.groups = [AutoScaleGroup(x) for x in names]
-            
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_ip(self, force_refresh=False):
-        if force_refresh:
+        if force_refresh or any([x._instance_info is None 
+                                 for x in self.groups]):
             yield [x._refresh_data() for x in self.groups]
 
         ip_lists = yield [x._get_ip_list(True) for x in self.groups]

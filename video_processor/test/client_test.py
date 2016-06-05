@@ -91,6 +91,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                                 "test.mp4") 
         self.test_video_file2 = os.path.join(os.path.dirname(__file__), 
                                 "test2.mp4") 
+        self.predictor_patcher = patch(
+            'video_processor.client.model.predictor')
+        self.predictor_patcher.start()
+        
         # Fill out database
         na = neondata.NeonUserAccount('acct1')
         self.api_key = na.neon_api_key
@@ -161,6 +165,11 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.uc = self._future_wrap_mock(self.utils_patch.start(),
                                          require_async_kw=True)
 
+        # Mock out the aquila lookup
+        self.aquila_conn_patcher = patch(
+            'video_processor.client.utils.autoscale')
+        self.aquila_conn_patcher.start()
+
         # create the client object
         self.video_client = video_processor.client.VideoClient(
             'some/dir/my_model.model',
@@ -170,8 +179,10 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         
     def tearDown(self):
         self.job_queue_patcher.stop()
+        self.aquila_conn_patcher.stop()
         self.youtube_patcher.stop()
         self.utils_patch.stop()
+        self.predictor_patcher.stop()
         self.postgresql.clear_all_tables()
         super(TestVideoClient, self).tearDown()
 
@@ -441,7 +452,7 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
         self.job_hide_mock.assert_called_with(self.job_message,
                                               3.0*600.0)
 
-    @patch('video_processor.client.model.load_model')
+    @patch('video_processor.client.model.generate_model')
     @tornado.testing.gen_test
     def test_fail_and_retry(self, model_mock):
         self.youtube_extract_info_mock.side_effect = [
@@ -1490,7 +1501,8 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.cloudinary_mock().upload.side_effect = [future]
 
         # Mock out the model
-        self.model_patcher = patch('video_processor.client.model.load_model')
+        self.model_patcher = patch(
+            'video_processor.client.model.generate_model')
         self.model_file = os.path.join(os.path.dirname(__file__), "model.pkl")
         self.model_version = "test" 
         self.model = MagicMock()
@@ -1498,6 +1510,9 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         load_model_mock.return_value = self.model
         ct_output, ft_output = pickle.load(open(self.model_file)) 
         self.model.choose_thumbnails.return_value = ct_output
+        self.predictor_patcher = patch(
+            'video_processor.client.model.predictor')
+        self.predictor_patcher.start()
 
         # Mock out the image download
         self.im_download_mocker = patch(
@@ -1508,12 +1523,18 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.random_image = imageutils.PILImageUtils.create_random_image(480, 640)
         self.im_download_mock.return_value = self.random_image
 
+        # Mock out the aquila lookup
+        self.aquila_conn_patcher = patch(
+            'video_processor.client.utils.autoscale')
+        self.aquila_conn_patcher.start()
+
         # create the client object
         self.video_client = VideoClient(
-            'some/dir/my_model.model',
+            'some/dir/my_model',
             multiprocessing.BoundedSemaphore(1))
         
     def tearDown(self):
+        self.aquila_conn_patcher.stop()
         self.s3_patcher.stop()
         self.client_s3_patcher.stop()
         self.http_mocker.stop()
@@ -1521,6 +1542,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         self.cloudinary_patcher.stop()
         self.model_patcher.stop() 
         self.job_queue_patcher.stop()
+        self.predictor_patcher.stop()
         self.postgresql.clear_all_tables()
         super(SmokeTest, self).tearDown()
 
@@ -1592,7 +1614,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
         self.assertGreater(len(video_meta.thumbnail_ids), 0)
-        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertEquals(video_meta.model_version, 'my_model-aqv1.1.250')
 
         # Check the thumbnail data
         thumbs = neondata.ThumbnailMetadata.get_many(
@@ -1662,7 +1684,7 @@ class SmokeTest(test_utils.neontest.AsyncTestCase):
         # Check the video data
         video_meta = neondata.VideoMetadata.get(self.video_id)
         self.assertGreater(len(video_meta.thumbnail_ids), 0)
-        self.assertEquals(video_meta.model_version, 'my_model')
+        self.assertEquals(video_meta.model_version, 'my_model-aqv1.1.250')
         self.assertNotIn('%s_thumb1' % self.video_id, video_meta.thumbnail_ids)
         self.assertNotIn('%s_thumb2' % self.video_id, video_meta.thumbnail_ids)
         self.assertIn('%s_thumb3' % self.video_id, video_meta.thumbnail_ids)

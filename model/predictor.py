@@ -271,6 +271,8 @@ class DeepnetPredictor(Predictor):
         # with stubs & channels that are *attributes* of a
         # class.
         # atexit.register(self.shutdown)
+        self.channel = None
+        self.stub = None
         self._connect(force_refresh=False)
 
     def _connect(self, force_refresh):
@@ -326,8 +328,9 @@ class DeepnetPredictor(Predictor):
             while self.active == self.concurrency:
                 self._cv.wait()
         self.active += 1
-        # # it appears to be the case that creating the stub as an attribute can cause some
-        # # issues, so let's see if this works.
+        # # it appears to be the case that creating the stub as an
+        # # attribute can cause some issues, so let's see if this
+        # # works.
         # with aquila_inference_pb2.beta_create_AquilaService_stub(self.channel) as stub:
         #     result_future = stub.Regress.future(request, timeout)  # 10 second timeout
         result_future = self.stub.Regress.future(request, timeout)
@@ -356,19 +359,27 @@ class DeepnetPredictor(Predictor):
             return self.active == 0
 
     def __del__(self):
-        del self.channel
-        del self.stub
+        if self.channel is not None:
+            del self.channel
+            self.channel = None
+        if self.stub is not None:
+            del self.stub
+            self.stub = None
         super(DeepnetPredictor, self).__del__()
 
     def shutdown(self):
         _log.debug('Exit has started.')
         # just try to unsubscribe everything.
-        cbs = self.channel._connectivity_channel._callbacks_and_connectivities
-        while len(cbs):
-            subscribed_callback, unused_connectivity = cbs[0]
-            self.channel.unsubscribe(subscribed_callback)
-        del self.channel
-        del self.stub
+        if self.channel is not None:
+            cbs = self.channel._connectivity_channel._callbacks_and_connectivities
+            while len(cbs):
+                subscribed_callback, unused_connectivity = cbs[0]
+                self.channel.unsubscribe(subscribed_callback)
+            del self.channel
+            self.channel = None
+        if self.stub is not None:
+            del self.stub
+            self.stub = None
 
 
 class KFlannPredictor(Predictor):

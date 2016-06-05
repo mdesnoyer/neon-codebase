@@ -49,6 +49,10 @@ class KeyedSingleton(type):
                     *args, **kwargs)
         return cls._instances[single_key]
 
+    def _clear_singletons(self):
+        '''For unittests only.'''
+        self._instances = {}
+
 class Singleton(KeyedSingleton):
     '''A Singleton metaclass so that only one version of the object type exists.
 

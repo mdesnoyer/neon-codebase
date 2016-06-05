@@ -1053,7 +1053,7 @@ class VideoClient(multiprocessing.Process):
         _log.info('Generating predictor instance')
         aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
             options.model_autoscale_groups.split(','))
-        predictor = predictor.DeepnetPredictor(
+        predictor = model.predictor.DeepnetPredictor(
             port=options.model_server_port,
             concurrency=options.request_concurrency,
             aquila_connection=aquila_conn)
