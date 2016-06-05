@@ -142,7 +142,7 @@ def generate_model(ls_inp_filename, predictor):
     predictor: an instance of the predictor.
     '''
     with open(ls_inp_filename) as f:
-        ls_in_dict = pickle.load(ls_inp_filename)
+        ls_in_dict = pickle.load(f)
     loc_srch = local_video_searcher.LocalSearcher(predictor, **ls_in_dict)
     model = Model(predictor, vid_searcher=loc_srch)
     model.restore_additional_data(ls_inp_filename)
