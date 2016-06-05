@@ -41,8 +41,12 @@ class KeyedSingleton(type):
     def __call__(cls, key, *args, **kwargs):
         single_key = (cls, key)
         if single_key not in cls._instances:
-            cls._instances[single_key] = super(KeyedSingleton, cls).__call__(
-                *args, **kwargs)
+            if key is not None:
+                cls._instances[single_key] = super(KeyedSingleton, cls).__call__(
+                key, *args, **kwargs)
+            else:
+                cls._instances[single_key] = super(KeyedSingleton, cls).__call__(
+                    *args, **kwargs)
         return cls._instances[single_key]
 
 class Singleton(KeyedSingleton):
@@ -56,6 +60,6 @@ class Singleton(KeyedSingleton):
     Then, every time you call MyClass(), you get the same object
     '''
     def __call__(cls, *args, **kwargs):
-        super(Singleton, cls).__call__(None, *args, **kwargs)
+        return super(Singleton, cls).__call__(None, *args, **kwargs)
 
 

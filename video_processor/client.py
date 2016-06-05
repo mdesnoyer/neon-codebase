@@ -111,8 +111,6 @@ define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
 define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
        help='Api key for the notifications')
-define('server_auth', default='secret_token',
-       help='Secret token for talking with the video processing server')
 define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
 define('video_temp_dir', default=None,
@@ -1061,7 +1059,8 @@ class VideoClient(multiprocessing.Process):
             aquila_connection=aquila_conn)
         # TODO (nick): Figure out how to get the aquila server to relay the
         #              model version to the local model.
-        self.model_version = 'Not Available'
+        self.model_version = '%s-aqv1.1.250' % os.path.basename(
+            self.model_file)
         # note, the model file is no longer a complete model, but is instead
         # an input dictionary for local search.
         self.model = model.generate_model(self.model_file, predictor)

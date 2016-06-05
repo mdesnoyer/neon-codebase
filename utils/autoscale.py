@@ -36,6 +36,7 @@ class RefresherThread(threading.Thread):
     __metaclass__ = utils.obj.Singleton
     
     def __init__(self):
+        super(RefresherThread, self).__init__()
         self._lock = threading.RLock()
         self._timers = {} # name -> timer
         self.ioloop = tornado.ioloop.IOLoop()
@@ -54,7 +55,7 @@ class RefresherThread(threading.Thread):
 
     def _add_group_to_monitor_impl(self, group_name):
         timer = utils.sync.PeriodicCoroutineTimer(
-            lambda x:self._refresh_data(group_name),
+            lambda: self._refresh_data(group_name),
             options.refresh_rate*1000,
             self.ioloop)
         with self._lock:
@@ -82,14 +83,14 @@ class AutoScaleGroup(object):
         self.name = name # The autoscaling group name
         # List of dictionaries with instance info. will have
         # 'zone' and 'ip'
-        self._instances = [] 
+        self._instance_info = None 
 
         self._lock = threading.RLock()
 
         self._executor = concurrent.futures.ThreadPoolExecutor(10)
 
         # Start monitoring this group
-        RefresherThread().add_group_to_monitor(name)
+        #RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
         # Stop monitoring this group
@@ -104,17 +105,20 @@ class AutoScaleGroup(object):
                                              names=[self.name])
 
         instance_info = []
-        instance_ids = [x.instance_id for x in groups[0].instances if
-                        x.lifecycle_state == 'InService']
-        for i in range(0, len(instance_ids), 10):
+        id_zone = [(x.instance_id, x.availability_zone)
+                   for x in groups[0].instances if
+                   x.lifecycle_state == 'InService']
+        for i in range(0, len(id_zone), 10):
+            chunk = id_zone[i:i+10]
             instances = yield self._executor.submit(ec2conn.get_only_instances,
-                instance_ids=instance_ids[i:i+10])
-            instance_info.extend([{'id': x.id,
+                instance_ids=zip(*chunk)[0])
+            instance_info.extend([{'id': y[0],
                                    'ip': x.private_ip_address,
-                                   'zone': x.placement} for x in instances])
+                                   'zone': y[1]} 
+                                   for x, y in zip(instances, chunk)])
             
         with self._lock:
-            self._instances = instance_info
+            self._instance_info = instance_info
             
 
     @utils.sync.optional_sync
@@ -126,7 +130,7 @@ class AutoScaleGroup(object):
         force_refresh - Whether to check the instance group details before returning the ip.
         only_cur_az - If true, only returns IPs from this AZ
         '''
-        if force_refresh:
+        if force_refresh or self._instance_info is None:
             yield self._refresh_data()
 
         ips = yield self._get_ip_list()
@@ -143,14 +147,15 @@ class AutoScaleGroup(object):
         Inputs:
         only_cur_az - If True only return IPs for this AZ
         '''
-        cur_az = yield self._executor.submit(utils.aws.get_current_az)
+        metadata = utils.aws.InstanceMetadata()
+        cur_az = yield self._executor.submit(metadata.get_current_az)
 
         with self._lock:
             # Pick an ip from this AZ if we can
-            ips = [x['ip'] for x in self._instances 
+            ips = [x['ip'] for x in self._instance_info
                    if x['zone'] == cur_az]
             if len(ips) == 0 and not only_cur_az:
-                ips = [x['ip'] for x in self._instances]
+                ips = [x['ip'] for x in self._instance_info]
 
         raise tornado.gen.Return(ips)
 

@@ -6,14 +6,25 @@ Copyright 2016
 '''
 
 import boto.utils
+import utils.obj
 
-_az = 'unknown'
-def get_current_az():
-    '''Returns the availability zone of this machine.'''
-    if _az is 'unknown':
-        meta = boto.utils.get_instance_metadata()
+class InstanceMetadata(object):
+    __metaclass__ = utils.obj.Singleton
+
+    def __init__(self):
+        self.meta = None
+
+    def _get_metadata(self):
+        if self.meta is None:
+            self.meta = boto.utils.get_instance_metadata()
+
+    
+    def get_current_az(self):
+        '''Returns the availability zone of this machine.'''
+        self._get_metadata()
         try:
-            _az = meta['placement']['availability-zone']
+            az = self.meta['placement']['availability-zone']
         except KeyError as e:
-            _az = None
-    return _az
+            az = None
+
+        return az
