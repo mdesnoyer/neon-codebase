@@ -103,8 +103,6 @@ define('request_concurrency', default=22, type=int,
        help=("the maximum number of concurrent scoring requests to"
              " make at a time. Should be less than or equal to the"
              " server batch size."))
-define('serving_url_format',
-        default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
 define('dequeue_period', default=10.0,

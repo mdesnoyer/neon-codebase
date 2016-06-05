@@ -498,7 +498,7 @@ class KFlannPredictor(Predictor):
         _log.info('Built index with parameters: %s' % self.params)
         self.is_trained = True
 
-    def _predict(self, image, video_id=None):
+    def _predict(self, image, video_id=None, **kwargs):
         if not self.is_trained:
             raise NotTrainedError()
 
