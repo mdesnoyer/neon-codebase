@@ -1242,9 +1242,6 @@ class LocalSearcher(object):
 
         '''
         self.predictor = predictor
-        if self.predictor.async:
-            # you're using an asynchronous predictor, so create a lock
-            self._result_lock = threading.Lock()
         self.processing_time_ratio = processing_time_ratio
         self._orig_local_search_width = local_search_width
         self._orig_local_search_step = local_search_step
@@ -1589,33 +1586,6 @@ class LocalSearcher(object):
                         start, stop, e.message)
                     statemon.state.increment('searching_problem')
 
-    def _get_score(self, frame, frameno=None, numretry=1, timeout=10.):
-        '''
-        Acquires the score for a frame.
-
-        frame: The frame to process, as an openCV-style array.
-        frameno: The frame number (if provided)
-        numretry: The maximum number of times to retry processing the frame.
-        timeout: How long to wait for the frame to be returned.
-        '''
-        rem_try = numretry
-        fno = str(frameno) if frameno is not None else 'NA'
-        if numretry is None:
-            rem_try = -1  # retry forever
-        while rem_try != 0:
-            rem_try -= 1
-            result_future = self.predictor.predict(frame, timeout=timeout)
-            concurrent.futures.wait(result_future)
-            if not result_future.exception():
-                return result.valence[0]
-            else:
-                tatemon.state.increment('unable_to_score_frame')
-                _log.warn('Problem obtaining score for frame %s: %s',
-                          fno, exception.message)
-        _log.warn(('Frame #%s has exceeded the maximum number of '
-                   'retries (%i).'), fno, numretry)
-        statemon.state.increment('frame_score_attempt_limit_reached')
-
     def _conduct_local_search(self, start_frame, start_score,
                               end_frame, end_score):
         '''
@@ -1718,11 +1688,13 @@ class LocalSearcher(object):
                         self.combiner.get_indy_funcs(best_feat_dict)]
             else:
                 meta = None
-        if self.predictor.async:
-            indi_framescore = self._get_score(best_frame,
-                                              frameno=best_frameno)
-        else:
+        try:
             indi_framescore = self.predictor.predict(best_frame)
+        except model.predictor.PredictionError as e:
+            statemon.state.increment('unable_to_score_frame')
+            _log.warn('Problem obtaining score localsearch frame %s: %s',
+                      (best_frameno, e))
+            return
         with self._proc_lock:
             inter_framescore = (start_score + end_score) / 2
             # interpolate the framescore
@@ -1754,11 +1726,13 @@ class LocalSearcher(object):
                 self.search_algo.update(frameno, bad=True)
                 return
             frames = self._prep(frames)
-        if self.predictor.async:
-            # get the score the image from the server.
-            frame_score = self._get_score(frames[0], frameno)
-        else:
+        try:
             frame_score = self.predictor.predict(frames[0])
+        except model.predictor.PredictionError as e:
+            statemon.state.increment('unable_to_score_frame')
+            _log.warn('Problem obtaining score for frame %s: %s',
+                      (frameno, e))
+            return
         with self._proc_lock:
             self.stats['score'].push(frame_score)
             _log.debug_n('Took sample at %i, score is %.3f' % (frameno, frame_score), 10)

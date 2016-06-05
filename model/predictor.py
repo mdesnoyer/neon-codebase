@@ -9,25 +9,31 @@ Copyright: 2016 Neon Labs
 Author: Mark Desnoyer (desnoyer@neon-lab.com)
 Author: Nick Dufour
 '''
+import aquila_inference_pb2  # TODO: make sure this is correct.
+import atexit
+import concurrent.futures
+from grpc.beta import implementations
+from grpc.beta.interfaces import ChannelConnectivity
 import hashlib
 import logging
-import atexit
 import numpy as np
 from PIL import Image
 import os
 import pyflann
+import random
+import time
 import tempfile
+import threading
 import utils.obj
 from utils import statemon
-import threading
-from grpc.beta import implementations
-import aquila_inference_pb2  # TODO: make sure this is correct.
-from grpc.beta.interfaces import ChannelConnectivity
+import weakref
 
 _log = logging.getLogger(__name__)
 
 statemon.define('lost_server_connection', int)  # lost the server connection
 statemon.define('unable_to_connect', int)  # could not connect to server in the first place
+
+class PredictionError(Exception): pass
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -131,7 +137,6 @@ class Predictor(object):
         self.feature_generator = feature_generator
         self.__version__ = 3
         self.async = False
-        self.concurrency = 1
 
     def __str__(self):
         return utils.obj.full_object_str(self)
@@ -172,12 +177,47 @@ class Predictor(object):
         raise NotImplementedError()
 
 
-    def predict(self, image, *args, **kwargs):
-        '''Wrapper for image valence prediction functions'''
-        if self.async:
-            return self._predictasync(image, *args, **kwargs)
-        else:
-            return self._predict(image, *args, **kwargs)
+    def predict(self, image, ntries=3, timeout=10.0, *args, **kwargs):
+        '''Predicts the valence score of an image synchronously.
+
+        Inputs:
+        image - numpy array of the image
+
+        Returns: predicted valence score
+
+        Raises: NotTrainedError if it has been called before train() has.
+        '''
+        cur_try = 0
+        kwargs['timeout'] = timeout
+        while cur_try < ntries:
+            cur_try += 1
+            try:
+                return self._predict(image, *args, **kwargs)
+            except Exception as e:
+                _log.warn('Problem scoring image. Retrying: %s' %
+                          e)
+                delay = (1 << cur_try) * 0.2 * random.random()
+                time.sleep(delay)
+        raise PredictionError(str(e))
+
+    def predictasync(self, image, *args, **kwargs):
+        '''
+        Asynchronous prediction using the deepnet Aquila's
+        server.
+
+        Inputs:
+        image - numpy array of the image, as an N x M x 3
+        array of integers.
+
+        Returns: A prediction future.
+        '''
+        assert(not self.async)
+        future = concurrent.futures.Future()
+        try:
+            future.set_result(self._predict(image, *args, **kwargs))
+        except Exception as e:
+            future.set_exception(e)
+        return future
 
     def _predict(self, image, *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
@@ -189,20 +229,9 @@ class Predictor(object):
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
-        raise NotImplementedError()
-
-    def _predictasync(self, image, *args, **kwargs):
-        '''
-        Asynchronous prediction using the deepnet Aquila's
-        server.
-
-        Inputs:
-        image - numpy array of the image, as an N x M x 3
-        array of integers.
-
-        Returns: A prediction future.
-        '''
-        raise NotImplementedError()
+        assert(self.async)
+        future = self.predictasync(image, *args, **kwargs)
+        return future.result(timeout=kwargs.get('timeout', 10.0))
 
     def reset(self):
         '''Resets the predictor by removing all the data/model.'''
@@ -233,6 +262,16 @@ class Predictor(object):
         '''
         pass
 
+def deepnet_conn_callback(predictor, status):
+    '''A callback that uses a weak reference to avoid a circular reference.'''
+    self = predictor()
+    if self:
+        self._check_conn(status)
+
+def deepnet_cleanup_callback(predictor):
+    self = predictor()
+    if self:
+        self._async_cb_hand()
 
 class DeepnetPredictor(Predictor):
     '''Prediction using the deepnet Aquila (or an arbitrary predictor).
@@ -261,10 +300,9 @@ class DeepnetPredictor(Predictor):
         self.aq_conn = aquila_connection
         self.port = port
         self._cv = threading.Condition()
-        self._ready = threading.Event()
-        self._connecting = threading.Event()
         self.active = 0
-        self.done = 0
+        self._ready = threading.Event()
+        self._shutting_down = False
         self.async = True
         # register your own shutdown function to the atexit
         # cleanup handlers, since gRPC currently has issues
@@ -273,22 +311,49 @@ class DeepnetPredictor(Predictor):
         # atexit.register(self.shutdown)
         self.channel = None
         self.stub = None
-        self._connect(force_refresh=False)
+        self._conn_callback = None
+        self._conn_lock = threading.RLock()
+        self._consequtive_connection_failures = 0
+        self._reconnect(force_refresh=False)
+
+    def _reconnect(self, force_refresh):
+        '''
+        Establishes a new connection to the server.
+        '''
+        self._disconnect()
+        self._connect(force_refresh)
 
     def _connect(self, force_refresh):
-        '''
-        Establishes a connection to the server.
-        '''
-        host = self.aq_conn.get_ip(force_refresh=force_refresh)
-        _log.debug('Establishing connection on %s' % host)
-        # open question: do we have to destroy old channels?
-        # open question: what happens to futures that derive from destroyed
-        #   channels?
-        self.channel = implementations.insecure_channel(host, self.port)
-        # register callback
-        self.channel.subscribe(self._check_conn, try_to_connect=True)
-        self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
-            self.channel)
+        '''Establish a connection to the server if there isn't one.'''
+        with self._conn_lock:
+            if self.channel is None and not self._shutting_down:
+                host = self.aq_conn.get_ip(force_refresh=force_refresh)
+                _log.debug('Establishing connection on %s' % host)
+                # open question: what happens to futures that derive
+                #   from destroyed channels?
+                self.channel = implementations.insecure_channel(host,
+                                                                self.port)
+                # register callback
+                weak_self = weakref.ref(self)
+                self._conn_callback = lambda status: deepnet_conn_callback(
+                    weak_self, status)
+                self.channel.subscribe(self._conn_callback,
+                                       try_to_connect=True)
+                self.stub = aquila_inference_pb2.beta_create_AquilaService_stub(
+                    self.channel, pool_size=self.concurrency)
+
+    def _disconnect(self):
+        ''' Disconnect from the server if there is a connection. '''
+        # the connection has been lost
+        with self._conn_lock:
+            if self.channel is not None:
+                self._ready.clear()
+                del self.stub
+                self.stub = None
+                self.channel.unsubscribe(self._conn_callback)
+                self._conn_callback = None
+                del self.channel
+                self.channel = None
 
     def _check_conn(self, status):
         '''
@@ -297,48 +362,53 @@ class DeepnetPredictor(Predictor):
         '''
         if (status is ChannelConnectivity.TRANSIENT_FAILURE or
             status is ChannelConnectivity.FATAL_FAILURE):
-            # the connection has been lost
-            self._ready.clear()
-            # unsubscribe yourself
-            self.channel.unsubscribe(self._check_conn)
             statemon.state.increment('lost_server_connection')
             _log.warn('Lost connection to server, trying another')
-            self._connect(force_refresh=True)
+            self._consequtive_connection_failures += 1
+            time.sleep((self._consequtive_connection_failures << 1) * 0.1 *
+                       random.random())
+            self._reconnect(force_refresh=True)
         elif self._ready.is_set():
             pass
         elif status is ChannelConnectivity.READY:
             _log.debug('Server has been reached')
             self._ready.set()
+            self._consequtive_connection_failures = 0
             _log.debug('Ready event is set.')
 
-    def _predictasync(self, image, timeout=10.0):
+    def predictasync(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring.
         '''
+        if self._shutting_down:
+            fut = concurrent.futures.Future()
+            fut.set_exception(PredictionError('Object is shutting down.'))
+            return fut
         conn_est = self._ready.wait(20.)  # TODO: do we want a timeout?
         if not conn_est:
-            _log.error('Connection not established in time.')
-            # what do we do here?
-            return
+            fut = concurrent.futures.Future()
+            fut.set_exception(TimeoutError(
+                'Connection not established in time.'))
+            return fut
         image = _aquila_prep(image)
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data = image.flatten().tostring()
-        with self._cv:
-            while self.active == self.concurrency:
-                self._cv.wait()
-        self.active += 1
         # # it appears to be the case that creating the stub as an
         # # attribute can cause some issues, so let's see if this
         # # works.
         # with aquila_inference_pb2.beta_create_AquilaService_stub(self.channel) as stub:
         #     result_future = stub.Regress.future(request, timeout)  # 10 second timeout
-        result_future = self.stub.Regress.future(request, timeout)
-        result_future.add_done_callback(
-            lambda result_future: self.async_cb_hand(result_future))
-        return result_future
+        with self._cv:
+            self.active += 1
+        with self._conn_lock:
+            result_future = self.stub.Regress.future(request, timeout)
+            weak_self = weakref.ref(self)
+            result_future.add_done_callback(
+                lambda x: deepnet_cleanup_callback(weak_self))
+            return result_future
 
-    def async_cb_hand(self, result_future):
+    def _async_cb_hand(self):
         '''
         Housekeeping handler for predictor to monitor the number of active
         inference requests.
@@ -347,39 +417,26 @@ class DeepnetPredictor(Predictor):
         function to handle.
         '''
         with self._cv:
-            self.done += 1
             self.active -= 1
-            self._cv.notify()
+            self._cv.notify_all()
 
     def complete(self):
         '''
-        Returns True when it is safe to terminate.
+        Blocks until all the currently active jobs are done
         '''
         with self._cv:
-            return self.active == 0
+            while self.active > 0:
+                self._cv.wait()
+
+        return True
 
     def __del__(self):
-        if self.channel is not None:
-            del self.channel
-            self.channel = None
-        if self.stub is not None:
-            del self.stub
-            self.stub = None
-        super(DeepnetPredictor, self).__del__()
+        self.shutdown()
 
     def shutdown(self):
         _log.debug('Exit has started.')
-        # just try to unsubscribe everything.
-        if self.channel is not None:
-            cbs = self.channel._connectivity_channel._callbacks_and_connectivities
-            while len(cbs):
-                subscribed_callback, unused_connectivity = cbs[0]
-                self.channel.unsubscribe(subscribed_callback)
-            del self.channel
-            self.channel = None
-        if self.stub is not None:
-            del self.stub
-            self.stub = None
+        self._shutting_down = True
+        self._disconnect()
 
 
 class KFlannPredictor(Predictor):

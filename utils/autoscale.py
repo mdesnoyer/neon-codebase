@@ -96,7 +96,7 @@ class AutoScaleGroup(object):
 
         self._lock = threading.RLock()
 
-        self._executor = concurrent.futures.ThreadPoolExecutor(10)
+        self._executor = concurrent.futures.ThreadPoolExecutor(5)
 
         # Start monitoring this group
         RefresherThread().add_group_to_monitor(name)

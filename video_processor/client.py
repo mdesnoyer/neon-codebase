@@ -1071,6 +1071,12 @@ class VideoClient(multiprocessing.Process):
         # TODO (someone): How tf are we gonna handle exiting? Remember that
         #                 gRPC hangs due to a bug at exit.
 
+    def unload_model(self):
+        if self.model is not None:
+            if self.model.predictor is not None:
+                self.model.predictor.shutdown()
+            self.model = None
+
     def run(self):
         ''' run/start method '''
         # The worker should ignore the SIGTERM because it will be
@@ -1082,6 +1088,8 @@ class VideoClient(multiprocessing.Process):
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
+        if self.model is not None:
+            del self.model
  
         _log.info("stopping worker [%s] " % (self.pid))
 
@@ -1108,6 +1116,7 @@ class VideoClient(multiprocessing.Process):
                 yield vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
+                self.unload_model()
             self.videos_processed += 1
 
         except Queue.Empty:
