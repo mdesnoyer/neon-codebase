@@ -170,6 +170,8 @@ class AutoScaleGroup(object):
         cur_az = yield self._executor.submit(metadata.get_current_az)
 
         with self._lock:
+            if self._instance_info is None:
+                raise tornado.gen.Return([])
             # Pick an ip from this AZ if we can
             ips = [x['ip'] for x in self._instance_info
                    if x['zone'] == cur_az]
