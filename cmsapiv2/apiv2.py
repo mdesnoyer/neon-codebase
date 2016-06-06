@@ -773,6 +773,7 @@ class JWTHelper(object):
     """
     @staticmethod
     def generate_token(payload={}, token_type=TokenTypes.ACCESS_TOKEN):
+
         if token_type is TokenTypes.ACCESS_TOKEN:
             exp_time_add = options.access_token_exp
         elif token_type is TokenTypes.REFRESH_TOKEN:

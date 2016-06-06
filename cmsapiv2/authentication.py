@@ -192,7 +192,7 @@ class RefreshTokenHandler(APIV2Handler):
     @tornado.gen.coroutine
     def post(self):
         schema = Schema({
-          Required('token') : All(Coerce(str), Length(min=1, max=512))
+            Required('token') : All(Coerce(str), Length(min=1, max=512))
         })
 
         args = self.parse_args(keep_token=True)
@@ -507,8 +507,8 @@ class AccountHelper(object):
     def get_auth_tokens(payload):
         """Generate token pair (access, refresh) encoding dict payload"""
         return (
-            JWTHelper.generate_token(payload, token_type=TokenTypes.ACCESS_TOKEN),
-            JWTHelper.generate_token(payload, token_type=TokenTypes.REFRESH_TOKEN))
+            JWTHelper.generate_token(payload.copy(), token_type=TokenTypes.ACCESS_TOKEN),
+            JWTHelper.generate_token(payload.copy(), token_type=TokenTypes.REFRESH_TOKEN))
 
 
 '''****************************************************************
