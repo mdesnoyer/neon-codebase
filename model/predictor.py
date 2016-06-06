@@ -401,7 +401,7 @@ class DeepnetPredictor(Predictor):
                 raise model.errors.PredictionError(
                     'Invalid response, must be a single value. Was: %s' % 
                     response.valence)
-                return response.valence[0]
+            return response.valence[0]
         except grpc.RpcError as e:
             msg = 'RPC Error: %s' % e
             _log.error(msg)
