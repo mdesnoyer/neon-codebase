@@ -1,9 +1,9 @@
-"""Collection of email templates
+"""Email Template for Verify Email Address
 
-A function will return a tuple (subject, body).
+The function returns a tuple (subject, body).
 """
 
-def verify():
+def template():
     return (
 "Welcome to Neon For Videos",
 """<html>
