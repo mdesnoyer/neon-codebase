@@ -38,6 +38,8 @@ from tornado.httputil import HTTPServerRequest
 import video_processor.video_processing_queue
 from utils.options import options
 
+define('run_stripe_on_test_account', default=0, type=int,
+       help='If set, will run tests that hit the real Stripe APIs')
 
 class TestBase(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
@@ -4988,9 +4990,11 @@ class TestBillingAccountHandler(TestControllersBase):
             rjson['error']['data'],
             'Unknown')
 
-    @unittest.skip('this actually posts to stripe')
     @tornado.testing.gen_test
     def test_post_actual_int(self):
+        if not options.run_stripe_on_test_account:
+            raise unittest.SkipTest(
+                'actually talks to stripe, skipped in normal testing')
         so = neondata.NeonUserAccount('kevinacct')
         so.email = 'test@invalid24.xxx.test'
         yield so.save(async=True)
@@ -5003,9 +5007,11 @@ class TestBillingAccountHandler(TestControllersBase):
             headers=header)
         print response.body
 
-    @unittest.skip('this actually gets from stripe')
     @tornado.testing.gen_test
     def test_get_actual_int(self):
+        if not options.run_stripe_on_test_account:
+            raise unittest.SkipTest(
+                'actually talks to stripe, skipped in normal testing')
         options._set('cmsapiv2.apiv2.stripe_api_key',
             'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
         so = neondata.NeonUserAccount('kevinacct')
@@ -5505,9 +5511,12 @@ class TestBillingSubscriptionHandler(TestControllersBase):
             rjson['error']['data'],
             'Unknown')
 
-    @unittest.skip('actually talks to stripe, skipped in normal testing')
     @tornado.testing.gen_test
     def test_post_billing_actual_talking(self):
+        if not options.run_stripe_on_test_account:
+            raise unittest.SkipTest(
+                'actually talks to stripe, skipped in normal testing')
+
         so = neondata.NeonUserAccount('kevinacct')
         so.billing_provider_ref = 'cus_8P7y8RI3gRyhF0'
         yield so.save(async=True)
@@ -5520,9 +5529,12 @@ class TestBillingSubscriptionHandler(TestControllersBase):
                                                 headers=header)
         print response
 
-    @unittest.skip('this actually gets from stripe')
     @tornado.testing.gen_test
     def test_get_actual_sub(self):
+        if not options.run_stripe_on_test_account:
+            raise unittest.SkipTest(
+                'actually talks to stripe, skipped in normal testing')
+
         options._set('cmsapiv2.apiv2.stripe_api_key',
             'sk_test_mOzHk0K8yKfe57T63jLhfCa8')
         so = neondata.NeonUserAccount('kevinacct')
