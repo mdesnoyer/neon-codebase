@@ -12,6 +12,7 @@ Author: Nick Dufour
 import aquila_inference_pb2  # TODO: make sure this is correct.
 import atexit
 import concurrent.futures
+import grpc
 from grpc.beta import implementations
 from grpc.beta.interfaces import ChannelConnectivity
 import hashlib
@@ -138,6 +139,8 @@ class Predictor(object):
         self.__version__ = 3
         self.async = False
 
+        self._executor = concurrent.futures.ThreadPoolExecutor(10)
+
     def __str__(self):
         return utils.obj.full_object_str(self)
 
@@ -198,6 +201,8 @@ class Predictor(object):
                           e)
                 delay = (1 << cur_try) * 0.2 * random.random()
                 time.sleep(delay)
+        if isinstance(e, model.errors.PredictionError):
+            raise e
         raise model.errors.PredictionError(str(e))
 
     def predictasync(self, image, *args, **kwargs):
@@ -211,13 +216,9 @@ class Predictor(object):
 
         Returns: A prediction future.
         '''
+        # TODO: Add retries
         assert(not self.async)
-        future = concurrent.futures.Future()
-        try:
-            future.set_result(self._predict(image, *args, **kwargs))
-        except Exception as e:
-            future.set_exception(e)
-        return future
+        return self._executor.submit(self._predict, image, *args, **kwargs)
 
     def _predict(self, image, *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
@@ -268,11 +269,6 @@ def deepnet_conn_callback(predictor, status):
     if self:
         self._check_conn(status)
 
-def deepnet_cleanup_callback(predictor):
-    self = predictor()
-    if self:
-        self._async_cb_hand()
-
 class DeepnetPredictor(Predictor):
     '''Prediction using the deepnet Aquila (or an arbitrary predictor).
     Note, this does not require you provision a feature generator for
@@ -303,7 +299,7 @@ class DeepnetPredictor(Predictor):
         self.active = 0
         self._ready = threading.Event()
         self._shutting_down = False
-        self.async = True
+        self.async = False
         # register your own shutdown function to the atexit
         # cleanup handlers, since gRPC currently has issues
         # with stubs & channels that are *attributes* of a
@@ -378,22 +374,17 @@ class DeepnetPredictor(Predictor):
             statemon.state.good_deepnet_connection = 1
             _log.debug('Ready event is set.')
 
-    def predictasync(self, image, timeout=10.0):
+    def _predict(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
         timeout: How long the request lasts for before expiring.
         '''
         if self._shutting_down:
-            fut = concurrent.futures.Future()
-            fut.set_exception(model.errors.PredictionError(
-                'Object is shutting down.'))
-            return fut
-        conn_est = self._ready.wait(20.)  # TODO: do we want a timeout?
+            raise model.errors.PredictionError('Object is shutting down.')
+            
+        conn_est = self._ready.wait(timeout)  # TODO: do we want a timeout?
         if not conn_est:
-            fut = concurrent.futures.Future()
-            fut.set_exception(TimeoutError(
-                'Connection not established in time.'))
-            return fut
+            raise TimeoutError('Connection not established in time.')
         image = _aquila_prep(image)
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data = image.flatten().tostring()
@@ -404,24 +395,21 @@ class DeepnetPredictor(Predictor):
         #     result_future = stub.Regress.future(request, timeout)  # 10 second timeout
         with self._cv:
             self.active += 1
-        with self._conn_lock:
-            result_future = self.stub.Regress.future(request, timeout)
-            weak_self = weakref.ref(self)
-            result_future.add_done_callback(
-                lambda x: deepnet_cleanup_callback(weak_self))
-            return result_future
-
-    def _async_cb_hand(self):
-        '''
-        Housekeeping handler for predictor to monitor the number of active
-        inference requests.
-
-        NOTE: This does not handle any errors, this is up to the true callback
-        function to handle.
-        '''
-        with self._cv:
-            self.active -= 1
-            self._cv.notify_all()
+        try:
+            response = self.stub.Regress(request, timeout)
+            if len(response.valence) != 1:
+                raise model.errors.PredictionError(
+                    'Invalid response, must be a single value. Was: %s' % 
+                    response.valence)
+                return response.valence[0]
+        except grpc.RpcError as e:
+            msg = 'RPC Error: %s' % e
+            _log.error(msg)
+            raise model.errors.PredictionError(msg)
+        finally:
+            with self._cv:
+                self.active -= 1
+                self._cv.notify_all()
 
     def complete(self):
         '''
