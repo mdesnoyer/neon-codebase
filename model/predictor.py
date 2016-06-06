@@ -12,7 +12,6 @@ Author: Nick Dufour
 import aquila_inference_pb2  # TODO: make sure this is correct.
 import atexit
 import concurrent.futures
-import grpc
 from grpc.beta import implementations
 from grpc.beta.interfaces import ChannelConnectivity
 import hashlib
@@ -397,12 +396,9 @@ class DeepnetPredictor(Predictor):
             self.active += 1
         try:
             response = self.stub.Regress(request, timeout)
-            if len(response.valence) != 1:
-                raise model.errors.PredictionError(
-                    'Invalid response, must be a single value. Was: %s' % 
-                    response.valence)
-            return response.valence[0]
-        except grpc.RpcError as e:
+        # TODO(mdesnoyer, nick): On upgrade, only catch
+        # RpcErrors. Version 0.13 of grpc doesn't have them
+        except Exception as e:
             msg = 'RPC Error: %s' % e
             _log.error(msg)
             raise model.errors.PredictionError(msg)
@@ -410,6 +406,12 @@ class DeepnetPredictor(Predictor):
             with self._cv:
                 self.active -= 1
                 self._cv.notify_all()
+
+        if len(response.valence) != 1:
+            raise model.errors.PredictionError(
+                'Invalid response, must be a single value. Was: %s' % 
+                response.valence)
+        return response.valence[0]
 
     def complete(self):
         '''
