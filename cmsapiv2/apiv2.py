@@ -177,7 +177,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         except IndexError:
             request.account_id = None
 
-    @staticmethod
     @tornado.gen.coroutine
     def set_account(request):
         request.set_account_id()
@@ -187,7 +186,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                           async=True)
             request.account = account
 
-    @staticmethod
     @tornado.gen.coroutine
     def is_authorized(request,
                       access_level_required,
