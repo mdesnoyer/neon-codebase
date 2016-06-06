@@ -177,6 +177,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         except IndexError:
             request.account_id = None
 
+    @staticmethod
     @tornado.gen.coroutine
     def set_account(request):
         request.set_account_id()
@@ -186,6 +187,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                           async=True)
             request.account = account
 
+    @staticmethod
     @tornado.gen.coroutine
     def is_authorized(request,
                       access_level_required,
@@ -256,7 +258,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 raise NotAuthorizedError('user does not exist')
             elif account_id:
                 # Handle account not associated with any user.
-                if account_id != self.account.get_id():
+                if account_id != account.get_id():
                     # Mismatch of token and path.
                     raise NotAuthorizedError('You cannot access this resource.')
                 account = yield neondata.NeonUserAccount.get(

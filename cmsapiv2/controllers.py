@@ -2573,7 +2573,7 @@ application = tornado.web.Application([
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
