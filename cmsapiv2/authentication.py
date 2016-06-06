@@ -219,7 +219,7 @@ class RefreshTokenHandler(APIV2Handler):
                 account_id = payload.get('account_id')
                 account = yield neondata.NeonUserAccount.get(account_id, async=True)
                 if not account:
-                    raise jwt.InvalidTokenError('Malformed refresh token')
+                    raise jwt.NotFoundError('Account does not exist.')
                 account_ids = [account.get_id()]
 
                 access_token = JWTHelper.generate_token(
@@ -314,7 +314,11 @@ class NewAccountHandler(APIV2Handler):
             last_name = args.get('admin_user_last_name', None),
             title = args.get('admin_user_title', None))
         account.users.append(username)
-        yield AccountHelper.user_wants_verification(user, account, self.origin)
+        yield AccountHelper.user_wants_verification(
+            account=account,
+            user=user,
+            origin=self.origin,
+            executor=self.executor)
         msg = 'Account verification email sent to %s' % account.email
         self.success({'message': msg})
 
@@ -327,12 +331,12 @@ class AccountHelper(object):
 
     @staticmethod
     def create_empty_account(name=None):
-        """Call to create an empty account"""
+        """Call to instantiate an empty account"""
         return neondata.NeonUserAccount(uuid.uuid1().hex, name=name)
 
     @staticmethod
     def create_account_with_args(args):
-        """Create (don't save) a account object given API arguments
+        """Instantiate (don't save) a account object given API arguments
 
         Input dict args:
             default_width
@@ -357,7 +361,7 @@ class AccountHelper(object):
 
         # Save anonymous Neon user account.
         account = neondata.NeonUserAccount(uuid.uuid1().hex)
-        account.save()
+        account.save(async=True)
 
         # Save other account objects that are based on the Neon api key.
         yield AccountHelper.save_default_objects(account)
@@ -387,7 +391,6 @@ class AccountHelper(object):
         # Instantiate account from json payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
-        yield account.save(async=True)
 
         # Create user.
         user_json = json.loads(verifier.extra_info['user'])
@@ -399,12 +402,12 @@ class AccountHelper(object):
             yield user.save(overwrite_existing_object=False, async=True)
         except neondata.psycopg2.IntegrityError:
             raise AlreadyExists('User with that email already exists.')
-        # Save other user objects.
+
+        # Save other user objects (ExperimentStrategy, AccountLimits, etc.).
         yield AccountHelper.save_default_objects(account)
 
-        account = yield neondata.NeonUserAccount.get(
-            account.neon_api_key,
-            async=True)
+        # Save account and return it.
+        account.save(async=True)
         raise tornado.gen.Return(account)
 
     @staticmethod
@@ -445,7 +448,7 @@ class AccountHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def user_wants_verification(user, account, origin):
+    def user_wants_verification(account, user, origin, executor):
         """Handle when user wants to verify an email address.
 
         This saves a verification token.
@@ -467,15 +470,18 @@ class AccountHelper(object):
         yield verifier.save(async=True)
 
         # Send email.
-        rv = AccountHelper.send_verification_email(
-            account,
-            user,
-            token,
-            origin)
+
+        rv = yield AccountHelper.send_verification_email(
+            account=account,
+            user=user,
+            token=token,
+            origin=origin,
+            executor=executor)
         raise tornado.gen.Return(rv)
 
     @staticmethod
-    def send_verification_email(account, user, token, origin):
+    @tornado.gen.coroutine
+    def send_verification_email(account, user, token, origin, executor):
         """Send verification email.
 
         If the email is sent successfully, it returns True.
@@ -495,13 +501,13 @@ class AccountHelper(object):
         kwargs['format'] = 'html'
         ses = boto.connect_ses()
         try:
-            # @TODO wrap in executor.
-            ses.send_email(**kwargs)
+            # Yield on this external call.
+            yield executor.submit(ses.send_email, **kwargs)
         except Exception as e:
             _log.error('Failed to Verification Send email to %s exc_info %s' %
                 (user.username, e))
             raise Exception('unable to send verification email')
-        return True
+        raise tornado.gen.Return()
 
     @staticmethod
     def get_auth_tokens(payload):
