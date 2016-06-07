@@ -849,6 +849,7 @@ class ResultsList(object):
                  adapt_improve=False, combination_function=None):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
+        self.failed_scoring = 0 # Number of failed scoring operations
         self.reset()
         self._min_acceptable = min_acceptable
         self._max_rejectable = max_rejectable
@@ -917,6 +918,7 @@ class ResultsList(object):
         self.results = [_Result() for x in range(self.n_thumbs)]
         self.min = self.results[0].score
         self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
+        self.failed_scoring = 0
 
     def _update_dists(self, entry_idx):
         for idx in range(len(self.results)):
@@ -945,6 +947,9 @@ class ResultsList(object):
             return self._push_over_lowest(res)
         else:
             return self._maxvar_replace(res)
+
+    def register_failure(self):
+        self.failed_scoring += 1
 
     def _compute_new_dist(self, res):
         '''
@@ -1460,7 +1465,8 @@ class LocalSearcher(object):
         _log.info('Search width: %i' % (self.local_search_width))
         _log.info('Search step: %i' % (self.local_search_step))
         video_time = float(num_frames) / fps
-        self.search_algo = self._search_algo(num_frames, self.local_search_width,
+        self.search_algo = self._search_algo(num_frames,
+                                             self.local_search_width,
                                              self.startend_clip)
         start_time = time()
         max_processing_time = self.processing_time_ratio * video_time
@@ -1501,6 +1507,11 @@ class LocalSearcher(object):
         _log.info('Total running time: %s, expected: %s',
                   sec_to_time(time() - start_time),
                   sec_to_time(max_processing_time))
+        if self.results.failed_scoring > 2:
+            msg = ('Too many frames failed to be scored for video %s' %
+                   self.video_name)
+            _log.error(msg)
+            raise model.errors.PredictionError(msg)
         raw_results = self.results.get_results()
         # format it into the expected format
         results = []
@@ -1515,7 +1526,9 @@ class LocalSearcher(object):
                                  self.n_thumbs).astype(int)
             rframes = [self._get_frame(x) for x in frames]
             for frame, frameno in zip(rframes, frames):
-                formatted_result = (frame, 1.0, frameno,
+                # TODO: get the scores of these frames more efficiently (async)
+                score = self.predictor.predict(frame)
+                formatted_result = (frame, score, frameno,
                                     frameno / float(fps), '')
                 results.append(formatted_result)
         else:
@@ -1694,6 +1707,8 @@ class LocalSearcher(object):
             statemon.state.increment('unable_to_score_frame')
             _log.warn('Problem obtaining score localsearch frame %s: %s',
                       (best_frameno, e))
+            with self._proc_lock:
+                self.results.register_failure()
             return
         with self._proc_lock:
             inter_framescore = (start_score + end_score) / 2
@@ -1721,8 +1736,9 @@ class LocalSearcher(object):
             frames = self.get_seq_frames(
                     [frameno, frameno + self.local_search_step])
             if frames is None:
-                # uh-oh, something went wrong! Update the knowledge state of the
-                # search algo with the knowledge that the frame is bad.
+                # uh-oh, something went wrong! Update the knowledge
+                # state of the search algo with the knowledge that the
+                # frame is bad.
                 self.search_algo.update(frameno, bad=True)
                 return
             frames = self._prep(frames)
@@ -1732,6 +1748,8 @@ class LocalSearcher(object):
             statemon.state.increment('unable_to_score_frame')
             _log.warn('Problem obtaining score for frame %s: %s',
                       (frameno, e))
+            with self._proc_lock:
+                self.results.register_failure()
             return
         with self._proc_lock:
             self.stats['score'].push(frame_score)

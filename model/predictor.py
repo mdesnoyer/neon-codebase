@@ -25,7 +25,10 @@ import random
 import time
 import tempfile
 import threading
+import tornado.locks
+import tornado.gen
 import utils.obj
+import utils.sync
 from utils import statemon
 import weakref
 
@@ -136,7 +139,6 @@ class Predictor(object):
     def __init__(self, feature_generator = None):
         self.feature_generator = feature_generator
         self.__version__ = 3
-        self.async = False
 
         self._executor = concurrent.futures.ThreadPoolExecutor(10)
 
@@ -179,6 +181,8 @@ class Predictor(object):
         raise NotImplementedError()
 
 
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def predict(self, image, ntries=3, timeout=10.0, *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
 
@@ -194,7 +198,10 @@ class Predictor(object):
         while cur_try < ntries:
             cur_try += 1
             try:
-                return self._predict(image, *args, **kwargs)
+                score = yield self._predict(image, *args, **kwargs)
+                raise tornado.gen.Return(score)
+            except tornado.gen.Return:
+                raise
             except Exception as e:
                 _log.warn('Problem scoring image. Retrying: %s' %
                           e)
@@ -204,21 +211,7 @@ class Predictor(object):
             raise e
         raise model.errors.PredictionError(str(e))
 
-    def predictasync(self, image, *args, **kwargs):
-        '''
-        Asynchronous prediction using the deepnet Aquila's
-        server.
-
-        Inputs:
-        image - numpy array of the image, as an N x M x 3
-        array of integers.
-
-        Returns: A prediction future.
-        '''
-        # TODO: Add retries
-        assert(not self.async)
-        return self._executor.submit(self._predict, image, *args, **kwargs)
-
+    @tornado.gen.coroutine
     def _predict(self, image, *args, **kwargs):
         '''Predicts the valence score of an image synchronously.
 
@@ -229,9 +222,7 @@ class Predictor(object):
 
         Raises: NotTrainedError if it has been called before train() has.
         '''
-        assert(self.async)
-        future = self.predictasync(image, *args, **kwargs)
-        return future.result(timeout=kwargs.get('timeout', 10.0))
+        raise NotImplementedError()
 
     def reset(self):
         '''Resets the predictor by removing all the data/model.'''
@@ -296,9 +287,9 @@ class DeepnetPredictor(Predictor):
         self.port = port
         self._cv = threading.Condition()
         self.active = 0
-        self._ready = threading.Event()
+        self._ready_lock = threading.RLock()
+        self._ready = tornado.locks.Event()
         self._shutting_down = False
-        self.async = False
         # register your own shutdown function to the atexit
         # cleanup handlers, since gRPC currently has issues
         # with stubs & channels that are *attributes* of a
@@ -309,16 +300,15 @@ class DeepnetPredictor(Predictor):
         self._conn_callback = None
         self._conn_lock = threading.RLock()
         self._consequtive_connection_failures = 0
-        self._reconnect(force_refresh=False)
 
     def _reconnect(self, force_refresh):
         '''
         Establishes a new connection to the server.
         '''
         self._disconnect()
-        self._connect(force_refresh)
+        self.connect(force_refresh)
 
-    def _connect(self, force_refresh):
+    def connect(self, force_refresh=False):
         '''Establish a connection to the server if there isn't one.'''
         with self._conn_lock:
             if self.channel is None and not self._shutting_down:
@@ -342,7 +332,8 @@ class DeepnetPredictor(Predictor):
         # the connection has been lost
         with self._conn_lock:
             if self.channel is not None:
-                self._ready.clear()
+                with self._ready_lock:
+                    self._ready.clear()
                 del self.stub
                 self.stub = None
                 self.channel.unsubscribe(self._conn_callback)
@@ -368,11 +359,13 @@ class DeepnetPredictor(Predictor):
             pass
         elif status is ChannelConnectivity.READY:
             _log.debug('Server has been reached')
-            self._ready.set()
+            with self._ready_lock:
+                self._ready.set()
             self._consequtive_connection_failures = 0
             statemon.state.good_deepnet_connection = 1
             _log.debug('Ready event is set.')
 
+    @tornado.gen.coroutine
     def _predict(self, image, timeout=10.0):
         '''
         image: The image to be scored, as a OpenCV-style numpy array.
@@ -380,10 +373,12 @@ class DeepnetPredictor(Predictor):
         '''
         if self._shutting_down:
             raise model.errors.PredictionError('Object is shutting down.')
-            
-        conn_est = self._ready.wait(timeout)  # TODO: do we want a timeout?
-        if not conn_est:
-            raise TimeoutError('Connection not established in time.')
+
+        # Wait for the connection to be ready
+        with self._ready_lock:
+            ready_future = self._ready.wait(timeout)  
+        yield ready_future
+        
         image = _aquila_prep(image)
         request = aquila_inference_pb2.AquilaRequest()
         request.image_data = image.flatten().tostring()
@@ -395,7 +390,7 @@ class DeepnetPredictor(Predictor):
         with self._cv:
             self.active += 1
         try:
-            response = self.stub.Regress(request, timeout)
+            response = yield self.stub.Regress.future(request, timeout)
         # TODO(mdesnoyer, nick): On upgrade, only catch
         # RpcErrors. Version 0.13 of grpc doesn't have them
         except Exception as e:
@@ -411,7 +406,7 @@ class DeepnetPredictor(Predictor):
             raise model.errors.PredictionError(
                 'Invalid response, must be a single value. Was: %s' % 
                 response.valence)
-        return response.valence[0]
+        raise tornado.gen.Return(response.valence[0])
 
     def complete(self):
         '''
@@ -488,12 +483,14 @@ class KFlannPredictor(Predictor):
         _log.info('Built index with parameters: %s' % self.params)
         self.is_trained = True
 
+    @tornado.gen.coroutine
     def _predict(self, image, video_id=None, **kwargs):
         if not self.is_trained:
             raise NotTrainedError()
 
         if video_id is None:
-            return self.score_neighbours(self.get_neighbours(image, k=self.k))
+            score = self.score_neighbours(self.get_neighbours(image, k=self.k))
+            raise tornado.gen.Return(score)
 
         # If we don't want to include images from the same
         # video, we need to ask for extra neighbours. This
@@ -509,7 +506,8 @@ class KFlannPredictor(Predictor):
 
             if neighbour[3] <> video_hash:
                 valid_neighbours.append(neighbour)
-        return self.score_neighbours(valid_neighbours)
+        score = self.score_neighbours(valid_neighbours)
+        raise tornado.gen.Return(score)
 
     def score_neighbours(self, neighbours):
         '''Returns the score for k neighbours.'''
