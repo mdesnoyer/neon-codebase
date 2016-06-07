@@ -1201,12 +1201,15 @@ class VideoHelper(object):
                                        neondata.InternalVideoID.generate(account_id_api_key, video_id))
         if video is None:
             # make sure we can download the image before creating requests
+            duration = args.get('duration', None) 
+            if duration: 
+                duration=float(duration) 
 
             video = neondata.VideoMetadata(
                 neondata.InternalVideoID.generate(account_id_api_key, video_id),
                 video_url=args.get('url', None),
                 publish_date=args.get('publish_date', None),
-                duration=float(args.get('duration', 0.0)) or None,
+                duration=duration,
                 custom_data=args.get('custom_data', None),
                 i_id=args.get('integration_id', '0'),
                 serving_enabled=False)
@@ -1455,7 +1458,7 @@ class VideoHandler(APIV2Handler):
               Length(min=1, max=2048)),
           'title': All(Any(Coerce(str), unicode), 
               Length(min=1, max=2048)), 
-          'duration': All(Coerce(float), Range(min=0.0, max=86400.0)),
+          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)), None),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
           'default_thumbnail_url': All(Any(Coerce(str), unicode), 
