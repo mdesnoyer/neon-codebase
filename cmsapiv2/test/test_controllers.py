@@ -4628,8 +4628,18 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.assertEquals('kevins best video yet', video['title'])
 
 
-class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
+class TestVideoSearchExtHandlerQuery(TestControllersBase):
+
     def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
         super(TestVideoSearchExtHandlerQuery, self).setUp()
 
         neondata.VideoMetadata('u0_v0', request_id='j0').save()
@@ -4643,6 +4653,9 @@ class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
                                 title='Another title0 title1 title?').save()
         self.url = self.get_url(
             '/api/v2/u0/videos/search?fields=video_id,title&query={}')
+    def tearDown(self):
+        self.verify_account_mocker.stop()
+        super(TestVideoSearchExtHandlerQuery, self).tearDown()
 
     @tornado.testing.gen_test
     def test_regex(self):
