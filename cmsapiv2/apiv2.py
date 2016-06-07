@@ -839,7 +839,11 @@ APIV2 Custom Voluptuous Types
 class CustomVoluptuousTypes():
     @staticmethod
     def Date():
-        return lambda v: dateutil.parser.parse(v)
+        def f(v): 
+            if v is None or v == 'None': 
+                return True
+            return dateutil.parser.parse(v)
+        return f 
 
     @staticmethod
     def CommaSeparatedList(limit=100):
