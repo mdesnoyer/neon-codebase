@@ -3099,6 +3099,34 @@ class TestVideoHandler(TestControllersBase):
             self.account_id_api_key, '1234ascs33'), async=True)
         self.assertEquals(video.url, 'some_url')
 
+    @tornado.testing.gen_test
+    def test_post_video_body_nones(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+           patch(pstr)) as cmock:
+            cmock.side_effect = [self.random_image]
+            body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'de pol\xc3\xb6tica de los EE.UU.-'.decode('utf-8'),
+                'default_thumbnail_url': 'invalid',
+                'thumbnail_ref': 'ref1',
+                'publish_date': None,
+                'custom_data': None
+            }
+            header = {"Content-Type": "application/json"}
+            url = '/api/v2/%s/videos' % (self.account_id_api_key)
+            response = yield self.http_client.fetch(self.get_url(url),
+                body=json.dumps(body),
+                method='POST',
+                headers=header)
+        self.assertEquals(response.code, 202) 
+        video = yield neondata.VideoMetadata.get('%s_%s' % (
+            self.account_id_api_key, '1234ascs33'), async=True)
+        self.assertEquals(video.url, 'some_url')
+        self.assertEquals(video.publish_date, None)
+        self.assertEquals(video.custom_data, {})
+
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
         url = '/api/v2/%s/videos' % '1234234'

@@ -855,7 +855,11 @@ APIV2 Custom Voluptuous Types
 class CustomVoluptuousTypes():
     @staticmethod
     def Date():
-        return lambda v: dateutil.parser.parse(v)
+        def f(v): 
+            if v is None: 
+                return True
+            return dateutil.parser.parse(v)
+        return f 
 
     @staticmethod
     def CommaSeparatedList(limit=100):
@@ -870,6 +874,8 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Dictionary():
         def f(v):
+            if v is None: 
+                return True 
             if type(v) is dict:
                 return v
             elif isinstance(ast.literal_eval(v), dict):
