@@ -4521,8 +4521,7 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         video_count = rjson['video_count']
         videos = rjson['videos']
         self.assertEquals(video_count, 0)
-        self.assertEquals(videos, None)
-
+        self.assertEquals(videos, [])
 
 class TestVideoSearchExternalHandler(TestControllersBase):
     def setUp(self):
@@ -4540,6 +4539,28 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestVideoSearchExternalHandler, self).tearDown()
 
+    @tornado.testing.gen_test
+    def test_since_and_until_param(self):
+        # Add a number of videos and get the time at third's creation
+        for i in range(6):
+            c = str(i)
+            neondata.VideoMetadata('u0_v' + c, request_id='j' + c).save()
+            neondata.NeonApiRequest('j' + c, 'u0').save()
+            if i == 3:
+                video = neondata.VideoMetadata.get('u0_v' + c)
+                time_param = dateutil.parser.parse(video.created).strftime('%s.%f')
+
+        url = '/api/v2/u0/videos/search?fields=video_id,created&since={}'.format(
+            time_param)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEqual(2, len(rjson['videos']), 'Two videos after timestamp')
+
+        url = '/api/v2/u0/videos/search?fields=video_id,created&until={}'.format(
+            time_param)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEqual(3, len(rjson['videos']), 'Three videos before timestamp')
 
     @tornado.testing.gen_test
     def test_search_base(self):
@@ -4613,7 +4634,62 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.assertEquals('kevins best video yet', video['title'])
 
 
-class TestAccountLimitsHandler(TestControllersBase):
+class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
+    def setUp(self):
+        super(TestVideoSearchExtHandlerQuery, self).setUp()
+
+        neondata.VideoMetadata('u0_v0', request_id='j0').save()
+        neondata.NeonApiRequest('j0', 'u0',
+                                title='Title title0 title').save()
+        neondata.VideoMetadata('u0_v1', request_id='j1').save()
+        neondata.NeonApiRequest('j1', 'u0',
+                                title='*.*.* Title2 title1 title *.*.*').save()
+        neondata.VideoMetadata('u0_v2', request_id='j2').save()
+        neondata.NeonApiRequest('j2', 'u0',
+                                title='Another title0 title1 title?').save()
+        self.url = self.get_url(
+            '/api/v2/u0/videos/search?fields=video_id,title&query={}')
+
+    @tornado.testing.gen_test
+    def test_regex(self):
+        '''Allow POSIX features.'''
+        response = yield self.http_client.fetch(self.url.format('^[A|T].*title0.*'))
+        rjson = json.loads(response.body)
+        self.assertEqual(2, len(rjson['videos']))
+
+    @tornado.testing.gen_test
+    def test_case_insensitive(self):
+        '''Allow case insensitive matches'''
+        response = yield self.http_client.fetch(self.url.format('.*title2.*'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']), 'Matches "Title2" in request j1')
+
+    @tornado.testing.gen_test
+    def test_special_character_in_param(self):
+        '''Handle pattern that has special characters'''
+        response = yield self.http_client.fetch(self.url.format('*.*.*'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']))
+        response = yield self.http_client.fetch(self.url.format('?'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']))
+
+    @tornado.testing.gen_test
+    def test_instring_query_param(self):
+        '''Falls back to using in-string (LIKE %s<param>%s)'''
+        response = yield self.http_client.fetch(self.url.format('title%20title0'))
+        rjson = json.loads(response.body)
+        self.assertEqual(1, len(rjson['videos']), 'Search is case insensitive')
+
+    @tornado.testing.gen_test
+    def test_order_query_param(self):
+        '''Find only titles where tokens in query appear in order'''
+        response = yield self.http_client.fetch(self.url.format('title1%20title2'))
+        rjson = json.loads(response.body)
+        self.assertEqual(0, len(rjson['videos']), 'Search is strict on token order')
+
+
+class TestAccountLimitsHandler(TestControllersBase): 
     def setUp(self):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         self.user.save()

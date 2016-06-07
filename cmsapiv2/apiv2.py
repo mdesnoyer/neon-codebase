@@ -18,6 +18,7 @@ import jwt
 import logging
 import re
 import signal
+import sre_constants
 import stripe
 import tornado.httpserver
 import tornado.ioloop
@@ -92,6 +93,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
+
 
 class APIV2Sender(object):
     def success(self, data, code=ResponseCode.HTTP_OK):
@@ -883,4 +885,15 @@ class CustomVoluptuousTypes():
                 return str(v)
             else:
                 raise Invalid("not a valid email address")
+        return f
+
+    @staticmethod
+    def Regex():
+        '''Validate value is regex for Voluptuous schema'''
+        def f(query):
+            try:
+                re.compile(query)
+            except sre_constants.error as e:
+                raise Invalid(e.message)
+            return query
         return f
