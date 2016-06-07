@@ -147,8 +147,6 @@ class LogoutHandler(APIV2Handler):
                 yield tornado.gen.Task(neondata.NeonUserAccount.modify, username, _update_user)
                 statemon.state.increment('successful_logouts')
                 self.success(json.dumps({'message' : 'successfully logged out user'}))
-            else:
-                _log.error('Logout called with no user.')
         except jwt.ExpiredSignatureError:
             statemon.state.increment('token_expiration_logout')
             self.success(json.dumps({'message' : 'logged out expired user'}))
@@ -279,9 +277,9 @@ class NewAccountHandler(APIV2Handler):
         # If email is valued, then admin fields must be.
         if args.get('email'):
             requires_schema = Schema({
-                Required('email'): str,
-                Required('admin_user_username'): str,
-                Required('admin_user_password'): str
+                Required('email'): CustomVoluptuousTypes.Email(),
+                Required('admin_user_username'): All(CustomVoluptuousTypes.Email(), Length(min=6, max=512)),
+                Required('admin_user_password'): All(Coerce(str), Length(min=8, max=64)),
             })
             schema(args)
         # If not email, then provide a loginless account.
@@ -408,7 +406,7 @@ class AccountHelper(object):
         yield AccountHelper.save_default_objects(account)
 
         # Save account and return it.
-        account.save(async=True)
+        yield account.save(async=True)
         raise tornado.gen.Return(account)
 
     @staticmethod
