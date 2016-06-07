@@ -702,7 +702,6 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"request already processed","video_id":"%s","job_id":"%s"}'\
                     % (video_id, job_id)
             self.send_json_response(data, 409)
-            statemon.state.increment('failed_video_submission')
             return
 
         if response.code == 400:
