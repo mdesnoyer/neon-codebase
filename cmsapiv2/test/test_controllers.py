@@ -4469,7 +4469,7 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         video_count = rjson['video_count'] 
         videos = rjson['videos']
         self.assertEquals(video_count, 0) 
-        self.assertEquals(videos, None) 
+        self.assertEquals(videos, []) 
 
 class TestVideoSearchExternalHandler(TestControllersBase):
     def setUp(self):
@@ -4486,6 +4486,52 @@ class TestVideoSearchExternalHandler(TestControllersBase):
     def tearDown(self):
         self.verify_account_mocker.stop()
         super(TestVideoSearchExternalHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_deleted_video(self):
+
+        # Add videos and delete one. The deleted doesn't show in a search.
+        neondata.VideoMetadata('u_1', request_id='1').save()
+        neondata.VideoMetadata('u_2', request_id='2').save()
+        neondata.VideoMetadata('u_3', request_id='3').save()
+        neondata.NeonApiRequest('1', 'u').save()
+        neondata.NeonApiRequest('2', 'u').save()
+        neondata.NeonApiRequest('3', 'u').save()
+        url = self.get_url('/api/v2/u/videos/')
+        body = json.dumps({
+            'video_id': '2',
+            'is_deleted': True
+        })
+        headers = {'Content-Type': 'application/json'}
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        search_url = self.get_url('/api/v2/u/videos/search?fields=video_id')
+        response = yield self.http_client.fetch(search_url)
+        rjson = json.loads(response.body)
+        self.assertEqual(2, rjson['video_count'])
+        self.assertIn('1', [v['video_id'] for v in rjson['videos']])
+        self.assertNotIn('2', [v['video_id'] for v in rjson['videos']])
+
+        # Put it back.
+        body = json.dumps({
+            'video_id': '2',
+            'is_deleted': False
+        })
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        response = yield self.http_client.fetch(search_url)
+        rjson = json.loads(response.body)
+        self.assertEqual(3, rjson['video_count'])
+        self.assertIn('1', [v['video_id'] for v in rjson['videos']])
+        self.assertIn('2', [v['video_id'] for v in rjson['videos']])
 
     @tornado.testing.gen_test
     def test_since_and_until_param(self):
