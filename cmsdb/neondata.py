@@ -34,6 +34,7 @@ import contextlib
 import copy
 import cv.imhash_index
 import datetime
+import dateutil.parser
 import errno
 import hashlib
 import itertools
@@ -47,9 +48,8 @@ from PIL import Image
 import queries 
 import random
 import re
-import redis as blockingRedis
-import redis.exceptions
 import select
+import sre_constants
 import socket
 import string
 from StringIO import StringIO
@@ -82,16 +82,6 @@ _log = logging.getLogger(__name__)
 define("thumbnailBucket", default="host-thumbnails", type=str,
         help="S3 bucket to Host thumbnails ")
 
-define("accountDB", default="0.0.0.0", type=str, help="")
-define("videoDB", default="0.0.0.0", type=str, help="")
-define("thumbnailDB", default="0.0.0.0", type=str ,help="")
-define("dbPort", default=6379, type=int, help="redis port")
-define("watchdogInterval", default=3, type=int, 
-        help="interval for watchdog thread")
-define("maxRedisRetries", default=5, type=int,
-       help="Maximum number of retries when sending a request to redis")
-define("baseRedisRetryWait", default=0.1, type=float,
-       help="On the first retry of a redis command, how long to wait in seconds")
 define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
@@ -137,30 +127,6 @@ statemon.define('postgres_pools', int)
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
 class DBConnectionError(IOError):pass
-
-def _get_db_address(class_name, is_writeable=True):
-    '''Function that returns the address to the database for an object.
-
-    Inputs:
-    class_name - Class name of the object to lookup
-    is_writeable - If true, the connection can write to the database.
-                   Otherwise it's read only
-
-    Returns: (host, port)
-    '''
-    #TODO: Add the functionlity to talk to read only database slaves
-
-    # This function can get called a lot, so all the options lookups
-    # are done without introspection.
-    host = options.get('cmsdb.neondata.accountDB')
-    port = options.get('cmsdb.neondata.dbPort')
-    if class_name:
-        if class_name == "VideoMetadata":
-            host = options.get('cmsdb.neondata.videoDB')
-        elif class_name in ["ThumbnailMetadata", "ThumbnailURLMapper",
-                            "ThumbnailServingURLs"]:
-            host = options.get('cmsdb.neondata.thumbnailDB')
-    return (host, port)
 
 def _get_db_information(): 
     '''Function that returns the address to the database for an object.
@@ -461,365 +427,6 @@ class PostgresDB(tornado.web.RequestHandler):
     def __setattr__(self, name):
         return setattr(self.instance, name)
  
-class DBConnection(object):
-    '''Connection to the database.
-
-    There is one connection for each object type, so to get the
-    connection, please use the get() function and don't create it
-    directly.
-    '''
-
-    #Note: Lock for each instance, currently locks for any instance creation
-    __singleton_lock = threading.Lock() 
-    _singleton_instance = {} 
-
-    def __init__(self, class_name):
-        '''Init function.
-
-        DO NOT CALL THIS DIRECTLY. Use the get() function instead
-        '''
-        self.conn = RedisAsyncWrapper(class_name, socket_timeout=10)
-        self.blocking_conn = RedisRetryWrapper(class_name, socket_timeout=10)
-
-    def __del__(self):
-        self.close()
-
-    def close(self):
-        self.conn.close()
-        self.blocking_conn.close()
-
-    def fetch_keys_from_db(self, pattern='*', keys_per_call=1000,
-                           set_name=None, callback=None):
-        '''Gets a list of keys that match a pattern.
-
-        Uses SCAN to do it and not block the database
-
-        Inputs:
-        pattern - wildcard pattern of key to look for
-        keys_per_call - Max number of keys to return per scan call
-        set_name - If fetching from a set, what is that set's name
-        callback - Optional callback to get an asynchronous call
-        '''
-
-        conn = self.conn if callback else self.blocking_conn
-        scan_func = conn.scan
-        if set_name:
-            scan_func = lambda **kw: conn.sscan(set_name, **kw)
-            
-        keys = set([])
-        cursor = '0'
-        cnt = keys_per_call
-
-        def _handle_scan_result(result, cnt=keys_per_call):
-            cursor, data = result
-            keys.update(data)
-            if len(data) < (keys_per_call / 2):
-                cnt *= 2
-            if cursor == 0:
-                # We're done
-                callback(keys)
-            else:
-                scan_func(cursor=cursor, match=pattern,
-                          count=cnt,
-                          callback=lambda x:_handle_scan_result(x, cnt))
-
-        if callback:
-            scan_func(cursor=cursor, match=pattern,
-                      count=cnt,
-                      callback=_handle_scan_result)
-        else:
-            while cursor != 0:
-                cursor, data = scan_func(cursor=cursor,
-                                         match=pattern,
-                                         count=cnt)
-                if len(data) < (keys_per_call /2):
-                    cnt *= 2
-                keys.update(data)
-            return list(keys)
-
-    def clear_db(self):
-        '''Erases all the keys in the database.
-
-        This should really only be used in test scenarios.
-        '''
-        self.blocking_conn.flushdb()
-
-    @classmethod
-    def update_instance(cls, cname):
-        ''' Method to update the connection object in case of 
-        db config update '''
-        if cls._singleton_instance.has_key(cname):
-            with cls.__singleton_lock:
-                if cls._singleton_instance.has_key(cname):
-                    cls._singleton_instance[cname] = cls(cname)
-
-    @classmethod
-    def get(cls, otype=None):
-        '''Gets a DB connection for a given object type.
-
-        otype - The object type to get the connection for.
-                Can be a class object, an instance object or the class name 
-                as a string.
-        '''
-        cname = _object_to_classname(otype)
-        
-        if not cls._singleton_instance.has_key(cname):
-            with cls.__singleton_lock:
-                if not cls._singleton_instance.has_key(cname):
-                    cls._singleton_instance[cname] = \
-                      DBConnection(cname)
-        return cls._singleton_instance[cname]
-
-    @classmethod
-    def clear_singleton_instance(cls):
-        '''
-        Clear the singleton instance for each of the classes
-
-        NOTE: To be only used by the test code
-        '''
-        with cls.__singleton_lock:
-            for k in cls._singleton_instance.keys():
-                cls._singleton_instance[k].close()
-                del cls._singleton_instance[k]
-
-class RedisRetryWrapper(object):
-    '''Wraps a redis client so that it retries with exponential backoff.
-
-    You use this class exactly the same way that you would use the
-    StrctRedis class. 
-
-    Calls on this object are blocking.
-
-    '''
-
-    def __init__(self, class_name, **kwargs):
-        self.conn_kwargs = kwargs
-        self.conn_address = None
-        self.class_name = class_name
-        self.client = None
-        self.connection = None
-        self._connect()
-
-    def __del__(self):
-        self._disconnect()
-
-    def close(self):
-        self._disconnect()
-
-    def _connect(self):
-        db_address = _get_db_address(self.class_name)
-        if db_address != self.conn_address:
-            # Reconnect to database because the address has changed
-            self._disconnect()
-            
-            self.connection = blockingRedis.ConnectionPool(
-                host=db_address[0], port=db_address[1],
-                **self.conn_kwargs)
-            self.client = blockingRedis.StrictRedis(
-                connection_pool=self.connection)
-            self.conn_address = db_address
-
-    def _disconnect(self):
-        if self.client is not None:
-            self.connection.disconnect()
-            self.connection = None
-            self.client = None
-            self.conn_address = None
-
-    def _get_wrapped_retry_func(self, attr):
-        '''Returns an blocking retry function wrapped around the given func.
-        '''
-        def RetryWrapper(*args, **kwargs):
-            cur_try = 0
-            busy_count = 0
-            
-            while True:
-                try:
-                    self._connect()
-                    func = getattr(self.client, attr)
-                    return func(*args, **kwargs)
-                except redis.exceptions.BusyLoadingError as e:
-                    # Redis is busy, so wait
-                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
-                                busy_count, 5)
-                    delay = (1 << busy_count) * 0.2
-                    busy_count += 1
-                    time.sleep(delay)
-                except Exception as e:
-                    _log.error('Error talking to sync redis on attempt %i'
-                               ' for function %s: %s' % 
-                               (cur_try, attr, e))
-                    cur_try += 1
-                    if cur_try == options.maxRedisRetries:
-                        raise
-
-                    # Do an exponential backoff
-                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
-                    time.sleep(delay)
-        return RetryWrapper
-
-    def __getattr__(self, attr):
-        '''Allows us to wrap all of the redis-py functions.'''
-        if hasattr(self.client, attr):
-            if hasattr(getattr(self.client, attr), '__call__'):
-                return self._get_wrapped_retry_func(
-                    attr)
-                
-        raise AttributeError(attr)
-
-    def pubsub(self, **kwargs):
-        self._connect()
-        return self.client.pubsub(**kwargs)
-
-class RedisAsyncWrapper(object):
-    '''
-    Replacement class for tornado-redis 
-    
-    This is a wrapper class which does redis operation
-    in a background thread and on completion transfers control
-    back to the tornado ioloop. If you wrap this around gen/Task,
-    you can write db operations as if they were synchronous.
-    
-    usage: 
-    value = yield tornado.gen.Task(RedisAsyncWrapper().get, key)
-
-
-    #TODO: see if we can completely wrap redis-py calls, helpful if
-    you can get the callback attribue as well when call is made
-    '''
-
-    _thread_pools = {}
-    _pool_lock = multiprocessing.RLock()
-    
-    def __init__(self, class_name, **kwargs):
-        self.conn_kwargs = kwargs
-        self.conn_address = None
-        self.class_name = class_name
-        self.client = None
-        self.connection = None
-        self._lock = threading.RLock()
-        self._connect()
-
-    def __del__(self):
-        self._disconnect()
-
-    def close(self):
-        self._disconnect()
-
-    def _connect(self):
-        db_address = _get_db_address(self.class_name)
-        if db_address != self.conn_address:
-            with self._lock:
-                # Reconnect to database because the address has changed
-                self._disconnect()
-            
-                self.connection = blockingRedis.ConnectionPool(
-                    host=db_address[0], port=db_address[1],
-                    **self.conn_kwargs)
-                self.client = blockingRedis.StrictRedis(
-                    connection_pool=self.connection)
-                self.conn_address = db_address
-
-    def _disconnect(self):
-        with self._lock:
-            if self.client is not None:
-                self.connection.disconnect()
-                self.connection = None
-                self.client = None
-                self.conn_address = None
-
-    @classmethod
-    def _get_thread_pool(cls):
-        '''Get the thread pool for this process.'''
-        with cls._pool_lock:
-            try:
-                return cls._thread_pools[os.getpid()]
-            except KeyError:
-                pool = concurrent.futures.ThreadPoolExecutor(
-                    options.async_pool_size)
-                cls._thread_pools[os.getpid()] = pool
-                return pool
-
-    def _get_wrapped_async_func(self, attr):
-        '''Returns an asynchronous function wrapped around the given func.
-
-        The asynchronous call has a callback keyword added to it
-        '''
-        def AsyncWrapper(*args, **kwargs):
-            # Find the callback argument
-            try:
-                callback = kwargs['callback']
-                del kwargs['callback']
-            except KeyError:
-                if len(args) > 0 and hasattr(args[-1], '__call__'):
-                    callback = args[-1]
-                    args = args[:-1]
-                else:
-                    raise AttributeError('A callback is necessary')
-                    
-            io_loop = tornado.ioloop.IOLoop.current()
-            
-            def _cb(future, cur_try=0, busy_count=0):
-                if future.exception() is None:
-                    callback(future.result())
-                    return
-                elif isinstance(future.exception(),
-                                redis.exceptions.BusyLoadingError):
-                    _log.warn_n('Redis is busy on attempt %i. Waiting' %
-                                busy_count)
-                    delay = (1 << busy_count) * 0.2
-                    busy_count += 1
-                else:
-                    _log.error('Error talking to async redis on attempt %i for'
-                               ' call %s: %s' % 
-                               (cur_try, attr, future.exception()))
-                    cur_try += 1
-                    if cur_try == options.maxRedisRetries:
-                        raise future.exception()
-
-                    delay = (1 << cur_try) * options.baseRedisRetryWait # in seconds
-                self._connect()
-                func = getattr(self.client, attr)
-                io_loop.add_timeout(
-                    time.time() + delay,
-                    lambda: io_loop.add_future(
-                        RedisAsyncWrapper._get_thread_pool().submit(
-                            func, *args, **kwargs),
-                        lambda x: _cb(x, cur_try, busy_count)))
-
-            self._connect()
-            func = getattr(self.client, attr)
-            future = RedisAsyncWrapper._get_thread_pool().submit(
-                func, *args, **kwargs)
-            io_loop.add_future(future, _cb)
-        return AsyncWrapper
-        
-
-    def __getattr__(self, attr):
-        '''Allows us to wrap all of the redis-py functions.'''
-        if hasattr(self.client, attr):
-            if hasattr(getattr(self.client, attr), '__call__'):
-                return self._get_wrapped_async_func(attr)
-                
-        raise AttributeError(attr)
-    
-    def pipeline(self):
-        ''' pipeline '''
-        #TODO(Sunil) make this asynchronous
-        self._connect()
-        return self.client.pipeline()
-
-def _erase_all_data():
-    '''Erases all the data from the redis databases.
-
-    This should only be used for testing purposes.
-    '''
-    _log.warn('Erasing all the data. I hope this is a test.')
-    AbstractPlatform._erase_all_data()
-    ThumbnailMetadata._erase_all_data()
-    ThumbnailURLMapper._erase_all_data()
-    VideoMetadata._erase_all_data()
-
 class PostgresPubSub(object):
     class _PostgresPubSub: 
         def __init__(self): 
@@ -978,371 +585,6 @@ class PostgresPubSub(object):
     def __setattr__(self, name):
         return setattr(self.instance, name) 
         
-class PubSubConnection(threading.Thread):
-    '''Handles a pubsub connection.
-
-    The thread, when running, will service messages on the channels
-    subscribed to.
-    '''
-
-    __singleton_lock = threading.RLock()
-    _singleton_instance = {}
-
-    def __init__(self, class_name):
-        '''Init function.
-
-        DO NOT CALL THIS DIRECTLY. Use the get() function instead
-        '''
-        super(PubSubConnection, self).__init__(name='PubSubConnection[%s]' 
-                                               % class_name)
-        self.class_name = class_name
-        self._client = None
-        self._pubsub = None
-        self.connected = False
-        self._address = None
-
-        self._publock = threading.RLock()
-        self._running = threading.Event()
-        self._exit = False
-
-        # Futures to keep track of pending subscribe and unsubscribe
-        # responses. Keyed by channel name.
-        self._sub_futures = {}
-        self._unsub_futures = {}
-
-        # The channels subscribed to. pattern => function
-        self._channels = {}
-
-        self.daemon = True
-
-        self.connect()
-
-    def __del__(self):
-        self.close()
-        self.stop()
-
-    def connect(self):
-        '''Connects to the database. This is a blocking call.'''
-        with self._publock:
-            address = _get_db_address(self.class_name)
-            _log.info(
-                'Connecting to redis at %s for subscriptions of class %s' %
-                (address, self.class_name))
-            self._client = blockingRedis.StrictRedis(address[0],
-                                                     address[1])
-            self._pubsub = self._client.pubsub(ignore_subscribe_messages=False)
-
-            self.connected = True
-            self._address = address
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def _resubscribe(self):
-        '''Resubscribes to channels.'''
-        
-        # Re-subscribe to channels
-        error = None
-        for pattern, func in self._channels.items():
-            self._running.set()
-            if not self.is_alive():
-                self.start()
-            for i in range(options.maxRedisRetries):
-                try:
-                    if self._pubsub is None:
-                        return
-                    yield self._subscribe_impl(func, pattern)
-                    break
-                except DBConnectionError as e:
-                    _log.error('Error subscribing to channel %s: %s' %
-                               (pattern, e))
-                    error = e
-                    delay = (1 << i) * options.baseRedisRetryWait # in seconds
-                    yield tornado.gen.sleep(delay)
-            if error is not None:
-                raise error
-
-    def reconnect(self):
-        '''Reconnects to the database.'''
-        self.close()
-        self.connect()
-
-    def subscribed(self):
-        '''Returns true if we are subscribed to something.'''
-        return len(self._channels) > 0 or len(self._unsub_futures) > 0
-
-    def run(self):
-        error_count = 0
-        while self._running.wait() and not self._exit:            
-            try:
-                with self._publock:
-                    if not self.subscribed():
-                        # There are no more subscriptions, so wait
-                        self._running.clear()
-                        continue
-
-                    if self._address != _get_db_address(self.class_name):
-                        self.reconnect()
-                        # Resubscribe asynchronously because this
-                        # thread has to handle the subscription acks
-                        thread = threading.Thread(target=self._resubscribe,
-                                                  name='resubscribe')
-                        thread.daemon = True
-                        thread.start()
-
-                    if self._pubsub.connection is not None:
-                        # This will cause any callbacks that aren't
-                        # subscribe/unsubscribe messages to be called.
-                        msg = self._pubsub.get_message()
-
-                        self._handle_sub_unsub_messages(msg)
-
-                        # Look for any subscription or unsubscription timeouts
-                        self._handle_timedout_futures(self._unsub_futures)
-                        self._handle_timedout_futures(self._sub_futures)
-
-                        error_count = 0
-                
-            except Exception as e:
-                _log.exception('Error in thread listening to objects %s. '
-                           ': %s' %
-                           (self.__class__.__name__, e))
-                self.connected = False
-                time.sleep((1<<error_count) * 1.0)
-                error_count += 1
-                statemon.state.increment('pubsub_errors')
-
-                # Force reconnection
-                self.reconnect()
-                # Resubscribe asynchronously because this
-                # thread has to handle the subscription acks
-                thread = threading.Thread(target=self._resubscribe,
-                                          name='resubscribe')
-                thread.daemon = True
-                thread.start()
-                        
-            time.sleep(0.05)
-
-    def close(self):
-        with self._publock:
-            if self._pubsub is not None:
-                self._pubsub.close()
-                self._pubsub = None
-                self._client = None
-                self.connected = False
-
-    def stop(self):
-        '''Stops the thread. It cannot be restarted.'''
-        self._exit = True
-        self._running.set()
-
-    def _handle_sub_unsub_messages(self, msg):
-        '''Handle a subscribe or unsubscribe messages.
-
-        Triggers their callbacks
-        '''
-        if msg is None:
-            return
-        
-        future = None
-        if msg['type'] in \
-          blockingRedis.client.PubSub.UNSUBSCRIBE_MESSAGE_TYPES:
-            future = self._unsub_futures.pop(msg['channel'], None)
-        elif msg['type'] not in \
-          blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
-            future = self._sub_futures.pop(msg['channel'], None)
-
-        if future is not None:
-            if future[0].set_running_or_notify_cancel():
-                _log.debug('Changed subscription state to %s' % msg['channel'])
-                future[0].set_result(msg)
-
-    def _handle_timedout_futures(self, future_dict):
-        '''Handle any futures that have timed out.'''
-        timed_out = []
-        for channel in future_dict:
-            future, deadline = future_dict.get(channel)
-            if time.time() > deadline :
-                if future.set_running_or_notify_cancel():
-                    future.set_exception(DBConnectionError(
-                    'Timeout when changing connection state to channel '
-                    '%s' % channel))
-                    statemon.state.increment('subscription_errors')
-                timed_out.append(channel)
-
-        for channel in timed_out:
-            del future_dict[channel]
-
-    def get_parsed_message(self):
-        '''Return a parsed message from the channel(s).'''
-        with self._publock:
-            return self._pubsub.parse_response(block=False)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def subscribe(self, func, pattern='*', timeout=10.0):
-        '''Subscribe to channel(s)
-
-        func - Function to run with each data point
-        pattern - Channel to subscribe to
-
-        returns nothing
-        '''
-        with self._publock:
-            self._channels[pattern] = func
-
-        error = None
-        for i in range(options.maxRedisRetries):
-            try:
-                pool = concurrent.futures.ThreadPoolExecutor(1)
-                sub_future = yield pool.submit(
-                    lambda: self._subscribe_impl(func, pattern,
-                                                 timeout=timeout))
-
-                # Start the thread so that we can receive and service messages
-                self._running.set()
-                if not self.is_alive():
-                    self.start()
-
-                yield sub_future
-                return
-            except DBConnectionError as e:
-                error = e
-                _log.error('Error subscribing to %s on try %d: %s' %
-                           (pattern, i, e))
-                delay = (1 << i) * options.baseRedisRetryWait # in seconds
-                yield tornado.gen.sleep(delay)
-
-        with self._publock:
-            try:
-                del self._channels[pattern]
-            except KeyError:
-                pass
-
-        raise error
-                
-
-    def _subscribe_impl(self, func, pattern='*', timeout=10.0):
-        try:
-            with self._publock:
-                if '*' in pattern:
-                    self._pubsub.psubscribe(**{pattern: func})
-                else:
-                    self._pubsub.subscribe(**{pattern: func})
-
-                if pattern in self._sub_futures:
-                    return self._sub_futures[pattern][0]
-                future = concurrent.futures.Future()
-                self._sub_futures[pattern] = (future, time.time() + timeout)
-                return future
-                
-        except redis.exceptions.RedisError as e:
-            msg = 'Error subscribing to channel %s: %s' % (pattern, e)
-            _log.error(msg)
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-        except socket.error as e:
-            msg = 'Socket error subscribing to channel %s: %s' % (pattern, e)
-            _log.error(msg) 
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def unsubscribe(self, channel=None, timeout=10.0):
-        '''Unsubscribe from channel.
-
-        channel - Channel to unsubscribe from
-        '''
-        def _remove_channel():
-            with self._publock:
-                try:
-                    if channel is None:
-                        self._channels = {}
-                    else:
-                        del self._channels[channel]
-                except KeyError:
-                    return
-        
-
-        error = None
-        for i in range(options.maxRedisRetries):
-            try:
-                pool = concurrent.futures.ThreadPoolExecutor(1)
-                unsub_future = yield pool.submit(
-                    lambda: self._unsubscribe_impl(channel, timeout))
-                yield unsub_future
-                return
-
-            except DBConnectionError as e:
-                error = e
-                _log.error('Error unsubscribing from %s on try %d: %s' %
-                           (channel, i, e))
-                delay = (1 << i) * options.baseRedisRetryWait # in seconds
-                yield tornado.gen.sleep(delay)
-
-        raise error
-
-    def _unsubscribe_impl(self, channel=None, timeout=10.0):
-        try:
-            with self._publock:
-                if channel is None:
-                    self._pubsub.unsubscribe()
-                    self._pubsub.punsubscribe()
-                elif '*' in channel:
-                    self._pubsub.punsubscribe([channel])
-                else:
-                    self._pubsub.unsubscribe([channel])
-                self._running.set()
-                if channel in self._unsub_futures:
-                    return self._unsub_futures[channel][0]
-                future = concurrent.futures.Future()
-                self._unsub_futures[channel] = (future, time.time() + timeout)
-                return future
-        except redis.exceptions.RedisError as e:
-            msg = 'Error unsubscribing to channel %s: %s' % (channel, e)
-            _log.error(msg)
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-        except socket.error as e:
-            msg = 'Socket error unsubscribing to channel %s: %s' % (channel, e)
-            _log.error(msg) 
-            statemon.state.increment('subscription_errors')
-            raise DBConnectionError(msg)
-
-
-    @classmethod
-    def get(cls, otype=None):
-        '''
-        Gets a connection for a given object type.
-
-        otype - The object type to get the connection for.
-                Can be a class object, an instance object or the class name 
-                as a string.
-        '''
-        cname = _object_to_classname(otype)
-        
-        if not cls._singleton_instance.has_key(cname):
-            with cls.__singleton_lock:
-                if not cls._singleton_instance.has_key(cname):
-                    cls._singleton_instance[cname] = \
-                      PubSubConnection(cname)
-        return cls._singleton_instance[cname]
-
-    @classmethod
-    def clear_singleton_instance(cls):
-        '''
-        Clear the singleton instance for each of the classes
-
-        NOTE: To be only used by the test code
-        '''
-        with cls.__singleton_lock:
-            for inst in cls._singleton_instance.values():
-                if inst is not None:
-                    inst.stop()
-                    inst.close()
-            cls._singleton_instance = {}
-    
-
 ##############################################################################
 
 def id_generator(size=32, 
@@ -1518,41 +760,27 @@ class StoredObject(object):
         if self.key is None:
             raise ValueError("key not set")
 
-        if options.wants_postgres:
-            rv = True  
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            query_tuple = db.get_insert_json_query_tuple(self)
-            try:  
+        rv = True  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        query_tuple = db.get_insert_json_query_tuple(self)
+        try:  
+            result = yield conn.execute(query_tuple[0], query_tuple[1])
+        except psycopg2.IntegrityError as e:  
+            # since upsert is not available until postgres 9.5 
+            # we need to do an update here
+            if overwrite_existing_object: 
+                query_tuple = db.get_update_json_query_tuple(self)
                 result = yield conn.execute(query_tuple[0], query_tuple[1])
-            except psycopg2.IntegrityError as e:  
-                # since upsert is not available until postgres 9.5 
-                # we need to do an update here
-                if overwrite_existing_object: 
-                    query_tuple = db.get_update_json_query_tuple(self)
-                    result = yield conn.execute(query_tuple[0], query_tuple[1])
-                else: 
-                    raise  
-            except Exception as e: 
-                rv = False
-                _log.exception('an unknown error occurred when saving an object %s' % e) 
-                statemon.state.increment('postgres_unknown_errors')
+            else: 
+                raise  
+        except Exception as e: 
+            rv = False
+            _log.exception('an unknown error occurred when saving an object %s' % e) 
+            statemon.state.increment('postgres_unknown_errors')
 
-            db.return_connection(conn)
-            raise tornado.gen.Return(rv)
-        else: 
-            db_connection = DBConnection.get(self)
-             
-            def _save_and_add2set(pipe):
-                pipe.sadd(self._set_keyname(), self.key)
-                pipe.set(self.key, value)
-                return True
-                
-            result = yield tornado.gen.Task(db_connection.conn.transaction, _save_and_add2set,
-                                                                            self._set_keyname(),
-                                                                            self.key,
-                                                                            value_from_callable=True)
-            raise tornado.gen.Return(result)
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def _create(cls, key, obj_dict):
@@ -1583,10 +811,9 @@ class StoredObject(object):
                     if isinstance(obj_dict[k], datetime.datetime): 
                         data_dict[k.split('_')[0]] = obj_dict[k].strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
-                    elif isinstance(obj_dict[k], str): 
-                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
-                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
-                                "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str):
+                        data_dict[k.split('_')[0]] = dateutil.parser.parse(
+                            obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
             except KeyError: 
                 pass
  
@@ -1647,40 +874,28 @@ class StoredObject(object):
 
         Returns the object
         '''
-        if options.wants_postgres: 
-            db = PostgresDB()
-            conn = yield db.get_connection()
+        db = PostgresDB()
+        conn = yield db.get_connection()
 
-            obj = None 
-            query = "SELECT _data, _type, \
-                            created_time AS created_time_pg,\
-                            updated_time AS updated_time_pg \
-                     FROM %s \
-                     WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
+        obj = None 
+        query = "SELECT _data, _type, \
+                        created_time AS created_time_pg,\
+                        updated_time AS updated_time_pg \
+                 FROM %s \
+                 WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), key)
 
-            cursor = yield conn.execute(query)
-            result = cursor.fetchone()
-            if result:
-                obj = cls._create(key, result)
-            else:
-                if log_missing:
-                    _log.warn('No %s for id %s in db' % (cls.__name__, key))
-                if create_default:
-                    obj = cls(key)
+        cursor = yield conn.execute(query)
+        result = cursor.fetchone()
+        if result:
+            obj = cls._create(key, result)
+        else:
+            if log_missing:
+                _log.warn('No %s for id %s in db' % (cls.__name__, key))
+            if create_default:
+                obj = cls(key)
 
-            db.return_connection(conn)
-            raise tornado.gen.Return(obj)
-        else: 
-            db_connection = DBConnection.get(cls)
-            jdata = yield tornado.gen.Task(db_connection.conn.get, key) 
-            if jdata is None:
-                if log_missing:
-                    _log.warn('No %s for %s' % (cls.__name__, key))
-                if create_default:
-                    raise tornado.gen.Return(cls(key))
-                else:
-                    raise tornado.gen.Return(None)
-            raise tornado.gen.Return(cls._create(key, json.loads(jdata)))
+        db.return_connection(conn)
+        raise tornado.gen.Return(obj)
 
     @classmethod
     @utils.sync.optional_sync
@@ -1717,28 +932,21 @@ class StoredObject(object):
         A list of cls objects
         '''
         retval = []
-        if options.wants_postgres:
-            results = [] 
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            query = "SELECT _data, _type, \
-                           created_time AS created_time_pg,\
-                           updated_time AS updated_time_pg \
-                     FROM %s \
-                     WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
+        results = [] 
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        query = "SELECT _data, _type, \
+                       created_time AS created_time_pg,\
+                       updated_time AS updated_time_pg \
+                 FROM %s \
+                 WHERE _data->>'key' ~ '%s'" % (cls._baseclass_name().lower(), pattern)
 
-            cursor = yield conn.execute(query)
-            for result in cursor:
-                obj = cls._create(result['_data']['key'], result)
-                results.append(obj) 
-            db.return_connection(conn)
-            raise tornado.gen.Return(results)
-        else: 
-            db_connection = DBConnection.get(cls)
-            keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db, pattern, keys_per_call=10000)
-            raise tornado.gen.Return([x for x in 
-                                     cls._get_many_with_raw_keys(keys)
-                                     if x is not None])
+        cursor = yield conn.execute(query)
+        for result in cursor:
+            obj = cls._create(result['_data']['key'], result)
+            results.append(obj) 
+        db.return_connection(conn)
+        raise tornado.gen.Return(results)
 
     @classmethod
     @utils.sync.optional_sync
@@ -1751,26 +959,23 @@ class StoredObject(object):
             matching ~ and makes this the much better choice if 
             you are trying to match on accountid_blah 
         ''' 
-        if options.wants_postgres:
-            results = [] 
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            baseclass_name = cls._baseclass_name().lower()
-            query = "SELECT _data, _type, \
-                            created_time AS created_time_pg,\
-                            updated_time AS updated_time_pg FROM "\
-                        + baseclass_name + \
-                    " WHERE _data->>'key' LIKE %s"
+        results = [] 
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        baseclass_name = cls._baseclass_name().lower()
+        query = "SELECT _data, _type, \
+                        created_time AS created_time_pg,\
+                        updated_time AS updated_time_pg FROM "\
+                    + baseclass_name + \
+                " WHERE _data->>'key' LIKE %s"
 
-            params = ['%'+key_portion+'%']
-            cursor = yield conn.execute(query, params)
-            for result in cursor:
-                obj = cls._create(result['_data']['key'], result)
-                results.append(obj) 
-            db.return_connection(conn)
-            raise tornado.gen.Return(results)
-        else:
-            raise NotImplementedError('not implemented for redis')  
+        params = ['%'+key_portion+'%']
+        cursor = yield conn.execute(query, params)
+        for result in cursor:
+            obj = cls._create(result['_data']['key'], result)
+            results.append(obj) 
+        db.return_connection(conn)
+        raise tornado.gen.Return(results)
 
     @classmethod
     @utils.sync.optional_sync
@@ -1783,79 +988,58 @@ class StoredObject(object):
         if len(keys) == 0:
             raise tornado.gen.Return([])
 
-        if options.wants_postgres and func_level_wpg:
-            chunk_size = 1000
-            rv = []
-            obj_map = OrderedDict() 
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            # let's use a server-side cursor here 
-            # since momoko won't let me declare a cursor by name, I need to 
-            # do this manually 
-            yield conn.execute("BEGIN")
+        chunk_size = 1000
+        rv = []
+        obj_map = OrderedDict() 
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        # let's use a server-side cursor here 
+        # since momoko won't let me declare a cursor by name, I need to 
+        # do this manually 
+        yield conn.execute("BEGIN")
  
-            query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
-                         created_time AS created_time_pg, \
-                         updated_time AS updated_time_pg \
-                     FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
-                                                    ",".join("'{0}'".format(k) for k in keys))
-            
-            yield conn.execute(query)
-            for key in keys: 
-                obj_map[key] = None 
+        query = "DECLARE get_many CURSOR FOR SELECT _data, _type, \
+                     created_time AS created_time_pg, \
+                     updated_time AS updated_time_pg \
+                 FROM %s \
+                 WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
+                                                ",".join("'{0}'".format(k) for k in keys))
+        
+        yield conn.execute(query)
+        for key in keys: 
+            obj_map[key] = None 
 
-            def _map_new_results(results):
-                for result in results:
-                    obj_key = result['_data']['key'] 
-                    obj_map[obj_key] = result
+        def _map_new_results(results):
+            for result in results:
+                obj_key = result['_data']['key'] 
+                obj_map[obj_key] = result
  
-            def _build_return_items(): 
-                rv = [] 
-                for key, item in obj_map.iteritems():
-                    if item: 
-                        obj = cls._create(key, item) 
+        def _build_return_items(): 
+            rv = [] 
+            for key, item in obj_map.iteritems():
+                if item: 
+                    obj = cls._create(key, item) 
+                else:
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        obj = cls(key)
                     else:
-                        if log_missing:
-                            _log.warn('No %s for %s' % (cls.__name__, key))
-                        if create_default:
-                            obj = cls(key)
-                        else:
-                            obj = None
-                    rv.append(obj)
-                return rv
+                        obj = None
+                rv.append(obj)
+            return rv
  
-            rows = True
-            while rows:
-                cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
-                rows = cursor.fetchmany(chunk_size) 
-                _map_new_results(rows)
+        rows = True
+        while rows:
+            cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
+            rows = cursor.fetchmany(chunk_size) 
+            _map_new_results(rows)
 
-            yield conn.execute("CLOSE get_many")  
-            yield conn.execute("COMMIT")
+        yield conn.execute("CLOSE get_many")  
+        yield conn.execute("COMMIT")
  
-            db.return_connection(conn)
-            raise tornado.gen.Return(_build_return_items())
-        else: 
-            db_connection = DBConnection.get(cls)
-    
-            def _process(results):
-                mappings = []
-                for key, item in zip(keys, results):
-                    if item:
-                        obj = cls._create(key, json.loads(item))
-                    else:
-                        if log_missing:
-                            _log.warn('No %s for %s' % (cls.__name__, key))
-                        if create_default:
-                            obj = cls(key)
-                        else:
-                            obj = None
-                    mappings.append(obj)
-                return mappings
-    
-            items = yield tornado.gen.Task(db_connection.conn.mget, keys)
-            raise tornado.gen.Return(_process(items))
+        db.return_connection(conn)
+        raise tornado.gen.Return(_build_return_items())
     
     @classmethod
     @utils.sync.optional_sync
@@ -1917,142 +1101,96 @@ class StoredObject(object):
         '''
         if create_class is None:
             create_class = cls
-        if options.wants_postgres:
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            if len(keys) == 0:
-                raise tornado.gen.Return({})
-                
-            mappings = {}
-            key_to_object = {}  
-            for key in keys: 
-                key_to_object[key] = None
- 
-            query = "SELECT _data, _type,\
-                            created_time AS created_time_pg,\
-                            updated_time AS updated_time_pg \
-                     FROM %s \
-                     WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
-                                                    ",".join("'{0}'".format(k) for k in keys))
 
-            cursor = yield conn.execute(query)
-            items = cursor.fetchall()
-            for item in items:
-                current_key = item['_data']['key']
-                key_to_object[current_key] = item
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        if len(keys) == 0:
+            raise tornado.gen.Return({})
             
-            for key, item in key_to_object.iteritems(): 
-                if item is None:  
-                    if create_missing:
-                        cur_obj = create_class(key)
-                    else:
-                        _log.warn_n('Could not find postgres object: %s' % key)
-                        cur_obj = None
+        mappings = {}
+        key_to_object = {}  
+        for key in keys: 
+            key_to_object[key] = None
+ 
+        query = "SELECT _data, _type,\
+                        created_time AS created_time_pg,\
+                        updated_time AS updated_time_pg \
+                 FROM %s \
+                 WHERE _data->>'key' IN(%s)" % (create_class._baseclass_name().lower(), 
+                                                ",".join("'{0}'".format(k) for k in keys))
+
+        cursor = yield conn.execute(query)
+        items = cursor.fetchall()
+        for item in items:
+            current_key = item['_data']['key']
+            key_to_object[current_key] = item
+        
+        for key, item in key_to_object.iteritems(): 
+            if item is None:  
+                if create_missing:
+                    cur_obj = create_class(key)
                 else:
-                    def json_serial(obj):
-                        if isinstance(obj, datetime.datetime):
-                            serial = obj.isoformat()
-                            return serial
-                    # hack we need two copies of the object, copy won't work here
-                    item_one = json.loads(json.dumps(item, default=json_serial))
-                    cur_obj = create_class._create(key, item_one)
+                    _log.warn_n('Could not find postgres object: %s' % key)
+                    cur_obj = None
+            else:
+                def json_serial(obj):
+                    if isinstance(obj, datetime.datetime):
+                        serial = obj.isoformat()
+                        return serial
+                # hack we need two copies of the object, copy won't work here
+                item_one = json.loads(json.dumps(item, default=json_serial))
+                cur_obj = create_class._create(key, item_one)
 
-                mappings[key] = cur_obj 
-            try:
-                func(mappings)
-            finally:
-                insert_statements = []
-                update_objs = [] 
-                for key, obj in mappings.iteritems():
-                   original_object = key_to_object.get(key, None)
-                   if obj is not None and original_object is None: 
-                       created = datetime.datetime.utcnow()
-                       updated = datetime.datetime.utcnow()
-                       obj.__dict__['created'] = created.strftime(
-                            "%Y-%m-%d %H:%M:%S.%f")
-                       obj.__dict__['updated'] = updated.strftime(
-                            "%Y-%m-%d %H:%M:%S.%f")
-                       query_tuple = db.get_insert_json_query_tuple(
-                           obj, 
-                           fields='(_data, _type, created_time, updated_time)',
-                           values='VALUES(%s, %s, %s, %s)', 
-                           extra_params=(created, updated))  
-                       insert_statements.append(query_tuple) 
-                   elif obj is not None and obj != original_object:
-                       update_objs.append(obj)
+            mappings[key] = cur_obj 
+        try:
+            vals = func(mappings)
+            if isinstance(vals, concurrent.futures.Future):
+                yield vals
+        finally:
+            insert_statements = []
+            update_objs = [] 
+            for key, obj in mappings.iteritems():
+               original_object = key_to_object.get(key, None)
+               if obj is not None and original_object is None: 
+                   created = datetime.datetime.utcnow()
+                   updated = datetime.datetime.utcnow()
+                   obj.__dict__['created'] = created.strftime(
+                        "%Y-%m-%d %H:%M:%S.%f")
+                   obj.__dict__['updated'] = updated.strftime(
+                        "%Y-%m-%d %H:%M:%S.%f")
+                   query_tuple = db.get_insert_json_query_tuple(
+                       obj, 
+                       fields='(_data, _type, created_time, updated_time)',
+                       values='VALUES(%s, %s, %s, %s)', 
+                       extra_params=(created, updated))  
+                   insert_statements.append(query_tuple) 
+               elif obj is not None and obj != original_object:
+                   update_objs.append(obj)
 
-            if update_objs:  
-                try: 
-                    update_query = db.get_update_many_query_tuple(
-                        update_objs)
-                    yield conn.execute(update_query[0], 
-                                       update_query[1]) 
-                except Exception as e: 
-                    _log.error('unknown error when running \
-                                update_query %s : %s' % 
-                                (update_query, e))
+        if update_objs:  
+            try: 
+                update_query = db.get_update_many_query_tuple(
+                    update_objs)
+                yield conn.execute(update_query[0], 
+                                   update_query[1]) 
+            except Exception as e: 
+                _log.error('unknown error when running \
+                            update_query %s : %s' % 
+                            (update_query, e))
 
-            if insert_statements: 
-                try: 
-                    for it in insert_statements:  
-                        yield conn.execute(it[0], it[1])
-                except psycopg2.IntegrityError:
-                    pass  
-                except Exception as e: 
-                    _log.error('unknown error when running \
-                                inserts %s : %s' % 
-                                (insert_statements, e))
-                
-            db.return_connection(conn)
-            raise tornado.gen.Return(mappings)
-        else:  
-            def _getandset(pipe):
-                # mget can't handle an empty list 
-                if len(keys) == 0:
-                    return {}
-    
-                items = pipe.mget(keys)
-                pipe.multi()
-    
-                mappings = {}
-                orig_objects = {}
-                key_sets = collections.defaultdict(list)
-                for key, item in zip(keys, items):
-                    if item is None:
-                        if create_missing:
-                            cur_obj = create_class(key)
-                            if cur_obj is not None:
-                                key_sets[cur_obj._set_keyname()].append(key)
-                        else:
-                            _log.error('Could not get redis object: %s' % key)
-                            cur_obj = None
-                    else:
-                        cur_obj = create_class._create(key, json.loads(item))
-                        orig_objects[key] = create_class._create(key,
-                                                                 json.loads(item))
-                    mappings[key] = cur_obj
-                try:
-                    func(mappings)
-                finally:
-                    to_set = {}
-                    for key, obj in mappings.iteritems():
-                        if obj is not None and obj != orig_objects.get(key, None):
-                            to_set[key] = obj.to_json()
-    
-                    to_set['updated'] = str(datetime.datetime.utcnow()) 
-    
-                    if len(to_set) > 0:
-                        pipe.mset(to_set)
-                    for set_key, cur_keys in key_sets.iteritems():
-                        pipe.sadd(set_key, *cur_keys)
-                return mappings
-    
-            db_connection = DBConnection.get(create_class)
-
-            result = yield tornado.gen.Task(db_connection.conn.transaction, 
-                                            _getandset, *keys, value_from_callable=True)
-
-            raise tornado.gen.Return(result)
+        if insert_statements: 
+            try: 
+                for it in insert_statements:  
+                    yield conn.execute(it[0], it[1])
+            except psycopg2.IntegrityError:
+                pass  
+            except Exception as e: 
+                _log.error('unknown error when running \
+                            inserts %s : %s' % 
+                            (insert_statements, e))
+            
+        db.return_connection(conn)
+        raise tornado.gen.Return(mappings)
             
     @classmethod
     @utils.sync.optional_sync
@@ -2060,55 +1198,30 @@ class StoredObject(object):
     def save_all(cls, objects):
         '''Save many objects simultaneously'''
         data = {}
-        rv = True 
-        if options.wants_postgres:
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            sql_statements = [] 
-            for obj in objects:
-                query_tuple = db.get_insert_json_query_tuple(obj)
-                sql_statements.append(query_tuple)
-            try:  
-                cursor = yield conn.transaction(sql_statements)
-            except psycopg2.IntegrityError as e: 
-                '''we rollback the transaction, but we still need to 
-                   save all the objects that were in the transaction
-                   we also do not know what object caused the integrityerror, 
-                   so just save on all of them'''
-                for obj in objects: 
-                    obj.save() 
-            except Exception as e: 
-                rv = False
-                _log.exception('an unknown error occurred when saving an object %s' % e) 
-                statemon.state.increment('postgres_unknown_errors')
+        rv = True
+ 
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        sql_statements = [] 
+        for obj in objects:
+            query_tuple = db.get_insert_json_query_tuple(obj)
+            sql_statements.append(query_tuple)
+        try:  
+            cursor = yield conn.transaction(sql_statements)
+        except psycopg2.IntegrityError as e: 
+            '''we rollback the transaction, but we still need to 
+               save all the objects that were in the transaction
+               we also do not know what object caused the integrityerror, 
+               so just save on all of them'''
+            for obj in objects: 
+                obj.save() 
+        except Exception as e: 
+            rv = False
+            _log.exception('an unknown error occurred when saving an object %s' % e) 
+            statemon.state.increment('postgres_unknown_errors')
 
-            db.return_connection(conn)
-            raise tornado.gen.Return(rv) 
-        else: 
-            db_connection = DBConnection.get(cls)
-            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-            for obj in objects:
-                data[obj.key] = obj.to_json()
-                key_sets[obj._set_keyname()].append(obj.key)
-    
-            def _save_and_add2set(pipe):
-                for set_key, keys in key_sets.iteritems():
-                    pipe.sadd(set_key, *keys)
-                pipe.mset(data)
-                return True
-    
-            lock_keys = key_sets.keys() + data.keys()
-            result = yield tornado.gen.Task(db_connection.conn.transaction, 
-                                            _save_and_add2set,
-                                            *lock_keys,
-                                            value_from_callable=True)
-            raise tornado.gen.Return(result)                                 
-
-    @classmethod
-    def _erase_all_data(cls):
-        '''Clear the database that contains objects of this type '''
-        db_connection = DBConnection.get(cls)
-        db_connection.clear_db()
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2141,38 +1254,18 @@ class StoredObject(object):
     @tornado.gen.coroutine
     def _delete_many_raw_keys(cls, keys):
         '''Deletes many objects by their raw keys'''
-        if options.wants_postgres:
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            sql_statements = []
-            for key in keys:
-                query = "DELETE FROM %s \
-                         WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
-                                              key)
-                sql_statements.append(query) 
-            #TODO figure out rv
-            cursor = yield conn.transaction(sql_statements)
-            db.return_connection(conn) 
-            raise tornado.gen.Return(True)  
-        else:  
-            db_connection = DBConnection.get(cls)
-            key_sets = collections.defaultdict(list) # set_keyname -> [keys]
-            for key in keys:
-                obj = cls(key)
-                obj.key = key
-                key_sets[obj._set_keyname()].append(key)
-
-            def _del_and_remfromset(pipe):
-                for set_key, keys in key_sets.iteritems():
-                    pipe.srem(set_key, *keys)
-                    pipe.delete(*keys)
-                return True
-            
-            result = yield tornado.gen.Task(db_connection.conn.transaction, 
-                                            _del_and_remfromset,
-                                            *keys,
-                                            value_from_callable=True)
-            raise tornado.gen.Return(result)
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        sql_statements = []
+        for key in keys:
+            query = "DELETE FROM %s \
+                     WHERE _data->>'key' = '%s'" % (cls._baseclass_name().lower(), 
+                                          key)
+            sql_statements.append(query) 
+        #TODO figure out rv
+        cursor = yield conn.transaction(sql_statements)
+        db.return_connection(conn) 
+        raise tornado.gen.Return(True)  
     
     @classmethod
     @tornado.gen.coroutine 
@@ -2219,57 +1312,6 @@ class StoredObject(object):
         raise NotImplementedError()
         
     @classmethod
-    def _handle_all_changes(cls, msg, func, conn, get_object):
-        '''Handles any changes to objects subscribed on pubsub.
-
-        Used with subscribe_to_changes.
-
-        Drains the channel of keys that have changed and gets them
-        from the database in one big extraction instead of a ton of
-        small ones. Then, for each object, func is called once.
-
-        Inputs:
-        func - The function to call with each object. 
-        conn - The connection we can drain from
-        msg - The message structure for the first event
-        '''
-        keys = [cls.key2id(msg['channel'].partition(':')[2])]
-        ops = [msg['data']]
-        response = conn.get_parsed_message()
-        while response is not None:
-            message_type = response[0]
-            if message_type in blockingRedis.client.PubSub.PUBLISH_MESSAGE_TYPES:
-                ops.append(response[3])
-                keys.append(cls.key2id(response[2].partition(':')[2]))
-    
-            response = conn.get_parsed_message()
-    
-        # Filter out the invalid keys
-        filtered = zip(*filter(lambda x: cls.is_valid_key(x[0]),
-                               zip(*(keys, ops))))
-        if len(filtered) == 0:
-            return
-        keys, ops = filtered
-    
-        if get_object:
-            # this is a dirty hack, to prevent a race condition 
-            # when we subscribe to changes in redis, but want to 
-            # push to postgres -- i don't want to lock get_many for this 
-            # case, adding the extra parameter instead to force redis here
-            objs = cls.get_many(keys, func_level_wpg=False)
-        else:
-            objs = [None for x in range(len(keys))]
-    
-        for key, obj, op in zip(*(keys, objs, ops)):
-            if obj is None or isinstance(obj, cls):
-                try:
-                    func(key, obj, op)
-                except Exception as e:
-                    _log.error('Unexpected exception on db change when calling'
-                               ' %s with arguments %s: %s' % 
-                               (func, (key, obj, op), e))
-
-    @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def subscribe_to_changes(cls, func, pattern='*', get_object=True):
@@ -2285,100 +1327,93 @@ class StoredObject(object):
         get_object - If True, the object will be grabbed from the db.
                      Otherwise, it will be passed into the function as None
         '''
-        if options.wants_postgres:
-            pubsub = PostgresPubSub();
-            pattern = cls._baseclass_name().lower()
-            yield pubsub.listen(pattern, 
-                                lambda x: cls._handle_all_changes_pg(x, func))
-        else: 
-            conn = PubSubConnection.get(cls)
-        
-            yield conn.subscribe(
-                lambda x: cls._handle_all_changes(x, func, conn, get_object),
-                '__keyspace@0__:%s' % cls.format_subscribe_pattern(pattern),
-                async=True)
+        pubsub = PostgresPubSub();
+        pattern = cls._baseclass_name().lower()
+        yield pubsub.listen(pattern, 
+                            lambda x: cls._handle_all_changes_pg(x, func))
 
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def unsubscribe_from_changes(cls, channel):
-        if options.wants_postgres:
-            pubsub = PostgresPubSub();
-            yield pubsub.unlisten(cls._baseclass_name().lower()) 
-        else: 
-            conn = PubSubConnection.get(cls)
-        
-            yield conn.unsubscribe(
-                '__keyspace@0__:%s' % cls.format_subscribe_pattern(channel),
-                async=True)
+        pubsub = PostgresPubSub();
+        yield pubsub.unlisten(cls._baseclass_name().lower()) 
 
     @classmethod
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
 
-    @classmethod 
-    @tornado.gen.coroutine
-    def get_and_execute_select_query(cls, 
-                                     fields, 
-                                     where_clause=None,
-                                     table_name=None, 
-                                     wc_params=[],
-                                     limit_clause=None,
-                                     order_clause=None, 
-                                     group_clause=None,  
-                                     cursor_factory=psycopg2.extensions.cursor): 
+    @classmethod
+    def get_select_query(cls, fields, where_clause=None, table_name=None,
+                         join_clause=None, wc_params=[], limit_clause=None,
+                         order_clause=None, group_clause=None):
         ''' helper function to build up a select query
 
-               fields : an array of the fields you want 
-               where_clause : the portion of the query following WHERE 
-               table_name : defaults to _baseclass_name, but this populates 
-                            the from portion of the query 
-               wc_params : any params you need in the where clause
+               fields : an array of the fields you want
+               where_clause : the portion of the query following WHERE
+               table_name : defaults to _baseclass_name, but this populates
+                            the from portion of the query
 
- 
-               eg fields = ["_data->>'neon_api_key'", 
-                            "_data->>'key'"] 
-                  object_type = neonuseraccount 
-                  where_clause = "_data->'users' ? %s" 
-                  params = [user1] 
-               would execute 
-                  SELECT _data->>'neon_api_key', _data->>'key' 
-                   FROM neonuseraccount 
-                  WHERE _data->'users' ? user1 
-            returns the result array from the query 
-
-            be nice, this will do a fetchall, which can be 
-            memory intensive -- TODO make an option that 
-            operates like get_many does currently 
+               eg fields = ["_data->>'neon_api_key'",
+                            "_data->>'key'"]
+                  object_type = neonuseraccount
+                  where_clause = "_data->'users' ? %s"
+                  params = [user1]
+               would build
+                  SELECT _data->>'neon_api_key', _data->>'key'
+                   FROM neonuseraccount
+                  WHERE _data->'users' ? user1
         '''
-        
-        db = PostgresDB() 
-        conn = yield db.get_connection()
-        if table_name is None: 
+        if table_name is None:
             table_name = cls._baseclass_name().lower()
 
-        csl_fields = ",".join("{0}".format(f) for f in fields) 
-        query = "SELECT " + csl_fields + \
-                " FROM " + table_name
-        
+        csl_fields = ",".join("{0}".format(f) for f in fields)
+        query = "SELECT " + csl_fields + " FROM " + table_name
+        if join_clause:
+            query += " JOIN " + join_clause
         if where_clause:
             query += " WHERE " + where_clause
-
-        if order_clause: 
+        if order_clause:
             query += " " + order_clause
+        if group_clause:
+            query += " " + group_clause
+        if limit_clause:
+            query += " " + limit_clause
 
-        if group_clause: 
-            query += " " + group_clause  
- 
-        if limit_clause: 
-            query += " " + limit_clause 
- 
-        cursor = yield conn.execute(query, 
-                                    wc_params,
-                                    cursor_factory=cursor_factory)
+        return query
+
+
+    @classmethod
+    @tornado.gen.coroutine
+    def explain_query(cls, query, wc_params, cursor_factory):
+        ''' Get database query plan of query.'''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute('EXPLAIN {}'.format(query), wc_params, cursor_factory=cursor_factory)
         rv = cursor.fetchall()
-        db.return_connection(conn) 
-        raise tornado.gen.Return(rv) 
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def execute_select_query(cls, query, wc_params,
+                             cursor_factory=psycopg2.extensions.cursor):
+        ''' helper function to execute a select query
+
+            returns the result array from the query
+
+            be nice, this will do a fetchall, which can be
+            memory intensive -- TODO make an option that
+            operates like get_many does currently
+
+            wc_params : any params you need in the where clause
+        '''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
+        rv = cursor.fetchall()
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -2565,24 +1600,17 @@ class NamespacedStoredObject(StoredObject):
     @tornado.gen.coroutine
     def get_all_keys(cls):
         '''Return all the keys in the database for this object type.'''
-        if options.wants_postgres: 
-            rv = True  
-            db = PostgresDB()
-            conn = yield db.get_connection()
+        rv = True  
+        db = PostgresDB()
+        conn = yield db.get_connection()
 
-            query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
-            cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
-            keys_list = [i[0] for i in cursor.fetchall()]
-            db.return_connection(conn)
-            rv = [x.partition('_')[2] for x in keys_list if
-                                      x is not None]
-            raise tornado.gen.Return(rv) 
-        else: 
-            db_connection = DBConnection.get(cls)
-            raw_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                              set_name=cls._set_keyname())
-            raise tornado.gen.Return([x.partition('_')[2] for x in raw_keys if
-                                      x is not None])
+        query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
+        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+        keys_list = [i[0] for i in cursor.fetchall()]
+        db.return_connection(conn)
+        rv = [x.partition('_')[2] for x in keys_list if
+                                  x is not None]
+        raise tornado.gen.Return(rv) 
 
     @classmethod
     @utils.sync.optional_sync
@@ -2725,10 +1753,7 @@ class NeonApiKey(NamespacedStoredObject):
         #NOTE: This is a misnomer. It is being overriden here since the save()
         # function uses to_json() and the NeonApiKey is saved as a plain string
         # in the database
-        if options.wants_postgres:
-            return json.dumps(self.__dict__) 
-        else:  
-            return self.api_key
+        return json.dumps(self.__dict__) 
     
     @classmethod
     def _create(cls, key, obj_dict):
@@ -2750,27 +1775,20 @@ class NeonApiKey(NamespacedStoredObject):
     def get(cls, a_id, callback=None):
         #NOTE: parent get() method uses json.loads() hence overriden here
         key = cls.format_key(a_id)
-        if options.wants_postgres:
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            
-            query = "SELECT _data \
-                     FROM %s \
-                     WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        
+        query = "SELECT _data \
+                 FROM %s \
+                 WHERE _data->>'key' = '%s'" % (cls.__name__.lower(), key)
 
-            cursor = yield conn.execute(query)
-            result = cursor.fetchone()
-            db.return_connection(conn)
-            if result:  
-                raise tornado.gen.Return(result['_data']['api_key']) 
-            else: 
-                raise tornado.gen.Return(None) 
-        else:  
-            db_connection = DBConnection.get(cls)
-            if callback:
-                db_connection.conn.get(key, callback) 
-            else:
-                raise tornado.gen.Return(db_connection.blocking_conn.get(key))
+        cursor = yield conn.execute(query)
+        result = cursor.fetchone()
+        db.return_connection(conn)
+        if result:  
+            raise tornado.gen.Return(result['_data']['api_key']) 
+        else: 
+            raise tornado.gen.Return(None) 
    
     @classmethod
     def get_many(cls, keys, callback=None):
@@ -2945,23 +1963,20 @@ class User(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_associated_account_ids(self):
-        results = yield self.get_and_execute_select_query(
-                    [ "_data->>'neon_api_key'" ], 
-                    "_data->'users' ? %s", 
-                    table_name='neonuseraccount', 
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data->>'neon_api_key'" ],
+                        "_data->'users' ? %s",
+                        table_name='neonuseraccount'),
                     wc_params=[self.username])
- 
+
         rv = [i[0] for i in results]
-        raise tornado.gen.Return(rv) 
-        
+        raise tornado.gen.Return(rv)
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
         '''
-        if options.wants_postgres:
-            return 'users' 
-        else: 
-            return User.__name__  
+        return 'users' 
         
 class NeonUserAccount(NamespacedStoredObject):
     ''' NeonUserAccount
@@ -2986,7 +2001,8 @@ class NeonUserAccount(NamespacedStoredObject):
                  subscription_information=None, 
                  verify_subscription_expiry=datetime.datetime(1970,1,1), 
                  billed_elsewhere=True, 
-                 billing_provider_ref=None):
+                 billing_provider_ref=None,
+                 processing_priority=1):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
@@ -3009,7 +2025,7 @@ class NeonUserAccount(NamespacedStoredObject):
         self.default_size = default_size
         
         # Priority Q number for processing, currently supports {0,1}
-        self.processing_priority = 1
+        self.processing_priority = processing_priority
 
         # Default thumbnail to show if we don't have one for a video
         # under this account.
@@ -3125,27 +2141,26 @@ class NeonUserAccount(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_integrations(self):
-        rv = [] 
+        rv = []
 
         # due to old data, these could either have account_id or api_key
         # as account_id
-        results = yield self.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg"], 
-                    "_data->>'account_id' IN(%s, %s)", 
-                    table_name='abstractintegration', 
-                    wc_params=[self.neon_api_key, 
-                               self.account_id],
-                    group_clause = "ORDER BY _type",  
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'account_id' IN(%s, %s)",
+                        table_name='abstractintegration',
+                        group_clause = "ORDER BY _type"),
+                    wc_params=[self.neon_api_key, self.account_id],
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         for result in results:
             obj = self._create(result['_data']['key'], result)
             rv.append(obj)
 
-        raise tornado.gen.Return(rv) 
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def get_ovp(cls):
@@ -3243,30 +2258,36 @@ class NeonUserAccount(NamespacedStoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_internal_video_ids(self):
-        '''Return the list of internal videos ids for this account.'''
-        if options.wants_postgres:
-            rv = True  
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            # right now, we are gonna do this with a LIKE query on the 
-            # indexed key field, however, as data grows it may become 
-            # necessary to store account_id/api_key on the object or table : 
-            # index that, and query based on that
-            query = "SELECT _data->>'key' FROM " + VideoMetadata._baseclass_name().lower() + \
-                    " WHERE _data->>'key' LIKE %s" 
-            # what a mess...escaping 'hack' 
-            params = [self.neon_api_key+'%']
-            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
-            rv = [i[0] for i in cursor.fetchall()]
+    def get_internal_video_ids(self, since=None):
+        '''Return the list of internal videos ids for this account.
 
-            db.return_connection(conn)
-            raise tornado.gen.Return(rv) 
-        else: 
-            db_connection = DBConnection.get(self)
-            vids = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                          set_name='objset:%s' % self.neon_api_key)
-            raise tornado.gen.Return(list(vids))
+           Orders by updated_time ASC 
+        '''
+        if since is None: 
+            since = '1969-01-01'
+ 
+        rv = True  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        # right now, we are gonna do this with a LIKE query on the 
+        # indexed key field, however, as data grows it may become 
+        # necessary to store account_id/api_key on the object or table : 
+        # index that, and query based on that
+        query = "SELECT _data->>'key' FROM " + \
+                VideoMetadata._baseclass_name().lower() + \
+                " WHERE _data->>'key' LIKE %s AND updated_time > %s"\
+                " ORDER BY updated_time ASC" 
+        # what a mess...escaping 'hack' 
+        params = [self.neon_api_key+'%', since]
+        cursor = yield conn.execute(
+            query, 
+            params, 
+            cursor_factory=psycopg2.extensions.cursor)
+
+        rv = [i[0] for i in cursor.fetchall()]
+
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv) 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3295,27 +2316,19 @@ class NeonUserAccount(NamespacedStoredObject):
     def get_all_job_keys(self):
         '''Return a list of (job_id, api_key) of all the jobs for this account.
         '''
-        if options.wants_postgres:
-            db = PostgresDB()
-            conn = yield db.get_connection()
-            base_class_name = NeonApiRequest._baseclass_name().lower()
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        base_class_name = NeonApiRequest._baseclass_name().lower()
 
-            query = "SELECT _data->>'key' FROM " + base_class_name + \
-                    " WHERE _data->>'key' LIKE %s"
+        query = "SELECT _data->>'key' FROM " + base_class_name + \
+                " WHERE _data->>'key' LIKE %s"
  
-            params = [base_class_name+'_'+self.neon_api_key+'_%']
-            cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
-            tuple_to_list = [i[0] for i in cursor.fetchall()]
-            db.return_connection(conn)
+        params = [base_class_name+'_'+self.neon_api_key+'_%']
+        cursor = yield conn.execute(query, params, cursor_factory=psycopg2.extensions.cursor)
+        tuple_to_list = [i[0] for i in cursor.fetchall()]
+        db.return_connection(conn)
 
-            raise tornado.gen.Return([x.split('_')[:0:-1] for x in tuple_to_list])
-        else:  
-            db_connection = DBConnection.get(self)
-            base_keys = yield tornado.gen.Task(db_connection.fetch_keys_from_db,
-                                               set_name='objset:request:%s' % 
-                                               self.neon_api_key)
-
-            raise tornado.gen.Return([x.split('_')[:0:-1] for x in base_keys])
+        raise tornado.gen.Return([x.split('_')[:0:-1] for x in tuple_to_list])
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3411,7 +2424,7 @@ class ProcessingStrategy(DefaultedStoredObject):
     parameter for which this is the case, see local_video_searcher.py for
     more elaborate documentation.
     '''
-    def __init__(self, account_id, processing_time_ratio=2.5,
+    def __init__(self, account_id, processing_time_ratio=2.0,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
@@ -4322,10 +3335,7 @@ class NeonPlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres: 
-            return AbstractPlatform.__name__ 
-        else: 
-            return NeonPlatform.__name__
+        return AbstractPlatform.__name__ 
 
 class BrightcoveIntegration(AbstractIntegration):
     ''' Brightcove Integration class '''
@@ -4560,10 +3570,7 @@ class BrightcovePlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres: 
-            return AbstractPlatform.__name__ 
-        else: 
-            return BrightcovePlatform.__name__
+        return AbstractPlatform.__name__ 
 
 class YoutubePlatform(AbstractPlatform):
     ''' Youtube platform integration '''
@@ -4679,10 +3686,7 @@ class YoutubePlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres: 
-            return AbstractPlatform.__name__ 
-        else: 
-            return YoutubePlatform.__name__
+        return AbstractPlatform.__name__ 
 
 class OoyalaIntegration(AbstractIntegration):
     '''
@@ -4782,10 +3786,7 @@ class OoyalaPlatform(AbstractPlatform):
 
     @classmethod
     def _baseclass_name(cls):
-        if options.wants_postgres: 
-            return AbstractPlatform.__name__ 
-        else: 
-            return OoyalaPlatform.__name__
+        return AbstractPlatform.__name__ 
 
 #######################
 # Request Blobs 
@@ -4873,6 +3874,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.callback_state = callback_state
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
+        self.try_count = 0 # Number of attempted processing tries
         
         self.integration_type = integration_type
         self.integration_id = integration_id
@@ -5219,13 +4221,13 @@ class BrightcovePlayer(NamespacedStoredObject):
         '''Get all players associated to the integration'''
 
         rv = []
-        results = yield self.get_and_execute_select_query(
-                    [ "_data",
-                      "_type",
-                      "created_time AS created_time_pg",
-                      "updated_time AS updated_time_pg"],
-                    "_data->>'integration_id' = '%s' ",
-                    table_name='brightcoveplayer',
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'integration_id' = '%s' ",
+                        table_name='brightcoveplayer'),
                     wc_params=[integration_id])
         for result in results:
             player = self._create(result['_data']['key'], result)
@@ -5656,9 +4658,10 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload(image, self.key, async=True, 
-                                        do_source_crop=self.do_source_crop,
-                                        do_smart_crop=self.do_smart_crop)
+        s3_url_list = yield primary_hoster.upload(
+            image, self.key, async=True, 
+            do_source_crop=self.do_source_crop,
+            do_smart_crop=self.do_smart_crop)
         
         # TODO (Sunil):  Add redirect for the image
 
@@ -6219,104 +5222,135 @@ class VideoMetadata(StoredObject):
 
         yield VideoMetadata.delete(key, async=True)
 
-    @classmethod 
+    @classmethod
     @tornado.gen.coroutine
-    def search_videos(cls, 
-                      account_id=None, 
+    def search_videos(cls,
+                      account_id=None,
                       since=None,
-                      until=None, 
-                      limit=25):
+                      until=None,
+                      limit=25,
+                      search_query=None):
 
-        """Does a basic search over the videometadatas in the DB 
+        """Does a basic search over the videometadatas in the DB
 
-           account_id : if specified will only search videos for that account, 
-                        defaults to None, meaning it will search all accounts 
-                        for videos 
-           since      : if specified will find videos since this date, 
-                        defaults to None, meaning it will grab the 25 most 
-                        recent videos 
-           until      : if specified will find videos until this date, 
-                        defaults to None
-           limit      : if specified it limits the search to this many 
+           account_id  : if specified will only search videos for that account,
+                         defaults to None, meaning it will search all accounts
+                         for videos
+           since       : if specified will find videos since this date,
+                         defaults to None, meaning it will grab the 25 most
+                         recent videos
+           until       : if specified will find videos until this date,
+                         defaults to None
+           limit       : if specified it limits the search to this many
                         videos, defaults to 25
+           search_query: A string that, if valid regex, is applied via PG's
+                         ~* (case insensitive posix regex) operator to title and,
+                         if not valid regex, applied as a simple %<search_query>%
+                         expression. For the latter, terms must all appear
+                         and appear in order in a title to match.
 
-           Returns : a dictionary of the following 
-               videos - the videos that the search returned 
-               since_time - this is the time of the most recent video that 
-                            the search returned, it's mainly here to prevent 
-                            consumers from having to do this 
-        """ 
-        where_clause = "" 
+
+           Returns : a dictionary of the following
+               videos - the videos that the search returned
+               since_time - this is the time of the most recent video that
+                            the search returned, it's mainly here to prevent
+                            consumers from having to do this
+        """
+        where_clause = ""
         videos = []
-        since_time = None 
-        until_time = None  
+        since_time = None
+        until_time = None
         wc_params = []
-        rv = {}  
-        
-        where_clause = "_data->'job_id' != 'null'"
-        order_clause = "ORDER BY created_time DESC" 
-        if since: 
-            if where_clause: 
-                where_clause += " AND "
-            where_clause += " created_time > to_timestamp(%s)::timestamp"
-            # switch up the order clause so the page starts at the right spot 
-            order_clause = "ORDER BY created_time ASC" 
-            wc_params.append(since) 
+        rv = {}
 
-        if until: 
-            if where_clause: 
+        where_clause = "v._data->'job_id' != 'null'"
+        order_clause = "ORDER BY v.created_time DESC"
+        join_clause = None
+        if since:
+            if where_clause:
                 where_clause += " AND "
-            where_clause += " created_time < to_timestamp(%s)::timestamp" 
-            wc_params.append(until) 
-        
-        if account_id: 
-            if where_clause: 
+            where_clause += " v.created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot
+            order_clause = "ORDER BY v.created_time ASC"
+            wc_params.append(since)
+
+        if until:
+            if where_clause:
                 where_clause += " AND "
-            where_clause += " _data->>'key' LIKE %s"
+            where_clause += " v.created_time < to_timestamp(%s)::timestamp"
+            wc_params.append(until)
+
+        if account_id:
+            if where_clause:
+                where_clause += " AND "
+            where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
- 
-        results = yield cls.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg" ], 
-                    where_clause, 
-                    wc_params=wc_params, 
-                    limit_clause="LIMIT %d" % limit, 
-     		    order_clause=order_clause,
-                    cursor_factory=psycopg2.extras.RealDictCursor)
 
-        def _get_time(result): 
-            # need micros here 
+        columns = ["v._data",
+                   "v._type",
+                   "v.created_time AS created_time_pg",
+                   "v.updated_time AS updated_time_pg"]
+
+        # Join request to query searches on video title.
+        if search_query is not None:
+
+            join_clause  = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
+            if where_clause:
+                where_clause += " AND "
+
+            # Assume it's a regex.
+            try:
+                re.compile(search_query)
+            except sre_constants.error:
+                # Escape its special characters if not valid.
+                search_query = re.escape(search_query)
+            where_clause += " r._data->>'video_title' ~* %s"
+            wc_params.append(search_query)
+
+        query = cls.get_select_query(
+            columns,
+            where_clause,
+            join_clause=join_clause,
+            table_name="videometadata AS v",
+            limit_clause="LIMIT %d" % limit,
+            order_clause=order_clause)
+
+        results = yield cls.execute_select_query(
+            query,
+            wc_params=wc_params,
+            cursor_factory=psycopg2.extras.RealDictCursor)
+
+        def _get_time(result):
+            # need micros here
             created_time = result['created_time_pg']
             cc_tt = time.mktime(created_time.timetuple())
             _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time 
-        
-        try:   
-            do_reverse = False 
-            if since: 
+            return _time
+
+        try:
+            do_reverse = False
+            if since:
                 since_time = _get_time(results[-1])
                 until_time = _get_time(results[0])
                 do_reverse = True
-            else:  
-                since_time = _get_time(results[0]) 
-                until_time = _get_time(results[-1]) 
-        except (KeyError,IndexError): 
+            else:
+                since_time = _get_time(results[0])
+                until_time = _get_time(results[-1])
+        except (KeyError,IndexError):
             pass
-        
+
         for result in results:
-            obj = cls._create(result['_data']['key'], result)
-            videos.append(obj)
+            video = cls._create(result['_data']['key'], result)
+            videos.append(video)
 
-        if do_reverse: 
-            videos.reverse() 
+        if do_reverse:
+            videos.reverse()
 
-        rv['videos'] = videos 
+        rv['videos'] = videos
         rv['since_time'] = since_time
         rv['until_time'] = until_time
-        raise tornado.gen.Return(rv) 
-         
+        raise tornado.gen.Return(rv)
+
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 

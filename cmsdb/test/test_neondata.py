@@ -43,7 +43,7 @@ import test_utils.mock_boto_s3 as boto_mock
 from StringIO import StringIO
 from cmsdb import neondata
 from cmsdb.neondata import NeonPlatform, BrightcovePlatform, \
-        YoutubePlatform, NeonUserAccount, DBConnection, NeonApiKey, \
+        YoutubePlatform, NeonUserAccount, NeonApiKey, \
         AbstractPlatform, VideoMetadata, ThumbnailID, ThumbnailURLMapper,\
         ThumbnailMetadata, InternalVideoID, OoyalaPlatform, \
         TrackerAccountIDMapper, ThumbnailServingURLs, ExperimentStrategy, \
@@ -68,13 +68,11 @@ class TestNeondataDataSpecific(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     def test_default_bcplatform_settings(self):
@@ -1198,14 +1196,12 @@ class TestThumbnailHelperClass(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     def test_thumbnail_get_data(self):
@@ -1424,14 +1420,12 @@ class TestAddingImageData(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
         super(TestAddingImageData, cls).tearDownClass()
 
@@ -1757,13 +1751,11 @@ class TestPostgresDBConnections(test_utils.neontest.AsyncTestCase):
         # do this in setup because its tough to shutdown, and restart 
         # from tests otherwise, this should be the only place where 
         # this is done, as the operation is slow. 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         self.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     def tearDown(self): 
         super(TestPostgresDBConnections, self).tearDown()
-        options._set('cmsdb.neondata.wants_postgres', 0)
         self.postgresql.stop()
     
     @tornado.testing.gen_test(timeout=20.0) 
@@ -1839,14 +1831,12 @@ class TestPostgresDB(test_utils.neontest.AsyncTestCase):
     
     @classmethod
     def setUpClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     @tornado.testing.gen_test 
@@ -1911,14 +1901,12 @@ class TestPostgresPubSub(test_utils.neontest.AsyncTestCase):
     
     @classmethod
     def setUpClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     @tornado.testing.gen_test()
@@ -2015,14 +2003,12 @@ class TestPlatformAndIntegration(test_utils.neontest.AsyncTestCase):
     
     @classmethod
     def setUpClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         file_str = os.path.join(__base_path__, '/cmsdb/test/cmsdb.sql')
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     @tornado.testing.gen_test 
@@ -2271,13 +2257,11 @@ class TestVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod 
@@ -2309,13 +2293,11 @@ class TestVerification(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod 
@@ -2333,13 +2315,11 @@ class TestAccountLimits(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod 
@@ -2357,13 +2337,11 @@ class TestBillingPlans(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod 
@@ -2381,13 +2359,11 @@ class TestNeonRequest(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key'), ('static', 'a1')]
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod 
@@ -2414,13 +2390,11 @@ class TestUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod
@@ -2476,13 +2450,11 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')] 
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls): 
-        options._set('cmsdb.neondata.wants_postgres', 0) 
         cls.postgresql.stop()
     
     @classmethod
@@ -2544,7 +2516,55 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         so = neondata.NeonUserAccount('kevinacct')
         yield so.save(async=True) 
         integrations = yield so.get_integrations(async=True)
-        self.assertEquals(len(integrations), 0)  
+        self.assertEquals(len(integrations), 0) 
+
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids(self): 
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(async=True)
+        self.assertEquals(len(video_ids), 1)
+        self.assertEquals(video_ids[0], 'key_vid1')
+ 
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids_multiple(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        i_vid_two = InternalVideoID.generate(api_key, 'vid2')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(async=True)
+        self.assertEquals(len(video_ids), 2)
+        self.assertEquals(video_ids[0], 'key_vid1')
+        self.assertEquals(video_ids[1], 'key_vid2')
+
+    @tornado.testing.gen_test 
+    def test_get_internal_video_ids_since_date(self):
+        api_key = 'key'
+        i_vid = InternalVideoID.generate(api_key, 'vid1')
+        i_vid_two = InternalVideoID.generate(api_key, 'vid2')
+        tid = i_vid + "_t1"
+        yield ThumbnailMetadata(tid, i_vid).save(async=True)
+        yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
+        since_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
+        video = yield VideoMetadata.get(i_vid_two, async=True)
+        so = neondata.NeonUserAccount('key', api_key='key')
+        yield so.save(async=True)
+        video_ids = yield so.get_internal_video_ids(
+            async=True, 
+            since=since_date)
+        self.assertEquals(len(video_ids), 1)
+        self.assertEquals(video_ids[0], 'key_vid2')
 
 class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self):
@@ -2557,13 +2577,11 @@ class TestBrightcovePlayer(test_utils.neontest.AsyncTestCase, BasePGNormalObject
     @classmethod
     def setUpClass(cls):
         BasePGNormalObject.keys = [('dynamic', 'key')]
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
 
     @classmethod

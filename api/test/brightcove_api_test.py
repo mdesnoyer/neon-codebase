@@ -30,7 +30,6 @@ from StringIO import StringIO
 import test_utils.neontest
 from tornado.httpclient import HTTPError, HTTPRequest, HTTPResponse
 import tornado.ioloop
-import test_utils.redis
 import urlparse
 import unittest
 from cvutils.imageutils import PILImageUtils
@@ -47,7 +46,31 @@ _log = logging.getLogger(__name__)
 define('run_tests_on_test_account', default=0, type=int,
        help='If set, will run tests that hit the real Brightcove APIs')
 
-class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
+class BaseAsyncTest(test_utils.neontest.AsyncTestCase): 
+    def setUp(self):
+        super(test_utils.neontest.AsyncTestCase, self).setUp()
+
+    def tearDown(self): 
+        self.postgresql.clear_all_tables()
+        super(test_utils.neontest.AsyncTestCase, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        super(BaseAsyncTest, cls).tearDownClass() 
+        cls.max_io_loop_size = options.get(
+            'cmsdb.neondata.max_io_loop_dict_size')
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+        options._set('cmsdb.neondata.max_io_loop_dict_size', 
+            cls.max_io_loop_size)
+        super(BaseAsyncTest, cls).tearDownClass() 
+
+class TestBrightcoveApi(BaseAsyncTest):
     def setUp(self):
         super(TestBrightcoveApi, self).setUp()
 
@@ -61,12 +84,9 @@ class TestBrightcoveApi(test_utils.neontest.AsyncTestCase):
           patch('api.brightcove_api.BrightcoveApi.read_connection.send_request')
         self.outer_http_mock = self.http_call_patcher.start()
         self.http_mock = self._future_wrap_mock(self.outer_http_mock)
-        self.redis = test_utils.redis.RedisServer()
-        self.redis.start() 
 
     def tearDown(self):
         self.http_call_patcher.stop()
-        self.redis.stop()
         super(TestBrightcoveApi, self).tearDown()
 
     def _set_http_response(self, code=200, body='', error=None):
@@ -344,13 +364,11 @@ class TestPlayerAPI(test_utils.neontest.AsyncTestCase):
 
     @classmethod
     def setUpClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 1)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
 
     @classmethod
     def tearDownClass(cls):
-        options._set('cmsdb.neondata.wants_postgres', 0)
         cls.postgresql.stop()
         super(TestPlayerAPI, cls).tearDownClass()
 

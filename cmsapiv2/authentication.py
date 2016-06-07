@@ -226,6 +226,8 @@ class RefreshTokenHandler(APIV2Handler):
             
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('refresh token has expired, please authenticate again')
+        except jwt.InvalidTokenError:
+            raise NotAuthorizedError('refresh token invalid, please authenticate again')
  
     @classmethod
     def get_access_levels(self):
@@ -493,7 +495,7 @@ class UserHandler(APIV2Handler):
     def get_access_levels(self):
         return { 
                  HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE
+                 HTTPVerbs.PUT : neondata.AccessLevels.NONE
                } 
  
     @classmethod

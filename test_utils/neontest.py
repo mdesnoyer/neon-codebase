@@ -56,7 +56,7 @@ class TestCase(unittest.TestCase):
 
         if len(matching_logs) == 0:
             self.fail(
-                'Msg: %s was not logged. The log was: %s' % 
+                'Msg: %s was not logged. The following messages were logged: %s' % 
                 (regexp,
                  '\n'.join(['%s: %s' % (x.levelname, x.getMessage())
                             for x in handler.logs])))

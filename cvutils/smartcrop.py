@@ -123,6 +123,7 @@ class SmartCrop(object):
                 SmartCrop._dlib_face_detector = \
                   dlib.get_frontal_face_detector()
             self.dlib_face_detector = SmartCrop._dlib_face_detector
+            
             self.haar_params = {'minNeighbors': 8,
                                 'minSize': (100, 100),
                                 'scaleFactor': 1.1}

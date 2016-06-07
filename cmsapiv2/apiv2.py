@@ -18,6 +18,7 @@ import jwt
 import logging
 import re
 import signal
+import sre_constants
 import stripe
 import tornado.httpserver
 import tornado.ioloop
@@ -92,6 +93,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
+
 
 class APIV2Sender(object):
     def success(self, data, code=ResponseCode.HTTP_OK):
@@ -592,13 +594,15 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         self.set_status(status_code)
         exception = kwargs["exc_info"][1]
         if any(isinstance(exception, c) for c in [Invalid,
+                                                  MultipleInvalid, 
                                                   NotAuthorizedError,
                                                   NotFoundError,
                                                   BadRequestError,
                                                   NotImplementedError,
                                                   TooManyRequestsError,
                                                   stripe.error.CardError]):
-            if isinstance(exception, Invalid):
+            if isinstance(exception, Invalid) or \
+               isinstance(exception, MultipleInvalid):
                 statemon.state.increment(ref=_invalid_input_errors_ref,
                                          safe=False)
                 self.set_status(ResponseCode.HTTP_BAD_REQUEST)
@@ -789,6 +793,11 @@ class SaveError(Error):
         self.msg = msg
         self.code = code
 
+class SubmissionError(tornado.web.HTTPError):
+    def __init__(self, msg, code=ResponseCode.HTTP_INTERNAL_SERVER_ERROR):
+        self.msg = self.reason = self.log_message = msg
+        self.code = self.status_code = code
+ 
 class NotFoundError(tornado.web.HTTPError):
     def __init__(self,
                  msg='resource was not found',
@@ -860,4 +869,15 @@ class CustomVoluptuousTypes():
                 return str(v)
             else:
                 raise Invalid("not a valid email address")
+        return f
+
+    @staticmethod
+    def Regex():
+        '''Validate value is regex for Voluptuous schema'''
+        def f(query):
+            try:
+                re.compile(query)
+            except sre_constants.error as e:
+                raise Invalid(e.message)
+            return query
         return f
