@@ -812,10 +812,8 @@ class StoredObject(object):
                         data_dict[k.split('_')[0]] = obj_dict[k].strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
                     elif isinstance(obj_dict[k], str):
-                        import pdb; pdb.set_trace()
                         data_dict[k.split('_')[0]] = dateutil.parser.parse(
                             obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
-                        pass 
             except KeyError: 
                 pass
  
