@@ -674,7 +674,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["url"] = video_url
-        request_body["default_thumbnail_url"] = default_thumbnail 
+        request_body["default_thumbnail_url"] = default_thumbnail
         request_body["thumbnail_ref"] = external_thumbnail_id
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'

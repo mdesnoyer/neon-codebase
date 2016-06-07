@@ -1467,11 +1467,15 @@ class VideoHandler(APIV2Handler):
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
         schema(args)
-
         reprocess = args.get('reprocess', None)
         url = args.get('url', None)
         if (reprocess is None) == (url is None):
             raise Invalid('Exactly one of reprocess or url is required')
+
+        publish_date = args.get('publish_date', None) 
+        if publish_date: 
+            if publish_date == 'None': 
+                args['publish_date'] = None
 
         # add the video / request
         video_and_request = yield tornado.gen.Task(
