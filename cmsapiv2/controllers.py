@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 import video_processor.video_processing_queue
 import api.brightcove_api
+import cmsapiv2.client
 
 import logging
 from apiv2 import *
@@ -2552,11 +2553,81 @@ class TelemetrySnippetHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.GET] 
                }
 
+'''*****************************************************************
+BatchHandler 
+*****************************************************************'''
+class BatchHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def post(self):
+        schema = Schema({
+          Required('call_info') : All(CustomVoluptuousTypes.Dictionary())
+        })
+      
+        args = self.parse_args()
+        schema(args)
+         
+        call_info = args['call_info']
+        access_token = call_info.get('access_token', None) 
+        refresh_token = call_info.get('refresh_token', None)
+        
+        client = cmsapiv2.client.Client(
+            access_token=access_token,  
+            refresh_token=refresh_token)
+
+        requests = call_info.get('requests', None)
+        output = { 'results' : [] } 
+        for req in requests: 
+            # request will be information about 
+            # the call we want to make 
+            result = {} 
+            try:
+                result['relative_url'] = req['relative_url'] 
+                result['method'] = req['method']
+ 
+                method = req['method'] 
+                http_req = tornado.httpclient.HTTPRequest(
+                    req['relative_url'], 
+                    method=method) 
+
+                if method == 'POST' or method == 'PUT': 
+                    http_req.headers = {"Content-Type" : "application/json"}
+                    http_req.body = json.dumps(req.get('body', None))
+                
+                response = yield client.send_request(http_req)
+                if response.error:
+                    error = { 'error' : 
+                        { 
+                            'message' : response.reason, 
+                            'code' : response.code 
+                        } 
+                    }
+                    result['response'] = error 
+                else:  
+                    result['relative_url'] = req['relative_url'] 
+                    result['method'] = req['method'] 
+                    result['response'] = json.loads(response.body)
+                    result['response_code'] = response.code
+            except AttributeError:
+                result['response'] = 'Malformed Request'
+            except Exception as e: 
+                result['response'] = 'Unknown Error Occurred' 
+            finally: 
+                output['results'].append(result)
+                 
+        self.success(output) 
+ 
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
+    (r'/api/v2/batch/?$', BatchHandler), 
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
