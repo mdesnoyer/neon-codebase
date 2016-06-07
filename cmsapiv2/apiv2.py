@@ -259,10 +259,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 if account_id != account.get_id():
                     # Mismatch of token and path.
                     raise NotAuthorizedError('You cannot access this resource.')
-                account = yield neondata.NeonUserAccount.get(
-                    account_id,
-                    async=True)
-                if account:
+                if request.account:
                     # No account-only acccessor is an internal account.
                     if internal_only:
                         raise NotAuthorizedError('Internal only resource.')
