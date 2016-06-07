@@ -674,16 +674,13 @@ class CMSAPIHandler(tornado.web.RequestHandler):
         request_body["title"] = \
                 video_url.split('//')[-1] if video_title is None else video_title 
         request_body["url"] = video_url
-        request_body["default_thumbnail_url"] = default_thumbnail 
+        request_body["default_thumbnail_url"] = default_thumbnail
         request_body["thumbnail_ref"] = external_thumbnail_id
         request_body["callback_url"] = callback_url 
         request_body["integration_id"] = integration_id or '0'
-        if publish_date: 
-            request_body["publish_date"] = publish_date
-        if duration: 
-            request_body['duration'] = duration
-        if custom_data: 
-            request_body['custom_data'] = custom_data
+        request_body["publish_date"] = publish_date
+        request_body['duration'] = duration
+        request_body['custom_data'] = custom_data
         body = tornado.escape.json_encode(request_body)
         http_client = tornado.httpclient.AsyncHTTPClient()
         hdr = tornado.httputil.HTTPHeaders({"Content-Type": "application/json"})

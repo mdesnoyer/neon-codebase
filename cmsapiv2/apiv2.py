@@ -840,7 +840,7 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Date():
         def f(v): 
-            if v is None or v == 'None': 
+            if v is None: 
                 return True
             return dateutil.parser.parse(v)
         return f 
@@ -858,6 +858,8 @@ class CustomVoluptuousTypes():
     @staticmethod
     def Dictionary():
         def f(v):
+            if v is None: 
+                return True 
             if type(v) is dict:
                 return v
             elif isinstance(ast.literal_eval(v), dict):
