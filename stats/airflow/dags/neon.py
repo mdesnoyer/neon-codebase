@@ -598,7 +598,7 @@ def _clear_all_tasks(operators=None, **kwargs):
 default_args = {
     'owner': 'Ops',
     'start_date': datetime(2015, 7, 1),
-    'email': ['ops@neon-lab.com'],
+    'email': ['nazeer@neon-lab.com'],
     'email_on_failure': True,
     'email_on_retry': True,
     'retries': 3,
