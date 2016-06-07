@@ -34,6 +34,7 @@ import contextlib
 import copy
 import cv.imhash_index
 import datetime
+import dateutil.parser
 import errno
 import hashlib
 import itertools
@@ -810,10 +811,11 @@ class StoredObject(object):
                     if isinstance(obj_dict[k], datetime.datetime): 
                         data_dict[k.split('_')[0]] = obj_dict[k].strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
-                    elif isinstance(obj_dict[k], str): 
-                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
-                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
-                                "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str):
+                        import pdb; pdb.set_trace()
+                        data_dict[k.split('_')[0]] = dateutil.parser.parse(
+                            obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
+                        pass 
             except KeyError: 
                 pass
  
