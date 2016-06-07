@@ -1055,6 +1055,7 @@ class VideoClient(multiprocessing.Process):
             port=options.model_server_port,
             concurrency=options.request_concurrency,
             aquila_connection=aquila_conn)
+        predictor.connect()
         # TODO (nick): Figure out how to get the aquila server to relay the
         #              model version to the local model.
         self.model_version = '%s-aqv1.1.250' % os.path.basename(
