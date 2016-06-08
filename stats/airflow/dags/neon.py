@@ -151,7 +151,7 @@ def _create_tables(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    builder = ImpalaTableBuilder(cluster, event)
+    builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
 
 
