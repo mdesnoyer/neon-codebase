@@ -12,6 +12,7 @@ Author: Nick Dufour
 import aquila_inference_pb2  # TODO: make sure this is correct.
 import atexit
 import concurrent.futures
+import datetime
 from grpc.beta import implementations
 from grpc.beta.interfaces import ChannelConnectivity
 import hashlib
@@ -205,8 +206,8 @@ class Predictor(object):
             except Exception as e:
                 _log.warn('Problem scoring image. Retrying: %s' %
                           e)
-                delay = (1 << cur_try) * 0.2 * random.random()
-                time.sleep(delay)
+                delay = (1 << cur_try) * 0.4 * random.random()
+                yield tornado.gen.sleep(delay)
         if isinstance(e, model.errors.PredictionError):
             raise e
         raise model.errors.PredictionError(str(e))
@@ -258,6 +259,16 @@ def deepnet_conn_callback(predictor, status):
     self = predictor()
     if self:
         self._check_conn(status)
+
+class GRPCFutureWrapper(concurrent.futures.Future):
+    '''Wraps a GRPCFuture so that it looks like a concurrent one.'''
+    def __init__(self, future):
+        self._future = future
+
+    def __getattribute__(self, name):
+        if name == '_future':
+            return super(GRPCFutureWrapper, self).__getattribute__(name)
+        return getattr(self._future, name)
 
 class DeepnetPredictor(Predictor):
     '''Prediction using the deepnet Aquila (or an arbitrary predictor).
@@ -376,7 +387,7 @@ class DeepnetPredictor(Predictor):
 
         # Wait for the connection to be ready
         with self._ready_lock:
-            ready_future = self._ready.wait(timeout)  
+            ready_future = self._ready.wait(datetime.timedelta(seconds=timeout))
         yield ready_future
         
         image = _aquila_prep(image)
@@ -390,7 +401,8 @@ class DeepnetPredictor(Predictor):
         with self._cv:
             self.active += 1
         try:
-            response = yield self.stub.Regress.future(request, timeout)
+            response = yield GRPCFutureWrapper(self.stub.Regress.future(
+                request, timeout))
         # TODO(mdesnoyer, nick): On upgrade, only catch
         # RpcErrors. Version 0.13 of grpc doesn't have them
         except Exception as e:

@@ -27,6 +27,7 @@ import utils.obj
 from utils.options import define, options
 from utils import statemon
 import utils.sync
+import urllib2
 
 define('refresh_rate', default=120.0, type=float,
        help=('Rate (in seconds) at which to refresh autoscale info '
@@ -99,7 +100,7 @@ class AutoScaleGroup(object):
         self._executor = concurrent.futures.ThreadPoolExecutor(5)
 
         # Start monitoring this group
-        RefresherThread().add_group_to_monitor(name)
+        #RefresherThread().add_group_to_monitor(name)
 
     def __del__(self):
         # Stop monitoring this group
@@ -128,7 +129,8 @@ class AutoScaleGroup(object):
                                        'zone': y[1]} 
                                        for x, y in zip(instances, chunk)])
             statemon.state.ip_list_connection_lost = 0
-        except (boto.exception.BotoClientError, boto.exception.BotoServerError) as e:
+        except (urllib2.URLError, boto.exception.BotoClientError,
+                boto.exception.BotoServerError) as e:
             _log.error('Could not refresh autoscale data: %s' % e)
             statemon.state.ip_list_connection_lost = 1
             return
