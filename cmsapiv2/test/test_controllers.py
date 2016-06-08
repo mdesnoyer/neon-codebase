@@ -2789,7 +2789,7 @@ class TestVideoHandler(TestControllersBase):
                 tid,
                 size_map={
                     (210, 118): '%s%s_w210_h118.jpg' % (base_url, tid),
-                    (160, 90): '%s%s_w160_h90.jpg' % (base_url, tid),
+                    (120, 67): '%s%s_w120_h67.jpg' % (base_url, tid),
                     (320, 180): '%s%s_w320_h180.jpg' % (base_url, tid)}).save()
 
 
@@ -2814,9 +2814,9 @@ class TestVideoHandler(TestControllersBase):
         self.assertEqual(3, len(thumbnail_two['renditions']))
         rendition = {
             u'aspect_ratio': u'16x9',
-            u'height': 90,
-            u'width': 160,
-            u'url': u'http://n3.neon-images.com/xbo/neontntesting_vtid_two_w160_h90.jpg'
+            u'width': 120,
+            u'height': 67,
+            u'url': u'http://n3.neon-images.com/xbo/neontntesting_vtid_two_w120_h67.jpg'
         }
         self.assertIn(rendition, thumbnail_two['renditions'])
 

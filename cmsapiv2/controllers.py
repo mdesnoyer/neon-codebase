@@ -1215,6 +1215,8 @@ class ThumbnailHelper(object):
     def _get_ar(width, height):
         """Calculate aspect ratio from width, height."""
         f = fractions.Fraction(width, height)
+        if f.numerator == 120 and f.denominator == 67:
+            return 16, 9
         return f.numerator, f.denominator
 
 
