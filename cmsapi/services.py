@@ -116,6 +116,7 @@ statemon.define('invalid_custom_upload', int)
 statemon.define('invalid_json', int)
 statemon.define('malformed_request', int)
 statemon.define('not_supported', int)
+statemon.define('failed_video_submission', int)
 
 #Place holder images for processing
 placeholder_images = [
@@ -707,6 +708,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
             data = '{"error":"bad request. check api specs","video_id":"%s"}' %\
                         video_id
             self.send_json_response(data, 400)
+            statemon.state.increment('failed_video_submission')
             return
 
         if response.error:
@@ -714,6 +716,7 @@ class CMSAPIHandler(tornado.web.RequestHandler):
                     "msg=thumbnail api error %s" % response.error)
             data = '{"error":"neon thumbnail api error"}'
             self.send_json_response(data, 502)
+            statemon.state.increment('failed_video_submission')
             return
 
         #Success
