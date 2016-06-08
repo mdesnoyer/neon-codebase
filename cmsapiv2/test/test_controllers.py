@@ -3125,7 +3125,9 @@ class TestVideoHandler(TestControllersBase):
                 'title': 'de pol\xc3\xb6tica de los EE.UU.-'.decode('utf-8'),
                 'default_thumbnail_url': 'invalid',
                 'thumbnail_ref': 'ref1',
+                'duration' : None, 
                 'publish_date': None,
+                'thumbnail_ref': None, 
                 'custom_data': None
             }
             header = {"Content-Type": "application/json"}
@@ -3140,6 +3142,29 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(video.url, 'some_url')
         self.assertEquals(video.publish_date, None)
         self.assertEquals(video.custom_data, {})
+
+    @tornado.testing.gen_test
+    def test_post_video_too_big_duration(self):
+        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        with self._future_wrap_mock(
+           patch(pstr)) as cmock:
+            cmock.side_effect = [self.random_image]
+            body = {
+                'external_video_ref': '1234ascs33',
+                'url': 'some_url',
+                'title': 'de pol\xc3\xb6tica de los EE.UU.-'.decode('utf-8'),
+                'default_thumbnail_url': 'invalid',
+                'thumbnail_ref': 'ref1',
+                'duration': 8532234.3,
+            }
+            header = {"Content-Type": "application/json"}
+            url = '/api/v2/%s/videos' % (self.account_id_api_key)
+            with self.assertRaises(tornado.httpclient.HTTPError) as e:
+                response = yield self.http_client.fetch(self.get_url(url),
+                    body=json.dumps(body),
+                    method='POST',
+                    headers=header)
+        self.assertEquals(e.exception.code, 400)
 
     def test_get_video_exceptions(self):
         exception_mocker = patch('cmsapiv2.controllers.VideoHandler.get')
