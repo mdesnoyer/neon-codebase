@@ -1240,7 +1240,7 @@ class VideoHelper(object):
                 def _flag_reprocess(x):
                     x.state = neondata.RequestState.REPROCESS
                     x.fail_count = 0
-                    x.attempt_count = 0
+                    x.try_count = 0
                     x.response = {}
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
