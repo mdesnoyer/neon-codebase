@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 import video_processor.video_processing_queue
 import api.brightcove_api
+import cmsapiv2.client
 
 import logging
 from apiv2 import *
@@ -1283,9 +1284,10 @@ class VideoHelper(object):
                          account_id,
                          since=since,
                          until=until,
-                         limit=limit)
+                         limit=limit,
+                         search_query=query)
 
-        videos = search_res['videos']
+        videos = search_res['videos'] or []
         since_time = search_res['since_time']
         until_time = search_res['until_time']
         vid_dict = yield VideoHelper.build_video_dict(
@@ -1325,29 +1327,28 @@ class VideoHelper(object):
         new_videos = []
         vid_counter = 0
         index = 0
-        if videos:
-            videos = [x for x in videos if x and x.job_id]
-            job_ids = [(v.job_id, v.get_account_id())
-                          for v in videos]
+        videos = [x for x in videos if x and x.job_id]
+        job_ids = [(v.job_id, v.get_account_id())
+                      for v in videos]
 
-            requests = yield neondata.NeonApiRequest.get_many(
-                           job_ids,
-                           async=True)
-            for video, request in zip(videos, requests):
-                if video is None or request is None and video_ids:
-                    new_videos.append({'error': 'video does not exist',
-                                       'video_id': video_ids[index] })
-                    index += 1
-                    continue
+        requests = yield neondata.NeonApiRequest.get_many(
+                       job_ids,
+                       async=True)
+        for video, request in zip(videos, requests):
+            if video is None or request is None and video_ids:
+                new_videos.append({'error': 'video does not exist',
+                                   'video_id': video_ids[index] })
+                index += 1
+                continue
 
-                new_video = yield VideoHelper.db2api(video,
-                                                     request,
-                                                     fields)
-                new_videos.append(new_video)
-                vid_counter += 1
+            new_video = yield VideoHelper.db2api(video,
+                                                 request,
+                                                 fields)
+            new_videos.append(new_video)
+            vid_counter += 1
 
-            vid_dict['videos'] = new_videos
-            vid_dict['video_count'] = vid_counter
+        vid_dict['videos'] = new_videos
+        vid_dict['video_count'] = vid_counter
 
         raise tornado.gen.Return(vid_dict)
 
@@ -1434,6 +1435,7 @@ class VideoHelper(object):
                     new_video['error'] = err
 
         raise tornado.gen.Return(new_video)
+
 
 '''*********************************************************************
 VideoHandler
@@ -1898,7 +1900,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         schema = Schema({
             'limit': All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            'query': All(Coerce(str), Length(min=1, max=256)),
+            Optional('query'): str,
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
             'since': All(Coerce(float)),
             'until': All(Coerce(float))
@@ -1908,6 +1910,7 @@ class VideoSearchInternalHandler(APIV2Handler):
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
+
         account_id = args.get('account_id', None)
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
@@ -1943,10 +1946,10 @@ class VideoSearchExternalHandler(APIV2Handler):
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'limit': All(Coerce(int), Range(min=1, max=100)),
-          'query': All(Coerce(str), Length(min=1, max=256)),
+          Optional('query'): Any(CustomVoluptuousTypes.Regex(), str),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
-          'until': All(Coerce(float))
+          'until': All(Coerce(float)),
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -1954,6 +1957,7 @@ class VideoSearchExternalHandler(APIV2Handler):
         since = args.get('since', None)
         until = args.get('until', None)
         query = args.get('query', None)
+
         limit = int(args.get('limit', 25))
         fields = args.get('fields', None)
         if fields:
@@ -1961,13 +1965,13 @@ class VideoSearchExternalHandler(APIV2Handler):
 
         base_url = '/api/v2/%s/videos/search' % account_id
         vid_dict = yield VideoHelper.get_search_results(
-                       account_id,
-                       since,
-                       until,
-                       query,
-                       limit,
-                       fields,
-                       base_url=base_url)
+            account_id,
+            since,
+            until,
+            query,
+            limit,
+            fields,
+            base_url=base_url)
 
         self.success(vid_dict)
 
@@ -2063,7 +2067,7 @@ class UserHandler(APIV2Handler):
             raise NotFoundError()
 
         if self.user.username != username:
-            raise NotAuthorizedError('Can not view another users account')
+            raise NotAuthorizedError('Cannot view another users account')
 
         result = yield self.db2api(user)
 
@@ -2088,7 +2092,7 @@ class UserHandler(APIV2Handler):
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
-                raise NotAuthorizedError('Can not update another\
+                raise NotAuthorizedError('Cannot update another\
                                users account')
 
         def _update_user(u):
@@ -2549,11 +2553,81 @@ class TelemetrySnippetHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.GET] 
                }
 
+'''*****************************************************************
+BatchHandler 
+*****************************************************************'''
+class BatchHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def post(self):
+        schema = Schema({
+          Required('call_info') : All(CustomVoluptuousTypes.Dictionary())
+        })
+      
+        args = self.parse_args()
+        schema(args)
+         
+        call_info = args['call_info']
+        access_token = call_info.get('access_token', None) 
+        refresh_token = call_info.get('refresh_token', None)
+        
+        client = cmsapiv2.client.Client(
+            access_token=access_token,  
+            refresh_token=refresh_token)
+
+        requests = call_info.get('requests', None)
+        output = { 'results' : [] } 
+        for req in requests: 
+            # request will be information about 
+            # the call we want to make 
+            result = {} 
+            try:
+                result['relative_url'] = req['relative_url'] 
+                result['method'] = req['method']
+ 
+                method = req['method'] 
+                http_req = tornado.httpclient.HTTPRequest(
+                    req['relative_url'], 
+                    method=method) 
+
+                if method == 'POST' or method == 'PUT': 
+                    http_req.headers = {"Content-Type" : "application/json"}
+                    http_req.body = json.dumps(req.get('body', None))
+                
+                response = yield client.send_request(http_req)
+                if response.error:
+                    error = { 'error' : 
+                        { 
+                            'message' : response.reason, 
+                            'code' : response.code 
+                        } 
+                    }
+                    result['response'] = error 
+                else:  
+                    result['relative_url'] = req['relative_url'] 
+                    result['method'] = req['method'] 
+                    result['response'] = json.loads(response.body)
+                    result['response_code'] = response.code
+            except AttributeError:
+                result['response'] = 'Malformed Request'
+            except Exception as e: 
+                result['response'] = 'Unknown Error Occurred' 
+            finally: 
+                output['results'].append(result)
+                 
+        self.success(output) 
+ 
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.NONE 
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
+    (r'/api/v2/batch/?$', BatchHandler), 
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
@@ -2573,7 +2647,7 @@ application = tornado.web.Application([
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
