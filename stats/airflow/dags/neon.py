@@ -27,7 +27,8 @@ if sys.path[0] != __base_path__:
 
 from airflow import DAG
 from airflow.configuration import conf, AirflowConfigException
-from airflow.hooks.S3_hook import S3Hook
+#from airflow.hooks.S3_hook import S3Hook
+from airflow.hooks.S3Hook import S3Hook
 from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
 from airflow.operators.dummy_operator import DummyOperator
 # from airflow.operators.bash_operator import BashOperator
