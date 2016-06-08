@@ -52,6 +52,7 @@ import urllib
 import urllib2
 import urlparse
 from cvutils.imageutils import PILImageUtils
+import utils.autoscale
 import utils.neon
 from utils import pycvutils
 import utils.http
@@ -94,16 +95,20 @@ statemon.define('youtube_video_not_found', int)
 # ======== Parameters  =======================#
 from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
-define('serving_url_format',
-        default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
+define('model_server_port', default=9000, type=int,
+       help="the port currently being used by model servers")
+define('model_autoscale_groups', default='AquilaOnDemand', type=str,
+       help="Comma separated list of autscaling group names")
+define('request_concurrency', default=22, type=int,
+       help=("the maximum number of concurrent scoring requests to"
+             " make at a time. Should be less than or equal to the"
+             " server batch size."))
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
 define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
 define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
        help='Api key for the notifications')
-define('server_auth', default='secret_token',
-       help='Secret token for talking with the video processing server')
 define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
 define('video_temp_dir', default=None,
@@ -303,6 +308,14 @@ class VideoProcessor(object):
                 _log.warn('Job %s for account %s has failed' %
                           (api_request.job_id, api_request.api_key))
                 yield self.job_queue.delete_message(self.job_message)
+                 
+                # modify accountlimits to have one less video post
+                def _modify_limits(al): 
+                    al.video_posts -= 1 
+                yield neondata.AccountLimits.modify( 
+                    api_request.api_key, 
+                    _modify_limits, 
+                    async=True) 
        
         finally:
             #Delete the temp video file which was downloaded
@@ -1043,17 +1056,33 @@ class VideoClient(multiprocessing.Process):
 
     def load_model(self):
         ''' load model '''
-        parts = self.model_file.split('/')[-1]
-        version = parts.split('.model')[0]
-        self.model_version = version
-        _log.info('Loading model from %s version %s'
-                  % (self.model_file, self.model_version))
-        self.model = model.load_model(self.model_file)
-
+        _log.info('Generating predictor instance')
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
+        predictor = model.predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aquila_conn)
+        predictor.connect()
+        # TODO (nick): Figure out how to get the aquila server to relay the
+        #              model version to the local model.
+        self.model_version = '%s-aqv1.1.250' % os.path.basename(
+            self.model_file)
+        # note, the model file is no longer a complete model, but is instead
+        # an input dictionary for local search.
+        self.model = model.generate_model(self.model_file, predictor)
         if not self.model:
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
             raise IOError('Error loading model from %s' % self.model_file)
+        # TODO (someone): How tf are we gonna handle exiting? Remember that
+        #                 gRPC hangs due to a bug at exit.
+
+    def unload_model(self):
+        if self.model is not None:
+            if self.model.predictor is not None:
+                self.model.predictor.shutdown()
+            self.model = None
 
     def run(self):
         ''' run/start method '''
@@ -1066,6 +1095,8 @@ class VideoClient(multiprocessing.Process):
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
+        if self.model is not None:
+            del self.model
  
         _log.info("stopping worker [%s] " % (self.pid))
 
@@ -1092,6 +1123,7 @@ class VideoClient(multiprocessing.Process):
                 yield vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
+                self.unload_model()
             self.videos_processed += 1
 
         except Queue.Empty:
