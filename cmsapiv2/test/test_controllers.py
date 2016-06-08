@@ -4582,6 +4582,51 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         super(TestVideoSearchExternalHandler, self).tearDown()
 
     @tornado.testing.gen_test
+    def test_deleted_video(self):
+        # Add videos and hide one. The hidden doesn't show in a search.
+        neondata.VideoMetadata('u_1', request_id='1').save()
+        neondata.VideoMetadata('u_2', request_id='2').save()
+        neondata.VideoMetadata('u_3', request_id='3').save()
+        neondata.NeonApiRequest('1', 'u').save()
+        neondata.NeonApiRequest('2', 'u').save()
+        neondata.NeonApiRequest('3', 'u').save()
+        url = self.get_url('/api/v2/u/videos/')
+        body = json.dumps({
+            'video_id': '2',
+            'hidden': True
+        })
+        headers = {'Content-Type': 'application/json'}
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        search_url = self.get_url('/api/v2/u/videos/search?fields=video_id')
+        response = yield self.http_client.fetch(search_url)
+        rjson = json.loads(response.body)
+        self.assertEqual(2, rjson['video_count'])
+        self.assertIn('1', [v['video_id'] for v in rjson['videos']])
+        self.assertNotIn('2', [v['video_id'] for v in rjson['videos']])
+
+        # Put it back.
+        body = json.dumps({
+            'video_id': '2',
+            'hidden': False
+        })
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        response = yield self.http_client.fetch(search_url)
+        rjson = json.loads(response.body)
+        self.assertEqual(3, rjson['video_count'])
+        self.assertIn('1', [v['video_id'] for v in rjson['videos']])
+        self.assertIn('2', [v['video_id'] for v in rjson['videos']])
+
+    @tornado.testing.gen_test
     def test_since_and_until_param(self):
         # Add a number of videos and get the time at third's creation
         for i in range(6):
@@ -4676,8 +4721,18 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.assertEquals('kevins best video yet', video['title'])
 
 
-class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
+class TestVideoSearchExtHandlerQuery(TestControllersBase):
+
     def setUp(self):
+        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        user.save()
+        self.account_id_api_key = user.neon_api_key
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
         super(TestVideoSearchExtHandlerQuery, self).setUp()
 
         neondata.VideoMetadata('u0_v0', request_id='j0').save()
@@ -4691,6 +4746,9 @@ class TestVideoSearchExtHandlerQuery(TestVideoSearchExternalHandler):
                                 title='Another title0 title1 title?').save()
         self.url = self.get_url(
             '/api/v2/u0/videos/search?fields=video_id,title&query={}')
+    def tearDown(self):
+        self.verify_account_mocker.stop()
+        super(TestVideoSearchExtHandlerQuery, self).tearDown()
 
     @tornado.testing.gen_test
     def test_regex(self):

@@ -1278,14 +1278,16 @@ class VideoHelper(object):
                            query=None,
                            limit=None,
                            fields=None,
-                           base_url='/api/v2/videos/search'):
+                           base_url='/api/v2/videos/search',
+                           skip_deleted=False):
 
         search_res = yield neondata.VideoMetadata.search_videos(
                          account_id,
                          since=since,
                          until=until,
                          limit=limit,
-                         search_query=query)
+                         search_query=query,
+                         skip_deleted=skip_deleted)
 
         videos = search_res['videos'] or []
         since_time = search_res['since_time']
@@ -1556,10 +1558,11 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint put request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
-          'testing_enabled': Boolean(),
-          'title': Any(str, unicode, Length(min=1, max=1024))
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
+            'testing_enabled': Boolean(),
+            'title': Any(str, unicode, Length(min=1, max=1024)),
+            'hidden': Boolean(),
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1572,8 +1575,8 @@ class VideoHandler(APIV2Handler):
             args['video_id'])
 
         def _update_video(v):
-            v.testing_enabled = Boolean()(
-                args.get('testing_enabled', v.testing_enabled))
+            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+            v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
@@ -1971,7 +1974,8 @@ class VideoSearchExternalHandler(APIV2Handler):
             query,
             limit,
             fields,
-            base_url=base_url)
+            base_url=base_url,
+            skip_deleted=True)
 
         self.success(vid_dict)
 
@@ -2641,7 +2645,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
-    (r'/api/v2/videos/search?$', VideoSearchInternalHandler),
+    (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search?$',
         ThumbnailSearchExternalHandler),
     (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),

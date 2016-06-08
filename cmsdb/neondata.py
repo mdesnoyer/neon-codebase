@@ -4910,7 +4910,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None):
+                 publish_date=None, hidden=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -4941,6 +4941,9 @@ class VideoMetadata(StoredObject):
 
         # The time the video was published in ISO 8601 format
         self.publish_date = publish_date
+
+        # If user has deleted this video, flag it deleted.
+        self.hidden = hidden
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5229,7 +5232,8 @@ class VideoMetadata(StoredObject):
                       since=None,
                       until=None,
                       limit=25,
-                      search_query=None):
+                      search_query=None,
+                      skip_deleted=False):
 
         """Does a basic search over the videometadatas in the DB
 
@@ -5248,6 +5252,8 @@ class VideoMetadata(StoredObject):
                          if not valid regex, applied as a simple %<search_query>%
                          expression. For the latter, terms must all appear
                          and appear in order in a title to match.
+           show_hidden : A boolean. Default true. If false, add criterion to
+                         where clause not to include hidden videos.
 
 
            Returns : a dictionary of the following
@@ -5285,6 +5291,11 @@ class VideoMetadata(StoredObject):
                 where_clause += " AND "
             where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
+
+        if skip_deleted:
+            if where_clause:
+                where_clause += " AND "
+            where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"
 
         columns = ["v._data",
                    "v._type",
