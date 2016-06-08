@@ -6,12 +6,12 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import video_processor.video_processing_queue
+from apiv2 import *
 import api.brightcove_api
 import cmsapiv2.client
-
+import fractions
 import logging
-from apiv2 import *
+import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
@@ -1126,8 +1126,7 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated']
-
+                'type', 'external_ref', 'created', 'updated', 'renditions']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1136,6 +1135,7 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
+
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
@@ -1148,10 +1148,76 @@ class ThumbnailHandler(APIV2Handler):
             retval = obj.urls[0] or []
         elif field == 'external_ref':
             retval = obj.external_id
+        elif field == 'renditions':
+            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
+            retval = ThumbnailHelper.renditions_of(urls)
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+
+class ThumbnailHelper(object):
+    """A collection of stateless functions for working on Thumbnails"""
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_renditions_from_tids(tids):
+        """Given list of thumbnails ids, get all renditions as map of tid.
+
+        Input- list of thumbnail ids
+        Yields- [ tid0: [rendition1, .. renditionN], tid1: [...], ...}
+            where rendition has format {
+                'url': string
+                'width': int,
+                'height': int,
+                'aspect_ratio': string in format "WxH"
+        """
+        urls = yield neondata.ThumbnailServingURLs.get_many(tids, async=True)
+        # Build a map of {tid: [renditions]}.
+        rv = {}
+        for chunk in urls:
+            renditions = [ThumbnailHelper._to_dict(pair) for pair in chunk]
+            try:
+                rv[chunk.get_id()].extend(renditions)
+            except KeyError:
+                rv[chunk.get_id()] = renditions
+        raise tornado.gen.Return(rv)
+
+    @staticmethod
+    def renditions_of(urls_obj):
+        """Given a ThumbnailServingURLs, get a list of rendition dicts.
+
+        Input- urls_obj a ThumbnailServingURLs
+        Returns- list of rendition dictionaries
+            i.e., [rendition1, rendition2, ... , renditionN]
+            where rendition has format {
+                'url': string
+                'width': int,
+                'height': int,
+                'aspect_ratio': string in format "WxH"
+        """
+        return [ThumbnailHelper._to_dict(item) for item
+                in urls_obj.size_map.items()]
+
+    @staticmethod
+    def _to_dict(pair):
+        """Given a size map (sizes, url) tuple return a rendition dictionary."""
+        dimensions, url = pair 
+
+        return {
+            'url': url,
+            'width': dimensions[0],
+            'height': dimensions[1],
+            'aspect_ratio': '%sx%s' % ThumbnailHelper._get_ar(*dimensions)}
+
+    @staticmethod
+    def _get_ar(width, height):
+        """Calculate aspect ratio from width, height."""
+        f = fractions.Fraction(width, height)
+        return f.numerator, f.denominator
+
+
 
 '''*********************************************************************
 VideoHelper
@@ -1267,6 +1333,9 @@ class VideoHelper(object):
                 tids)
             thumbnails = yield [ThumbnailHandler.db2api(x) for
                                 x in thumbnails]
+            renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
+            for thumbnail in thumbnails:
+                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
 
         raise tornado.gen.Return(thumbnails)
 
@@ -1382,7 +1451,7 @@ class VideoHelper(object):
         """Converts a database video metadata object to a video
         response dictionary
 
-        Overrite the base function because we have to do a join on the request
+        Overwrite the base function because we have to do a join on the request
 
         Keyword arguments:
         video - The VideoMetadata object

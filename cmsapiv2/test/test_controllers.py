@@ -2776,11 +2776,23 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_get_single_video_with_thumbnails_field(self):
+        tids = ['testing_vtid_one', 'testing_vtid_two']
         vm = neondata.VideoMetadata(
-            neondata.InternalVideoID.generate(self.account_id_api_key,'vid1'),
-            tids=['testing_vtid_one', 'testing_vtid_two'],
+            neondata.InternalVideoID.generate(self.account_id_api_key, 'vid1'),
+            tids=tids,
             request_id='job1')
         vm.save()
+
+        for tid in tids:
+            base_url = 'http://n3.neon-images.com/xbo/neontn'
+            neondata.ThumbnailServingURLs(
+                tid,
+                size_map={
+                    (210, 118): '%s%s_w210_h118.jpg' % (base_url, tid),
+                    (160, 90): '%s%s_w160_h90.jpg' % (base_url, tid),
+                    (320, 180): '%s%s_w320_h180.jpg' % (base_url, tid)}).save()
+
+
         url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(
@@ -2799,6 +2811,14 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(thumbnail_one['thumbnail_id'], 'testing_vtid_one')
         self.assertEquals(thumbnail_two['width'], 500)
         self.assertEquals(thumbnail_two['thumbnail_id'], 'testing_vtid_two')
+        self.assertEqual(3, len(thumbnail_two['renditions']))
+        rendition = {
+            u'aspect_ratio': u'16x9',
+            u'height': 90,
+            u'width': 160,
+            u'url': u'http://n3.neon-images.com/xbo/neontntesting_vtid_two_w160_h90.jpg'
+        }
+        self.assertIn(rendition, thumbnail_two['renditions'])
 
     @tornado.testing.gen_test
     def test_get_video_with_thumbnails_field_no_thumbnails(self):
@@ -3206,11 +3226,38 @@ class TestThumbnailHandler(TestControllersBase):
     def test_get_thumbnail_exists(self):
         url = '/api/v2/%s/thumbnails?thumbnail_id=testingtid' % (
             self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
         self.assertEquals(rjson['width'], 500)
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
+
+    @tornado.testing.gen_test
+    def test_get_thumbnail_with_renditions(self):
+
+        base_url = 'http://n3.neon-images.com/xbo/neontn'
+        tid = 'testingtid'
+        neondata.ThumbnailServingURLs(
+            tid,
+            size_map={
+                (210, 118): '%s%s_w210_h118.jpg' % (base_url, tid),
+                (160, 90): '%s%s_w160_h90.jpg' % (base_url, tid),
+                (320, 180): '%s%s_w320_h180.jpg' % (base_url, tid)}).save()
+
+        url = self.get_url(
+            '/api/v2/{ac}/thumbnails?thumbnail_id={tid}&fields={fs}'.format(
+                tid=tid,
+                ac=self.account_id_api_key,
+                fs='thumbnail_id,renditions'))
+
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertEqual(3, len(rjson['renditions']))
+        self.assertIn({
+            u'aspect_ratio': u'105x59',
+            u'height': 118,
+            u'url': u'%s%s_w210_h118.jpg' % (base_url, tid),
+            u'width': 210}, rjson['renditions'])
+
 
     @tornado.testing.gen_test
     def test_get_thumbnail_does_not_exist(self):
