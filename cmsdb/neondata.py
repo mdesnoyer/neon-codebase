@@ -4910,7 +4910,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, is_deleted=None):
+                 publish_date=None, hidden=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -4943,7 +4943,7 @@ class VideoMetadata(StoredObject):
         self.publish_date = publish_date
 
         # If user has deleted this video, flag it deleted.
-        self.is_deleted = is_deleted
+        self.hidden = hidden
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5252,8 +5252,8 @@ class VideoMetadata(StoredObject):
                          if not valid regex, applied as a simple %<search_query>%
                          expression. For the latter, terms must all appear
                          and appear in order in a title to match.
-           skip_deleted: A boolean. Default false. If true, add check to
-                         where clause that doesn't include "is_deleted" videos.
+           show_hidden : A boolean. Default true. If false, add criterion to
+                         where clause not to include hidden videos.
 
 
            Returns : a dictionary of the following
@@ -5295,7 +5295,7 @@ class VideoMetadata(StoredObject):
         if skip_deleted:
             if where_clause:
                 where_clause += " AND "
-            where_clause += " (v._data->>'is_deleted')::BOOLEAN IS NOT TRUE"
+            where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"
 
         columns = ["v._data",
                    "v._type",

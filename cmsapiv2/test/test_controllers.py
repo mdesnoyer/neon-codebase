@@ -4489,8 +4489,7 @@ class TestVideoSearchExternalHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_deleted_video(self):
-
-        # Add videos and delete one. The deleted doesn't show in a search.
+        # Add videos and hide one. The hidden doesn't show in a search.
         neondata.VideoMetadata('u_1', request_id='1').save()
         neondata.VideoMetadata('u_2', request_id='2').save()
         neondata.VideoMetadata('u_3', request_id='3').save()
@@ -4500,7 +4499,7 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         url = self.get_url('/api/v2/u/videos/')
         body = json.dumps({
             'video_id': '2',
-            'is_deleted': True
+            'hidden': True
         })
         headers = {'Content-Type': 'application/json'}
         response = yield self.http_client.fetch(
@@ -4519,7 +4518,7 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         # Put it back.
         body = json.dumps({
             'video_id': '2',
-            'is_deleted': False
+            'hidden': False
         })
         response = yield self.http_client.fetch(
             url,

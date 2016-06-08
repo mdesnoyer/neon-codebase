@@ -1561,7 +1561,7 @@ class VideoHandler(APIV2Handler):
             Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
             'testing_enabled': Boolean(),
             'title': Any(str, unicode, Length(min=1, max=1024)),
-            'is_deleted': Boolean(),
+            'hidden': Boolean(),
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1575,7 +1575,7 @@ class VideoHandler(APIV2Handler):
 
         def _update_video(v):
             v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
-            v.is_deleted =  Boolean()(args.get('is_deleted', v.is_deleted))
+            v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
