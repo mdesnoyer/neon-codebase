@@ -2493,6 +2493,14 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(cargs[2], 31)
         self.job_write_mock.reset_mock()
 
+        # Simulate a job failure
+        def _mod(x):
+            x.fail_count = 1
+            x.try_count = 1
+            x.response = {'error': 'Ooops'}
+        neondata.NeonApiRequest.modify(first_job_id, self.account_id_api_key,
+                                       _mod)
+
         url = '/api/v2/%s/videos?integration_id=%s'\
               '&external_video_ref=1234ascs'\
               '&reprocess=true' % (self.account_id_api_key,
@@ -2511,6 +2519,12 @@ class TestVideoHandler(TestControllersBase):
         cargs, kwargs = self.job_write_mock.call_args
         self.assertEquals(cargs[0], 2)
         self.assertEquals(cargs[2], 31)
+
+        # Make sure that the fail and try counts are reset
+        job = neondata.NeonApiRequest.get(first_job_id,
+                                          self.account_id_api_key)
+        self.assertEquals(job.try_count, 0)
+        self.assertEquals(job.fail_count, 0)
 
     @tornado.testing.gen_test
     def test_post_two_videos_with_reprocess_fail(self):
