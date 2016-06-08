@@ -122,10 +122,10 @@ class ClusterGetter(object):
     cluster = None
 
     @classmethod
-    def get_cluster():
-        if ClusterGetter.cluster is None:
-            ClusterGetter.cluster = stats.cluster.Cluster()
-        return ClusterGetter.cluster
+    def get_cluster(cls):
+        if cls.cluster is None:
+            cls.cluster = stats.cluster.Cluster()
+        return cls.cluster
 
 
 def _cluster_status():
