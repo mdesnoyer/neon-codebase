@@ -57,7 +57,11 @@ _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
 
 define("token_secret", 
     default="9gRvLemgdfHUlzpv", 
-    help="the secret for tokens", 
+    help="secret for login and email verification tokens", 
+    type=str)
+define("share_token_secret",
+    default="MjUzNzIwOTkyOTMy",
+    help="secret for socially shared user content tokens",
     type=str)
 define("access_token_exp", 
     default=720, 
@@ -93,6 +97,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
+    SHARE_TOKEN = 4
 
 
 class APIV2Sender(object):
@@ -795,6 +800,23 @@ class JWTHelper(object):
     @staticmethod
     def decode_token(access_token):
         return jwt.decode(access_token, options.token_secret, algorithms=['HS256'])
+
+class ShareJWTHelper(object):
+    """Implements encode and decode of shared user content JWT tokens.
+
+    This complements JWTHelper and uses a distinct salt to protect against
+    analysis-based attacks on the token decoding.
+    """
+
+    @staticmethod
+    def encode(payload):
+        return jwt.encode(payload,
+                          options.share_token_secret,
+                          algorithm=['HS256'])
+
+    @staticmethod
+    def decode(token):
+        return jwt.decode(token, algorithms=['HS256'])
 
 '''*********************************************************************
 APIV2 Defined Exceptions
