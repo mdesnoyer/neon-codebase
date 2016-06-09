@@ -321,21 +321,6 @@ class VideoProcessor(object):
             #Delete the temp video file which was downloaded
             self.tempfile.close()
 
-    @tornado.concurrent.run_on_executor
-    def _urllib_read(self, response, do_throttle, chunk_time):
-        last_time = time.time()
-        data = response.read(VideoProcessor.CHUNK_SIZE)
-        while data != '':
-            if do_throttle:
-                time_spent = time.time() - last_time
-                time.sleep(max(0, chunk_time-time_spent))
-            self.tempfile.write(data)
-            self.tempfile.flush()
-            last_time = time.time()
-            data = response.read(VideoProcessor.CHUNK_SIZE)
-
-        self.tempfile.flush()
-
     @tornado.gen.coroutine
     def download_video_file(self):
         '''
@@ -586,12 +571,13 @@ class VideoProcessor(object):
                 rank += 1 
 
         # Get the baseline frames of the video
-        self._get_center_frame(video_file)
-        self._get_random_frame(video_file)
+        yield self._get_center_frame(video_file)
+        yield self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
         _log.info('Sucessfully finished searching video %s' % self.video_url)
 
+    @tornado.gen.coroutine
     def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
@@ -609,15 +595,22 @@ class VideoProcessor(object):
                 ttype=neondata.ThumbnailType.CENTERFRAME,
                 frameno=int(nframes / 2),
                 rank=0)
-            #TODO(Sunil): Get valence score once flann global data
-            #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+            yield meta.score_image(self.model.predictor,
+                                   self.model_version,
+                                   image=cv_image)
+        except model.errors.PredictionError as e:
+            _log.warn('Error predicting score for the center frame: %s' %
+                      e)
+            # We don't wait to fail in this case because we don't care
+            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
             statemon.state.increment('centerframe_extraction_error')
             raise
 
+    @tornado.gen.coroutine
     def _get_random_frame(self, video_file, nframes=None):
         '''Gets a random frame from the video.
         '''
@@ -634,9 +627,15 @@ class VideoProcessor(object):
                 ttype=neondata.ThumbnailType.RANDOM,
                 frameno=frameno,
                 rank=0)
-            #TODO(Sunil): Get valence score once flann global data
-            #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+            yield meta.score_image(self.model.predictor,
+                                   self.model_version,
+                                   image=cv_image)
+        except model.errors.PredictionError as e:
+            _log.warn('Error predicting score for the random frame: %s' %
+                      e)
+            # We don't wait to fail in this case because we don't care
+            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
@@ -813,7 +812,19 @@ class VideoProcessor(object):
             # A second attempt to save the default thumb
             api_request.default_thumbnail = (api_request.default_thumbnail or 
                                              self.extracted_default_thumbnail)
-            yield api_request.save_default_thumbnail(cdn_metadata, async=True)
+            thumb = yield api_request.save_default_thumbnail(cdn_metadata,
+                                                             async=True)
+
+            # Score the default thumb
+            if thumb is not None:
+                # TODO(mdesnoyer): This will potentially download the
+                # image twice. It would be better to avoid that, but
+                # the code flow makes it annoying. Given this is a
+                # long process, not a big deal, but we might want to
+                # fix that
+                yield thumb.score_image(self.model.predictor,
+                                        self.model_version,
+                                        save_object=True)
 
         except neondata.ThumbDownloadError, e:
             # If we extracted the default thumb from the url, then
