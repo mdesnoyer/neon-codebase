@@ -559,7 +559,7 @@ class VideoProcessor(object):
                   mov,
                   n=n_thumbs,
                   video_name=self.video_url)
-            results = results.sorted(results, key=lambda x:x[1], reverse=True)
+            results = sorted(results, key=lambda x:x[1], reverse=True)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
