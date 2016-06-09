@@ -857,6 +857,7 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         self._combination_function = combination_function
+        self._lock = threading.RLock()
         if adapt_improve:
             self._clipLimit = 1.0
             self._tileGridSize = (8, 8)
@@ -912,13 +913,14 @@ class ResultsList(object):
         cv2.imwrite(fname, res.image)
 
     def reset(self, n_thumbs=None):
-        _log.debug('Result object of size %i resetting' % (self.n_thumbs))
-        if n_thumbs is not None:
-            self.n_thumbs = n_thumbs
-        self.results = [_Result() for x in range(self.n_thumbs)]
-        self.min = self.results[0].score
-        self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
-        self.failed_scoring = 0
+        with self._lock:
+            _log.debug('Result object of size %i resetting' % (self.n_thumbs))
+            if n_thumbs is not None:
+                self.n_thumbs = n_thumbs
+            self.results = [_Result() for x in range(self.n_thumbs)]
+            self.min = self.results[0].score
+            self.dists = np.zeros((self.n_thumbs, self.n_thumbs))
+            self.failed_scoring = 0
 
     def _update_dists(self, entry_idx):
         for idx in range(len(self.results)):
@@ -932,24 +934,26 @@ class ResultsList(object):
         Attempts to insert a result into the results list. If it does not
         qualify, it returns False, otherwise returns True
         '''
-        res = _Result(frameno=frameno, score=score, image=image,
-                      feat_score=feat_score, meta=meta,
-                      feat_score_weight=self._feat_score_weight,
-                      feat_score_func=feat_score_func,
-                      combination_function=self._combination_function)
-        self._considered_thumbs += 1
-        if score < self.min:
-            _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
-                                                                  score))
-            self._write_testing_frame(res, 'score_too_low')
-            return False
-        if not self._max_variety:
-            return self._push_over_lowest(res)
-        else:
-            return self._maxvar_replace(res)
+        with self._lock:
+            res = _Result(frameno=frameno, score=score, image=image,
+                          feat_score=feat_score, meta=meta,
+                          feat_score_weight=self._feat_score_weight,
+                          feat_score_func=feat_score_func,
+                          combination_function=self._combination_function)
+            self._considered_thumbs += 1
+            if score < self.min:
+                _log.debug('Frame %i [%.3f] rejected due to score' % (frameno,
+                                                                      score))
+                self._write_testing_frame(res, 'score_too_low')
+                return False
+            if not self._max_variety:
+                return self._push_over_lowest(res)
+            else:
+                return self._maxvar_replace(res)
 
     def register_failure(self):
-        self.failed_scoring += 1
+        with self._lock:
+            self.failed_scoring += 1
 
     def _compute_new_dist(self, res):
         '''
@@ -1093,16 +1097,17 @@ class ResultsList(object):
         Returns the results in sorted order, sorted by score. Returns them
         as (image, score, frameno)
         '''
-        _log.debug('Dumping results')
-        sco_by_idx = np.argsort([x.score for x in self.results])[::-1]
-        res = []
-        for idx in sco_by_idx:
-            res_obj = self.results[idx]
-            if not res_obj._defined:
-                continue
-            image = self._improve_raw_img(res_obj.image)
-            res.append([image, res_obj.score, res_obj.frameno])
-        return res
+        with self._lock:
+            _log.debug('Dumping results')
+            sco_by_idx = np.argsort([x.score for x in self.results])[::-1]
+            res = []
+            for idx in sco_by_idx:
+                res_obj = self.results[idx]
+                if not res_obj._defined:
+                    continue
+                image = self._improve_raw_img(res_obj.image)
+                res.append([image, res_obj.score, res_obj.frameno])
+            return res
 
 
 class LocalSearcher(object):
