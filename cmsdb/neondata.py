@@ -5398,8 +5398,48 @@ class VideoStatus(DefaultedStoredObject):
         '''
         return VideoStatus.__name__ 
 
+class ContentShare(StoredObject):
+    """ContentShare models a re-usable token that allows alternate access
+    to a user resource (e.g., video) without user authentication. The token
+    encodes the key to the resource. The intention is to enable
+    sharing of URLs via email, tweet, etc. These URLs are permanent so the
+    token has no expiration (unlike the auth tokens). The token is costly
+    to generate so is stored. Keeping the token also enables an additional
+    validation check when authorizing access.
+
+    A ContentShare maps (content type, content id} -> JWT share token. Use
+    create_key(content_type, content_id) to key this class."""
+
+    def __init__(self, key, token=None):
+        try:
+            content_type, content_id = key.split('_')
+        except ValueError:
+            raise ValueError('Invalid key format. Got {key}.\
+                Use ContentShare.create_key'.format(key=key))
+        super(ContentShare, self).__init__(
+            ContentShare.create_key(content_type, content_id))
+        self.content_type = content_type
+        self.content_id = content_id
+        self.token = token
+
+    @staticmethod
+    def create_key(content_type, content_id):
+        # Check if content type is valid.
+        try:
+            classtype = globals()[content_type]
+        except IndexError:
+            raise TypeError(
+                'Invalid type: unrecognized. Got {}'.format(content_type))
+        if not issubclass(classtype, StoredObject):
+            raise TypeError(
+                'Invalid type: not a StoredObject. Got {}'.format(content_type))
+        return "{}_{}".format(content_type, content_id)
+
+    @classmethod
+    def _baseclass_name(cls):
+        return ContentShare.__name__
+
 class AbstractJsonResponse(object):
-    
     def to_dict(self):
         return self.__dict__
 

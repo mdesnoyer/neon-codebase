@@ -103,6 +103,14 @@ ALTER TABLE cdnhostingmetadatalist OWNER TO pgadmin;
 -- Name: experimentstrategy; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
 --
 
+CREATE TABLE contentshare (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp,
+    updated_time timestamp DEFAULT current_timestamp
+);
+ALTER TABLE contentshare OWNER TO pgadmin;
+
 CREATE TABLE experimentstrategy (
     _data jsonb,
     _type character varying(128) NOT NULL,
@@ -596,6 +604,11 @@ FOR EACH ROW EXECUTE PROCEDURE tables_notify_func();
 CREATE TRIGGER cdnhostingmetadatalist_update_updated_time_trig 
 BEFORE UPDATE 
 ON cdnhostingmetadatalist
+FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
+
+CREATE TRIGGER contentshare_update_updated_time_trig 
+BEFORE UPDATE 
+ON contentshare
 FOR EACH ROW EXECUTE PROCEDURE update_updated_time_column(); 
 
 CREATE TRIGGER experimentstrategy_notify_trig

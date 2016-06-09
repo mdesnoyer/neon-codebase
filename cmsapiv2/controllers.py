@@ -1939,6 +1939,54 @@ class VideoSearchInternalHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+VideoShareHandler : class responsible for generating video share tokens
+   HTTP Verbs     : get
+*********************************************************************'''
+class VideoShareHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('video_id'): All(Coerce(str), Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        # Validate video exists.
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            args['video_id'])
+        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+        if not video:
+            raise NotFoundError('video does not exist with id: %s' %
+                (args['video_id']))
+
+        # Get and/or set token.
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': args['video_id']}
+        def _set_token_if_none(share):
+            if share.token is None:
+                share.token = ShareJWTHelper.encode(payload)
+        share_key = neondata.ContentShare.create_key(**payload)
+        share = yield neondata.ContentShare.modify(
+            share_key,
+            _set_token_if_none,
+            create_missing=True,
+            async=True)
+        # Return is just token string.
+        self.success(share.token)
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+
+'''*********************************************************************
 VideoSearchExternalHandler : class responsible for searching videos from
                              an external source
    HTTP Verbs     : get
@@ -2631,7 +2679,7 @@ Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/batch/?$', BatchHandler), 
+    (r'/api/v2/batch/?$', BatchHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
@@ -2644,21 +2692,22 @@ application = tornado.web.Application([
         AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search?$',
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',
         ThumbnailSearchExternalHandler),
-    (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
+    (r'/api/v2/thumbnails/search/?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$',
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
@@ -2666,7 +2715,7 @@ application = tornado.web.Application([
 def main():
     global server
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-    
+
     server = tornado.httpserver.HTTPServer(application)
     #utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)

@@ -815,11 +815,13 @@ class ShareJWTHelper(object):
     def encode(payload):
         return jwt.encode(payload,
                           options.share_token_secret,
-                          algorithm=['HS256'])
+                          algorithm='HS256')
 
     @staticmethod
     def decode(token):
-        return jwt.decode(token, algorithms=['HS256'])
+        return jwt.decode(token,
+                          options.share_token_secret,
+                          algorithms=['HS256'])
 
 '''*********************************************************************
 APIV2 Defined Exceptions

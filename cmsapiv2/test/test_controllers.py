@@ -4402,24 +4402,44 @@ class TestAuthenticationHealthCheckHandler(TestAuthenticationBase):
         self.assertEquals(response.code, 200)
 
 
-class TestVideoSearchInternalHandler(TestControllersBase):
+class TestVerifiedControllersBase(TestControllersBase):
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,
-                                        name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
+        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
+        self.user.save()
+        self.account_id_api_key = self.user.neon_api_key
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
-        super(TestVideoSearchInternalHandler, self).setUp()
+        super(TestVerifiedControllersBase, self).setUp()
 
     def tearDown(self):
         self.verify_account_mocker.stop()
-        super(TestVideoSearchInternalHandler, self).tearDown()
+        super(TestVerifiedControllersBase, self).tearDown()
 
+class TestVideoShareHandler(TestVerifiedControllersBase):
+    @tornado.testing.gen_test
+    def test_get_200(self):
+        neondata.VideoMetadata('u_1', request_id='1').save()
+        neondata.NeonApiRequest('1', 'u').save()
+        url = self.get_url('/api/v2/u/videos/share/?video_id=1')
+        response = yield self.http_client.fetch(url)
+        token = response.body
+        payload = ShareJWTHelper.decode(token)
+        self.assertEqual(u'1', payload['content_id'])
+        self.assertEqual(u'VideoMetadata', payload['content_type'])
 
+    @tornado.testing.gen_test
+    def test_get_404(self):
+        neondata.VideoMetadata('u1_1', request_id='1').save()
+        neondata.NeonApiRequest('1', 'u2').save()
+        url = self.get_url('/api/v2/u/videos/share/?video_id=1')
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(404, e.exception.code)
+
+class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
     @tornado.testing.gen_test
     def test_search_no_videos(self):
         url = '/api/v2/videos/search?account_id=kevin&fields='\
@@ -4565,21 +4585,7 @@ class TestVideoSearchInternalHandler(TestControllersBase):
         self.assertEquals(video_count, 0)
         self.assertEquals(videos, [])
 
-class TestVideoSearchExternalHandler(TestControllersBase):
-    def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestVideoSearchExternalHandler, self).setUp()
-
-    def tearDown(self):
-        self.verify_account_mocker.stop()
-        super(TestVideoSearchExternalHandler, self).tearDown()
+class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
 
     @tornado.testing.gen_test
     def test_deleted_video(self):
@@ -4721,18 +4727,9 @@ class TestVideoSearchExternalHandler(TestControllersBase):
         self.assertEquals('kevins best video yet', video['title'])
 
 
-class TestVideoSearchExtHandlerQuery(TestControllersBase):
+class TestVideoSearchExtHandlerQuery(TestVerifiedControllersBase):
 
     def setUp(self):
-        user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        user.save()
-        self.account_id_api_key = user.neon_api_key
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-
         super(TestVideoSearchExtHandlerQuery, self).setUp()
 
         neondata.VideoMetadata('u0_v0', request_id='j0').save()
@@ -4746,9 +4743,6 @@ class TestVideoSearchExtHandlerQuery(TestControllersBase):
                                 title='Another title0 title1 title?').save()
         self.url = self.get_url(
             '/api/v2/u0/videos/search?fields=video_id,title&query={}')
-    def tearDown(self):
-        self.verify_account_mocker.stop()
-        super(TestVideoSearchExtHandlerQuery, self).tearDown()
 
     @tornado.testing.gen_test
     def test_regex(self):
@@ -4788,24 +4782,7 @@ class TestVideoSearchExtHandlerQuery(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEqual(0, len(rjson['videos']), 'Search is strict on token order')
 
-
-class TestAccountLimitsHandler(TestControllersBase): 
-    def setUp(self):
-        self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
-        self.user.save()
-        self.account_id_api_key = self.user.neon_api_key
-        self.verify_account_mocker = patch(
-            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
-        self.verify_account_mock = self._future_wrap_mock(
-            self.verify_account_mocker.start())
-        self.verify_account_mock.sife_effect = True
-        super(TestAccountLimitsHandler, self).setUp()
-
-    def tearDown(self):
-        self.verify_account_mocker.stop()
-        super(TestAccountLimitsHandler, self).tearDown()
-
-
+class TestAccountLimitsHandler(TestVerifiedControllersBase):
     @tornado.testing.gen_test
     def test_search_with_limit(self):
         limits = neondata.AccountLimits(self.user.neon_api_key)
