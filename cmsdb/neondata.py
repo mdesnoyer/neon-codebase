@@ -900,7 +900,8 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 func_level_wpg=True, as_dict=False):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
@@ -915,7 +916,12 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
-        return cls._get_many_with_raw_keys(keys, create_default, log_missing, func_level_wpg)
+        return cls._get_many_with_raw_keys(
+            keys,
+            create_default,
+            log_missing,
+            func_level_wpg,
+            as_dict)
 
     @classmethod
     @utils.sync.optional_sync
@@ -981,7 +987,8 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
-                                log_missing=True, func_level_wpg=True):
+                                log_missing=True, func_level_wpg=True,
+                                as_dict=False):
         '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
@@ -1014,7 +1021,7 @@ class StoredObject(object):
                 obj_key = result['_data']['key'] 
                 obj_map[obj_key] = result
  
-        def _build_return_items(): 
+        def _build_return_items_list(): 
             rv = [] 
             for key, item in obj_map.iteritems():
                 if item: 
@@ -1029,6 +1036,21 @@ class StoredObject(object):
                 rv.append(obj)
             return rv
  
+        def _build_return_items_dict(): 
+            rv = {} 
+            for key, item in obj_map.iteritems():
+                if item: 
+                    obj = cls._create(key, item) 
+                else:
+                    if log_missing:
+                        _log.warn('No %s for %s' % (cls.__name__, key))
+                    if create_default:
+                        obj = cls(key)
+                    else:
+                        obj = None
+                rv[key] = obj
+            return rv
+ 
         rows = True
         while rows:
             cursor = yield conn.execute("FETCH %s FROM get_many", (chunk_size,))  
@@ -1039,7 +1061,12 @@ class StoredObject(object):
         yield conn.execute("COMMIT")
  
         db.return_connection(conn)
-        raise tornado.gen.Return(_build_return_items())
+        if as_dict:
+            items = _build_return_items_dict()
+        else:
+            items = _build_return_items_list()
+
+        raise tornado.gen.Return(items)
     
     @classmethod
     @utils.sync.optional_sync

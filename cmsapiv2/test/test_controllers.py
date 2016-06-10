@@ -3670,6 +3670,58 @@ class TestThumbnailStatsHandler(TestControllersBase):
                                  'thumbnail_id or video_id is required')
 
 
+class TestLiftStatsHandler(TestControllersBase):
+
+    def setUp(self):
+        super(TestLiftStatsHandler, self).setUp()
+        self.verify_account_mocker = patch(
+            'cmsapiv2.apiv2.APIV2Handler.is_authorized')
+        self.verify_account_mock = self._future_wrap_mock(
+            self.verify_account_mocker.start())
+        self.verify_account_mock.sife_effect = True
+
+    def tearDown(self):
+        self.verify_account_mocker.stop()
+        super(TestLiftStatsHandler, self).tearDown()
+
+    @tornado.testing.gen_test
+    def test_response_has_structure(self):
+        base_id = 'a'
+        neondata.ThumbnailMetadata('a').save()
+        thumbnail_ids = ['b', 'c', 'd']
+        neondata.ThumbnailMetadata('c').save()
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}'.format(
+                base_id,
+                ','.join(thumbnail_ids))))
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIn('baseline_thumbnail_id', rjson)
+        self.assertIn('lift', rjson)
+        lift = rjson['lift']
+        self.assertIsInstance(lift, list)
+        [self.assertIsInstance(i, dict) for i in lift]
+        [self.assertIn('thumbnail_id', i) for i in lift]
+        [self.assertIn('lift', i) for i in lift]
+        self.assertNotIn('a', [i['thumbnail_id'] for i in lift])
+        [self.assertIsNone(i['lift']) for i in lift
+            if i['thumbnail_id'] in ['b', 'd']]
+        [self.assertIsInstance(i['lift'], float) for i in lift
+            if i['thumbnail_id'] == 'c']
+
+    @tornado.testing.gen_test
+    def test_base_thumb_does_not_exist(self):
+        base_id = 'b'
+        thumbnail_ids = ['c']
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}'.format(
+                base_id,
+                ','.join(thumbnail_ids))))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(404, e.exception.code)
+
+
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
