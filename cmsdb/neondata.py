@@ -40,6 +40,7 @@ import hashlib
 import itertools
 import simplejson as json
 import logging
+import model.scores
 import momoko
 import multiprocessing
 import psycopg2
@@ -833,6 +834,7 @@ class StoredObject(object):
             except ValueError:
                 return None
         
+
             return obj
 
     @classmethod
@@ -4739,6 +4741,14 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailStatus.delete(key, async=True) 
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
+
+    def get_neon_score(self):
+        """Get a value in [1..99] that the Neon score maps to.
+
+        Uses a mapping dictionary according to the name of the
+        scoring model."""
+
+        return model.scores.lookup(self.model_version, self.model_score)
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''

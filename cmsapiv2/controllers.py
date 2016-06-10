@@ -1099,8 +1099,9 @@ class ThumbnailHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         thumbnail_id = args['thumbnail_id']
-        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get,
-                                           thumbnail_id)
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+            thumbnail_id,
+            async=True)
         if not thumbnail:
             raise NotFoundError('thumbnail does not exist with id = %s' %
                                 (thumbnail_id))
@@ -1142,8 +1143,7 @@ class ThumbnailHandler(APIV2Handler):
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'neon_score':
-            # TODO(mdesnoyer): convert the model score into the neon score
-            retval = obj.model_score
+            retval = obj.get_neon_score()
         elif field == 'url':
             retval = obj.urls[0] or []
         elif field == 'external_ref':
@@ -2707,7 +2707,7 @@ Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/batch/?$', BatchHandler), 
+    (r'/api/v2/batch/?$', BatchHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
