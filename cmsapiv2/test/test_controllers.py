@@ -3616,7 +3616,7 @@ class TestSharedContent(TestControllersBase):
     def test_token_matches_shared_video(self):
         # Get the shared video.
         video_id = '1'
-        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
             (video_id, self.token))
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
@@ -3626,10 +3626,15 @@ class TestSharedContent(TestControllersBase):
     def test_token_matches_unshared_video(self):
         # Call JWT encoder directly so no token is saved.
         video_id = '2'
-        token = ShareJWTHelper.encode('VideoMetadata', video_id)
-        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+        content_type = 'VideoMetadata'
+        payload = {
+            'content_type': content_type,
+            'content_id': video_id
+        }
+        token = ShareJWTHelper.encode(payload)
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
             (video_id, token))
-        with self.assertRaises(tornado.http.ResponseError) as e:
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
@@ -3637,10 +3642,14 @@ class TestSharedContent(TestControllersBase):
     def test_token_isnt_video(self):
         thumbnail_id = 1
         content_type = 'ThumbnailMetadata'
-        token = ShareJWTHelper.encode(content_type, thumbnail_id)
-        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&token=%s' %
+        payload = {
+            'content_type': content_type,
+            'content_id': thumbnail_id
+        }
+        token = ShareJWTHelper.encode(payload)
+        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&share_token=%s' %
             (thumbnail_id, token))
-        with self.assertRaises(tornado.http.ResponseError) as e:
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
@@ -3651,7 +3660,7 @@ class TestSharedContent(TestControllersBase):
             'content_type': 'VideoMetadata',
             'content_id': video_id}
         token = JWTHelper.generate_token(payload, TokenTypes.ACCESS_TOKEN)
-        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
             (video_id, token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
@@ -3660,19 +3669,23 @@ class TestSharedContent(TestControllersBase):
     @tornado.testing.gen_test
     def test_token_to_nonsharing_endpoint(self):
         video_id = '1'
-        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
             (video_id, self.token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url, method='POST',
                                          allow_nonstandard_methods=True)
         self.assertEqual(401, e.exception.code)
 
-        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&token=%s' %
+        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&share_token=%s' %
             (video_id, self.token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
+
+    @tornado.testing.gen_test
+    def test_token_wrong_param(self):
+        pass
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):

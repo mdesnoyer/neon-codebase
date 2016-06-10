@@ -773,7 +773,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             (field, cls.__name__))
 
 class ShareableContentHandler(APIV2Handler):
-    """Enable authorization by URL parameter token."""
+    """Enable authorization by URL parameter share_token."""
 
     @tornado.gen.coroutine
     def is_authorized(request,
@@ -783,9 +783,9 @@ class ShareableContentHandler(APIV2Handler):
         """Allow access if request has query token and matches resource"""
         args = request.parse_args(True)
         try:
-            payload = ShareJWTHelper.decode(args['token'])
+            payload = ShareJWTHelper.decode(args['share_token'])
             # Implement for just video resources reads for now.
-            if (access_level_required == neondata.AccessLevels.READ and
+            if (access_level_required & neondata.AccessLevels.SHARE and
                 payload['content_type'] == 'VideoMetadata' and
                 payload['content_id'] == args['video_id']):
                    # Validate that database agrees that content is shared.

@@ -643,17 +643,18 @@ class SubscriptionState(object):
     UNPAID = 'unpaid' 
     PAST_DUE = 'past_due' 
     IN_TRIAL = 'trialing'
- 
+
 class AccessLevels(object):
-    NONE = 0 
-    READ = 1 
-    UPDATE = 2 
+    NONE = 0
+    READ = 1
+    UPDATE = 2
     CREATE = 4
-    DELETE = 8 
-    ACCOUNT_EDITOR = 16 
-    INTERNAL_ONLY_USER = 32 
+    DELETE = 8
+    ACCOUNT_EDITOR = 16
+    INTERNAL_ONLY_USER = 32
     GLOBAL_ADMIN = 64
-    
+    SHARE = 128             # Resource permits share token authorization
+
     # Helpers  
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
     ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR

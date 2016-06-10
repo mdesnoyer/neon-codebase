@@ -1517,10 +1517,11 @@ class VideoHandler(ShareableContentHandler):
         """handles a Video endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id'): Any(
-              CustomVoluptuousTypes.CommaSeparatedList()),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('video_id'): Any(
+                CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'share_token': str
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1609,15 +1610,16 @@ class VideoHandler(ShareableContentHandler):
 
     @classmethod
     def get_access_levels(self):
-        return { 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, 
-                                        HTTPVerbs.PUT,
-                                        HTTPVerbs.POST],
-                 'subscription_required' : [HTTPVerbs.POST]  
-               }
+        return {HTTPVerbs.GET:
+                    neondata.AccessLevels.READ |
+                    neondata.AccessLevels.SHARE,
+                HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                'account_required': [
+                    HTTPVerbs.GET,
+                    HTTPVerbs.PUT,
+                    HTTPVerbs.POST],
+                'subscription_required': [HTTPVerbs.POST]}
 
     @classmethod
     def get_limits(self):
@@ -1962,13 +1964,15 @@ class VideoShareHandler(APIV2Handler):
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
-        token = yield ShareHelper.get_token('VideoMetadata', args['video_id'])
+        token = yield ShareHelper.get_token_with_save(
+            'VideoMetadata',
+            args['video_id'])
         self.success(token)
 
     @classmethod
     def get_access_levels(self):
         return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.GET: neondata.AccessLevels.SHARE,
             'account_required': [HTTPVerbs.GET]}
 
 
