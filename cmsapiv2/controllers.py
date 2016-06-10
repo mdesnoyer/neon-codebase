@@ -1890,7 +1890,7 @@ class ThumbnailStatsHandler(APIV2Handler):
 
 
 '''*********************************************************************
-HealthCheckHandler
+LiftStatsHandler
 *********************************************************************'''
 class LiftStatsHandler(APIV2Handler):
 
