@@ -2810,9 +2810,7 @@ class TestVideoHandler(TestControllersBase):
         url = '/api/v2/%s/videos?video_id=vid1&fields=created,thumbnails' % (
             self.account_id_api_key)
         response = yield self.http_client.fetch(
-            self.get_url(url),
-            method='GET')
-
+            self.get_url(url))
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals(rjson['video_count'], 1)
@@ -2833,6 +2831,14 @@ class TestVideoHandler(TestControllersBase):
             u'url': u'http://n3.neon-images.com/xbo/neontntesting_vtid_two_w120_h67.jpg'
         }
         self.assertIn(rendition, thumbnail_two['renditions'])
+
+        neondata.ThumbnailServingURLs(
+            tids[0],
+            size_map={}).save()
+        response = yield self.http_client.fetch(
+            self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEquals(response.code, 200)
 
     @tornado.testing.gen_test
     def test_get_video_with_thumbnails_field_no_thumbnails(self):
@@ -3324,7 +3330,6 @@ class TestThumbnailHandler(TestControllersBase):
             u'height': 118,
             u'url': u'%s%s_w210_h118.jpg' % (base_url, tid),
             u'width': 210}, rjson['renditions'])
-
 
     @tornado.testing.gen_test
     def test_get_thumbnail_does_not_exist(self):

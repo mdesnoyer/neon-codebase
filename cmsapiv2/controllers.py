@@ -1177,14 +1177,16 @@ class ThumbnailHelper(object):
         # Build a map of {tid: [renditions]}.
         rv = {}
         for chunk in urls:
-            try:
+            if chunk:
                 renditions = [ThumbnailHelper._to_dict(pair) for pair in chunk]
-            except TypeError:
-                renditions = []
-            try:
-                rv[chunk.get_id()].extend(renditions)
-            except KeyError:
-                rv[chunk.get_id()] = renditions
+                try:
+                    rv[chunk.get_id()].extend(renditions)
+                except KeyError:
+                    rv[chunk.get_id()] = renditions
+        # Ensure that every tid in request has a list mapped.
+        for tid in tids:
+            if not rv.get(tid):
+                rv[tid] = []
         raise tornado.gen.Return(rv)
 
     @staticmethod
