@@ -725,8 +725,7 @@ class Cluster():
         #avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-d3be7fa4',  
         #    'us-east-1d' : 'subnet-53fa1901' 
         #}
-        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-e7be7f90',
-                                    'us-east-1d' : 'subnet-abf214f2'}
+        avail_zone_to_subnet_id = { 'us-east-1c' : 'subnet-f5d88482'}
  
         data = [(itype, math.ceil(self.n_core_instances / x[0]), 
                  x[0] * math.ceil(self.n_core_instances / x[0]), 
