@@ -1442,7 +1442,7 @@ class VideoHelper(object):
 '''*********************************************************************
 VideoHandler
 *********************************************************************'''
-class VideoHandler(APIV2Handler):
+class VideoHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request"""
@@ -1962,10 +1962,25 @@ class VideoShareHandler(APIV2Handler):
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
-        # Get and/or set token.
+        token = yield ShareHelper.get_token('VideoMetadata', args['video_id'])
+        self.success(token)
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+class ShareHelper(object):
+    """Contains method to handle getting with optionally saving share token"""
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_token_with_save(content_type, content_id):
+        """ Get (and set if missing) share token"""
         payload = {
-            'content_type': 'VideoMetadata',
-            'content_id': args['video_id']}
+            'content_type': content_type,
+            'content_id': content_id}
         def _set_token_if_none(share):
             if share.token is None:
                 share.token = ShareJWTHelper.encode(payload)
@@ -1976,14 +1991,7 @@ class VideoShareHandler(APIV2Handler):
             create_missing=True,
             async=True)
         # Return is just token string.
-        self.success(share.token)
-
-    @classmethod
-    def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            'account_required': [HTTPVerbs.GET]}
-
+        raise tornado.gen.Return(share.token)
 
 
 '''*********************************************************************

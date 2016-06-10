@@ -773,6 +773,38 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             'Must specify how to convert %s for object %s' %
             (field, cls.__name__))
 
+class ShareableContentHandler(APIV2Handler):
+    """Enable authorization by URL parameter token."""
+
+    @tornado.gen.coroutine
+    def is_authorized(request,
+                      access_level_required,
+                      account_required=True,
+                      internal_only=False):
+        """Allow access if request has query token and matches resource"""
+        args = request.parse_args(True)
+        try:
+            payload = ShareJWTHelper.decode(args['token'])
+            # Implement for just video resources reads for now.
+            if (access_level_required == neondata.AccessLevels.READ and
+                payload['content_type'] == 'VideoMetadata' and
+                payload['content_id'] == args['video_id']):
+                   # Validate that database agrees that content is shared.
+                   key = neondata.ContentShare.create_key(**payload)
+                   share = neondata.ContentShare.get(key)
+                   if share:
+                       return True
+        except KeyError, jwt.DecodeError:
+            # Go on to try Authorization header-based authorization.
+            pass
+
+        raise tornado.gen.Return(
+            super(ShareableContentHandler, request).is_authorized(
+                access_level_required,
+                account_required,
+                internal_only))
+
+
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place
        Use this class to generate good tokens with the correct secret
@@ -808,7 +840,7 @@ class ShareJWTHelper(object):
     """Implements encode and decode of shared user content JWT tokens.
 
     This complements JWTHelper and uses a distinct salt to protect against
-    analysis-based attacks on the token decoding.
+    hacks that look at lot of tokens to reverse the encoding.
     """
 
     @staticmethod

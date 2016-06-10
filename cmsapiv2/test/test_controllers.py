@@ -52,13 +52,13 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
             'cmsapiv2.authentication.ForgotPasswordHandler._send_email')
         self.send_email_mock_two = self.send_email_mocker_two.start()
         self.send_email_mock_two.return_value = True
-        super(test_utils.neontest.AsyncHTTPTestCase, self).setUp()
+        super(TestBase, self).setUp()
 
     def tearDown(self):
         self.send_email_mocker.stop()
         self.send_email_mocker_two.stop()
         self.postgresql.clear_all_tables()
-        super(test_utils.neontest.AsyncHTTPTestCase, self).tearDown()
+        super(TestBase, self).tearDown()
 
     @classmethod
     def setUpClass(cls):
@@ -3593,6 +3593,74 @@ class TestThumbnailStatsHandler(TestControllersBase):
                                  'thumbnail_id or video_id is required')
 
 
+class TestSharedContent(TestControllersBase):
+
+    def setUp(self):
+        super(TestControllersBase, self).setUp()
+        # Add account, video, request.
+        neondata.NeonUserAccount('u', 'u').save()
+        neondata.VideoMetadata('u_1', request_id='1').save()
+        neondata.NeonApiRequest('1', 'u').save()
+        neondata.VideoMetadata('u_2', request_id='2').save()
+        neondata.NeonApiRequest('2', 'u').save()
+        # Share the video.
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': '1'
+        }
+        self.token = ShareJWTHelper.encode(payload)
+        key = neondata.ContentShare.create_key(**payload)
+        neondata.ContentShare(key, token=self.token).save()
+
+    @tornado.testing.gen_test
+    def test_token_matches_shared_video(self):
+        # Get the shared video.
+        video_id = '1'
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+            (video_id, self.token))
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertEqual(video_id, rjson['videos'][0]['video_id'])
+
+    @tornado.testing.gen_test
+    def test_token_matches_unshared_video(self):
+        # Call JWT encoder directly so no token is saved.
+        video_id = '2'
+        token = ShareJWTHelper.encode('VideoMetadata', video_id)
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+            (video_id, token))
+        with self.assertRaises(tornado.http.ResponseError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_token_isnt_video(self):
+        thumbnail_id = 1
+        content_type = 'ThumbnailMetadata'
+        token = ShareJWTHelper.encode(content_type, thumbnail_id)
+        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&token=%s' %
+            (thumbnail_id, token))
+        with self.assertRaises(tornado.http.ResponseError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_token_invalid(self):
+        video_id = '2'
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': video_id}
+        token = JWTHelper.generate_token(payload, TokenTypes.ACCESS_TOKEN)
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+            (video_id, token))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(403, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_token_to_nonsharing_endpoint(self):
+        pass
+
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):
         self.neon_user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingaccount')
@@ -4418,6 +4486,7 @@ class TestVerifiedControllersBase(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestVerifiedControllersBase, self).tearDown()
 
+
 class TestVideoShareHandler(TestVerifiedControllersBase):
     @tornado.testing.gen_test
     def test_get_200(self):
@@ -4438,6 +4507,7 @@ class TestVideoShareHandler(TestVerifiedControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(404, e.exception.code)
+
 
 class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
     @tornado.testing.gen_test
@@ -4584,6 +4654,7 @@ class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
         videos = rjson['videos']
         self.assertEquals(video_count, 0)
         self.assertEquals(videos, [])
+
 
 class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
 
@@ -4781,6 +4852,7 @@ class TestVideoSearchExtHandlerQuery(TestVerifiedControllersBase):
         response = yield self.http_client.fetch(self.url.format('title1%20title2'))
         rjson = json.loads(response.body)
         self.assertEqual(0, len(rjson['videos']), 'Search is strict on token order')
+
 
 class TestAccountLimitsHandler(TestVerifiedControllersBase):
     @tornado.testing.gen_test
