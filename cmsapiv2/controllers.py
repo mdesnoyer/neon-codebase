@@ -1177,7 +1177,10 @@ class ThumbnailHelper(object):
         # Build a map of {tid: [renditions]}.
         rv = {}
         for chunk in urls:
-            renditions = [ThumbnailHelper._to_dict(pair) for pair in chunk]
+            try:
+                renditions = [ThumbnailHelper._to_dict(pair) for pair in chunk]
+            except TypeError:
+                renditions = []
             try:
                 rv[chunk.get_id()].extend(renditions)
             except KeyError:
