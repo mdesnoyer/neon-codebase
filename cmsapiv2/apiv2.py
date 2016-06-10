@@ -275,7 +275,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             else:
                 raise jwt.InvalidTokenError
 
-
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('access token is expired, please refresh the token')
         except (jwt.DecodeError, jwt.InvalidTokenError, KeyError):
@@ -793,16 +792,16 @@ class ShareableContentHandler(APIV2Handler):
                    key = neondata.ContentShare.create_key(**payload)
                    share = neondata.ContentShare.get(key)
                    if share:
-                       return True
-        except KeyError, jwt.DecodeError:
+                       raise tornado.gen.Return(True)
+        except (KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
 
-        raise tornado.gen.Return(
-            super(ShareableContentHandler, request).is_authorized(
+        rv = yield super(ShareableContentHandler, request).is_authorized(
                 access_level_required,
                 account_required,
-                internal_only))
+                internal_only)
+        raise tornado.gen.Return(rv)
 
 
 class JWTHelper(object):

@@ -3655,11 +3655,24 @@ class TestSharedContent(TestControllersBase):
             (video_id, token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
-        self.assertEqual(403, e.exception.code)
+        self.assertEqual(401, e.exception.code)
 
     @tornado.testing.gen_test
     def test_token_to_nonsharing_endpoint(self):
-        pass
+        video_id = '1'
+        url = self.get_url('/api/v2/u/videos/?video_id=%s&token=%s' %
+            (video_id, self.token))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url, method='POST',
+                                         allow_nonstandard_methods=True)
+        self.assertEqual(401, e.exception.code)
+
+        url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&token=%s' %
+            (video_id, self.token))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(url)
+        self.assertEqual(401, e.exception.code)
+
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):
