@@ -1495,11 +1495,14 @@ class VideoHandler(ShareableContentHandler):
         account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                          account_id)
         duration = new_video.duration
-                
+
         message = yield sqs_queue.write_message(
-                    account.get_processing_priority(), 
+                    account.get_processing_priority(),
                     json.dumps(api_request.__dict__),
                     duration)
+
+        # Generate a share token.
+        ShareHelper.get_token_with_save('VideoMetadata', new_video.get_id())
 
         if message:
             job_info = {}
@@ -1611,8 +1614,7 @@ class VideoHandler(ShareableContentHandler):
     @classmethod
     def get_access_levels(self):
         return {HTTPVerbs.GET:
-                    neondata.AccessLevels.READ |
-                    neondata.AccessLevels.SHARE,
+                    neondata.AccessLevels.READ,
                 HTTPVerbs.POST: neondata.AccessLevels.CREATE,
                 HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
                 'account_required': [
@@ -1972,7 +1974,7 @@ class VideoShareHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-            HTTPVerbs.GET: neondata.AccessLevels.SHARE,
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
 
 
