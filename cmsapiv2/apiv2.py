@@ -785,7 +785,7 @@ class ShareableContentHandler(APIV2Handler):
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
             # Implement for just video resources reads for now.
-            if (access_level_required & neondata.AccessLevels.SHARE and
+            if (access_level_required & neondata.AccessLevels.READ and
                 payload['content_type'] == 'VideoMetadata' and
                 payload['content_id'] == args['video_id']):
                    # Validate that database agrees that content is shared.
