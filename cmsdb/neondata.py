@@ -1915,7 +1915,8 @@ class User(NamespacedStoredObject):
                  title=None,
                  reset_password_token=None, 
                  secondary_email=None, 
-                 cell_phone_number=None):
+                 cell_phone_number=None, 
+                 send_emails=True):
  
         super(User, self).__init__(username)
 
@@ -1959,6 +1960,9 @@ class User(NamespacedStoredObject):
         # optional cell phone number, can be used for recovery purposes 
         # eventually 
         self.cell_phone_number = cell_phone_number
+
+        # whether or not we should send this user emails 
+        self.send_emails = send_emails 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
