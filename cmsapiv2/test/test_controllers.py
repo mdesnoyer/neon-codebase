@@ -3305,6 +3305,30 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(rjson['thumbnail_id'], 'testingtid')
 
     @tornado.testing.gen_test
+    def test_score_map(self):
+        """Test scores map to expected value based on model name."""
+        neondata.ThumbnailMetadata(
+            'a',
+            urls=['http://asdf.com/1.jpg'],
+            model_score='0.31337',
+            model_version='p_20151216_localsearch_v2'
+        ).save()
+        url = '/api/v2/%s/thumbnails?thumbnail_id=a' % (
+            self.account_id_api_key)
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['neon_score'], 7)
+        neondata.ThumbnailMetadata(
+            'a',
+            urls=['http://asdf.com/1.jpg'],
+            model_score='0.31337',
+            model_version='local_search_input_20160523-aqv1.1.250'
+        ).save()
+        response = yield self.http_client.fetch(self.get_url(url))
+        rjson = json.loads(response.body)
+        self.assertEquals(rjson['neon_score'], 12)
+
+    @tornado.testing.gen_test
     def test_get_thumbnail_with_renditions(self):
 
         base_url = 'http://n3.neon-images.com/xbo/neontn'
