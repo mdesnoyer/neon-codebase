@@ -785,15 +785,13 @@ class ShareableContentHandler(APIV2Handler):
         try:
             payload = ShareJWTHelper.decode(args['share_token'])
             # Implement for just video resources reads for now.
+            pl_account_id, pl_video_id = payload['content_id'].split('_')
             if (access_level_required & neondata.AccessLevels.READ and
                 payload['content_type'] == 'VideoMetadata' and
-                payload['content_id'] == args['video_id']):
-                   # Validate that database agrees that content is shared.
-                   key = neondata.ContentShare.create_key(**payload)
-                   share = neondata.ContentShare.get(key)
-                   if share:
-                       raise tornado.gen.Return(True)
-        except (KeyError, jwt.DecodeError):
+                pl_account_id == request.account_id and
+                pl_video_id == args['video_id']):
+                   raise tornado.gen.Return(True)
+        except (ValueError, KeyError, jwt.DecodeError):
             # Go on to try Authorization header-based authorization.
             pass
 
@@ -803,6 +801,25 @@ class ShareableContentHandler(APIV2Handler):
                 internal_only)
         raise tornado.gen.Return(rv)
 
+class ShareJWTHelper(object):
+    """Implements encode and decode of shared user content JWT tokens.
+
+    This complements JWTHelper and uses a distinct salt to protect against
+    hacks that look at lot of tokens to reverse the encoding.
+    """
+
+    @staticmethod
+    def encode(payload):
+        return jwt.encode(payload,
+                          options.share_token_secret,
+                          algorithm='HS256')
+
+    @staticmethod
+    def decode(token):
+        return jwt.decode(token,
+                          options.share_token_secret,
+                          algorithms=['HS256'])
+    
 
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place
@@ -834,25 +851,6 @@ class JWTHelper(object):
     @staticmethod
     def decode_token(access_token):
         return jwt.decode(access_token, options.token_secret, algorithms=['HS256'])
-
-class ShareJWTHelper(object):
-    """Implements encode and decode of shared user content JWT tokens.
-
-    This complements JWTHelper and uses a distinct salt to protect against
-    hacks that look at lot of tokens to reverse the encoding.
-    """
-
-    @staticmethod
-    def encode(payload):
-        return jwt.encode(payload,
-                          options.share_token_secret,
-                          algorithm='HS256')
-
-    @staticmethod
-    def decode(token):
-        return jwt.decode(token,
-                          options.share_token_secret,
-                          algorithms=['HS256'])
 
 '''*********************************************************************
 APIV2 Defined Exceptions

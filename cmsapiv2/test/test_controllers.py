@@ -3599,25 +3599,27 @@ class TestSharedContent(TestControllersBase):
         super(TestControllersBase, self).setUp()
         # Add account, video, request.
         neondata.NeonUserAccount('u', 'u').save()
-        neondata.VideoMetadata('u_1', request_id='1').save()
-        neondata.NeonApiRequest('1', 'u').save()
-        neondata.VideoMetadata('u_2', request_id='2').save()
-        neondata.NeonApiRequest('2', 'u').save()
-        # Share the video.
+        self.video1 = neondata.VideoMetadata('u_1', request_id='1')
+        # Generate share token.
         payload = {
             'content_type': 'VideoMetadata',
-            'content_id': '1'
+            'content_id': self.video1.get_id()
         }
-        self.token = ShareJWTHelper.encode(payload)
-        key = neondata.ContentShare.create_key(**payload)
-        neondata.ContentShare(key, token=self.token).save()
+        share_token = ShareJWTHelper.encode(payload)
+        self.video1.share_token = share_token
+        self.video1.save()
+
+        neondata.NeonApiRequest('1', 'u').save()
+        self.video2 = neondata.VideoMetadata('u_2', request_id='2')
+        self.video2.save()
+        neondata.NeonApiRequest('2', 'u').save()
 
     @tornado.testing.gen_test
     def test_token_matches_shared_video(self):
         # Get the shared video.
         video_id = '1'
         url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
-            (video_id, self.token))
+            (video_id, self.video1.share_token))
         response = yield self.http_client.fetch(url)
         rjson = json.loads(response.body)
         self.assertEqual(video_id, rjson['videos'][0]['video_id'])
@@ -3670,22 +3672,18 @@ class TestSharedContent(TestControllersBase):
     def test_token_to_nonsharing_endpoint(self):
         video_id = '1'
         url = self.get_url('/api/v2/u/videos/?video_id=%s&share_token=%s' %
-            (video_id, self.token))
+            (video_id, self.video1.share_token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url, method='POST',
                                          allow_nonstandard_methods=True)
         self.assertEqual(401, e.exception.code)
 
         url = self.get_url('/api/v2/u/thumbnails/?thumbnail_id=%s&share_token=%s' %
-            (video_id, self.token))
+            (video_id, self.video1.share_token))
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(401, e.exception.code)
 
-
-    @tornado.testing.gen_test
-    def test_token_wrong_param(self):
-        pass
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
     def setUp(self):

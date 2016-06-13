@@ -1196,20 +1196,32 @@ class VideoHelper(object):
         args -- the args sent to the api endpoint
         account_id_api_key -- the account_id/api_key
         """
-        video_id = args['external_video_ref']
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       neondata.InternalVideoID.generate(account_id_api_key, video_id))
-        if video is None:
-            # make sure we can download the image before creating requests
 
+        video_id = args['external_video_ref']
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            video_id)
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id,
+            async=True)
+        if video is None:
+            # Generate share token.
+            share_payload = {
+                'content_type': 'VideoMetadata',
+                'content_id': internal_video_id
+            }
+            share_token = ShareJWTHelper.encode(share_payload)
+
+            # make sure we can download the image before creating requests
             video = neondata.VideoMetadata(
-                neondata.InternalVideoID.generate(account_id_api_key, video_id),
+                internal_video_id,
                 video_url=args.get('url', None),
                 publish_date=args.get('publish_date', None),
                 duration=float(args.get('duration', 0.0)) or None,
                 custom_data=args.get('custom_data', None),
                 i_id=args.get('integration_id', '0'),
-                serving_enabled=False)
+                serving_enabled=False,
+                share_token=share_token)
 
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
@@ -1229,6 +1241,7 @@ class VideoHelper(object):
             api_request = yield VideoHelper.create_api_request(
                 args,
                 account_id_api_key)
+
             # add the job id save the video
             video.job_id = api_request.job_id
             yield video.save(async=True)
@@ -1500,9 +1513,6 @@ class VideoHandler(ShareableContentHandler):
                     account.get_processing_priority(),
                     json.dumps(api_request.__dict__),
                     duration)
-
-        # Generate a share token.
-        ShareHelper.get_token_with_save('VideoMetadata', new_video.get_id())
 
         if message:
             job_info = {}
@@ -1965,39 +1975,14 @@ class VideoShareHandler(APIV2Handler):
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
-
-        token = yield ShareHelper.get_token_with_save(
-            'VideoMetadata',
-            args['video_id'])
-        self.success({'share_token': token})
+        share_token = ShareJWTHelper.encode('VideoMetadata', video.get_id())
+        self.success(share_token)
 
     @classmethod
     def get_access_levels(self):
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
-
-
-class ShareHelper(object):
-    """Contains method to handle getting with optionally saving share token"""
-    @staticmethod
-    @tornado.gen.coroutine
-    def get_token_with_save(content_type, content_id):
-        """ Get (and set if missing) share token"""
-        payload = {
-            'content_type': content_type,
-            'content_id': content_id}
-        def _set_token_if_none(share):
-            if share.token is None:
-                share.token = ShareJWTHelper.encode(payload)
-        share_key = neondata.ContentShare.create_key(**payload)
-        share = yield neondata.ContentShare.modify(
-            share_key,
-            _set_token_if_none,
-            create_missing=True,
-            async=True)
-        # Return is just token string.
-        raise tornado.gen.Return(share.token)
 
 
 '''*********************************************************************
