@@ -1969,7 +1969,7 @@ class VideoShareHandler(APIV2Handler):
         token = yield ShareHelper.get_token_with_save(
             'VideoMetadata',
             args['video_id'])
-        self.success(token)
+        self.success({'share_token': token})
 
     @classmethod
     def get_access_levels(self):

@@ -4520,8 +4520,9 @@ class TestVideoShareHandler(TestVerifiedControllersBase):
         neondata.NeonApiRequest('1', 'u').save()
         url = self.get_url('/api/v2/u/videos/share/?video_id=1')
         response = yield self.http_client.fetch(url)
-        token = response.body
-        payload = ShareJWTHelper.decode(token)
+        rjson = json.loads(response.body)
+        share_token = rjson['share_token']
+        payload = ShareJWTHelper.decode(share_token)
         self.assertEqual(u'1', payload['content_id'])
         self.assertEqual(u'VideoMetadata', payload['content_type'])
 
