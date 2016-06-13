@@ -4512,9 +4512,11 @@ class TestVerifiedControllersBase(TestControllersBase):
 
 
 class TestVideoShareHandler(TestVerifiedControllersBase):
+
     @tornado.testing.gen_test
     def test_get_200(self):
-        neondata.VideoMetadata('u_1', request_id='1').save()
+        video = neondata.VideoMetadata('u_1', request_id='1')
+        video.save()
         neondata.NeonApiRequest('1', 'u').save()
         url = self.get_url('/api/v2/u/videos/share/?video_id=1')
         response = yield self.http_client.fetch(url)
@@ -4523,6 +4525,9 @@ class TestVideoShareHandler(TestVerifiedControllersBase):
         payload = ShareJWTHelper.decode(share_token)
         self.assertEqual(u'u_1', payload['content_id'])
         self.assertEqual(u'VideoMetadata', payload['content_type'])
+        # Calling the API sets the db video's share_token.
+        video = neondata.VideoMetadata.get(video.get_id())
+        self.assertEqual(video.share_token, share_token)
 
     @tornado.testing.gen_test
     def test_get_404(self):
