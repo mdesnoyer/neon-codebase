@@ -2859,7 +2859,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/email?$', EmailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
