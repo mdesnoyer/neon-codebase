@@ -18,6 +18,7 @@ from cmsdb import neondata
 from cvutils.imageutils import PILImageUtils
 import json
 import logging
+import re
 import signal
 import tornado.gen
 import tornado.httpserver
@@ -151,13 +152,14 @@ class ServingURLHandler(tornado.web.RequestHandler):
                                             'thumbnail', images)
             statemon.state.increment('originals_returned')
 
+    @tornado.gen.coroutine
     def _find_image_size(self, image_response):
         '''Returns (width, height) of the image in a Brightcove Response.'''
         width = None
         height = None
 
         if len(image_response) == 0:
-            return (None, None)
+            raise tornado.gen.Return((None, None))
 
         if image_response['remote']:
             # Try to get the image size from the URL
@@ -174,10 +176,16 @@ class ServingURLHandler(tornado.web.RequestHandler):
             except TypeError:
                 pass
         else:
-            width = max(x.get('width') for x in image_response['sources'])
-            height = max(x.get('height') for x in image_response['sources'])
+            width = max([x.get('width') for x in image_response['sources']] or
+                        [None])
+            height = max([x.get('height') for x in image_response['sources']]
+                         or [None])
 
-        return (width, height)
+        if (width is None or height is None):
+            width, height = yield self._get_size_from_existing_image(
+                image_response)
+
+        raise tornado.gen.Return((width, height))
 
     @tornado.gen.coroutine
     def _choose_replacement_thumb(self, data, integration):
@@ -221,7 +229,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
                              asset_name, images):
         '''Push our desired url into Brightcove.'''
         cur_image = images.get(asset_name, {})
-        width, height = self._find_image_size(cur_image)
+        width, height = yield self._find_image_size(cur_image)
         if width is None or height is None:
             width, height = api.brightcove_api.DEFAULT_IMAGE_SIZES[asset_name]
 
@@ -298,7 +306,7 @@ class ServingURLHandler(tornado.web.RequestHandler):
         asset_name - 'thumbnail' or 'poster'
         '''
         cur_image = cur_images.get(asset_name, {})
-        width, height = self._find_image_size(cur_image)
+        width, height = yield self._find_image_size(cur_image)
         if width is None or height is None:
             width, height = api.brightcove_api.DEFAULT_IMAGE_SIZES[asset_name]
 
@@ -321,6 +329,27 @@ class ServingURLHandler(tornado.web.RequestHandler):
         yield add_func(data['video_id'],
                        self.build_serving_url(data['serving_url'], height,
                                               width))
+
+    @tornado.gen.coroutine
+    def _get_size_from_existing_image(self, image_response):
+        '''Downloads the image in the account in order to get the image size.
+        '''
+        neonServingRe = re.compile('neon-images.com/v1/client')
+        if ('src' not in image_response or 
+            image_response['src'] is None or
+            neonServingRe.search(image_response['src']) is not None):
+            raise tornado.gen.Return((None, None))
+
+        try:
+            img = yield PILImageUtils.download_image(image_response['src'],
+                                                     async=True)
+        except Exception as e:
+            _log.warn('Error downloading image %s: %s' %
+                       (image_response['src'], e))
+            raise tornado.gen.Return((None, None))
+
+        raise tornado.gen.Return(img.size)
+        
 
     def build_serving_url(self, base_url, height=None, width=None):
         parsed_url = list(urlparse.urlparse(base_url))

@@ -34,11 +34,13 @@ import contextlib
 import copy
 import cv.imhash_index
 import datetime
+import dateutil.parser
 import errno
 import hashlib
 import itertools
 import simplejson as json
 import logging
+import model.scores
 import momoko
 import multiprocessing
 import psycopg2
@@ -48,6 +50,7 @@ import queries
 import random
 import re
 import select
+import sre_constants
 import socket
 import string
 from StringIO import StringIO
@@ -809,10 +812,9 @@ class StoredObject(object):
                     if isinstance(obj_dict[k], datetime.datetime): 
                         data_dict[k.split('_')[0]] = obj_dict[k].strftime(
                             "%Y-%m-%d %H:%M:%S.%f")
-                    elif isinstance(obj_dict[k], str): 
-                        data_dict[k.split('_')[0]] = datetime.datetime.strptime(
-                            obj_dict[k], "%Y-%m-%dT%H:%M:%S.%f").strftime(
-                                "%Y-%m-%d %H:%M:%S.%f")
+                    elif isinstance(obj_dict[k], str):
+                        data_dict[k.split('_')[0]] = dateutil.parser.parse(
+                            obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
             except KeyError: 
                 pass
  
@@ -832,6 +834,7 @@ class StoredObject(object):
             except ValueError:
                 return None
         
+
             return obj
 
     @classmethod
@@ -899,7 +902,8 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 func_level_wpg=True, as_dict=False):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
@@ -914,7 +918,12 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
-        return cls._get_many_with_raw_keys(keys, create_default, log_missing, func_level_wpg)
+        return cls._get_many_with_raw_keys(
+            keys,
+            create_default,
+            log_missing,
+            func_level_wpg,
+            as_dict)
 
     @classmethod
     @utils.sync.optional_sync
@@ -980,7 +989,8 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
-                                log_missing=True, func_level_wpg=True):
+                                log_missing=True, func_level_wpg=True,
+                                as_dict=False):
         '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
@@ -1014,7 +1024,7 @@ class StoredObject(object):
                 obj_map[obj_key] = result
  
         def _build_return_items(): 
-            rv = [] 
+            rv = {} if as_dict else []
             for key, item in obj_map.iteritems():
                 if item: 
                     obj = cls._create(key, item) 
@@ -1025,7 +1035,10 @@ class StoredObject(object):
                         obj = cls(key)
                     else:
                         obj = None
-                rv.append(obj)
+                if as_dict:
+                    rv[key] = obj
+                else:
+                    rv.append(obj)
             return rv
  
         rows = True
@@ -1038,7 +1051,8 @@ class StoredObject(object):
         yield conn.execute("COMMIT")
  
         db.return_connection(conn)
-        raise tornado.gen.Return(_build_return_items())
+        items = _build_return_items()
+        raise tornado.gen.Return(items)
     
     @classmethod
     @utils.sync.optional_sync
@@ -1142,7 +1156,9 @@ class StoredObject(object):
 
             mappings[key] = cur_obj 
         try:
-            func(mappings)
+            vals = func(mappings)
+            if isinstance(vals, concurrent.futures.Future):
+                yield vals
         finally:
             insert_statements = []
             update_objs = [] 
@@ -1340,69 +1356,77 @@ class StoredObject(object):
     def format_subscribe_pattern(cls, pattern):
         return cls.format_key(pattern)
 
-    @classmethod 
-    @tornado.gen.coroutine
-    def get_and_execute_select_query(cls, 
-                                     fields, 
-                                     where_clause=None,
-                                     table_name=None, 
-                                     wc_params=[],
-                                     limit_clause=None,
-                                     order_clause=None, 
-                                     group_clause=None,  
-                                     cursor_factory=psycopg2.extensions.cursor): 
+    @classmethod
+    def get_select_query(cls, fields, where_clause=None, table_name=None,
+                         join_clause=None, wc_params=[], limit_clause=None,
+                         order_clause=None, group_clause=None):
         ''' helper function to build up a select query
 
-               fields : an array of the fields you want 
-               where_clause : the portion of the query following WHERE 
-               table_name : defaults to _baseclass_name, but this populates 
-                            the from portion of the query 
-               wc_params : any params you need in the where clause
+               fields : an array of the fields you want
+               where_clause : the portion of the query following WHERE
+               table_name : defaults to _baseclass_name, but this populates
+                            the from portion of the query
 
- 
-               eg fields = ["_data->>'neon_api_key'", 
-                            "_data->>'key'"] 
-                  object_type = neonuseraccount 
-                  where_clause = "_data->'users' ? %s" 
-                  params = [user1] 
-               would execute 
-                  SELECT _data->>'neon_api_key', _data->>'key' 
-                   FROM neonuseraccount 
-                  WHERE _data->'users' ? user1 
-            returns the result array from the query 
-
-            be nice, this will do a fetchall, which can be 
-            memory intensive -- TODO make an option that 
-            operates like get_many does currently 
+               eg fields = ["_data->>'neon_api_key'",
+                            "_data->>'key'"]
+                  object_type = neonuseraccount
+                  where_clause = "_data->'users' ? %s"
+                  params = [user1]
+               would build
+                  SELECT _data->>'neon_api_key', _data->>'key'
+                   FROM neonuseraccount
+                  WHERE _data->'users' ? user1
         '''
-        
-        db = PostgresDB() 
-        conn = yield db.get_connection()
-        if table_name is None: 
+        if table_name is None:
             table_name = cls._baseclass_name().lower()
 
-        csl_fields = ",".join("{0}".format(f) for f in fields) 
-        query = "SELECT " + csl_fields + \
-                " FROM " + table_name
-        
+        csl_fields = ",".join("{0}".format(f) for f in fields)
+        query = "SELECT " + csl_fields + " FROM " + table_name
+        if join_clause:
+            query += " JOIN " + join_clause
         if where_clause:
             query += " WHERE " + where_clause
-
-        if order_clause: 
+        if order_clause:
             query += " " + order_clause
+        if group_clause:
+            query += " " + group_clause
+        if limit_clause:
+            query += " " + limit_clause
 
-        if group_clause: 
-            query += " " + group_clause  
- 
-        if limit_clause: 
-            query += " " + limit_clause 
- 
-        cursor = yield conn.execute(query, 
-                                    wc_params,
-                                    cursor_factory=cursor_factory)
+        return query
+
+
+    @classmethod
+    @tornado.gen.coroutine
+    def explain_query(cls, query, wc_params, cursor_factory):
+        ''' Get database query plan of query.'''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute('EXPLAIN {}'.format(query), wc_params, cursor_factory=cursor_factory)
         rv = cursor.fetchall()
-        db.return_connection(conn) 
-        raise tornado.gen.Return(rv) 
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def execute_select_query(cls, query, wc_params,
+                             cursor_factory=psycopg2.extensions.cursor):
+        ''' helper function to execute a select query
+
+            returns the result array from the query
+
+            be nice, this will do a fetchall, which can be
+            memory intensive -- TODO make an option that
+            operates like get_many does currently
+
+            wc_params : any params you need in the where clause
+        '''
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
+        rv = cursor.fetchall()
+        db.return_connection(conn)
+        raise tornado.gen.Return(rv)
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -1952,15 +1976,15 @@ class User(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_associated_account_ids(self):
-        results = yield self.get_and_execute_select_query(
-                    [ "_data->>'neon_api_key'" ], 
-                    "_data->'users' ? %s", 
-                    table_name='neonuseraccount', 
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data->>'neon_api_key'" ],
+                        "_data->'users' ? %s",
+                        table_name='neonuseraccount'),
                     wc_params=[self.username])
- 
+
         rv = [i[0] for i in results]
-        raise tornado.gen.Return(rv) 
-        
+        raise tornado.gen.Return(rv)
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -1990,7 +2014,8 @@ class NeonUserAccount(NamespacedStoredObject):
                  subscription_information=None, 
                  verify_subscription_expiry=datetime.datetime(1970,1,1), 
                  billed_elsewhere=True, 
-                 billing_provider_ref=None):
+                 billing_provider_ref=None,
+                 processing_priority=1):
 
         # Account id chosen/or generated by the api when account is created 
         self.account_id = a_id 
@@ -2013,7 +2038,7 @@ class NeonUserAccount(NamespacedStoredObject):
         self.default_size = default_size
         
         # Priority Q number for processing, currently supports {0,1}
-        self.processing_priority = 1
+        self.processing_priority = processing_priority
 
         # Default thumbnail to show if we don't have one for a video
         # under this account.
@@ -2129,27 +2154,26 @@ class NeonUserAccount(NamespacedStoredObject):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_integrations(self):
-        rv = [] 
+        rv = []
 
         # due to old data, these could either have account_id or api_key
         # as account_id
-        results = yield self.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg"], 
-                    "_data->>'account_id' IN(%s, %s)", 
-                    table_name='abstractintegration', 
-                    wc_params=[self.neon_api_key, 
-                               self.account_id],
-                    group_clause = "ORDER BY _type",  
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'account_id' IN(%s, %s)",
+                        table_name='abstractintegration',
+                        group_clause = "ORDER BY _type"),
+                    wc_params=[self.neon_api_key, self.account_id],
                     cursor_factory=psycopg2.extras.RealDictCursor)
 
         for result in results:
             obj = self._create(result['_data']['key'], result)
             rv.append(obj)
 
-        raise tornado.gen.Return(rv) 
+        raise tornado.gen.Return(rv)
 
     @classmethod
     def get_ovp(cls):
@@ -2413,7 +2437,7 @@ class ProcessingStrategy(DefaultedStoredObject):
     parameter for which this is the case, see local_video_searcher.py for
     more elaborate documentation.
     '''
-    def __init__(self, account_id, processing_time_ratio=2.5,
+    def __init__(self, account_id, processing_time_ratio=2.0,
                  local_search_width=32, local_search_step=4, n_thumbs=5,
                  feat_score_weight=2.0, mixing_samples=40, max_variety=True,
                  startend_clip=0.1, adapt_improve=True, analysis_crop=None,
@@ -3863,6 +3887,7 @@ class NeonApiRequest(NamespacedStoredObject):
         self.callback_state = callback_state
         self.state = RequestState.SUBMIT
         self.fail_count = 0 # Number of failed processing tries
+        self.try_count = 0 # Number of attempted processing tries
         
         self.integration_type = integration_type
         self.integration_id = integration_id
@@ -4209,13 +4234,13 @@ class BrightcovePlayer(NamespacedStoredObject):
         '''Get all players associated to the integration'''
 
         rv = []
-        results = yield self.get_and_execute_select_query(
-                    [ "_data",
-                      "_type",
-                      "created_time AS created_time_pg",
-                      "updated_time AS updated_time_pg"],
-                    "_data->>'integration_id' = '%s' ",
-                    table_name='brightcoveplayer',
+        results = yield self.execute_select_query(self.get_select_query(
+                        [ "_data",
+                          "_type",
+                          "created_time AS created_time_pg",
+                          "updated_time AS updated_time_pg"],
+                        "_data->>'integration_id' = '%s' ",
+                        table_name='brightcoveplayer'),
                     wc_params=[integration_id])
         for result in results:
             player = self._create(result['_data']['key'], result)
@@ -4647,9 +4672,10 @@ class ThumbnailMetadata(StoredObject):
         # Host the primary copy of the image 
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
-        s3_url_list = yield primary_hoster.upload(image, self.key, async=True, 
-                                        do_source_crop=self.do_source_crop,
-                                        do_smart_crop=self.do_smart_crop)
+        s3_url_list = yield primary_hoster.upload(
+            image, self.key, async=True, 
+            do_source_crop=self.do_source_crop,
+            do_smart_crop=self.do_smart_crop)
         
         # TODO (Sunil):  Add redirect for the image
 
@@ -4727,6 +4753,15 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailStatus.delete(key, async=True) 
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
+
+    def get_neon_score(self):
+        """Get a value in [1..99] that the Neon score maps to.
+
+        Uses a mapping dictionary according to the name of the
+        scoring model."""
+        if self.model_score:
+            return model.scores.lookup(self.model_version, self.model_score)
+        return None
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
@@ -4898,7 +4933,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None):
+                 publish_date=None, hidden=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -4929,6 +4964,9 @@ class VideoMetadata(StoredObject):
 
         # The time the video was published in ISO 8601 format
         self.publish_date = publish_date
+
+        # If user has deleted this video, flag it deleted.
+        self.hidden = hidden
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5210,104 +5248,143 @@ class VideoMetadata(StoredObject):
 
         yield VideoMetadata.delete(key, async=True)
 
-    @classmethod 
+    @classmethod
     @tornado.gen.coroutine
-    def search_videos(cls, 
-                      account_id=None, 
+    def search_videos(cls,
+                      account_id=None,
                       since=None,
-                      until=None, 
-                      limit=25):
+                      until=None,
+                      limit=25,
+                      search_query=None,
+                      skip_deleted=False):
 
-        """Does a basic search over the videometadatas in the DB 
+        """Does a basic search over the videometadatas in the DB
 
-           account_id : if specified will only search videos for that account, 
-                        defaults to None, meaning it will search all accounts 
-                        for videos 
-           since      : if specified will find videos since this date, 
-                        defaults to None, meaning it will grab the 25 most 
-                        recent videos 
-           until      : if specified will find videos until this date, 
-                        defaults to None
-           limit      : if specified it limits the search to this many 
+           account_id  : if specified will only search videos for that account,
+                         defaults to None, meaning it will search all accounts
+                         for videos
+           since       : if specified will find videos since this date,
+                         defaults to None, meaning it will grab the 25 most
+                         recent videos
+           until       : if specified will find videos until this date,
+                         defaults to None
+           limit       : if specified it limits the search to this many
                         videos, defaults to 25
+           search_query: A string that, if valid regex, is applied via PG's
+                         ~* (case insensitive posix regex) operator to title and,
+                         if not valid regex, applied as a simple %<search_query>%
+                         expression. For the latter, terms must all appear
+                         and appear in order in a title to match.
+           show_hidden : A boolean. Default true. If false, add criterion to
+                         where clause not to include hidden videos.
 
-           Returns : a dictionary of the following 
-               videos - the videos that the search returned 
-               since_time - this is the time of the most recent video that 
-                            the search returned, it's mainly here to prevent 
-                            consumers from having to do this 
-        """ 
-        where_clause = "" 
+
+           Returns : a dictionary of the following
+               videos - the videos that the search returned
+               since_time - this is the time of the most recent video that
+                            the search returned, it's mainly here to prevent
+                            consumers from having to do this
+        """
+        where_clause = ""
         videos = []
-        since_time = None 
-        until_time = None  
+        since_time = None
+        until_time = None
         wc_params = []
-        rv = {}  
-        
-        where_clause = "_data->'job_id' != 'null'"
-        order_clause = "ORDER BY created_time DESC" 
-        if since: 
-            if where_clause: 
-                where_clause += " AND "
-            where_clause += " created_time > to_timestamp(%s)::timestamp"
-            # switch up the order clause so the page starts at the right spot 
-            order_clause = "ORDER BY created_time ASC" 
-            wc_params.append(since) 
+        rv = {}
 
-        if until: 
-            if where_clause: 
+        where_clause = "v._data->'job_id' != 'null'"
+        order_clause = "ORDER BY v.created_time DESC"
+        join_clause = None
+        if since:
+            if where_clause:
                 where_clause += " AND "
-            where_clause += " created_time < to_timestamp(%s)::timestamp" 
-            wc_params.append(until) 
-        
-        if account_id: 
-            if where_clause: 
+            where_clause += " v.created_time > to_timestamp(%s)::timestamp"
+            # switch up the order clause so the page starts at the right spot
+            order_clause = "ORDER BY v.created_time ASC"
+            wc_params.append(since)
+
+        if until:
+            if where_clause:
                 where_clause += " AND "
-            where_clause += " _data->>'key' LIKE %s"
+            where_clause += " v.created_time < to_timestamp(%s)::timestamp"
+            wc_params.append(until)
+
+        if account_id:
+            if where_clause:
+                where_clause += " AND "
+            where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
- 
-        results = yield cls.get_and_execute_select_query(
-                    [ "_data", 
-                      "_type", 
-                      "created_time AS created_time_pg", 
-                      "updated_time AS updated_time_pg" ], 
-                    where_clause, 
-                    wc_params=wc_params, 
-                    limit_clause="LIMIT %d" % limit, 
-     		    order_clause=order_clause,
-                    cursor_factory=psycopg2.extras.RealDictCursor)
 
-        def _get_time(result): 
-            # need micros here 
+        if skip_deleted:
+            if where_clause:
+                where_clause += " AND "
+            where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"
+
+        columns = ["v._data",
+                   "v._type",
+                   "v.created_time AS created_time_pg",
+                   "v.updated_time AS updated_time_pg"]
+
+        # Join request to query searches on video title.
+        if search_query is not None:
+
+            join_clause  = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
+            if where_clause:
+                where_clause += " AND "
+
+            # Assume it's a regex.
+            try:
+                re.compile(search_query)
+            except sre_constants.error:
+                # Escape its special characters if not valid.
+                search_query = re.escape(search_query)
+            where_clause += " r._data->>'video_title' ~* %s"
+            wc_params.append(search_query)
+
+        query = cls.get_select_query(
+            columns,
+            where_clause,
+            join_clause=join_clause,
+            table_name="videometadata AS v",
+            limit_clause="LIMIT %d" % limit,
+            order_clause=order_clause)
+
+        results = yield cls.execute_select_query(
+            query,
+            wc_params=wc_params,
+            cursor_factory=psycopg2.extras.RealDictCursor)
+
+        def _get_time(result):
+            # need micros here
             created_time = result['created_time_pg']
             cc_tt = time.mktime(created_time.timetuple())
             _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time 
-        
-        try:   
-            do_reverse = False 
-            if since: 
+            return _time
+
+        try:
+            do_reverse = False
+            if since:
                 since_time = _get_time(results[-1])
                 until_time = _get_time(results[0])
                 do_reverse = True
-            else:  
-                since_time = _get_time(results[0]) 
-                until_time = _get_time(results[-1]) 
-        except (KeyError,IndexError): 
+            else:
+                since_time = _get_time(results[0])
+                until_time = _get_time(results[-1])
+        except (KeyError,IndexError):
             pass
-        
+
         for result in results:
-            obj = cls._create(result['_data']['key'], result)
-            videos.append(obj)
+            video = cls._create(result['_data']['key'], result)
+            videos.append(video)
 
-        if do_reverse: 
-            videos.reverse() 
+        if do_reverse:
+            videos.reverse()
 
-        rv['videos'] = videos 
+        rv['videos'] = videos
         rv['since_time'] = since_time
         rv['until_time'] = until_time
-        raise tornado.gen.Return(rv) 
-         
+        raise tornado.gen.Return(rv)
+
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 

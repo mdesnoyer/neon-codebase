@@ -56,7 +56,10 @@ class InputSanitizer(object):
 
     @staticmethod
     def to_string(_input):
-        if isinstance(_input, basestring):
+        if _input is None:
+            return None
+        
+        elif isinstance(_input, basestring):
             return _input
 
         elif isinstance(_input, list): 
@@ -122,7 +125,7 @@ class InputSanitizer(object):
 
     @staticmethod
     def sanitize_string(ip):
-        if ip == "null" or ip == "undefined" or ip == "":
+        if ip == "null" or ip == "undefined" or ip == "" or ip is None:
             return None
         return unicode(ip)
 

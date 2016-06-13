@@ -133,11 +133,9 @@ class AuthTest(test_utils.neontest.AsyncTestCase):
         self.assertEquals(kwargs['no_retry_codes'], [401])
         auth_request = cargs[0]
         self.assertEquals(auth_request.url,
-                          'https://auth.neon-lab.com/api/v2/authenticate')
+                          'https://auth.neon-lab.com/api/v2/refresh_token')
         self.assertEquals(auth_request.method, 'POST')
-        self.assertEquals(auth_request.body, '')
-        self.assertEquals(auth_request.headers,
-                          {'Authorization': 'Bearer %s' % refresh_token})
+        self.assertEquals(auth_request.body, '{"token": "rtok"}')
         self.assertIsNotNone(self.client.access_token)
         self.assertIsNotNone(self.client.refresh_token)
 
