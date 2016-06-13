@@ -298,7 +298,7 @@ def collect_stats(thumb_info, video_info,
         thumb_info['is_base'] = thumb_meta_info.index == base_thumb_id
         thumb_stats = pandas.concat([
             thumb_stats,
-            thumb_meta_info,
+            thumb_meta_info],
             axis=1,
             join='inner')
 
