@@ -4758,8 +4758,9 @@ class ThumbnailMetadata(StoredObject):
 
         Uses a mapping dictionary according to the name of the
         scoring model."""
-
-        return model.scores.lookup(self.model_version, self.model_score)
+        if self.model_score:
+            return model.scores.lookup(self.model_version, self.model_score)
+        return None
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
