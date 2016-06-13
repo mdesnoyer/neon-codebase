@@ -4521,7 +4521,7 @@ class TestVideoShareHandler(TestVerifiedControllersBase):
         rjson = json.loads(response.body)
         share_token = rjson['share_token']
         payload = ShareJWTHelper.decode(share_token)
-        self.assertEqual(u'1', payload['content_id'])
+        self.assertEqual(u'u_1', payload['content_id'])
         self.assertEqual(u'VideoMetadata', payload['content_type'])
 
     @tornado.testing.gen_test

@@ -1975,8 +1975,11 @@ class VideoShareHandler(APIV2Handler):
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
-        share_token = ShareJWTHelper.encode('VideoMetadata', video.get_id())
-        self.success(share_token)
+        payload = {
+            'content_type': 'VideoMetadata',
+            'content_id': video.get_id()}
+        share_token = ShareJWTHelper.encode(payload)
+        self.success({'share_token':share_token})
 
     @classmethod
     def get_access_levels(self):
