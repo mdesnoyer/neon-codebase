@@ -16,6 +16,18 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("send_mandrill_emails", 
+    default=1, 
+    help="should we actually send the email", 
+    type=str) 
+define("mandrill_api_key", 
+    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
+    help="key from mandrillapp.com used to make api calls", 
+    type=str)
+define("mandrill_base_url", 
+    default='https://mandrillapp.com/api/1.0', 
+    help="mandrill base api url", 
+    type=str)
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -36,6 +48,9 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
+
+statemon.define('mandrill_template_not_found', int)
+statemon.define('mandrill_email_not_sent', int)
 
 '''*****************************************************************
 AccountHandler
@@ -2214,7 +2229,8 @@ class UserHandler(APIV2Handler):
           'last_name': All(Coerce(str), Length(min=1, max=256)),
           'secondary_email': All(Coerce(str), Length(min=1, max=256)),
           'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-          'title': All(Coerce(str), Length(min=1, max=32))
+          'title': All(Coerce(str), Length(min=1, max=32)),
+          'send_emails': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -2236,6 +2252,9 @@ class UserHandler(APIV2Handler):
             u.secondary_email = args.get(
                 'secondary_email', 
                 u.secondary_email)
+            u.send_emails = Boolean()(args.get(
+                'send_emails', 
+                u.send_emails))
 
         user_internal = yield neondata.User.modify(
             username,
@@ -2753,6 +2772,111 @@ class BatchHandler(APIV2Handler):
                  HTTPVerbs.POST : neondata.AccessLevels.NONE 
                }
 
+class EmailHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)), 
+            Required('template_slug') : All(Coerce(str), Length(min=1, max=512)), 
+            'template_args' : All(Coerce(str), Length(min=1, max=2048)),
+            'to_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_name' : All(Coerce(str), Length(min=1, max=1024)),
+            'subject' : All(Coerce(str), Length(min=1, max=1024)),
+            'reply_to' : All(Coerce(str), Length(min=1, max=1024))
+        })
+
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+        
+        args_email = args.get('to_email_address', None)
+        template_args = args.get('template_args', None)  
+        template_slug = args.get('template_slug') 
+          
+        cur_user = self.user 
+        if cur_user:
+            cur_user_email = cur_user.username
+
+        if cur_user_email: 
+            send_to_email = cur_user_email
+            if not cur_user.send_emails: 
+                self.success({'message' : 'user does not want emails'})
+        elif args_email: 
+            send_to_email = args_email
+        else:  
+            raise NotFoundError('Email address is required.')
+
+        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
+            base_url=options.mandrill_base_url, 
+            api_key=options.mandrill_api_key, 
+            slug=template_slug) 
+            
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method="GET",
+            request_timeout=8.0)
+
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_template_not_found')
+            raise BadRequestError('Mandrill template unable to be loaded.')
+        
+        template_obj = json.loads(response.body) 
+        template_string = template_obj['code'] 
+
+        if template_args: 
+            email_html = template_string.format(**template_args)
+        else: 
+            email_html = template_string
+ 
+        # send email via mandrill
+        headers_dict = { 
+            'Reply-To' : args.get('reply_to', 'no-reply@neonlabs.com') 
+        }
+        to_list = [{ 
+            'email' : send_to_email, 
+            'type' : 'to'     
+        }]   
+        message_dict = { 
+            'html' : email_html, 
+            'subject' : args.get('subject', 'Neon Labs'),
+            'from_email' : args.get('from_email_address', 
+                'admin@neon-lab.com'),  
+            'from_name' : args.get('from_name', 'Neon Labs'),
+            'headers' : headers_dict, 
+            'to' : to_list  
+        }
+        json_body = { 
+            'key' : options.mandrill_api_key, 
+            'message' : message_dict  
+        }
+ 
+        url = '{base_url}/messages/send.json'.format(
+            base_url=options.mandrill_base_url) 
+        
+        request = tornado.httpclient.HTTPRequest( 
+            url=url, 
+            body=json.dumps(json_body),
+            method='POST', 
+            headers = {"Content-Type" : "application/json"},
+            request_timeout=20.0)
+ 
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_email_not_sent')
+            raise BadRequestError('Unable to send email')  
+        
+        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+            
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 'account_required'  : [HTTPVerbs.POST] 
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -2787,6 +2911,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$', LiftStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)

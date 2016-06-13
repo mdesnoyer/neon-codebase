@@ -995,6 +995,7 @@ class TestUserHandler(TestControllersBase):
                              'title' : 'DOCTOR',
                              'cell_phone_number':'867-5309',
                              'secondary_email':'rocking@invalid.com',
+                             'send_emails':False,
                              'token' : token})
         header = { 'Content-Type':'application/json' }
         url = '/api/v2/%s/users' % (self.neon_user.neon_api_key)
@@ -1012,6 +1013,7 @@ class TestUserHandler(TestControllersBase):
         self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
         self.assertEquals(updated_user.cell_phone_number, '867-5309')
         self.assertEquals(updated_user.secondary_email, 'rocking@invalid.com')
+        self.assertEquals(updated_user.send_emails, False)
 
     # token creation can be slow give it some extra time just in case
     @unittest.skip('revisit when access levels are better defined')
@@ -6623,7 +6625,90 @@ class TestForgotPasswordHandler(TestAuthenticationBase):
         user = yield neondata.User.get(user.username, async=True)
         self.assertNotEqual(None, user.reset_password_token)
 
+class TestEmailHandler(TestControllersBase):
+    def setUp(self):
+        self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
+                                        name='testingme')
+        self.acct.save()
+        user = neondata.User('fenger@neon-lab.com',
+            access_level=neondata.AccessLevels.GLOBAL_ADMIN)
+        user.save()
+        self.account_id = self.acct.neon_api_key
 
+        # Mock out the token decoding
+        self.token_decode_patcher = patch(
+            'cmsapiv2.apiv2.JWTHelper.decode_token')
+        self.token_decode_mock = self.token_decode_patcher.start()
+        self.token_decode_mock.return_value = {
+            'username' : 'fenger@neon-lab.com'
+            }
+        self.http_mocker = patch('utils.http.send_request')
+        self.http_mock = self._future_wrap_mock(
+              self.http_mocker.start())
+        super(TestEmailHandler, self).setUp()
+
+    def tearDown(self):
+        self.http_mocker.stop()
+        self.token_decode_patcher.stop()
+        super(TestEmailHandler, self).tearDown()
+
+    @tornado.gen.coroutine
+    def _send_authed_request(self, url, body, method='POST'):
+        request = tornado.httpclient.HTTPRequest(
+            self.get_url(url),
+            method=method,
+            body=json.dumps(body), 
+            headers={'Authorization' : 'Bearer my_token', 
+                     'Content-Type':'application/json'})
+        response = yield self.http_client.fetch(request)
+        raise tornado.gen.Return(response)
+
+    @tornado.testing.gen_test
+    def test_send_email_base(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                200, 
+                buffer=StringIO('{"code": "Hello There you fool"}')))
+        response = yield self._send_authed_request(url, body) 
+        self.assertEquals(response.code, 200)
+ 
+    @tornado.testing.gen_test
+    def test_send_email_error(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        self.http_mock.side_effect = lambda x, callback: callback(
+            tornado.httpclient.HTTPResponse(
+                x, 
+                400)) 
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            response = yield self._send_authed_request(url, body) 
+	    self.assertEquals(e.exception.code, 400)
+        rjson = json.loads(e.exception.response.body)
+        self.assertRegexpMatches(rjson['error']['message'],
+                                 'Mandrill')
+
+    @tornado.testing.gen_test
+    def test_send_email_user_turned_off(self): 
+        url = '/api/v2/%s/email' % self.account_id 
+        body = { 
+            'template_slug' : 'reset-password'
+        }
+        user = yield neondata.User.get('fenger@neon-lab.com', async=True)
+        user.send_emails = False 
+        yield user.save(async=True) 
+        response = yield self._send_authed_request(url, body) 
+        self.assertEquals(response.code, 200)
+        rjson = json.loads(response.body) 
+        self.assertRegexpMatches(rjson['message'],
+            'user does not')
+ 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()
