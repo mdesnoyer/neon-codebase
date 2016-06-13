@@ -1888,6 +1888,52 @@ class ThumbnailStatsHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
+
+'''*********************************************************************
+LiftStatsHandler
+*********************************************************************'''
+class LiftStatsHandler(APIV2Handler):
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
+            Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList())})
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        base_thumb = yield neondata.ThumbnailMetadata.get(
+            args['base_id'],
+            async=True)
+        if not base_thumb:
+            raise NotFoundError('Base thumbnail does not exist')
+
+        query_tids = args['thumbnail_ids'].split(',')
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            query_tids,
+            async=True,
+            as_dict=True)
+
+        # Stub.
+        def _get_estimated_lift(thumb):
+            return 0.01 * ord(thumb.key[0]) if thumb else None
+
+        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t)}
+                for k, t in thumbs.items()]
+
+        # Check thumbnail exists.
+        rv = {
+            'baseline_thumbnail_id': args['base_id'],
+            'lift': lift
+        }
+        self.success(rv)
+
+    def get_access_levels(self):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+
+
 '''*********************************************************************
 HealthCheckHandler
 *********************************************************************'''
@@ -2739,6 +2785,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$', LiftStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
