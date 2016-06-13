@@ -1021,8 +1021,8 @@ class StoredObject(object):
                 obj_key = result['_data']['key'] 
                 obj_map[obj_key] = result
  
-        def _build_return_items_list(): 
-            rv = [] 
+        def _build_return_items(): 
+            rv = {} if as_dict else []
             for key, item in obj_map.iteritems():
                 if item: 
                     obj = cls._create(key, item) 
@@ -1033,22 +1033,10 @@ class StoredObject(object):
                         obj = cls(key)
                     else:
                         obj = None
-                rv.append(obj)
-            return rv
- 
-        def _build_return_items_dict(): 
-            rv = {} 
-            for key, item in obj_map.iteritems():
-                if item: 
-                    obj = cls._create(key, item) 
+                if as_dict:
+                    rv[key] = obj
                 else:
-                    if log_missing:
-                        _log.warn('No %s for %s' % (cls.__name__, key))
-                    if create_default:
-                        obj = cls(key)
-                    else:
-                        obj = None
-                rv[key] = obj
+                    rv.append(obj)
             return rv
  
         rows = True
@@ -1061,11 +1049,7 @@ class StoredObject(object):
         yield conn.execute("COMMIT")
  
         db.return_connection(conn)
-        if as_dict:
-            items = _build_return_items_dict()
-        else:
-            items = _build_return_items_list()
-
+        items = _build_return_items()
         raise tornado.gen.Return(items)
     
     @classmethod
