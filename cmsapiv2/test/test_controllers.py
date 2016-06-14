@@ -3247,9 +3247,9 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail(self):
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid1'\
-              '&url=blah.jpg&thumbnail_ref=kevin' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
+        url = self.get_url('/api/v2/%s/thumbnails?video_id=tn_test_vid1'\
+              '&url=blah.jpg&thumbnail_ref=kevin' % (self.account_id_api_key))
+        response = yield self.http_client.fetch(url,
                                                 body='',
                                                 method='POST',
                                                 allow_nonstandard_methods=True)

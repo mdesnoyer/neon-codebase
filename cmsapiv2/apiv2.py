@@ -896,18 +896,6 @@ class CustomVoluptuousTypes():
                 raise Invalid("not a valid email address")
         return f
 
-<<<<<<< HEAD
-    def ExactlyOne(*validators, **kwargs):
-        '''Valid if exactly one of the validators returns true'''
-        def f(args):
-            import pdb; pdb.set_trace()
-            if Any(args):
-                return args
-            else:
-                raise Invalid('Expect exactly one argument')
-        return f
-
-=======
     @staticmethod
     def Regex():
         '''Validate value is regex for Voluptuous schema'''
@@ -918,4 +906,3 @@ class CustomVoluptuousTypes():
                 raise Invalid(e.message)
             return query
         return f
->>>>>>> working

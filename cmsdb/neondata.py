@@ -28,7 +28,7 @@ import binascii
 import cmsdb.cdnhosting
 import code
 import collections
-from collections import OrderedDict 
+from collections import OrderedDict
 import concurrent.futures
 import contextlib
 import copy
@@ -45,8 +45,7 @@ import momoko
 import multiprocessing
 import psycopg2
 from passlib.hash import sha256_crypt
-from PIL import Image
-import queries 
+import queries
 import random
 import re
 import select
@@ -988,6 +987,69 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
+    def get_all(cls):
+        ''' Get all the objects in the database of this type
+
+        Inputs:
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects.
+        '''
+        retval = []
+        i = cls.iterate_all()
+        while True:
+            item = yield i.next(async=True)
+            if isinstance(item, StopIteration):
+                break
+            retval.append(item)
+
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def iterate_all(cls, max_request_size=100, max_results=None):
+        '''Return an iterator for all the ojects of this type.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+
+        You can use it asynchronously like:
+        iter = cls.get_iterator()
+        while True:
+          item = yield iter.next(async=True)
+          if isinstance(item, StopIteration):
+            break
+
+        or just use it synchronously like a normal iterator.
+        '''
+        keys = yield cls.get_all_keys(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(cls, keys, page_size=max_request_size,
+                                 max_results=max_results, skip_missing=True))
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        '''Return all the keys in the database for this object type.'''
+        rv = True  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+
+        query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
+        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+        keys_list = [i[0] for i in cursor.fetchall()]
+        db.return_connection(conn)
+        rv = [x.partition('_')[2] for x in keys_list if
+                                  x is not None]
+        raise tornado.gen.Return(rv) 
+
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
                                 log_missing=True, func_level_wpg=True,
                                 as_dict=False):
@@ -1561,68 +1623,6 @@ class NamespacedStoredObject(StoredObject):
                          log_missing=log_missing, 
                          func_level_wpg=func_level_wpg, 
                          async=True)
-        raise tornado.gen.Return(rv) 
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all(cls):
-        ''' Get all the objects in the database of this type
-
-        Inputs:
-        callback - Optional callback function to call
-
-        Returns:
-        A list of cls objects.
-        '''
-        retval = []
-        i = cls.iterate_all()
-        while True:
-            item = yield i.next(async=True)
-            if isinstance(item, StopIteration):
-                break
-            retval.append(item)
-
-        raise tornado.gen.Return(retval)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def iterate_all(cls, max_request_size=100, max_results=None):
-        '''Return an iterator for all the ojects of this type.
-
-        The set of keys to grab happens once so if the db changes while
-        the iteration is going, so neither new or deleted objects will
-
-        You can use it asynchronously like:
-        iter = cls.get_iterator()
-        while True:
-          item = yield iter.next(async=True)
-          if isinstance(item, StopIteration):
-            break
-
-        or just use it synchronously like a normal iterator.
-        '''
-        keys = yield cls.get_all_keys(async=True)
-        raise tornado.gen.Return(
-            StoredObjectIterator(cls, keys, page_size=max_request_size,
-                                 max_results=max_results, skip_missing=True))
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all_keys(cls):
-        '''Return all the keys in the database for this object type.'''
-        rv = True  
-        db = PostgresDB()
-        conn = yield db.get_connection()
-
-        query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
-        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
-        keys_list = [i[0] for i in cursor.fetchall()]
-        db.return_connection(conn)
-        rv = [x.partition('_')[2] for x in keys_list if
-                                  x is not None]
         raise tornado.gen.Return(rv) 
 
     @classmethod
@@ -4649,11 +4649,9 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is 
+                       images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
-                       cropped here.
-        
-        '''        
+                       cropped here.'''
         image = PILImageUtils.convert_to_rgb(image)
         # Update the image metadata
         self.width = image.size[0]
@@ -4663,20 +4661,20 @@ class ThumbnailMetadata(StoredObject):
         # Convert the image to JPG
         fmt = 'jpeg'
         filestream = StringIO()
-        image.save(filestream, fmt, quality=90) 
+        image.save(filestream, fmt, quality=90)
         filestream.seek(0)
         imgdata = filestream.read()
 
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
-        # Host the primary copy of the image 
+        # Host the primary copy of the image
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(
-            image, self.key, async=True, 
+            image, self.key, async=True,
             do_source_crop=self.do_source_crop,
             do_smart_crop=self.do_smart_crop)
-        
+
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -4688,7 +4686,7 @@ class ThumbnailMetadata(StoredObject):
         # Host the image on the CDN
         if cdn_metadata is None:
             # Lookup the cdn metadata
-            if video_info is None: 
+            if video_info is None:
                 video_info = yield tornado.gen.Task(VideoMetadata.get,
                                                     self.video_id)
 
@@ -4699,9 +4697,9 @@ class ThumbnailMetadata(StoredObject):
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
-        
+
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, s3_url, async=True, 
+        yield [x.upload(image, self.key, s3_url, async=True,
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
@@ -5055,10 +5053,10 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(thumb)
 
-    
+    @staticmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_image_from_url(self, image_url): 
+    def download_image_from_url(image_url):
         try:
             image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
                     async=True)
@@ -5077,31 +5075,33 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_and_add_thumbnail(self, 
-                                   thumb=None, 
+    def download_and_add_thumbnail(self,
+                                   thumb=None,
                                    image_url=None,
                                    cdn_metadata=None,
-                                   image=None, 
-                                   external_thumbnail_id=None, 
+                                   image=None,
+                                   external_thumbnail_id=None,
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata
 
         Inputs:
         @thumb: ThumbnailMetadata object. Should be incomplete
-                because image based data will be added along with 
+                because image based data will be added along with
                 information about the video. The object will be updated with
                 the proper key and other information
         @image_url: url of the image to download
         @cdn_metadata: A list CDNHostingMetadata objects for how to upload the
                        images. If this is None, it is looked up, which is slow.
-        @save_objects: If true, the database is updated. Otherwise, 
+        @save_objects: If true, the database is updated. Otherwise,
                        just this object is updated along with the thumbnail
                        object.
         '''
-        if image is None: 
-            image = yield self.download_image_from_url(image_url, async=True) 
-        if thumb is None: 
+        if image is None:
+            image = yield VideoMetadata.download_image_from_url(
+                image_url,
+                async=True)
+        if thumb is None:
             thumb = ThumbnailMetadata(None,
                           ttype=ThumbnailType.DEFAULT,
                           external_id=external_thumbnail_id)

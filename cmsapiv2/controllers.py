@@ -989,81 +989,155 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
-    """handles all requests to the thumbnails endpoint within the v2 API"""
+
     @tornado.gen.coroutine
     def post(self, account_id):
-        """handles a thumbnail endpoint post request"""
+        """Handle creating a new thumbnail."""
 
+        # The client can submit either a url argument or file in the body
+        # with a Content-Type: multipart/form-data header.
         schema = Schema({
-          Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
-          Required('video_id') : All(Coerce(str), Length(min=1, max=256)),
-          Required('url') : All(Coerce(str), Length(min=1, max=2048)),
-          'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
+            # Video id associates this image as thumbnail of a video.
+            Optional('video_id') : All(Coerce(str), Length(min=1, max=256)),
+            Optional('url'): Url(),
+            # Tag id associates the image with a collection.
+            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
+            # This is a partner's id for the image.
+            'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
-        video_id = args['video_id']
-        internal_video_id = neondata.InternalVideoID.generate(
-            account_id_api_key, video_id)
-        external_thumbnail_id = args.get('thumbnail_ref', None)
+        self.args = self.parse_args()
+        self.args['account_id'] = account_id
+        schema(self.args)
 
-        video = yield neondata.VideoMetadata.get(
-            internal_video_id,
+        # Switch on whether a video is tied to this submission.
+        if self.args.get('video_id'):
+            yield self._post_with_video()
+            return
+        yield self._post_without_video()
+
+    @tornado.gen.coroutine
+    def _post_with_video(self):
+        """Set image and thumbnail data object with video association.
+
+        Confirm video exists, then add the thumbnail to the video's
+        list of thumbnails. Calculate the new thumbnail's rank from the old
+        thumbnails."""
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id, self.args['video_id'])
+        self.video = video = yield neondata.VideoMetadata.get(
+            _video_id,
             async=True)
-
-        current_thumbnails = yield neondata.ThumbnailMetadata.get_many(
+        if not video:
+            raise NotFoundError('No vid for {}'.format(_video_id))
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
             video.thumbnail_ids,
             async=True)
 
-        cdn_key = neondata.CDNHostingMetadataList.create_key(
-            account_id_api_key,
-            video.integration_id)
+        # Calculate new thumbnail's rank: one less than everything else.
+        rank = min([t.rank for t in thumbs
+            if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]) - 1 if thumbs else 1
 
-        cdn_metadata = yield neondata.CDNHostingMetadataList.get(
-            cdn_key,
+        # Save the image file and thumbnail data object.
+        yield self._set_thumb(rank)
+
+        # Update video's thumbnail list.
+        video = yield neondata.VideoMetadata.modify(
+            _video_id,
+            lambda x: x.thumbnail_ids.append(self.thumb.key),
             async=True)
+        if not video:
+            raise SaveError("Can't save thumbnail to video {}".format(_video_id))
+        statemon.state.increment('post_thumbnail_oks')
+        yield self._respond_with_thumb()
 
-        # ranks can be negative
-        min_rank = 1
-        for thumb in current_thumbnails:
-            if (thumb.type == neondata.ThumbnailType.CUSTOMUPLOAD and
-                thumb.rank < min_rank):
-                min_rank = thumb.rank
-        cur_rank = min_rank - 1
+    @tornado.gen.coroutine
+    def _post_without_video(self):
+        """Set the image to CDN. Set the thumb data to database.
 
-        new_thumbnail = neondata.ThumbnailMetadata(
+        Returns- the new thumbnail."""
+        yield self._set_thumb()
+        statemon.state.increment('post_thumbnail_oks')
+        yield self._respond_with_thumb()
+
+    @tornado.gen.coroutine
+    def _set_thumb(self, rank=None):
+        """Set self.thumb to a new thumbnail from submitted image."""
+
+        # Instantiate the thumbnail data object.
+        self.thumb = neondata.ThumbnailMetadata(
             None,
-            internal_vid=internal_video_id,
-            external_id=external_thumbnail_id,
+            internal_vid=self.video.get_id() if self.video else None,
+            external_id=self.args.get('thumbnail_ref'),
             ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
-            rank=cur_rank)
+            rank=rank)
 
-        # upload image to cdn
-        yield video.download_and_add_thumbnail(
-            new_thumbnail,
-            image_url=args['url'],
-            cdn_metadata=cdn_metadata,
+        # Set the image from url or body form data.
+        yield self._set_image()
+
+        # Get CDN store.
+        cdn = yield neondata.CDNHostingMetadataList.get(
+            neondata.CDNHostingMetadataList.create_key(
+                self.account_id,
+                self.video.integration_id),
             async=True)
 
-        # save the thumbnail
-        yield new_thumbnail.save(async=True)
-
-        # save the video
-        new_video = yield neondata.VideoMetadata.modify(
-            internal_video_id,
-            lambda x: x.thumbnail_ids.append(new_thumbnail.key),
-            async=True)
-
-        if new_video:
-            statemon.state.increment('post_thumbnail_oks')
-            new_thumbnail = yield neondata.ThumbnailMetadata.get(
-                new_thumbnail.key,
+        # If the thumbnail is tied to a video, set that association.
+        try:
+            self.thumb = yield self.video.download_and_add_thumbnail(
+                self.thumb,
+                image=self.image,
+                image_url=self.args.get('url'),
+                cdn_metadata=cdn,
                 async=True)
-            retobj = yield self.db2api(new_thumbnail)
-            self.success(retobj, code=ResponseCode.HTTP_ACCEPTED)
-        else:
-            raise SaveError('unable to save thumbnail to video')
+            yield self.thumb.save(async=True)
+            return
+        except AttributeError:
+            pass
+
+        yield self.thumb.add_image_data(self.image, cdn_metadata=cdn)
+        yield self.thumb.save(async=True)
+
+    @tornado.gen.coroutine
+    def _set_image(self):
+        """Set self.image to a cv2-style image or raise HTTP_BAD_REQUEST."""
+
+        # Get from url.
+        url = self.args.get('url')
+        if url:
+            self.image = yield neondata.VideoMetadata.download_image_from_url(url, async=True)
+            return
+
+        # Get image from body.
+        try:
+            self.image = self._get_image_from_body(
+                self.request.files['upload'][0]['body'])
+        except KeyError:
+            pass
+
+        if not self.image:
+            raise Exception('Image not available', ResponseCode.HTTP_BAD_REQUEST)
+
+    def _get_image_from_body(body):
+        """Get the image from the http post request.
+           Inputs- body of HTTP request
+           Returns- NxMx3 numpy array
+        """
+        image = np.asarray(bytearray(body), dtype="uint8")
+        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+        image = cv2.resize(image, (227, 227))
+        image = image[:, :, [2,1,0]]
+        image = image.transpose(2, 0, 1)
+        return image
+
+    @tornado.gen.coroutine
+    def _respond_with_thumb(self):
+        """Success. Reload the thumbnail and return it."""
+        thumb = yield neondata.ThumbnailMetadata.get(
+            self.thumb.key,
+            async=True)
+        rv = yield self.db2api(thumb)
+        self.success(rv, code=ResponseCode.HTTP_ACCEPTED)
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -1160,45 +1234,10 @@ class ThumbnailHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
-def does_account_own_tag(account_id, tag_id):
-    '''True if Neon user account owns the given tag'''
-    return True
 
-class DirectThumbnailHandler(ThumbnailHandler):
-    '''Handle multipart form POST directly from user xor url'''
-
-    @tornado.gen.coroutine
-    def post(self, account_id):
-        schema = Schema({
-            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Optional('external_ref'): All(Coerce(str), Length(min=1, max=64)),
-            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
-            CustomVoluptuousTypes.ExactlyOne({
-                Optional('url'): All(Coerce(str), Url(), Length(min=1, max=2048)),
-                Optional('upload'): object}): object
-        })
-        args = self.parse_args()
-        args['account_id'] = account_id_api_key = str(account_id)
-        schema(args)
-
-        if args.get('url'):
-            # @TODO submit to url service?
-            # @TODO add oauth based creds for Dropbox
-            # @TODO inline download
-            return
-
-        image = self.get_image_from_body(
-            self.request.files['upload'][0]['body'])
-
-        thumbnail = neondata.ThumbnailMetadata(
-            None,
-            account_id=account_id,
-            external_id=external_ref)
-
-        # @TODO skip saving until implemented fully.
-        # yield thumbnail.save(async=True)
-
-
+'''*********************************************************************
+ThumbnailHelper
+*********************************************************************'''
 class ThumbnailHelper(object):
     """A collection of stateless functions for working on Thumbnails"""
 
@@ -1343,7 +1382,7 @@ class VideoHelper(object):
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
                 # save the default thumbnail
-                image = yield video.download_image_from_url(
+                image = yield neondata.VideoMetadata.download_image_from_url(
                     default_thumbnail_url, async=True)
                 thumb = yield video.download_and_add_thumbnail(
                     image=image,
