@@ -699,7 +699,7 @@ for event in __EVENTS:
         dag=clicklogs,
         python_callable=_create_tables,
         op_kwargs=dict(event=event))
-    create_op.set_upstream(mr_cleaning_job)
+    #create_op.set_upstream(mr_cleaning_job)
 
     # Load the data into the impala table
     op = PythonOperator(
