@@ -1090,7 +1090,7 @@ class ThumbnailHandler(APIV2Handler):
             video_id = self.video.get_id()
             integration_id = self.video.integration_id
         else:
-            video_id = None
+            video_id = neondata.InternalVideoID.generate(self.account_id)
             integration_id = None
         self.thumb = neondata.ThumbnailMetadata(
             None,

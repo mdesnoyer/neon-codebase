@@ -3323,12 +3323,19 @@ class TestThumbnailHandler(TestControllersBase):
 
         thumbnail = yield neondata.ThumbnailMetadata.get(
            r['thumbnail_id'], async=True)
-        self.assertEqual(thumbnail.video_id, None)
+        expect_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key)
+        self.assertEqual(expect_video_id, thumbnail.video_id)
         self.assertEqual(thumbnail.external_id, thumbnail_ref)
         self.assertIn('some_cdn_url.jpg', thumbnail.urls)
+        thumbnail_id_parts = r['thumbnail_id'].split('_')
+        self.assertEqual(3, len(thumbnail_id_parts))
+        self.assertEqual(self.account_id_api_key, thumbnail_id_parts[0])
+        self.assertEqual(neondata.InternalVideoID.NOVIDEO, thumbnail_id_parts[1])
+        self.assertIsNotNone(thumbnail_id_parts[2])
 
     @tornado.testing.gen_test
-    def test_bad_add_new_thumbnail(self):
+    def test_bad_add_new_thumbnail_no_upload(self):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'
         url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
@@ -3350,6 +3357,10 @@ class TestThumbnailHandler(TestControllersBase):
                 body='',
                 method='POST')
         self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test
+    def test_bad_add_new_thumbnail_not_image(self):
+        pass
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
