@@ -159,21 +159,25 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
     def parse_args(self, keep_token=False):
         args = {}
-        # if we have query_arguments only use them
         if len(self.request.query_arguments) > 0:
             for key, value in self.request.query_arguments.iteritems():
                 if key != 'token' or keep_token:
                     args[key] = value[0]
-        # otherwise let's use what we find in the body, json only
-        elif len(self.request.body) > 0:
+        if len(self.request.body) > 0:
             content_type = self.request.headers.get('Content-Type', None)
-            if content_type is None or 'application/json' not in content_type:
-                raise BadRequestError('Content-Type must be JSON')
+            # Allow either multipart/form-data or application/json.
+            if content_type:
+                if 'multipart/form-data' in content_type:
+                    # Rely on tornado's argument handling.
+                    pass
+                elif 'application/json' in content_type:
+                    bjson = json.loads(self.request.body)
+                    for key, value in bjson.items():
+                        if key != 'token' or keep_token:
+                            args[key] = value
             else:
-                bjson = json.loads(self.request.body)
-                for key, value in bjson.items():
-                    if key != 'token' or keep_token:
-                        args[key] = value
+                raise BadRequestError(
+                    'Content-Type must be JSON or multipart/form-data')
 
         return args
 

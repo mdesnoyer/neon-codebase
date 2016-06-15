@@ -1010,17 +1010,17 @@ class ThumbnailHandler(APIV2Handler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
-        """Handle creating a new thumbnail."""
+        """Create a new thumbnail"""
 
         # The client can submit either a url argument or file in the body
         # with a Content-Type: multipart/form-data header.
         schema = Schema({
             Required('account_id') : All(Coerce(str), Length(min=1, max=256)),
             # Video id associates this image as thumbnail of a video.
-            Optional('video_id') : All(Coerce(str), Length(min=1, max=256)),
-            Optional('url'): Url(),
+            'video_id' : All(Coerce(str), Length(min=1, max=256)),
+            'url': Url(),
             # Tag id associates the image with a collection.
-            Optional('tag_id'): All(Coerce(str), Length(min=1, max=256)),
+            'tag_id': All(Coerce(str), Length(min=1, max=256)),
             # This is a partner's id for the image.
             'thumbnail_ref' : All(Coerce(str), Length(min=1, max=1024))
         })
@@ -1047,12 +1047,13 @@ class ThumbnailHandler(APIV2Handler):
             _video_id,
             async=True)
         if not video:
-            raise NotFoundError('No vid for {}'.format(_video_id))
+            raise NotFoundError('No video for {}'.format(_video_id))
         thumbs = yield neondata.ThumbnailMetadata.get_many(
             video.thumbnail_ids,
             async=True)
 
-        # Calculate new thumbnail's rank: one less than everything else.
+        # Calculate new thumbnail's rank: one less than everything else
+        # or default value 1 if no other thumbnail.
         rank = min([t.rank for t in thumbs
             if t.type == neondata.ThumbnailType.CUSTOMUPLOAD]) - 1 if thumbs else 1
 
