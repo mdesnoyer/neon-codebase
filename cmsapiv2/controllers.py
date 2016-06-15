@@ -11,6 +11,7 @@ import api.brightcove_api
 import numpy as np
 import PIL.Image
 import cv2
+import io
 import StringIO
 
 import cmsapiv2.client
@@ -1117,7 +1118,8 @@ class ThumbnailHandler(APIV2Handler):
 
         # Get image from body.
         try:
-            self.image = ThumbnailHandler._get_image_from_body(self.request.files['upload'][0])
+            self.image = ThumbnailHandler._get_image_from_httpfile(
+                self.request.files['upload'][0])
             if self.image:
                 return
         except KeyError:
@@ -1127,18 +1129,12 @@ class ThumbnailHandler(APIV2Handler):
             raise BadRequestError('Image not available', ResponseCode.HTTP_BAD_REQUEST)
 
     @staticmethod
-    def _get_image_from_body(file):
+    def _get_image_from_httpfile(httpfile):
         """Get the image from the http post request.
-           Inputs- body of HTTP request
-           Returns- NxMx3 numpy array
+           Inputs- a HTTPFile, or any dict with body string
+           Returns- instance of PIL.Image
         """
-        return PIL.Image.fromstring('RGB', (640, 480), file.body)
-        # array = np.asarray(bytearray(body), dtype="uint8")
-        # image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-        # image = cv2.resize(image, (227, 227))
-        # image = image[:, :, [2,1,0]]
-        # image = image.transpose(2, 0, 1)
-        # return image
+        return PIL.Image.open(io.BytesIO(httpfile.body))
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):

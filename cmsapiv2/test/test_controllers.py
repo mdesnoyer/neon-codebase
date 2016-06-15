@@ -3275,9 +3275,12 @@ class TestThumbnailHandler(TestControllersBase):
         thumbnail_ref = 'kevin'
         url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
             self.account_id_api_key, video_id, thumbnail_ref))
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
         body = MultipartEncoder({
-            'upload': ('image1.jpg', self.random_image.tostring(), 'multipart/form-data')})
+            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
         headers = {'Content-Type': body.content_type}
+
         self.im_download_mock.side_effect = Exception('No download allowed')
         response = yield self.http_client.fetch(
             url,
@@ -3285,6 +3288,7 @@ class TestThumbnailHandler(TestControllersBase):
             body=body.to_string(),
             method='POST')
         self.assertEquals(response.code, 202)
+
         _video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key,'tn_test_vid1')
         video = neondata.VideoMetadata.get(_video_id)
