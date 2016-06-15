@@ -22,6 +22,7 @@ if sys.path[0] != __base_path__:
 import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
+import cmsapiv2.client
 from cmsdb import neondata
 import concurrent.futures
 import cv2
@@ -91,6 +92,7 @@ statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
 statemon.define('youtube_video_not_found', int) 
+statemon.define('failed_to_send_result_email', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -122,6 +124,9 @@ define('max_fail_count', default=3,
        help='Number of failures allowed before a job is discarded')
 define('max_attempt_count', default=5, 
        help='Number of attempts allowed before a job is discarded')
+
+define("cmsapi_user", default=None, help='User to make api requests with')
+define("cmsapi_pass", default=None, help='Password for the cmsapi user')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -859,6 +864,7 @@ class VideoProcessor(object):
 
         # Send the notifications
         yield self.send_notifiction_response(api_request)
+        yield self.send_notification_email(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -884,6 +890,65 @@ class VideoProcessor(object):
             self.video_metadata.get_serving_url(save=False))
         return cresp.to_dict()
 
+    @tornado.gen.coroutine 
+    def send_notification_email(self, api_request): 
+        """ 
+            sends email to the email that is on the 
+            api_request 
+
+            returns True on success False on failure
+          
+            does not raise  
+        """ 
+        rv = True
+        try: 
+            # check for user that created the request 
+            to_email = api_request.callback_email
+            user = yield neondata.User.get(
+                to_email,
+                log_missing=False,  
+                async=True)
+
+            # if we have a user, check if they are subscribed
+            if user: 
+                if not user.send_emails: 
+                    raise tornado.gen.Return(True)  
+
+            # create a new apiv2 client
+            client = cmsapiv2.client.Client(
+                options.cmsapi_user,
+                options.cmsapi_pass)
+
+            # build up the body of the request
+            body_params = { 
+                'template_slug' : 'video-results', 
+                'subject' : 'Your Neon Images Are Here!', 
+                'from_name' : 'Neon Video Results', 
+                'to_email_address' : to_email 
+            }     
+            # make the call to post email
+            relative_url = '/api/v2/%s/email' % api_request.api_key
+            http_req = tornado.httpclient.HTTPRequest(
+                relative_url, 
+                method='POST', 
+                headers = {"Content-Type" : "application/json"},
+                body=json.dumps(body_params))
+
+            response = yield client.send_request(http_req)
+            if response.error: 
+                statemon.state.increment('failed_to_send_result_email')
+                _log.error('Failed to send email to %s due to %s' % 
+                    to_email, 
+                    response.error)
+                rv = False  
+        except AttributeError: 
+            pass 
+        except Exception as e:
+            rv = False  
+            _log.error('Unexcepted error %s when sending email')  
+        finally: 
+            raise tornado.gen.Return(rv) 
+        
     @tornado.gen.coroutine
     def send_notifiction_response(self, api_request):
         '''

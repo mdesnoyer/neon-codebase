@@ -847,6 +847,13 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
           lambda h, w: PILImageUtils.to_cv(
               PILImageUtils.create_random_image(h,w))
 
+        self.submit_mocker = patch('video_processor.client.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
+        self.submit_mock.side_effect = \
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
+              x, 200)
+
         # Setup the processor object
         job = self.api_request.__dict__
         self.vprocessor = video_processor.client.VideoProcessor(
@@ -888,6 +895,7 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.im_download_mocker.stop()
         self.cloudinary_patcher.stop()
         self.smart_crop_patcher.stop()
+        self.submit_mocker.stop()
         self.postgresql.clear_all_tables() 
         super(TestFinalizeResponse, self).tearDown()
 
@@ -901,12 +909,46 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         cls.postgresql.stop()
 
 
+    @tornado.testing.gen_test 
+    def test_send_email_notification_base(self): 
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        api_request.callback_email = 'basetest@invalid.xxx' 
+        yield api_request.save(async=True)
+        rv = yield self.vprocessor.send_notification_email(api_request)
+        body_json = json.loads(self.submit_mock.call_args[0][0].body)
+        self.assertEquals('/api/v2/%s/email' % api_request.api_key, 
+            self.submit_mock.call_args[0][0].url) 
+        self.assertTrue(self.submit_mock.called)
+        self.assertEquals(body_json['template_slug'], 'video-results') 
+        self.assertEquals(body_json['subject'], 'Your Neon Images Are Here!')
+        self.assertEquals(body_json['to_email_address'], 'basetest@invalid.xxx')
+        self.assertEquals(rv, True)
+ 
+    @tornado.testing.gen_test 
+    def test_send_email_notification_response_error(self): 
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        api_request.callback_email = 'basetest@invalid.xxx' 
+        yield api_request.save(async=True)
+        self.submit_mock.side_effect = \
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
+              x, 400, error=Exception('blah'))
+        rv = yield self.vprocessor.send_notification_email(api_request)
+        self.assertTrue(self.submit_mock.called)
+        self.assertEquals(rv, False)
+        self.assertEqual(
+            statemon.state.get('video_processor.client.failed_to_send_result_email'),
+            1)
+         
     @tornado.testing.gen_test
     def test_default_process(self):
+        api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        api_request.callback_email = 'test@invalid.xxx' 
+        yield api_request.save(async=True)
         yield self.vprocessor.finalize_response()
 
         # Make sure that the api request is updated
         api_request = neondata.NeonApiRequest.get('job1', self.api_key)
+        
         self.assertEquals(api_request.state, neondata.RequestState.FINISHED)
         self.assertEquals(api_request.callback_state,
                           neondata.CallbackState.NOT_SENT)
@@ -1003,8 +1045,15 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
         self.assertEquals(video_dict['video_id'], 'vid1')
         self.assertEquals(video_dict['title'], 'some fun video')
         self.assertEquals(len(video_dict['thumbnails']), 3)
-   
 
+        body_json = json.loads(self.submit_mock.call_args[0][0].body)
+        self.assertEquals('/api/v2/%s/email' % api_request.api_key, 
+            self.submit_mock.call_args[0][0].url) 
+        self.assertTrue(self.submit_mock.called)
+        self.assertEquals(body_json['template_slug'], 'video-results') 
+        self.assertEquals(body_json['subject'], 'Your Neon Images Are Here!')
+        self.assertEquals(body_json['to_email_address'], 'test@invalid.xxx')
+   
         # check video object again to ensure serving_url is not set
         video_data = neondata.VideoMetadata.get(self.video_id)
         self.assertIsNone(video_data.serving_url)

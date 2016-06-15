@@ -1269,6 +1269,7 @@ class VideoHelper(object):
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
+        request.callback_email = args.get('callback_email', None) 
         yield request.save(async=True)
 
         if request:
@@ -1559,6 +1560,7 @@ class VideoHandler(APIV2Handler):
           'default_thumbnail_url': All(Any(Coerce(str), unicode), 
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+          'callback_email': All(Coerce(str), Length(min=1, max=2048)),
           'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 

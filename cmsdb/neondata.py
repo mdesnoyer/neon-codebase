@@ -3872,7 +3872,8 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
-            callback_state=CallbackState.NOT_SENT):
+            callback_state=CallbackState.NOT_SENT, 
+            callback_email=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3910,6 +3911,11 @@ class NeonApiRequest(NamespacedStoredObject):
         # field used to store error message on partial error, explict error or 
         # additional information about the request
         self.msg = None
+
+        # what email address should we send this to, when done processing
+        # this could be associated to an existing user(username), but that is not 
+        # required 
+        self.callback_email = None 
 
     @classmethod
     def key2id(cls, key):
