@@ -1028,6 +1028,8 @@ class ThumbnailHandler(APIV2Handler):
         self.args['account_id'] = account_id
         schema(self.args)
 
+        self.thumb = self.image = self.video = None
+
         # Switch on whether a video is tied to this submission.
         if self.args.get('video_id'):
             yield self._post_with_video()
@@ -1084,10 +1086,12 @@ class ThumbnailHandler(APIV2Handler):
         """Set self.thumb to a new thumbnail from submitted image."""
 
         # Instantiate the thumbnail data object.
-        try:
+        if self.video:
             video_id = self.video.get_id()
-        except AttributeError:
+            integration_id = self.video.integration_id
+        else:
             video_id = None
+            integration_id = None
         self.thumb = neondata.ThumbnailMetadata(
             None,
             internal_vid=video_id,
@@ -1106,7 +1110,7 @@ class ThumbnailHandler(APIV2Handler):
             async=True)
 
         # If the thumbnail is tied to a video, set that association.
-        try:
+        if self.video:
             self.thumb = yield self.video.download_and_add_thumbnail(
                 self.thumb,
                 image=self.image,
@@ -1115,8 +1119,6 @@ class ThumbnailHandler(APIV2Handler):
                 async=True)
             yield self.thumb.save(async=True)
             return
-        except AttributeError:
-            pass
 
         yield self.thumb.add_image_data(self.image, cdn_metadata=cdn)
         yield self.thumb.save(async=True)
