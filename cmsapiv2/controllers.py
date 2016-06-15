@@ -8,8 +8,10 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
-import numpy
+import numpy as np
+import PIL.Image
 import cv2
+import StringIO
 
 import cmsapiv2.client
 import fractions
@@ -1065,9 +1067,13 @@ class ThumbnailHandler(APIV2Handler):
         """Set self.thumb to a new thumbnail from submitted image."""
 
         # Instantiate the thumbnail data object.
+        try:
+            video_id = self.video.get_id()
+        except AttributeError:
+            video_id = None
         self.thumb = neondata.ThumbnailMetadata(
             None,
-            internal_vid=self.video.get_id() if self.video else None,
+            internal_vid=video_id,
             external_id=self.args.get('thumbnail_ref'),
             ttype=neondata.ThumbnailType.CUSTOMUPLOAD,
             rank=rank)
@@ -1106,29 +1112,33 @@ class ThumbnailHandler(APIV2Handler):
         url = self.args.get('url')
         if url:
             self.image = yield neondata.VideoMetadata.download_image_from_url(url, async=True)
-            return
+            if self.image:
+                return
 
         # Get image from body.
         try:
-            self.image = self._get_image_from_body(
-                self.request.files['upload'][0]['body'])
+            self.image = ThumbnailHandler._get_image_from_body(self.request.files['upload'][0])
+            if self.image:
+                return
         except KeyError:
             pass
 
-        if not self.image:
-            raise Exception('Image not available', ResponseCode.HTTP_BAD_REQUEST)
+        if not hasattr(self, 'image') or not self.image:
+            raise BadRequestError('Image not available', ResponseCode.HTTP_BAD_REQUEST)
 
-    def _get_image_from_body(body):
+    @staticmethod
+    def _get_image_from_body(file):
         """Get the image from the http post request.
            Inputs- body of HTTP request
            Returns- NxMx3 numpy array
         """
-        image = np.asarray(bytearray(body), dtype="uint8")
-        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-        image = cv2.resize(image, (227, 227))
-        image = image[:, :, [2,1,0]]
-        image = image.transpose(2, 0, 1)
-        return image
+        return PIL.Image.fromstring('RGB', (640, 480), file.body)
+        # array = np.asarray(bytearray(body), dtype="uint8")
+        # image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+        # image = cv2.resize(image, (227, 227))
+        # image = image[:, :, [2,1,0]]
+        # image = image.transpose(2, 0, 1)
+        # return image
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
@@ -1240,17 +1250,6 @@ ThumbnailHelper
 *********************************************************************'''
 class ThumbnailHelper(object):
     """A collection of stateless functions for working on Thumbnails"""
-
-    def get_image_from_request(self, body):
-        """Extracts the image from the http post request.
-        returns a NxMx3 numpy array
-        """
-        image = numpy.asarray(bytearray(body), dtype="uint8")
-        image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-        image = cv2.resize(image, (227, 227))
-        image = image[:,:,[2,1,0]]
-        image = image.transpose(2,0,1)
-        return image
 
     @staticmethod
     @tornado.gen.coroutine

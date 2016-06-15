@@ -14,6 +14,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+from requests_toolbelt import MultipartEncoder
 import stripe
 import tornado.gen
 import tornado.testing
@@ -3244,19 +3245,21 @@ class TestThumbnailHandler(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestThumbnailHandler, self).tearDown()
 
-
     @tornado.testing.gen_test
-    def test_add_new_thumbnail(self):
-        url = self.get_url('/api/v2/%s/thumbnails?video_id=tn_test_vid1'\
-              '&url=blah.jpg&thumbnail_ref=kevin' % (self.account_id_api_key))
-        response = yield self.http_client.fetch(url,
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code,202)
-        internal_video_id = neondata.InternalVideoID.generate(
+    def test_add_new_thumbnail_by_url(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        image_url = 'blah.jpg'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref, 'blah.jpg'))
+        response = yield self.http_client.fetch(
+            url,
+            body='',
+            method='POST')
+        self.assertEquals(response.code, 202)
+        _video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key,'tn_test_vid1')
-        video = neondata.VideoMetadata.get(internal_video_id)
+        video = neondata.VideoMetadata.get(_video_id)
 
         self.assertEquals(len(video.thumbnail_ids), 1)
         self.assertEquals(self.im_download_mock.call_args[0][0], 'blah.jpg')
@@ -3264,8 +3267,57 @@ class TestThumbnailHandler(TestControllersBase):
            video.thumbnail_ids[0],
            async=True)
         self.assertEquals(thumbnail.external_id, 'kevin')
-        self.assertEquals(thumbnail.video_id,
-            '%s_%s' % (self.account_id_api_key, 'tn_test_vid1'))
+        self.assertEquals(thumbnail.video_id, _video_id)
+
+    @tornado.testing.gen_test
+    def test_add_new_thumbnail_by_body(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref))
+        body = MultipartEncoder({
+            'upload': ('image1.jpg', self.random_image.tostring(), 'multipart/form-data')})
+        headers = {'Content-Type': body.content_type}
+        self.im_download_mock.side_effect = Exception('No download allowed')
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEquals(response.code, 202)
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'tn_test_vid1')
+        video = neondata.VideoMetadata.get(_video_id)
+        self.assertEquals(len(video.thumbnail_ids), 1)
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           video.thumbnail_ids[0],
+           async=True)
+        self.assertEquals(thumbnail.external_id, 'kevin')
+        self.assertEquals(thumbnail.video_id, _video_id)
+
+    @tornado.testing.gen_test
+    def test_bad_add_new_thumbnail(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref))
+        self.im_download_mock.side_effect = Exception('No download')
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body='',
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
+
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body='',
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
