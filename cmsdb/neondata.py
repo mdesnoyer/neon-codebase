@@ -22,46 +22,35 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api import ooyala_api
 import base64
 import binascii
 import cmsdb.cdnhosting
 import code
-import collections
-from collections import OrderedDict 
+from collections import OrderedDict
 import concurrent.futures
-import contextlib
 import copy
 import cv.imhash_index
 import datetime
 import dateutil.parser
-import errno
 import hashlib
 import itertools
 import simplejson as json
-import jwt
 import logging
 import model.scores
 import momoko
-import multiprocessing
 import psycopg2
 from passlib.hash import sha256_crypt
-from PIL import Image
-import queries 
 import random
 import re
-import select
 import sre_constants
-import socket
 import string
 from StringIO import StringIO
 import tornado.ioloop
 import tornado.gen
 import tornado.web
 import tornado.httpclient
-import threading
 import time
-import api.brightcove_api #coz of cyclic import 
+import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 import utils.botoutils
 import utils.logs
@@ -72,10 +61,9 @@ from utils.options import define, options
 from utils import statemon
 import utils.sync
 import utils.s3
-import utils.http 
+import utils.http
 import urllib
 import urlparse
-import warnings
 import uuid
 
 

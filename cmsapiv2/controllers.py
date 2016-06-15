@@ -1556,20 +1556,20 @@ class VideoHandler(ShareableContentHandler):
         """handles a Video endpoint post request"""
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Required('external_video_ref'): All(Any(Coerce(str), unicode), 
+          Required('external_video_ref'): All(Any(Coerce(str), unicode),
               Length(min=1, max=512)),
           'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
           'reprocess': Boolean(),
           'integration_id': All(Coerce(str), Length(min=1, max=256)),
-          'callback_url': All(Any(Coerce(str), unicode), 
+          'callback_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
-          'title': All(Any(Coerce(str), unicode), 
+          'title': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
-          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)), 
-              None), 
+          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)),
+              None),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': All(Any(Coerce(str), unicode), 
+          'default_thumbnail_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
           'callback_email': All(Coerce(str), Length(min=1, max=2048)),
@@ -1631,7 +1631,7 @@ class VideoHandler(ShareableContentHandler):
             Required('video_id'): Any(
                 CustomVoluptuousTypes.CommaSeparatedList()),
             'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            'share_token': str
+            'share_token': Any(str)
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
