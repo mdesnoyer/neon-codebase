@@ -282,6 +282,7 @@ def _get_s3_tais(input_path):
 
     _log.info('bucket_name is %s' % bucket_name)
     _log.info('prefix is %s' % prefix)
+    _log.info('input path is %s' % input_path)
 
     # get the TAIs (Tracker Account Id)
     tais = []
