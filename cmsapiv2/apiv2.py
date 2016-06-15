@@ -57,7 +57,11 @@ _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
 
 define("token_secret", 
     default="9gRvLemgdfHUlzpv", 
-    help="the secret for tokens", 
+    help="secret for login and email verification tokens", 
+    type=str)
+define("share_token_secret",
+    default="MjUzNzIwOTkyOTMy",
+    help="secret for socially shared user content tokens",
     type=str)
 define("access_token_exp", 
     default=720, 
@@ -93,6 +97,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
+    SHARE_TOKEN = 4
 
 
 class APIV2Sender(object):
@@ -218,43 +223,57 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
         try:
             payload = JWTHelper.decode_token(access_token)
-            username = payload['username']
+            username = payload.get('username')
+            account_id = payload.get('account_id')
 
-            user = yield neondata.User.get(username, async=True)
-            if user:
-                request.user = user
+            if username:
+                user = yield neondata.User.get(username, async=True)
+                if user:
+                    request.user = user
 
-                def _check_internal_only():
-                    al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
-                    if internal_only:
-                        if user.access_level & al_internal_only is \
-                                neondata.AccessLevels.INTERNAL_ONLY_USER:
-                            return True
-                        return False
-                    return True
+                    def _check_internal_only():
+                        al_internal_only = neondata.AccessLevels.INTERNAL_ONLY_USER
+                        if internal_only:
+                            if user.access_level & al_internal_only is \
+                                    neondata.AccessLevels.INTERNAL_ONLY_USER:
+                                return True
+                            return False
+                        return True
 
-                if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
-                        neondata.AccessLevels.GLOBAL_ADMIN:
-                    raise tornado.gen.Return(True)
-
-                elif account_required and account and username in account.users:
-                    if not _check_internal_only():
-                        raise NotAuthorizedError('internal only resource')
-                    if user.access_level & access_level_required is \
-                            access_level_required:
+                    if user.access_level & neondata.AccessLevels.GLOBAL_ADMIN is \
+                            neondata.AccessLevels.GLOBAL_ADMIN:
                         raise tornado.gen.Return(True)
-                else:
-                    if internal_only:
+
+                    elif account_required and account and username in account.users:
                         if not _check_internal_only():
-                            raise NotAuthorizedError('internal only resource')
-                    if not account_required:
+                            raise NotAuthorizedError('Internal only resource.')
                         if user.access_level & access_level_required is \
-                               access_level_required:
+                                access_level_required:
                             raise tornado.gen.Return(True)
+                    else:
+                        if internal_only:
+                            if not _check_internal_only():
+                                raise NotAuthorizedError('Internal only resource.')
+                        if not account_required:
+                            if user.access_level & access_level_required is \
+                                   access_level_required:
+                                raise tornado.gen.Return(True)
 
-                raise NotAuthorizedError('you can not access this resource')
-
-            raise NotAuthorizedError('user does not exist')
+                    raise NotAuthorizedError('You cannot access this resource.')
+                raise NotAuthorizedError('user does not exist')
+            elif account_id:
+                # Handle account not associated with any user.
+                if account_id != account.get_id():
+                    # Mismatch of token and path.
+                    raise NotAuthorizedError('You cannot access this resource.')
+                if request.account:
+                    # No account-only acccessor is an internal account.
+                    if internal_only:
+                        raise NotAuthorizedError('Internal only resource.')
+                    raise tornado.gen.Return(True)
+                raise NotAuthorizedError('Account does not exist.')
+            else:
+                raise jwt.InvalidTokenError
 
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('access token is expired, please refresh the token')
@@ -569,21 +588,24 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         if defined_limits_dict is None:
             return
 
-        try:
-            defined_limit_list = defined_limits_dict[self.request.method]
-
-            for dl in defined_limit_list:
-                values_to_increase = dl['values_to_increase']
-                values_to_decrease = dl['values_to_decrease']
-
-                for v in values_to_increase:
-                    self.account_limits.__dict__[v[0]] += v[1]
-                for v in values_to_decrease:
-                    self.account_limits.__dict__[v[0]] -= v[1]
-
-            yield self.account_limits.save(async=True)
-        except KeyError:
-            pass
+        def _modify_limits(al): 
+            try: 
+                defined_limit_list = defined_limits_dict[self.request.method]
+                
+                for dl in defined_limit_list:
+                    values_to_increase = dl['values_to_increase']
+                    values_to_decrease = dl['values_to_decrease']
+                    for v in values_to_increase:
+                        al.__dict__[v[0]] += v[1]
+                    for v in values_to_decrease:
+                        al.__dict__[v[0]] -= v[1]
+            except KeyError: 
+                pass
+ 
+        self.account_limits = yield neondata.AccountLimits.modify(
+           self.account_limits.key, 
+           _modify_limits, 
+           async=True) 
 
     def write_error(self, status_code, **kwargs):
         def get_exc_message(exception):
@@ -750,6 +772,55 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             'Must specify how to convert %s for object %s' %
             (field, cls.__name__))
 
+class ShareableContentHandler(APIV2Handler):
+    """Enable authorization by URL parameter share_token."""
+
+    @tornado.gen.coroutine
+    def is_authorized(request,
+                      access_level_required,
+                      account_required=True,
+                      internal_only=False):
+        """Allow access if request has query token and matches resource"""
+        args = request.parse_args(True)
+        try:
+            payload = ShareJWTHelper.decode(args['share_token'])
+            # Implement for just video resources reads for now.
+            pl_account_id, pl_video_id = payload['content_id'].split('_')
+            if (access_level_required & neondata.AccessLevels.READ and
+                payload['content_type'] == 'VideoMetadata' and
+                pl_account_id == request.account_id and
+                pl_video_id == args['video_id']):
+                   raise tornado.gen.Return(True)
+        except (ValueError, KeyError, jwt.DecodeError):
+            # Go on to try Authorization header-based authorization.
+            pass
+
+        rv = yield super(ShareableContentHandler, request).is_authorized(
+                access_level_required,
+                account_required,
+                internal_only)
+        raise tornado.gen.Return(rv)
+
+class ShareJWTHelper(object):
+    """Implements encode and decode of shared user content JWT tokens.
+
+    This complements JWTHelper and uses a distinct salt to protect against
+    hacks that look at lot of tokens to reverse the encoding.
+    """
+
+    @staticmethod
+    def encode(payload):
+        return jwt.encode(payload,
+                          options.share_token_secret,
+                          algorithm='HS256')
+
+    @staticmethod
+    def decode(token):
+        return jwt.decode(token,
+                          options.share_token_secret,
+                          algorithms=['HS256'])
+    
+
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place
        Use this class to generate good tokens with the correct secret
@@ -757,6 +828,7 @@ class JWTHelper(object):
     """
     @staticmethod
     def generate_token(payload={}, token_type=TokenTypes.ACCESS_TOKEN):
+
         if token_type is TokenTypes.ACCESS_TOKEN:
             exp_time_add = options.access_token_exp
         elif token_type is TokenTypes.REFRESH_TOKEN:

@@ -6,16 +6,28 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-import video_processor.video_processing_queue
+from apiv2 import *
 import api.brightcove_api
 import cmsapiv2.client
-
+import fractions
 import logging
-from apiv2 import *
+import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("send_mandrill_emails", 
+    default=1, 
+    help="should we actually send the email", 
+    type=str) 
+define("mandrill_api_key", 
+    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
+    help="key from mandrillapp.com used to make api calls", 
+    type=str)
+define("mandrill_base_url", 
+    default='https://mandrillapp.com/api/1.0', 
+    help="mandrill base api url", 
+    type=str)
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -36,6 +48,9 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
+
+statemon.define('mandrill_template_not_found', int)
+statemon.define('mandrill_email_not_sent', int)
 
 '''*****************************************************************
 AccountHandler
@@ -1099,8 +1114,9 @@ class ThumbnailHandler(APIV2Handler):
         args['account_id'] = str(account_id)
         schema(args)
         thumbnail_id = args['thumbnail_id']
-        thumbnail = yield tornado.gen.Task(neondata.ThumbnailMetadata.get,
-                                           thumbnail_id)
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+            thumbnail_id,
+            async=True)
         if not thumbnail:
             raise NotFoundError('thumbnail does not exist with id = %s' %
                                 (thumbnail_id))
@@ -1126,8 +1142,7 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated']
-
+                'type', 'external_ref', 'created', 'updated', 'renditions']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1136,22 +1151,95 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
+
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'neon_score':
-            # TODO(mdesnoyer): convert the model score into the neon score
-            retval = obj.model_score
+            retval = obj.get_neon_score()
         elif field == 'url':
             retval = obj.urls[0] or []
         elif field == 'external_ref':
             retval = obj.external_id
+        elif field == 'renditions':
+            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
+            retval = ThumbnailHelper.renditions_of(urls)
         else:
             raise BadRequestError('invalid field %s' % field)
 
         raise tornado.gen.Return(retval)
+
+
+class ThumbnailHelper(object):
+    """A collection of stateless functions for working on Thumbnails"""
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def get_renditions_from_tids(tids):
+        """Given list of thumbnails ids, get all renditions as map of tid.
+
+        Input- list of thumbnail ids
+        Yields- [ tid0: [rendition1, .. renditionN], tid1: [...], ...}
+            where rendition has format {
+                'url': string
+                'width': int,
+                'height': int,
+                'aspect_ratio': string in format "WxH"
+        """
+        urls = yield neondata.ThumbnailServingURLs.get_many(tids, async=True)
+        # Build a map of {tid: [renditions]}.
+        rv = {}
+        for chunk in urls:
+            if chunk:
+                renditions = [ThumbnailHelper._to_dict(pair) for pair in chunk]
+                try:
+                    rv[chunk.get_id()].extend(renditions)
+                except KeyError:
+                    rv[chunk.get_id()] = renditions
+        # Ensure that every tid in request has a list mapped.
+        for tid in tids:
+            if not rv.get(tid):
+                rv[tid] = []
+        raise tornado.gen.Return(rv)
+
+    @staticmethod
+    def renditions_of(urls_obj):
+        """Given a ThumbnailServingURLs, get a list of rendition dicts.
+
+        Input- urls_obj a ThumbnailServingURLs
+        Returns- list of rendition dictionaries
+            i.e., [rendition1, rendition2, ... , renditionN]
+            where rendition has format {
+                'url': string
+                'width': int,
+                'height': int,
+                'aspect_ratio': string in format "WxH"
+        """
+        return [ThumbnailHelper._to_dict(item) for item
+                in urls_obj.size_map.items()]
+
+    @staticmethod
+    def _to_dict(pair):
+        """Given a size map (sizes, url) tuple return a rendition dictionary."""
+        dimensions, url = pair 
+
+        return {
+            'url': url,
+            'width': dimensions[0],
+            'height': dimensions[1],
+            'aspect_ratio': '%sx%s' % ThumbnailHelper._get_ar(*dimensions)}
+
+    @staticmethod
+    def _get_ar(width, height):
+        """Calculate aspect ratio from width, height."""
+        f = fractions.Fraction(width, height)
+        if f.numerator == 120 and f.denominator == 67:
+            return 16, 9
+        return f.numerator, f.denominator
+
+
 
 '''*********************************************************************
 VideoHelper
@@ -1181,6 +1269,7 @@ class VideoHelper(object):
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
+        request.callback_email = args.get('callback_email', None) 
         yield request.save(async=True)
 
         if request:
@@ -1196,23 +1285,35 @@ class VideoHelper(object):
         args -- the args sent to the api endpoint
         account_id_api_key -- the account_id/api_key
         """
+
         video_id = args['external_video_ref']
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       neondata.InternalVideoID.generate(account_id_api_key, video_id))
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            video_id)
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id,
+            async=True)
         if video is None:
-            # make sure we can download the image before creating requests
-            duration = args.get('duration', None) 
-            if duration: 
-                duration=float(duration) 
+            # Generate share token.
+            share_payload = {
+                'content_type': 'VideoMetadata',
+                'content_id': internal_video_id
+            }
+            share_token = ShareJWTHelper.encode(share_payload)
+
+            duration = args.get('duration', None)
+            if duration:
+                duration=float(duration)
 
             video = neondata.VideoMetadata(
-                neondata.InternalVideoID.generate(account_id_api_key, video_id),
+                internal_video_id,
                 video_url=args.get('url', None),
                 publish_date=args.get('publish_date', None),
                 duration=duration,
                 custom_data=args.get('custom_data', None),
                 i_id=args.get('integration_id', '0'),
-                serving_enabled=False)
+                serving_enabled=False,
+                share_token=share_token)
 
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
@@ -1232,6 +1333,7 @@ class VideoHelper(object):
             api_request = yield VideoHelper.create_api_request(
                 args,
                 account_id_api_key)
+
             # add the job id save the video
             video.job_id = api_request.job_id
             yield video.save(async=True)
@@ -1243,7 +1345,7 @@ class VideoHelper(object):
                 def _flag_reprocess(x):
                     x.state = neondata.RequestState.REPROCESS
                     x.fail_count = 0
-                    x.attempt_count = 0
+                    x.try_count = 0
                     x.response = {}
                 api_request = yield neondata.NeonApiRequest.modify(
                     video.job_id,
@@ -1270,6 +1372,9 @@ class VideoHelper(object):
                 tids)
             thumbnails = yield [ThumbnailHandler.db2api(x) for
                                 x in thumbnails]
+            renditions = yield ThumbnailHelper.get_renditions_from_tids(tids)
+            for thumbnail in thumbnails:
+                thumbnail['renditions'] = renditions[thumbnail['thumbnail_id']]
 
         raise tornado.gen.Return(thumbnails)
 
@@ -1281,14 +1386,16 @@ class VideoHelper(object):
                            query=None,
                            limit=None,
                            fields=None,
-                           base_url='/api/v2/videos/search'):
+                           base_url='/api/v2/videos/search',
+                           skip_deleted=False):
 
         search_res = yield neondata.VideoMetadata.search_videos(
                          account_id,
                          since=since,
                          until=until,
                          limit=limit,
-                         search_query=query)
+                         search_query=query,
+                         skip_deleted=skip_deleted)
 
         videos = search_res['videos'] or []
         since_time = search_res['since_time']
@@ -1385,7 +1492,7 @@ class VideoHelper(object):
         """Converts a database video metadata object to a video
         response dictionary
 
-        Overrite the base function because we have to do a join on the request
+        Overwrite the base function because we have to do a join on the request
 
         Keyword arguments:
         video - The VideoMetadata object
@@ -1443,27 +1550,29 @@ class VideoHelper(object):
 '''*********************************************************************
 VideoHandler
 *********************************************************************'''
-class VideoHandler(APIV2Handler):
+class VideoHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request"""
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Required('external_video_ref'): All(Any(Coerce(str), unicode), 
+          Required('external_video_ref'): All(Any(Coerce(str), unicode),
               Length(min=1, max=512)),
           'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
           'reprocess': Boolean(),
           'integration_id': All(Coerce(str), Length(min=1, max=256)),
-          'callback_url': All(Any(Coerce(str), unicode), 
+          'callback_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
-          'title': All(Any(Coerce(str), unicode), 
-              Length(min=1, max=2048)), 
-          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)), None),
+          'title': All(Any(Coerce(str), unicode),
+              Length(min=1, max=2048)),
+          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)),
+              None),
           'publish_date': All(CustomVoluptuousTypes.Date()),
           'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': All(Any(Coerce(str), unicode), 
+          'default_thumbnail_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+          'callback_email': All(Coerce(str), Length(min=1, max=2048)),
           'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 
@@ -1500,9 +1609,9 @@ class VideoHandler(APIV2Handler):
         account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                          account_id)
         duration = new_video.duration
-                
+
         message = yield sqs_queue.write_message(
-                    account.get_processing_priority(), 
+                    account.get_processing_priority(),
                     json.dumps(api_request.__dict__),
                     duration)
 
@@ -1522,10 +1631,11 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id'): Any(
-              CustomVoluptuousTypes.CommaSeparatedList()),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('video_id'): Any(
+                CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'share_token': Any(str)
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1563,10 +1673,11 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint put request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
-          'testing_enabled': Boolean(),
-          'title': Any(str, unicode, Length(min=1, max=1024))
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
+            'testing_enabled': Boolean(),
+            'title': Any(str, unicode, Length(min=1, max=1024)),
+            'hidden': Boolean(),
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -1579,8 +1690,8 @@ class VideoHandler(APIV2Handler):
             args['video_id'])
 
         def _update_video(v):
-            v.testing_enabled = Boolean()(
-                args.get('testing_enabled', v.testing_enabled))
+            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+            v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
         video = yield neondata.VideoMetadata.modify(
             internal_video_id,
@@ -1613,15 +1724,15 @@ class VideoHandler(APIV2Handler):
 
     @classmethod
     def get_access_levels(self):
-        return { 
-                 HTTPVerbs.GET : neondata.AccessLevels.READ, 
-                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
-                 HTTPVerbs.PUT : neondata.AccessLevels.UPDATE,
-                 'account_required'  : [HTTPVerbs.GET, 
-                                        HTTPVerbs.PUT,
-                                        HTTPVerbs.POST],
-                 'subscription_required' : [HTTPVerbs.POST]  
-               }
+        return {HTTPVerbs.GET:
+                    neondata.AccessLevels.READ,
+                HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+                HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+                'account_required': [
+                    HTTPVerbs.GET,
+                    HTTPVerbs.PUT,
+                    HTTPVerbs.POST],
+                'subscription_required': [HTTPVerbs.POST]}
 
     @classmethod
     def get_limits(self):
@@ -1811,6 +1922,55 @@ class ThumbnailStatsHandler(APIV2Handler):
 
         raise tornado.gen.Return(retval)
 
+
+'''*********************************************************************
+LiftStatsHandler
+*********************************************************************'''
+class LiftStatsHandler(APIV2Handler):
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('base_id'): All(Coerce(str), Length(min=1, max=2048)),
+            Required('thumbnail_ids'): Any(CustomVoluptuousTypes.CommaSeparatedList())})
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        base_thumb = yield neondata.ThumbnailMetadata.get(
+            args['base_id'],
+            async=True)
+        if not base_thumb:
+            raise NotFoundError('Base thumbnail does not exist')
+
+        query_tids = args['thumbnail_ids'].split(',')
+        thumbs = yield neondata.ThumbnailMetadata.get_many(
+            query_tids,
+            async=True,
+            as_dict=True)
+
+        default_neon_score = base_thumb.get_neon_score()
+        def _get_estimated_lift(thumb):
+            # The ratio of a thumbnail's Neon score to the default's.
+            score = thumb.get_neon_score()
+            if default_neon_score is None or score is None:
+                return None
+            return round(score / default_neon_score - 1, 3)
+
+        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
+                for k, t in thumbs.items()]
+
+        # Check thumbnail exists.
+        rv = {
+            'baseline_thumbnail_id': args['base_id'],
+            'lift': lift}
+        self.success(rv)
+
+    def get_access_levels(self):
+        return {HTTPVerbs.GET: neondata.AccessLevels.READ}
+
+
 '''*********************************************************************
 HealthCheckHandler
 *********************************************************************'''
@@ -1943,6 +2103,44 @@ class VideoSearchInternalHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+VideoShareHandler : class responsible for generating video share tokens
+   HTTP Verbs     : get
+*********************************************************************'''
+class VideoShareHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('video_id'): All(Coerce(str), Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        # Validate video exists.
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            args['video_id'])
+        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+        if not video:
+            raise NotFoundError('video does not exist with id: %s' %
+                (args['video_id']))
+        if not video.share_token:
+            payload = {
+                'content_type': 'VideoMetadata',
+                'content_id': video.get_id()}
+            video.share_token = ShareJWTHelper.encode(payload)
+            yield video.save(async=True)
+        self.success({'share_token':video.share_token})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+'''*********************************************************************
 VideoSearchExternalHandler : class responsible for searching videos from
                              an external source
    HTTP Verbs     : get
@@ -1978,7 +2176,8 @@ class VideoSearchExternalHandler(APIV2Handler):
             query,
             limit,
             fields,
-            base_url=base_url)
+            base_url=base_url,
+            skip_deleted=True)
 
         self.success(vid_dict)
 
@@ -2074,7 +2273,7 @@ class UserHandler(APIV2Handler):
             raise NotFoundError()
 
         if self.user.username != username:
-            raise NotAuthorizedError('Can not view another users account')
+            raise NotAuthorizedError('Cannot view another users account')
 
         result = yield self.db2api(user)
 
@@ -2090,7 +2289,8 @@ class UserHandler(APIV2Handler):
           'last_name': All(Coerce(str), Length(min=1, max=256)),
           'secondary_email': All(Coerce(str), Length(min=1, max=256)),
           'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-          'title': All(Coerce(str), Length(min=1, max=32))
+          'title': All(Coerce(str), Length(min=1, max=32)),
+          'send_emails': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -2099,7 +2299,7 @@ class UserHandler(APIV2Handler):
 
         if self.user.access_level is not neondata.AccessLevels.GLOBAL_ADMIN:
             if self.user.username != username:
-                raise NotAuthorizedError('Can not update another\
+                raise NotAuthorizedError('Cannot update another\
                                users account')
 
         def _update_user(u):
@@ -2112,6 +2312,9 @@ class UserHandler(APIV2Handler):
             u.secondary_email = args.get(
                 'secondary_email', 
                 u.secondary_email)
+            u.send_emails = Boolean()(args.get(
+                'send_emails', 
+                u.send_emails))
 
         user_internal = yield neondata.User.modify(
             username,
@@ -2629,12 +2832,117 @@ class BatchHandler(APIV2Handler):
                  HTTPVerbs.POST : neondata.AccessLevels.NONE 
                }
 
+class EmailHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)), 
+            Required('template_slug') : All(Coerce(str), Length(min=1, max=512)), 
+            'template_args' : All(Coerce(str), Length(min=1, max=2048)),
+            'to_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_name' : All(Coerce(str), Length(min=1, max=1024)),
+            'subject' : All(Coerce(str), Length(min=1, max=1024)),
+            'reply_to' : All(Coerce(str), Length(min=1, max=1024))
+        })
+
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+        
+        args_email = args.get('to_email_address', None)
+        template_args = args.get('template_args', None)  
+        template_slug = args.get('template_slug') 
+          
+        cur_user = self.user 
+        if cur_user:
+            cur_user_email = cur_user.username
+
+        if cur_user_email: 
+            send_to_email = cur_user_email
+            if not cur_user.send_emails: 
+                self.success({'message' : 'user does not want emails'})
+        elif args_email: 
+            send_to_email = args_email
+        else:  
+            raise NotFoundError('Email address is required.')
+
+        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
+            base_url=options.mandrill_base_url, 
+            api_key=options.mandrill_api_key, 
+            slug=template_slug) 
+            
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method="GET",
+            request_timeout=8.0)
+
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_template_not_found')
+            raise BadRequestError('Mandrill template unable to be loaded.')
+        
+        template_obj = json.loads(response.body) 
+        template_string = template_obj['code'] 
+
+        if template_args: 
+            email_html = template_string.format(**template_args)
+        else: 
+            email_html = template_string
+ 
+        # send email via mandrill
+        headers_dict = { 
+            'Reply-To' : args.get('reply_to', 'no-reply@neonlabs.com') 
+        }
+        to_list = [{ 
+            'email' : send_to_email, 
+            'type' : 'to'     
+        }]   
+        message_dict = { 
+            'html' : email_html, 
+            'subject' : args.get('subject', 'Neon Labs'),
+            'from_email' : args.get('from_email_address', 
+                'admin@neon-lab.com'),  
+            'from_name' : args.get('from_name', 'Neon Labs'),
+            'headers' : headers_dict, 
+            'to' : to_list  
+        }
+        json_body = { 
+            'key' : options.mandrill_api_key, 
+            'message' : message_dict  
+        }
+ 
+        url = '{base_url}/messages/send.json'.format(
+            base_url=options.mandrill_base_url) 
+        
+        request = tornado.httpclient.HTTPRequest( 
+            url=url, 
+            body=json.dumps(json_body),
+            method='POST', 
+            headers = {"Content-Type" : "application/json"},
+            request_timeout=20.0)
+ 
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_email_not_sent')
+            raise BadRequestError('Unable to send email')  
+        
+        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+            
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 'account_required'  : [HTTPVerbs.POST] 
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/batch/?$', BatchHandler), 
+    (r'/api/v2/batch/?$', BatchHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
@@ -2647,21 +2955,24 @@ application = tornado.web.Application([
         AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
-    (r'/api/v2/videos/search?$', VideoSearchInternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search?$',
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
+    (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',
         ThumbnailSearchExternalHandler),
-    (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
+    (r'/api/v2/thumbnails/search/?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$', 
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$', LiftStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
@@ -2669,7 +2980,7 @@ application = tornado.web.Application([
 def main():
     global server
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-    
+
     server = tornado.httpserver.HTTPServer(application)
     #utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)

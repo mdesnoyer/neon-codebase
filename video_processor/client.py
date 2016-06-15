@@ -22,6 +22,7 @@ if sys.path[0] != __base_path__:
 import atexit
 import boto.exception
 from boto.s3.connection import S3Connection
+import cmsapiv2.client
 from cmsdb import neondata
 import concurrent.futures
 import cv2
@@ -52,6 +53,7 @@ import urllib
 import urllib2
 import urlparse
 from cvutils.imageutils import PILImageUtils
+import utils.autoscale
 import utils.neon
 from utils import pycvutils
 import utils.http
@@ -90,20 +92,25 @@ statemon.define('s3url_download_error', int)
 statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
 statemon.define('youtube_video_not_found', int) 
+statemon.define('failed_to_send_result_email', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
 define('model_file', default=None, help='File that contains the model')
-define('serving_url_format',
-        default="http://i%s.neon-images.com/v1/client/%s/neonvid_%s", type=str)
+define('model_server_port', default=9000, type=int,
+       help="the port currently being used by model servers")
+define('model_autoscale_groups', default='AquilaOnDemand', type=str,
+       help="Comma separated list of autscaling group names")
+define('request_concurrency', default=22, type=int,
+       help=("the maximum number of concurrent scoring requests to"
+             " make at a time. Should be less than or equal to the"
+             " server batch size."))
 define('max_videos_per_proc', default=100,
        help='Maximum number of videos a process will handle before respawning')
 define('dequeue_period', default=10.0,
        help='Number of seconds between dequeues on a worker')
 define('notification_api_key', default='icAxBCbwo--owZaFED8hWA',
        help='Api key for the notifications')
-define('server_auth', default='secret_token',
-       help='Secret token for talking with the video processing server')
 define('extra_workers', default=0,
        help='Number of extra workers to allow downloads to happen in the background')
 define('video_temp_dir', default=None,
@@ -117,6 +124,9 @@ define('max_fail_count', default=3,
        help='Number of failures allowed before a job is discarded')
 define('max_attempt_count', default=5, 
        help='Number of attempts allowed before a job is discarded')
+
+define("cmsapi_user", default=None, help='User to make api requests with')
+define("cmsapi_pass", default=None, help='Password for the cmsapi user')
 
 class VideoError(Exception): pass 
 class BadVideoError(VideoError): pass
@@ -303,6 +313,14 @@ class VideoProcessor(object):
                 _log.warn('Job %s for account %s has failed' %
                           (api_request.job_id, api_request.api_key))
                 yield self.job_queue.delete_message(self.job_message)
+                 
+                # modify accountlimits to have one less video post
+                def _modify_limits(al): 
+                    al.video_posts -= 1 
+                yield neondata.AccountLimits.modify( 
+                    api_request.api_key, 
+                    _modify_limits, 
+                    async=True) 
        
         finally:
             #Delete the temp video file which was downloaded
@@ -546,6 +564,7 @@ class VideoProcessor(object):
                   mov,
                   n=n_thumbs,
                   video_name=self.video_url)
+            results = sorted(results, key=lambda x:x[1], reverse=True)
         except model.errors.VideoReadError:
             msg = "Error using OpenCV to read video. %s" % self.video_url
             _log.error(msg)
@@ -845,6 +864,7 @@ class VideoProcessor(object):
 
         # Send the notifications
         yield self.send_notifiction_response(api_request)
+        yield self.send_notification_email(api_request)
 
         _log.info('Sucessfully finalized video %s. Is has video id %s' % 
                   (self.video_url, self.video_metadata.key))
@@ -870,6 +890,65 @@ class VideoProcessor(object):
             self.video_metadata.get_serving_url(save=False))
         return cresp.to_dict()
 
+    @tornado.gen.coroutine 
+    def send_notification_email(self, api_request): 
+        """ 
+            sends email to the email that is on the 
+            api_request 
+
+            returns True on success False on failure
+          
+            does not raise  
+        """ 
+        rv = True
+        try: 
+            # check for user that created the request 
+            to_email = api_request.callback_email
+            user = yield neondata.User.get(
+                to_email,
+                log_missing=False,  
+                async=True)
+
+            # if we have a user, check if they are subscribed
+            if user: 
+                if not user.send_emails: 
+                    raise tornado.gen.Return(True)  
+
+            # create a new apiv2 client
+            client = cmsapiv2.client.Client(
+                options.cmsapi_user,
+                options.cmsapi_pass)
+
+            # build up the body of the request
+            body_params = { 
+                'template_slug' : 'video-results', 
+                'subject' : 'Your Neon Images Are Here!', 
+                'from_name' : 'Neon Video Results', 
+                'to_email_address' : to_email 
+            }     
+            # make the call to post email
+            relative_url = '/api/v2/%s/email' % api_request.api_key
+            http_req = tornado.httpclient.HTTPRequest(
+                relative_url, 
+                method='POST', 
+                headers = {"Content-Type" : "application/json"},
+                body=json.dumps(body_params))
+
+            response = yield client.send_request(http_req)
+            if response.error: 
+                statemon.state.increment('failed_to_send_result_email')
+                _log.error('Failed to send email to %s due to %s' % 
+                    to_email, 
+                    response.error)
+                rv = False  
+        except AttributeError: 
+            pass 
+        except Exception as e:
+            rv = False  
+            _log.error('Unexcepted error %s when sending email')  
+        finally: 
+            raise tornado.gen.Return(rv) 
+        
     @tornado.gen.coroutine
     def send_notifiction_response(self, api_request):
         '''
@@ -1043,17 +1122,33 @@ class VideoClient(multiprocessing.Process):
 
     def load_model(self):
         ''' load model '''
-        parts = self.model_file.split('/')[-1]
-        version = parts.split('.model')[0]
-        self.model_version = version
-        _log.info('Loading model from %s version %s'
-                  % (self.model_file, self.model_version))
-        self.model = model.load_model(self.model_file)
-
+        _log.info('Generating predictor instance')
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
+        predictor = model.predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aquila_conn)
+        predictor.connect()
+        # TODO (nick): Figure out how to get the aquila server to relay the
+        #              model version to the local model.
+        self.model_version = '%s-aqv1.1.250' % os.path.basename(
+            self.model_file)
+        # note, the model file is no longer a complete model, but is instead
+        # an input dictionary for local search.
+        self.model = model.generate_model(self.model_file, predictor)
         if not self.model:
             statemon.state.increment('model_load_error')
             _log.error('Error loading the Model from %s' % self.model_file)
             raise IOError('Error loading model from %s' % self.model_file)
+        # TODO (someone): How tf are we gonna handle exiting? Remember that
+        #                 gRPC hangs due to a bug at exit.
+
+    def unload_model(self):
+        if self.model is not None:
+            if self.model.predictor is not None:
+                self.model.predictor.shutdown()
+            self.model = None
 
     def run(self):
         ''' run/start method '''
@@ -1066,6 +1161,8 @@ class VideoClient(multiprocessing.Process):
         while (not self.kill_received.is_set() and 
                self.videos_processed < options.max_videos_per_proc):
             self.do_work()
+        if self.model is not None:
+            del self.model
  
         _log.info("stopping worker [%s] " % (self.pid))
 
@@ -1092,6 +1189,7 @@ class VideoClient(multiprocessing.Process):
                 yield vprocessor.start()
             finally:
                 statemon.state.decrement('workers_processing')
+                self.unload_model()
             self.videos_processed += 1
 
         except Queue.Empty:

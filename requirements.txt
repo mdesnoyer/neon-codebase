@@ -50,3 +50,4 @@ passlib==1.6.5
 stripe==1.32.2
 youtube_dl
 hdfs==2.0.6
+grpcio==0.13.1
