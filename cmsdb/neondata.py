@@ -22,44 +22,35 @@ __base_path__ = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if sys.path[0] != __base_path__:
     sys.path.insert(0, __base_path__)
 
-from api import ooyala_api
 import base64
 import binascii
 import cmsdb.cdnhosting
 import code
-import collections
 from collections import OrderedDict
 import concurrent.futures
-import contextlib
 import copy
 import cv.imhash_index
 import datetime
 import dateutil.parser
-import errno
 import hashlib
 import itertools
 import simplejson as json
 import logging
 import model.scores
 import momoko
-import multiprocessing
 import psycopg2
 from passlib.hash import sha256_crypt
-import queries
 import random
 import re
-import select
 import sre_constants
-import socket
 import string
 from StringIO import StringIO
 import tornado.ioloop
 import tornado.gen
 import tornado.web
 import tornado.httpclient
-import threading
 import time
-import api.brightcove_api #coz of cyclic import 
+import api.brightcove_api #coz of cyclic import
 import api.youtube_api
 import utils.botoutils
 import utils.logs
@@ -70,10 +61,9 @@ from utils.options import define, options
 from utils import statemon
 import utils.sync
 import utils.s3
-import utils.http 
+import utils.http
 import urllib
 import urlparse
-import warnings
 import uuid
 
 
@@ -643,17 +633,18 @@ class SubscriptionState(object):
     UNPAID = 'unpaid' 
     PAST_DUE = 'past_due' 
     IN_TRIAL = 'trialing'
- 
+
 class AccessLevels(object):
-    NONE = 0 
-    READ = 1 
-    UPDATE = 2 
+    NONE = 0
+    READ = 1
+    UPDATE = 2
     CREATE = 4
-    DELETE = 8 
-    ACCOUNT_EDITOR = 16 
-    INTERNAL_ONLY_USER = 32 
+    DELETE = 8
+    ACCOUNT_EDITOR = 16
+    INTERNAL_ONLY_USER = 32
     GLOBAL_ADMIN = 64
-    
+    SHARE = 128             # Resource permits share token authorization
+
     # Helpers  
     ALL_NORMAL_RIGHTS = READ | UPDATE | CREATE | DELETE
     ADMIN = ALL_NORMAL_RIGHTS | ACCOUNT_EDITOR
@@ -1928,7 +1919,8 @@ class User(NamespacedStoredObject):
                  title=None,
                  reset_password_token=None, 
                  secondary_email=None, 
-                 cell_phone_number=None):
+                 cell_phone_number=None, 
+                 send_emails=True):
  
         super(User, self).__init__(username)
 
@@ -1972,6 +1964,9 @@ class User(NamespacedStoredObject):
         # optional cell phone number, can be used for recovery purposes 
         # eventually 
         self.cell_phone_number = cell_phone_number
+
+        # whether or not we should send this user emails 
+        self.send_emails = send_emails 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3868,7 +3863,8 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
-            callback_state=CallbackState.NOT_SENT):
+            callback_state=CallbackState.NOT_SENT, 
+            callback_email=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3906,6 +3902,11 @@ class NeonApiRequest(NamespacedStoredObject):
         # field used to store error message on partial error, explict error or 
         # additional information about the request
         self.msg = None
+
+        # what email address should we send this to, when done processing
+        # this could be associated to an existing user(username), 
+        # but that is not required 
+        self.callback_email = None 
 
     @classmethod
     def key2id(cls, key):
@@ -4931,7 +4932,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None):
+                 publish_date=None, hidden=None, share_token=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -4943,6 +4944,7 @@ class VideoMetadata(StoredObject):
         self.frame_size = frame_size #(w,h)
         # Is A/B testing enabled for this video?
         self.testing_enabled = testing_enabled
+        self.share_token = share_token
 
         # DEPRECATED. Use VideoStatus table instead
         self.experiment_state = \
@@ -5385,6 +5387,7 @@ class VideoMetadata(StoredObject):
         rv['until_time'] = until_time
         raise tornado.gen.Return(rv)
 
+
 class VideoStatus(DefaultedStoredObject):
     '''Stores the status of the video in the wild for often changing entries.
 
@@ -5422,7 +5425,6 @@ class VideoStatus(DefaultedStoredObject):
         return VideoStatus.__name__ 
 
 class AbstractJsonResponse(object):
-    
     def to_dict(self):
         return self.__dict__
 
@@ -5482,7 +5484,8 @@ class VideoCallbackResponse(AbstractJsonResponse):
     def set_processing_state(self, internal_state):
         self.processing_state = ExternalRequestState.from_internal_state(
             internal_state)
-    
+
+
 if __name__ == '__main__':
     # If you call this module you will get a command line that talks
     # to the server. nifty eh?

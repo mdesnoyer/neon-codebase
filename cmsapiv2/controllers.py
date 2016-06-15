@@ -22,6 +22,18 @@ _log = logging.getLogger(__name__)
 
 define("port", default=8084, help="run on the given port", type=int)
 define("cmsapiv1_port", default=8083, help="what port apiv1 is running on", type=int)
+define("send_mandrill_emails", 
+    default=1, 
+    help="should we actually send the email", 
+    type=str) 
+define("mandrill_api_key", 
+    default='Y7N4ELi5hMDp_RbTQH9OqQ', 
+    help="key from mandrillapp.com used to make api calls", 
+    type=str)
+define("mandrill_base_url", 
+    default='https://mandrillapp.com/api/1.0', 
+    help="mandrill base api url", 
+    type=str)
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -42,6 +54,9 @@ statemon.define('post_video_oks', int)
 statemon.define('put_video_oks', int)
 statemon.define('get_video_oks', int)
 _get_video_oks_ref = statemon.state.get_ref('get_video_oks')
+
+statemon.define('mandrill_template_not_found', int)
+statemon.define('mandrill_email_not_sent', int)
 
 '''*****************************************************************
 AccountHandler
@@ -1340,6 +1355,7 @@ class VideoHelper(object):
         request.external_thumbnail_ref = args.get('thumbnail_ref', None)
         request.publish_date = args.get('publish_date', None)
         request.api_param = int(args.get('n_thumbs', 5))
+        request.callback_email = args.get('callback_email', None) 
         yield request.save(async=True)
 
         if request:
@@ -1355,24 +1371,35 @@ class VideoHelper(object):
         args -- the args sent to the api endpoint
         account_id_api_key -- the account_id/api_key
         """
-        video_id = args['external_video_ref']
-        video = yield tornado.gen.Task(neondata.VideoMetadata.get,
-                                       neondata.InternalVideoID.generate(account_id_api_key, video_id))
-        if video is None:
-            # make sure we can download the image before creating requests
 
-            duration = args.get('duration', None) 
-            if duration: 
-                duration=float(duration) 
+        video_id = args['external_video_ref']
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            video_id)
+        video = yield neondata.VideoMetadata.get(
+            internal_video_id,
+            async=True)
+        if video is None:
+            # Generate share token.
+            share_payload = {
+                'content_type': 'VideoMetadata',
+                'content_id': internal_video_id
+            }
+            share_token = ShareJWTHelper.encode(share_payload)
+
+            duration = args.get('duration', None)
+            if duration:
+                duration=float(duration)
 
             video = neondata.VideoMetadata(
-                neondata.InternalVideoID.generate(account_id_api_key, video_id),
+                internal_video_id,
                 video_url=args.get('url', None),
                 publish_date=args.get('publish_date', None),
                 duration=duration,
                 custom_data=args.get('custom_data', None),
                 i_id=args.get('integration_id', '0'),
-                serving_enabled=False)
+                serving_enabled=False,
+                share_token=share_token)
 
             default_thumbnail_url = args.get('default_thumbnail_url', None)
             if default_thumbnail_url:
@@ -1392,6 +1419,7 @@ class VideoHelper(object):
             api_request = yield VideoHelper.create_api_request(
                 args,
                 account_id_api_key)
+
             # add the job id save the video
             video.job_id = api_request.job_id
             yield video.save(async=True)
@@ -1608,7 +1636,7 @@ class VideoHelper(object):
 '''*********************************************************************
 VideoHandler
 *********************************************************************'''
-class VideoHandler(APIV2Handler):
+class VideoHandler(ShareableContentHandler):
     @tornado.gen.coroutine
     def post(self, account_id):
         """handles a Video endpoint post request"""
@@ -1630,6 +1658,7 @@ class VideoHandler(APIV2Handler):
           'default_thumbnail_url': All(Any(Coerce(str), unicode),
               Length(min=1, max=2048)),
           'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+          'callback_email': All(Coerce(str), Length(min=1, max=2048)),
           'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 
@@ -1662,9 +1691,9 @@ class VideoHandler(APIV2Handler):
         account = yield tornado.gen.Task(neondata.NeonUserAccount.get,
                                          account_id)
         duration = new_video.duration
-                
+
         message = yield sqs_queue.write_message(
-                    account.get_processing_priority(), 
+                    account.get_processing_priority(),
                     json.dumps(api_request.__dict__),
                     duration)
 
@@ -1684,10 +1713,11 @@ class VideoHandler(APIV2Handler):
         """handles a Video endpoint get request"""
 
         schema = Schema({
-          Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
-          Required('video_id'): Any(
-              CustomVoluptuousTypes.CommaSeparatedList()),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+            Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
+            Required('video_id'): Any(
+                CustomVoluptuousTypes.CommaSeparatedList()),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'share_token': Any(str)
         })
         args = self.parse_args()
         args['account_id'] = account_id_api_key = str(account_id)
@@ -2152,6 +2182,44 @@ class VideoSearchInternalHandler(APIV2Handler):
                }
 
 '''*********************************************************************
+VideoShareHandler : class responsible for generating video share tokens
+   HTTP Verbs     : get
+*********************************************************************'''
+class VideoShareHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        schema = Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('video_id'): All(Coerce(str), Length(min=1, max=256))
+        })
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        schema(args)
+
+        # Validate video exists.
+        internal_video_id = neondata.InternalVideoID.generate(
+            account_id_api_key,
+            args['video_id'])
+        video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
+        if not video:
+            raise NotFoundError('video does not exist with id: %s' %
+                (args['video_id']))
+        if not video.share_token:
+            payload = {
+                'content_type': 'VideoMetadata',
+                'content_id': video.get_id()}
+            video.share_token = ShareJWTHelper.encode(payload)
+            yield video.save(async=True)
+        self.success({'share_token':video.share_token})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+'''*********************************************************************
 VideoSearchExternalHandler : class responsible for searching videos from
                              an external source
    HTTP Verbs     : get
@@ -2300,7 +2368,8 @@ class UserHandler(APIV2Handler):
           'last_name': All(Coerce(str), Length(min=1, max=256)),
           'secondary_email': All(Coerce(str), Length(min=1, max=256)),
           'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-          'title': All(Coerce(str), Length(min=1, max=32))
+          'title': All(Coerce(str), Length(min=1, max=32)),
+          'send_emails': Boolean()
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -2322,6 +2391,9 @@ class UserHandler(APIV2Handler):
             u.secondary_email = args.get(
                 'secondary_email',
                 u.secondary_email)
+            u.send_emails = Boolean()(args.get(
+                'send_emails', 
+                u.send_emails))
 
         user_internal = yield neondata.User.modify(
             username,
@@ -2839,6 +2911,111 @@ class BatchHandler(APIV2Handler):
                  HTTPVerbs.POST : neondata.AccessLevels.NONE 
                }
 
+class EmailHandler(APIV2Handler): 
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        schema = Schema({
+            Required('account_id') : All(Coerce(str), Length(min=1, max=256)), 
+            Required('template_slug') : All(Coerce(str), Length(min=1, max=512)), 
+            'template_args' : All(Coerce(str), Length(min=1, max=2048)),
+            'to_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_email_address' : All(Coerce(str), Length(min=1, max=1024)),
+            'from_name' : All(Coerce(str), Length(min=1, max=1024)),
+            'subject' : All(Coerce(str), Length(min=1, max=1024)),
+            'reply_to' : All(Coerce(str), Length(min=1, max=1024))
+        })
+
+        args = self.parse_args()
+        args['account_id'] = account_id_api_key = str(account_id)
+        data = schema(args)
+        
+        args_email = args.get('to_email_address', None)
+        template_args = args.get('template_args', None)  
+        template_slug = args.get('template_slug') 
+          
+        cur_user = self.user 
+        if cur_user:
+            cur_user_email = cur_user.username
+
+        if cur_user_email: 
+            send_to_email = cur_user_email
+            if not cur_user.send_emails: 
+                self.success({'message' : 'user does not want emails'})
+        elif args_email: 
+            send_to_email = args_email
+        else:  
+            raise NotFoundError('Email address is required.')
+
+        url = '{base_url}/templates/info.json?key={api_key}&name={slug}'.format(
+            base_url=options.mandrill_base_url, 
+            api_key=options.mandrill_api_key, 
+            slug=template_slug) 
+            
+        request = tornado.httpclient.HTTPRequest(
+            url=url,
+            method="GET",
+            request_timeout=8.0)
+
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_template_not_found')
+            raise BadRequestError('Mandrill template unable to be loaded.')
+        
+        template_obj = json.loads(response.body) 
+        template_string = template_obj['code'] 
+
+        if template_args: 
+            email_html = template_string.format(**template_args)
+        else: 
+            email_html = template_string
+ 
+        # send email via mandrill
+        headers_dict = { 
+            'Reply-To' : args.get('reply_to', 'no-reply@neonlabs.com') 
+        }
+        to_list = [{ 
+            'email' : send_to_email, 
+            'type' : 'to'     
+        }]   
+        message_dict = { 
+            'html' : email_html, 
+            'subject' : args.get('subject', 'Neon Labs'),
+            'from_email' : args.get('from_email_address', 
+                'admin@neon-lab.com'),  
+            'from_name' : args.get('from_name', 'Neon Labs'),
+            'headers' : headers_dict, 
+            'to' : to_list  
+        }
+        json_body = { 
+            'key' : options.mandrill_api_key, 
+            'message' : message_dict  
+        }
+ 
+        url = '{base_url}/messages/send.json'.format(
+            base_url=options.mandrill_base_url) 
+        
+        request = tornado.httpclient.HTTPRequest( 
+            url=url, 
+            body=json.dumps(json_body),
+            method='POST', 
+            headers = {"Content-Type" : "application/json"},
+            request_timeout=20.0)
+ 
+        response = yield tornado.gen.Task(utils.http.send_request, request)
+
+        if response.code != ResponseCode.HTTP_OK:
+            statemon.state.increment('mandrill_email_not_sent')
+            raise BadRequestError('Unable to send email')  
+        
+        self.success({'message' : 'Email sent to %s' % send_to_email }) 
+            
+    @classmethod
+    def get_access_levels(cls):
+        return { 
+                 HTTPVerbs.POST : neondata.AccessLevels.CREATE, 
+                 'account_required'  : [HTTPVerbs.POST] 
+               }
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -2857,22 +3034,24 @@ application = tornado.web.Application([
         AccountIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/search?$', VideoSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
     (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search?$',
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',
         ThumbnailSearchExternalHandler),
-    (r'/api/v2/thumbnails/search?$', ThumbnailSearchInternalHandler),
+    (r'/api/v2/thumbnails/search/?$', ThumbnailSearchInternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/account?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription?$',
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
         BillingSubscriptionHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$', VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$', ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$', LiftStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/users?$', UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
     (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
 ], gzip=True)
@@ -2880,7 +3059,7 @@ application = tornado.web.Application([
 def main():
     global server
     signal.signal(signal.SIGTERM, lambda sig, y: sys.exit(-sig))
-    
+
     server = tornado.httpserver.HTTPServer(application)
     #utils.ps.register_tornado_shutdown(server)
     server.listen(options.port)
