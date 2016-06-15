@@ -870,7 +870,7 @@ application = tornado.web.Application([
     (r'/api/v2/accounts/?$', NewAccountHandler),
     (r'/api/v2/accounts/verify?$', VerifyAccountHandler),
     (r'/api/v2/users/?$', UserHandler),
-    (r'/api/v2/users/forgot_password?$', ForgotPasswordHandler),
+    (r'/api/v2/users/forgot_password/?$', ForgotPasswordHandler),
     (r'/api/v2/logout/?$', LogoutHandler)
 ], gzip=True)
 

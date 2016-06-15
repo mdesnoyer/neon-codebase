@@ -57,7 +57,11 @@ _internal_server_errors_ref = statemon.state.get_ref('internal_server_errors')
 
 define("token_secret", 
     default="9gRvLemgdfHUlzpv", 
-    help="the secret for tokens", 
+    help="secret for login and email verification tokens", 
+    type=str)
+define("share_token_secret",
+    default="MjUzNzIwOTkyOTMy",
+    help="secret for socially shared user content tokens",
     type=str)
 define("access_token_exp", 
     default=720, 
@@ -93,6 +97,7 @@ class TokenTypes(object):
     REFRESH_TOKEN = 1
     VERIFY_TOKEN = 2
     RESET_PASSWORD_TOKEN = 3
+    SHARE_TOKEN = 4
 
 
 class APIV2Sender(object):
@@ -269,7 +274,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
                 raise NotAuthorizedError('Account does not exist.')
             else:
                 raise jwt.InvalidTokenError
-
 
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('access token is expired, please refresh the token')
@@ -767,6 +771,55 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         raise NotImplementedError(
             'Must specify how to convert %s for object %s' %
             (field, cls.__name__))
+
+class ShareableContentHandler(APIV2Handler):
+    """Enable authorization by URL parameter share_token."""
+
+    @tornado.gen.coroutine
+    def is_authorized(request,
+                      access_level_required,
+                      account_required=True,
+                      internal_only=False):
+        """Allow access if request has query token and matches resource"""
+        args = request.parse_args(True)
+        try:
+            payload = ShareJWTHelper.decode(args['share_token'])
+            # Implement for just video resources reads for now.
+            pl_account_id, pl_video_id = payload['content_id'].split('_')
+            if (access_level_required & neondata.AccessLevels.READ and
+                payload['content_type'] == 'VideoMetadata' and
+                pl_account_id == request.account_id and
+                pl_video_id == args['video_id']):
+                   raise tornado.gen.Return(True)
+        except (ValueError, KeyError, jwt.DecodeError):
+            # Go on to try Authorization header-based authorization.
+            pass
+
+        rv = yield super(ShareableContentHandler, request).is_authorized(
+                access_level_required,
+                account_required,
+                internal_only)
+        raise tornado.gen.Return(rv)
+
+class ShareJWTHelper(object):
+    """Implements encode and decode of shared user content JWT tokens.
+
+    This complements JWTHelper and uses a distinct salt to protect against
+    hacks that look at lot of tokens to reverse the encoding.
+    """
+
+    @staticmethod
+    def encode(payload):
+        return jwt.encode(payload,
+                          options.share_token_secret,
+                          algorithm='HS256')
+
+    @staticmethod
+    def decode(token):
+        return jwt.decode(token,
+                          options.share_token_secret,
+                          algorithms=['HS256'])
+    
 
 class JWTHelper(object):
     """This class is here to keep the token_secret in one place
