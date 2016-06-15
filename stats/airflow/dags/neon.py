@@ -280,6 +280,9 @@ def _get_s3_tais(input_path):
 
     s3 = S3Hook(s3_conn_id='s3')
 
+    _log.info('bucket_name is %s' % bucket_name)
+    _log.info('prefix is %s' % prefix)
+
     # get the TAIs (Tracker Account Id)
     tais = []
     for key in s3.list_prefixes(bucket_name=bucket_name, prefix=prefix,
