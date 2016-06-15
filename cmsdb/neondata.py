@@ -41,6 +41,7 @@ import itertools
 import simplejson as json
 import jwt
 import logging
+import model.scores
 import momoko
 import multiprocessing
 import psycopg2
@@ -835,6 +836,7 @@ class StoredObject(object):
             except ValueError:
                 return None
         
+
             return obj
 
     @classmethod
@@ -902,7 +904,8 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_many(cls, keys, create_default=False, log_missing=True, func_level_wpg=True):
+    def get_many(cls, keys, create_default=False, log_missing=True,
+                 func_level_wpg=True, as_dict=False):
         ''' Get many objects of the same type simultaneously
 
         This is more efficient than one at a time.
@@ -917,7 +920,12 @@ class StoredObject(object):
         Returns:
         A list of cls objects or None depending on create_default settings
         '''
-        return cls._get_many_with_raw_keys(keys, create_default, log_missing, func_level_wpg)
+        return cls._get_many_with_raw_keys(
+            keys,
+            create_default,
+            log_missing,
+            func_level_wpg,
+            as_dict)
 
     @classmethod
     @utils.sync.optional_sync
@@ -983,7 +991,8 @@ class StoredObject(object):
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
-                                log_missing=True, func_level_wpg=True):
+                                log_missing=True, func_level_wpg=True,
+                                as_dict=False):
         '''Gets many objects with raw keys instead of namespaced ones.
         '''
         #MGET raises an exception for wrong number of args if keys = []
@@ -1017,7 +1026,7 @@ class StoredObject(object):
                 obj_map[obj_key] = result
  
         def _build_return_items(): 
-            rv = [] 
+            rv = {} if as_dict else []
             for key, item in obj_map.iteritems():
                 if item: 
                     obj = cls._create(key, item) 
@@ -1028,7 +1037,10 @@ class StoredObject(object):
                         obj = cls(key)
                     else:
                         obj = None
-                rv.append(obj)
+                if as_dict:
+                    rv[key] = obj
+                else:
+                    rv.append(obj)
             return rv
  
         rows = True
@@ -1041,7 +1053,8 @@ class StoredObject(object):
         yield conn.execute("COMMIT")
  
         db.return_connection(conn)
-        raise tornado.gen.Return(_build_return_items())
+        items = _build_return_items()
+        raise tornado.gen.Return(items)
     
     @classmethod
     @utils.sync.optional_sync
@@ -1917,7 +1930,8 @@ class User(NamespacedStoredObject):
                  title=None,
                  reset_password_token=None, 
                  secondary_email=None, 
-                 cell_phone_number=None):
+                 cell_phone_number=None, 
+                 send_emails=True):
  
         super(User, self).__init__(username)
 
@@ -1961,6 +1975,9 @@ class User(NamespacedStoredObject):
         # optional cell phone number, can be used for recovery purposes 
         # eventually 
         self.cell_phone_number = cell_phone_number
+
+        # whether or not we should send this user emails 
+        self.send_emails = send_emails 
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
@@ -3857,7 +3874,8 @@ class NeonApiRequest(NamespacedStoredObject):
             request_type=None, http_callback=None, default_thumbnail=None,
             integration_type='neon', integration_id='0',
             external_thumbnail_id=None, publish_date=None,
-            callback_state=CallbackState.NOT_SENT):
+            callback_state=CallbackState.NOT_SENT, 
+            callback_email=None):
         splits = job_id.split('_')
         if len(splits) == 3:
             # job id was given as the raw key
@@ -3895,6 +3913,11 @@ class NeonApiRequest(NamespacedStoredObject):
         # field used to store error message on partial error, explict error or 
         # additional information about the request
         self.msg = None
+
+        # what email address should we send this to, when done processing
+        # this could be associated to an existing user(username), 
+        # but that is not required 
+        self.callback_email = None 
 
     @classmethod
     def key2id(cls, key):
@@ -4741,6 +4764,15 @@ class ThumbnailMetadata(StoredObject):
         yield ThumbnailStatus.delete(key, async=True) 
         yield ThumbnailServingURLs.delete(key, async=True)
         yield ThumbnailMetadata.delete(key, async=True) 
+
+    def get_neon_score(self):
+        """Get a value in [1..99] that the Neon score maps to.
+
+        Uses a mapping dictionary according to the name of the
+        scoring model."""
+        if self.model_score:
+            return model.scores.lookup(self.model_version, self.model_score)
+        return None
 
 class ThumbnailStatus(DefaultedStoredObject):
     '''Holds the current status of the thumbnail in the wild.'''
