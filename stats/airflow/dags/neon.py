@@ -212,7 +212,7 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
     ts_end = int(((dateutils.timezone(dt_start, timezone='utc') + 
                    clicklogs.schedule_interval) - EPOCH).total_seconds())
 
-    s3 = S3Hook(s3_conn_id='s3_default')
+    s3 = S3Hook(s3_conn_id='s3')
 
     input_files = []
     for tai in _get_s3_tais(input_path):
