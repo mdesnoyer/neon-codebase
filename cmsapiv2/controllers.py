@@ -1106,7 +1106,7 @@ class ThumbnailHandler(APIV2Handler):
         cdn = yield neondata.CDNHostingMetadataList.get(
             neondata.CDNHostingMetadataList.create_key(
                 self.account_id,
-                self.video.integration_id),
+                integration_id),
             async=True)
 
         # If the thumbnail is tied to a video, set that association.
@@ -1118,10 +1118,9 @@ class ThumbnailHandler(APIV2Handler):
                 cdn_metadata=cdn,
                 async=True)
             yield self.thumb.save(async=True)
-            return
-
-        yield self.thumb.add_image_data(self.image, cdn_metadata=cdn)
-        yield self.thumb.save(async=True)
+        else:
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn)
+            yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
     def _set_image(self):
