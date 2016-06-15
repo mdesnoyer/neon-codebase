@@ -3913,8 +3913,8 @@ class NeonApiRequest(NamespacedStoredObject):
         self.msg = None
 
         # what email address should we send this to, when done processing
-        # this could be associated to an existing user(username), but that is not 
-        # required 
+        # this could be associated to an existing user(username), 
+        # but that is not required 
         self.callback_email = None 
 
     @classmethod
