@@ -3302,6 +3302,32 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEquals(thumbnail.video_id, _video_id)
 
     @tornado.testing.gen_test
+    def test_add_new_thumbnail_by_body_no_video(self):
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        body = MultipartEncoder({
+            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+        headers = {'Content-Type': body.content_type}
+
+        self.im_download_mock.side_effect = Exception('No download allowed')
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEquals(response.code, 202)
+        r = json.loads(response.body)
+
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           r['thumbnail_id'], async=True)
+        self.assertEqual(thumbnail.video_id, None)
+        self.assertEqual(thumbnail.external_id, thumbnail_ref)
+        self.assertIn('some_cdn_url.jpg', thumbnail.urls)
+
+    @tornado.testing.gen_test
     def test_bad_add_new_thumbnail(self):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'

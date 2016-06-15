@@ -1119,7 +1119,7 @@ class ThumbnailHandler(APIV2Handler):
                 async=True)
             yield self.thumb.save(async=True)
         else:
-            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn)
+            yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
             yield self.thumb.save(async=True)
 
     @tornado.gen.coroutine
