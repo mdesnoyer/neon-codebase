@@ -357,6 +357,7 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     same execution_date
     
     """
+    _log.info('output path is %s' % output_path)
     output_bucket, output_prefix = _get_s3_tuple(output_path)
     cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
                                             execution_date=execution_date,
