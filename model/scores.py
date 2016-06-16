@@ -5,7 +5,10 @@ def lookup(model, score):
     E.g., Input:0.10, for model "aqv1.1" output: 9"""
 
     score_float = float(score)
-    sequence = aquila if model.find('aqv') > -1 else previous_model
+    if not model:
+        sequence = previous_model
+    else:
+        sequence = aquila if model.find('aqv') > -1 else previous_model
     for i in xrange(len(sequence)):
         if sequence[i] > score_float:
             return max(0, i - 1)

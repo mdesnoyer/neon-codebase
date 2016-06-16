@@ -2034,18 +2034,21 @@ class LiftStatsHandler(APIV2Handler):
             async=True,
             as_dict=True)
 
-        # Stub.
+        default_neon_score = base_thumb.get_neon_score()
         def _get_estimated_lift(thumb):
-            return 0.01 * ord(thumb.key[0]) if thumb else None
+            # The ratio of a thumbnail's Neon score to the default's.
+            score = thumb.get_neon_score()
+            if default_neon_score is None or score is None:
+                return None
+            return round(score / default_neon_score - 1, 3)
 
-        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t)}
+        lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
                 for k, t in thumbs.items()]
 
         # Check thumbnail exists.
         rv = {
             'baseline_thumbnail_id': args['base_id'],
-            'lift': lift
-        }
+            'lift': lift}
         self.success(rv)
 
     def get_access_levels(self):

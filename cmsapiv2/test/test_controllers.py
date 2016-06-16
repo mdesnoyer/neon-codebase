@@ -3898,9 +3898,9 @@ class TestLiftStatsHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_response_has_structure(self):
         base_id = 'a'
-        neondata.ThumbnailMetadata('a').save()
+        neondata.ThumbnailMetadata('a', model_score=.4).save()
         thumbnail_ids = ['b', 'c', 'd']
-        neondata.ThumbnailMetadata('c').save()
+        neondata.ThumbnailMetadata('c', model_score=.5).save()
         url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
             '?base_id={}&thumbnail_ids={}'.format(
                 base_id,
@@ -3931,6 +3931,31 @@ class TestLiftStatsHandler(TestControllersBase):
         with self.assertRaises(tornado.httpclient.HTTPError) as e:
             yield self.http_client.fetch(url)
         self.assertEqual(404, e.exception.code)
+
+    @tornado.testing.gen_test
+    def test_model_score_is_none(self):
+        # Ensure model scores of None don't break api.
+        neondata.ThumbnailMetadata('a', model_score=.4).save()
+        neondata.ThumbnailMetadata('b', model_score=.5).save()
+        url = self.get_url('/api/v2/u/statistics/estimated_lift/{}'.format(
+            '?base_id={}&thumbnail_ids={}'.format('a', 'b')))
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIsNotNone(rjson['lift'][0]['lift'])
+        neondata.ThumbnailMetadata('b', model_score=None).save()
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIsNone(rjson['lift'][0]['lift'])
+        neondata.ThumbnailMetadata('a', model_score=None).save()
+        neondata.ThumbnailMetadata('b', model_score=.5).save()
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIsNone(rjson['lift'][0]['lift'])
+        neondata.ThumbnailMetadata('b', model_score=None).save()
+        response = yield self.http_client.fetch(url)
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
+        self.assertIsNone(rjson['lift'][0]['lift'])
 
 
 class TestAPIKeyRequired(TestControllersBase, TestAuthenticationBase):
