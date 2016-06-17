@@ -1952,7 +1952,7 @@ class LiftStatsHandler(APIV2Handler):
             score = thumb.get_neon_score()
             if default_neon_score is None or score is None:
                 return None
-            return round(score / default_neon_score - 1, 3)
+            return round(score / float(default_neon_score) - 1, 3)
 
         lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
                 for k, t in thumbs.items()]
