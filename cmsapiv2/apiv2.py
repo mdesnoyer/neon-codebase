@@ -168,8 +168,9 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             # Allow either multipart/form-data or application/json.
             if content_type:
                 if 'multipart/form-data' in content_type:
-                    # Rely on tornado's argument handling.
-                    pass
+                    # Update on tornado's body arguments previously parsed.
+                    args.update({k: v[0] for k, v
+                                 in self.request.body_arguments.items()})
                 elif 'application/json' in content_type:
                     bjson = json.loads(self.request.body)
                     for key, value in bjson.items():

@@ -1142,7 +1142,7 @@ class ThumbnailHandler(APIV2Handler):
         except KeyError:
             pass
 
-        if not hasattr(self, 'image') or not self.image:
+        if not self.image:
             raise BadRequestError('Image not available', ResponseCode.HTTP_BAD_REQUEST)
 
     @staticmethod

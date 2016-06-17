@@ -3275,12 +3275,13 @@ class TestThumbnailHandler(TestControllersBase):
     def test_add_new_thumbnail_by_body(self):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'
-        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
-            self.account_id_api_key, video_id, thumbnail_ref))
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
         buf = StringIO()
         self.random_image.save(buf, 'JPEG')
         body = MultipartEncoder({
-            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+            'video_id': video_id,
+            'upload': ('image1.jpg', buf.getvalue())})
         headers = {'Content-Type': body.content_type}
 
         self.im_download_mock.side_effect = Exception('No download allowed')
