@@ -2854,12 +2854,12 @@ class EmailHandler(APIV2Handler):
         if cur_user:
             cur_user_email = cur_user.username
 
-        if cur_user_email: 
+        if args_email: 
+            send_to_email = args_email
+        elif cur_user_email: 
             send_to_email = cur_user_email
             if not cur_user.send_emails: 
                 self.success({'message' : 'user does not want emails'})
-        elif args_email: 
-            send_to_email = args_email
         else:  
             raise NotFoundError('Email address is required.')
 
