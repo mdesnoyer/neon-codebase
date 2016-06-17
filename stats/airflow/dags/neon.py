@@ -361,8 +361,9 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
                                             execution_date=execution_date,
                                             prefix=output_prefix)
-    _log.info('output path is %s' % output_path)
+    _log.info('output bucket is %s' % output_bucket)
     _log.info('cleaned prefix is %s' % cleaned_prefix)
+    _log.info('output prefix is %s' % output_prefix)
 
     s3 = S3Hook(s3_conn_id='s3')
 
