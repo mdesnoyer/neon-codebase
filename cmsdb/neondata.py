@@ -4100,7 +4100,7 @@ class NeonApiRequest(NamespacedStoredObject):
             if thumb.type == thumb_type:
                 if thumb_url in thumb.urls:
                     # The exact thumbnail is already there
-                    return
+                    raise tornado.gen.Return(thumb)
             
                 if thumb.rank < min_rank:
                     min_rank = thumb.rank
@@ -4638,6 +4638,30 @@ class ThumbnailMetadata(StoredObject):
         new_dict["thumbnail_id"] = new_dict.pop("key")
         return new_dict
 
+    @staticmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def download_image_from_url(image_url):
+        '''Downloads an image from a given url.
+
+        returns: The PIL image
+        '''
+        try:
+            image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
+                    async=True)
+        except IOError, e:
+            msg = "IOError while downloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+        except tornado.httpclient.HTTPError as e:
+            msg = "HTTP Error while dowloading image %s: %s" % (
+                image_url, e)
+            _log.warn(msg)
+            raise ThumbDownloadError(msg)
+
+        raise tornado.gen.Return(image)
+
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def add_image_data(self, image, video_info=None, cdn_metadata=None):
@@ -4703,6 +4727,36 @@ class ThumbnailMetadata(StoredObject):
         yield [x.upload(image, self.key, s3_url, async=True, 
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
+
+    @tornado.gen.coroutine
+    def score_image(self, predictor, model_version, image=None,
+                    save_object=False):
+        '''Adds the model score to the image.
+
+        Inputs:
+        predictor - a model.predictor.Predictor object used to get the score
+        model_version - name of the model being used
+        image - OpenCV image data. If not provided, image will be downloaded
+        save_object - If true, the score is saved to the database
+        '''
+        if (self.model_version == model_version and 
+            self.model_score is not None):
+            # No need to compute the score, it's there
+            return
+
+        if image is None:
+            pil_image = yield ThumbnailMetadata.download_image_from_url(
+                self.urls[-1], async=True)
+            image = cvutils.imageutils.PILImageUtils.to_cv(pil_image)
+
+        self.model_score = yield predictor.predict(image, async=True)
+        self.model_version = model_version
+
+        if save_object:
+            def _set_score(x):
+                x.model_score = self.model_score
+                x.model_version = self.model_version
+            yield ThumbnailMetadata.modify(self.key, _set_score, async=True)
 
     @classmethod
     def get_video_id(cls, tid, callback=None):
@@ -5055,26 +5109,6 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(thumb)
 
-    
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def download_image_from_url(self, image_url): 
-        try:
-            image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
-                    async=True)
-        except IOError, e:
-            msg = "IOError while downloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-        except tornado.httpclient.HTTPError as e:
-            msg = "HTTP Error while dowloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-
-        raise tornado.gen.Return(image)
-
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def download_and_add_thumbnail(self, 
@@ -5100,7 +5134,8 @@ class VideoMetadata(StoredObject):
                        object.
         '''
         if image is None: 
-            image = yield self.download_image_from_url(image_url, async=True) 
+            image = yield ThumbnailMetadata.download_image_from_url(image_url,
+                                                                    async=True) 
         if thumb is None: 
             thumb = ThumbnailMetadata(None,
                           ttype=ThumbnailType.DEFAULT,

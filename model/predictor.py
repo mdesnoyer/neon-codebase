@@ -38,6 +38,7 @@ _log = logging.getLogger(__name__)
 statemon.define('lost_server_connection', int)  # lost the server connection
 statemon.define('unable_to_connect', int)  # could not connect to server in the first place
 statemon.define('good_deepnet_connection', int)
+statemon.define('prediction_error', int)
 
 def _resize_to(img, w=None, h=None):
   '''
@@ -208,6 +209,7 @@ class Predictor(object):
                           e)
                 delay = (1 << cur_try) * 0.4 * random.random()
                 yield tornado.gen.sleep(delay)
+        statemon.state.increment('prediction_error')
         if isinstance(e, model.errors.PredictionError):
             raise e
         raise model.errors.PredictionError(str(e))
