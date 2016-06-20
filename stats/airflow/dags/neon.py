@@ -472,8 +472,8 @@ def _run_mr_cleaning_job(**kwargs):
     cleaning_job_output_path = os.path.join("s3://", output_bucket,
                                             cleaned_prefix)
 
-    _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
-                                     output_path=kwargs['output_path'])
+    #_delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
+    #                                 output_path=kwargs['output_path'])
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
     cluster = ClusterGetter.get_cluster()
