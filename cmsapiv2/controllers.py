@@ -1004,6 +1004,108 @@ class BrightcoveIntegrationHandler(APIV2Handler):
 
 
 '''*********************************************************************
+TagHandler
+*********************************************************************'''
+class TagHandler(APIV2Handler):
+
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            'fields': CustomVoluptuousTypes.CommaSeparatedList
+        })(self.args)
+        self.success({})
+
+    @tornado.gen.coroutine
+    def post(self, account_id):
+        Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            'associations': CustomVoluptuousTypes.CommaSeparatedList
+        })(self.args)
+        self.success({})
+
+    @tornado.gen.coroutine
+    def put(self, account_id):
+        Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            'associations': CustomVoluptuousTypes.CommaSeparatedList
+        })(self.args)
+        self.success({})
+
+    @tornado.gen.coroutine
+    def delete(self, account_id):
+        Schema({
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+        })(self.args)
+        self.success({})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            HTTPVerbs.POST: neondata.AccessLevels.CREATE,
+            HTTPVerbs.PUT: neondata.AccessLevels.UPDATE,
+            HTTPVerbs.DELETE: neondata.AccessLevels.DELETE,
+            'account_required': [HTTPVerbs.GET,
+                                 HTTPVerbs.PUT,
+                                 HTTPVerbs.POST]}
+
+'''*********************************************************************
+TagSearchExternalHandler : class responsible for searching tags
+                           from an external source
+   HTTP Verbs     : get
+*********************************************************************'''
+class TagSearchExternalHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self, account_id):
+        Schema({
+          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+          'limit': All(Coerce(int), Range(min=1, max=100)),
+          'query': Any(CustomVoluptuousTypes.Regex(), str),
+          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+          'since': All(Coerce(float)),
+          'until': All(Coerce(float)),
+        })(self.args)
+        self.success({})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+'''*********************************************************************
+TagSearchInternalHandler : class responsible for searching tags
+                           from an internal source
+   HTTP Verbs     : get
+*********************************************************************'''
+class TagSearchInternalHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        Schema({
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'account_id': All(Coerce(str), Length(min=1, max=256)),
+            'query': str,
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'since': All(Coerce(float)),
+            'until': All(Coerce(float))
+        })(self.args)
+        self.success({})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'internal_only': True,
+            'account_required': []}
+
+
+'''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(APIV2Handler):
@@ -1069,6 +1171,12 @@ class ThumbnailHandler(APIV2Handler):
             async=True)
         if not video:
             raise SaveError("Can't save thumbnail to video {}".format(_video_id))
+
+        if self.args['tag_id']:
+            neondata.TagThumbnail.save_many(
+                thumbnail_id=self.thumb.key,
+                tag_id=self.args['tag_id'])
+
         statemon.state.increment('post_thumbnail_oks')
         yield self._respond_with_thumb()
 
@@ -1871,6 +1979,8 @@ class VideoStatsHandler(APIV2Handler):
         fields = args.get('fields', None)
         if fields:
             fields = set(fields.split(','))
+
+        import pdb; pdb.set_trace()
         video_statuses = yield [self.db2api(x) for x in video_statuses]
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)
@@ -2235,7 +2345,7 @@ class VideoSearchExternalHandler(APIV2Handler):
         schema = Schema({
           Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
           'limit': All(Coerce(int), Range(min=1, max=100)),
-          Optional('query'): Any(CustomVoluptuousTypes.Regex(), str),
+          'query': Any(CustomVoluptuousTypes.Regex(), str),
           'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
           'since': All(Coerce(float)),
           'until': All(Coerce(float)),
@@ -2272,15 +2382,6 @@ class VideoSearchExternalHandler(APIV2Handler):
                  'account_required': [HTTPVerbs.GET]
                }
 
-'''*********************************************************************
-ThumbnailSearchInternalHandler : class responsible for searching thumbs
-                                 from an internal source
-   HTTP Verbs     : get
-*********************************************************************'''
-class ThumbnailSearchInternalHandler(APIV2Handler):
-    @tornado.gen.coroutine
-    def get(self):
-        self.success({})
 
 '''*********************************************************************
 ThumbnailSearchExternalHandler : class responsible for searching thumbs
@@ -2290,7 +2391,48 @@ ThumbnailSearchExternalHandler : class responsible for searching thumbs
 class ThumbnailSearchExternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
+        Schema({
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'query': str,
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'since': All(Coerce(float)),
+            'until': All(Coerce(float))
+        })(self.args)
         self.success({})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
+
+
+'''*********************************************************************
+ThumbnailSearchInternalHandler : class responsible for searching thumbs
+                                 from an internal source
+   HTTP Verbs     : get
+*********************************************************************'''
+class ThumbnailSearchInternalHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        Schema({
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'account_id': All(Coerce(str), Length(min=1, max=256)),
+            'query': str,
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'since': All(Coerce(float)),
+            'until': All(Coerce(float))
+        })(self.args)
+        self.success({})
+
+    @classmethod
+    def get_access_levels(self):
+        return {
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'internal_only': True,
+            'account_required': []}
+
 
 '''*****************************************************************
 AccountIntegrationHandler : class responsible for getting all
@@ -3025,40 +3167,38 @@ class EmailHandler(APIV2Handler):
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
-    (r'/healthcheck/?$', HealthCheckHandler),
-    (r'/api/v2/batch/?$', BatchHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
-        OoyalaIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
-        BrightcoveIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$',
-        BrightcovePlayerHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$',
-        OptimizelyIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',
-        AccountIntegrationHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$', ThumbnailHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/?$', VideoHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$', VideoShareHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$', VideoSearchExternalHandler),
-    (r'/api/v2/videos/search/?$', VideoSearchInternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',
-        ThumbnailSearchExternalHandler),
-    (r'/api/v2/thumbnails/search/?$', ThumbnailSearchInternalHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/?$', AccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$', BillingAccountHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',
-        BillingSubscriptionHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/limits/?$', AccountLimitsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$', VideoStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$', ThumbnailStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/users/?$', UserHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$', LiftStatsHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/email/?$', EmailHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$', TelemetrySnippetHandler),
-    (r'/api/v2/(\d+)/live_stream', LiveStreamHandler)
+    (r'/api/v2/batch/?$',                                          BatchHandler),
+    (r'/api/v2/tags/search/?$',                                    TagSearchInternalHandler),
+    (r'/api/v2/thumbnails/search/?$',                              ThumbnailSearchInternalHandler),
+    (r'/api/v2/videos/search/?$',                                  VideoSearchInternalHandler),
+    (r'/api/v2/(\d+)/live_stream',                                 LiveStreamHandler),
+
+    (r'/api/v2/([a-zA-Z0-9]+)/?$',                                 AccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/account/?$',                 BillingAccountHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/billing/subscription/?$',            BillingSubscriptionHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/email/?$',                           EmailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/?$',                    AccountIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',         BrightcoveIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/players/?$', BrightcovePlayerHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',             OoyalaIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/integrations/optimizely/?$',         OptimizelyIntegrationHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/limits/?$',                          AccountLimitsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$',       LiftStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$',           ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$',               VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$',                ThumbnailStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$',                    VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/tags/?$',                            TagHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$',                     TagSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$',               TelemetrySnippetHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',               ThumbnailSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/users/?$',                           UserHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/?$',                          VideoHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$',                   VideoSearchExternalHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/videos/share/?$',                    VideoShareHandler),
+
+    (r'/healthcheck/?$',                                           HealthCheckHandler)
 ], gzip=True)
 
 def main():

@@ -1704,6 +1704,63 @@ class DefaultedStoredObject(NamespacedStoredObject):
                     async=True)
         raise tornado.gen.Return(rv) 
 
+
+class MappingObject(object):
+    '''Abstract class that backs an abstract 2-way, many-to-many relation.
+
+    Arguments should match the implementing class's table column names.
+    Ids are enforced by foreign key index to be valid references.
+    Uniqueness is likewise enforced by a unique index on the id pair.'''
+    def __init__(self, **kwargs):
+        pass
+
+    def get(self, **kwargs):
+        pass
+
+    def get_many(self, **kwargs):
+        pass
+
+    @staticmethod
+    @tornado.gen.coroutine
+    def save(self, **kwargs):
+        pass
+
+    @classmethod
+    @tornado.gen.coroutine
+    def save_many(cls, **kwargs):
+        '''Allow saving of many mapping relations.
+
+        0 or 1 of kwargs can have a list value.'''
+
+        # Validate input
+        if not len(kwargs) == 2:
+            raise Exception('Wrong number of arguments')
+
+        keys = kwargs.keys()
+        values = itertools.product(kwargs.values())
+
+
+    def delete(self, **kwargs):
+        pass
+
+    def delete_many(self, **kwargs):
+        pass
+
+
+class TagThumbnail(MappingObject):
+    _table = 'tag_thumbnail'
+    _keys = ['thumbnail_id', 'tag_id']
+
+
+class Tag(StoredObject):
+    '''Tag is a generic relation associating a set of user objects.
+
+    Collections of thumbnails of a user is one use case of Tag.'''
+    def __init__(self, key, name=None):
+        self.name = name
+        super(Tag, self).__init__(key)
+
+
 class AbstractHashGenerator(object):
     ' Abstract Hash Generator '
 
