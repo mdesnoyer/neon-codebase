@@ -569,7 +569,7 @@ def _execution_date_has_input_files(**kwargs):
     else:
         return 'no_input_files'
 
-def _update_table_build_times(**kwargs):
+def _update_table_build_times():
     stats.impala_table.update_table_build_times()
 
 
