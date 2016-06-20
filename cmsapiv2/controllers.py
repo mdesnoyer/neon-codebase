@@ -1783,7 +1783,7 @@ class VideoStatsHandler(APIV2Handler):
         fields = args.get('fields', None)
         if fields:
             fields = set(fields.split(','))
-        video_statuses = yield [self.db2api(x) for x in video_statuses]
+        video_statuses = yield [self.db2api(x, fields) for x in video_statuses]
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)
 
