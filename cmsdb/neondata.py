@@ -1722,7 +1722,7 @@ class MappingObject(object):
     @classmethod
     @tornado.gen.coroutine
     def get(cls, **kwargs):
-        cls._get_key_and_value(**kwargs)
+        _, value = cls._get_key_and_value(**kwargs)
         fetched = yield cls.get_many(**kwargs)
         raise tornado.gen.Return(fetched[value])
 
@@ -1825,7 +1825,7 @@ class MappingObject(object):
 
     @classmethod
     def _get_key_and_value(cls, **kwargs):
-        key, values = cls._get_key_and_values()
+        key, values = cls._get_key_and_values(**kwargs)
         if len(values) is not 1:
             raise TypeError('Expect exactly on value in get')
         return key, values[0]
@@ -4850,7 +4850,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, account_id=None, tag_ids=None):
+                 external_id=None, account_id=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4876,7 +4876,6 @@ class ThumbnailMetadata(StoredObject):
             self.do_source_crop = True
             self.do_smart_crop = True
         self.account_id = account_id
-        self.tag_ids = tag_ids or []
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 

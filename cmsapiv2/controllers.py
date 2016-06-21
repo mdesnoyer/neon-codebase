@@ -1172,11 +1172,6 @@ class ThumbnailHandler(APIV2Handler):
         if not video:
             raise SaveError("Can't save thumbnail to video {}".format(_video_id))
 
-        if self.args['tag_id']:
-            neondata.TagThumbnail.save_many(
-                thumbnail_id=self.thumb.key,
-                tag_id=self.args['tag_id'])
-
         statemon.state.increment('post_thumbnail_oks')
         yield self._respond_with_thumb()
 
@@ -1234,8 +1229,9 @@ class ThumbnailHandler(APIV2Handler):
         # TODO Restrict on tag type?
         if self.args.get('tag_id'):
             request_tag_ids = self.args.get('tag_id').split(',')
-            tags = [] # yield neondata.Tag.get_many(request_tag_ids)
-            valid_tag_ids = [t.get_id() for t in tags if t.account_id == self.account_id]
+            tags = yield neondata.Tag.get_many(request_tag_ids, async=True)
+            valid_tag_ids = [t.get_id() for t in tags
+                if t and t.account_id == self.account_id]
             yield neondata.TagThumbnail.save_many(
                 tag_id=valid_tag_ids,
                 thumbnail_id=self.thumb.get_id())
@@ -1346,7 +1342,8 @@ class ThumbnailHandler(APIV2Handler):
     def _get_default_returned_fields(cls):
         return ['video_id', 'thumbnail_id', 'rank', 'frameno',
                 'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions']
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'tag_ids']
     @classmethod
     def _get_passthrough_fields(cls):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
@@ -1355,12 +1352,14 @@ class ThumbnailHandler(APIV2Handler):
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
-
         if field == 'video_id':
             retval = neondata.InternalVideoID.to_external(
                 neondata.InternalVideoID.from_thumbnail_id(obj.key))
         elif field == 'thumbnail_id':
             retval = obj.key
+        elif field == 'tag_ids':
+            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key)
+            retval = list(tag_ids)
         elif field == 'neon_score':
             retval = obj.get_neon_score()
         elif field == 'url':

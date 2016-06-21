@@ -3285,8 +3285,14 @@ class TestThumbnailHandler(TestControllersBase):
            async=True)
         self.assertEqual(thumbnail.external_id, 'kevin')
         self.assertEqual(thumbnail.video_id, _video_id)
+
+        url = self.get_url('/api/v2/{}/thumbnails/?thumbnail_id={}'.format(
+            self.account_id_api_key,
+            thumbnail.get_id()))
+        response = yield self.http_client.fetch(url)
+        rjson = json.loads(response.body)
         valid_tag_ids = {'tag_0', 'tag_2'}
-        self.assertEqual(set(thumbnail.tag_ids), valid_tag_ids)
+        self.assertEqual(set(rjson['tag_ids']), valid_tag_ids)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
