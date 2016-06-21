@@ -1066,7 +1066,6 @@ class StoredObject(object):
                  FROM %s \
                  WHERE _data->>'key' IN(%s)" % (cls._baseclass_name().lower(), 
                                                 ",".join("'{0}'".format(k) for k in keys))
-        
         yield conn.execute(query)
         for key in keys: 
             obj_map[key] = None 
@@ -1723,15 +1722,34 @@ class MappingObject(object):
     @classmethod
     @tornado.gen.coroutine
     def get(cls, **kwargs):
-        '''Given a key-pair, returns True if the pair is associated in the db.'''
-        '''Delete a single mapping object row.'''
-        cls._validate_scalar_values(*kwargs.values())
+        cls._get_key_and_value(**kwargs)
         fetched = yield cls.get_many(**kwargs)
-        raise tornado.gen.Return(len(fetched) == 1)
+        raise tornado.gen.Return(fetched[value])
 
     @classmethod
     @tornado.gen.coroutine
     def get_many(cls, **kwargs):
+        key, values = cls._get_key_and_values(**kwargs)
+        other_key = cls._keys[0] if cls._keys[1] == key else cls._keys[1]
+        fetch = []
+        sql, bind = cls._get_select_single_col_tuple(key, values)
+        yield cls._execute(sql, bind, fetch)
+        result = {str(v): {item[other_key] for item in fetch
+                  if item[key] == str(v)} for v in values}
+        raise tornado.gen.Return(result)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def has(cls, **kwargs):
+        '''Given a key-pair, returns True if the pair is associated in the db.'''
+        '''Delete a single mapping object row.'''
+        cls._validate_scalar_values(**kwargs)
+        fetched = yield cls.has_many(**kwargs)
+        raise tornado.gen.Return(len(fetched) == 1)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def has_many(cls, **kwargs):
         '''Given lists of keys, return dictionary of all pairs to True if in db.'''
         cls._validate_keys(kwargs.keys())
         fetch = []
@@ -1749,7 +1767,7 @@ class MappingObject(object):
 
         Return False if row already exists. Raise exception on other results.'''
         '''Delete a single mapping object row.'''
-        cls._validate_scalar_values(*kwargs.values())
+        cls._validate_scalar_values(**kwargs)
         rows_changed = yield cls.save_many(**kwargs)
         raise tornado.gen.Return(rows_changed == 1)
 
@@ -1761,8 +1779,9 @@ class MappingObject(object):
         # Validate input
         cls._validate_keys(kwargs.keys())
 
-        pairs = cls._get_unique_pairs(**kwargs)
-        if not pairs:
+        try:
+            pairs = cls._get_unique_pairs(**kwargs)
+        except ValueError:
             raise tornado.gen.Return(0)
 
         # Build and execute insert.
@@ -1774,7 +1793,7 @@ class MappingObject(object):
     @tornado.gen.coroutine
     def delete(cls, **kwargs):
         '''Delete a single mapping object row.'''
-        cls._validate_scalar_values(*kwargs.values())
+        cls._validate_scalar_values(**kwargs)
         rows_changed = yield cls.delete_many(**kwargs)
         raise tornado.gen.Return(rows_changed == 1)
 
@@ -1805,18 +1824,44 @@ class MappingObject(object):
         raise tornado.gen.Return(cursor)
 
     @classmethod
-    def _validate_scalar_values(cls, values1, values2):
-        '''Return true if both values1 and values2 are int/str or lists
+    def _get_key_and_value(cls, **kwargs):
+        key, values = cls._get_key_and_values()
+        if len(values) is not 1:
+            raise TypeError('Expect exactly on value in get')
+        return key, values[0]
+
+    @classmethod
+    def _get_key_and_values(cls, **kwargs):
+        if len(kwargs) is not 1:
+            raise TypeError('Expect exactly one key in get kwargs')
+        if kwargs.get(cls._keys[0]):
+            values = kwargs[cls._keys[0]]
+            key = cls._keys[0]
+        elif kwargs.get(cls._keys[1]):
+            values = kwargs[cls._keys[1]]
+            key = cls._keys[1]
+        else:
+            raise KeyError('Underecognized key in %s' % kwargs.keys())
+        if type(values) is not list:
+            values = [values]
+        return key, values
+
+    @classmethod
+    def _validate_scalar_values(cls, **kwargs):
+        '''Return true if both values inputs are int/str or lists
         of one element.'''
+        values0 = kwargs[cls._keys[0]]
+        values1 = kwargs[cls._keys[1]]
         if (
+            (type(values0) is int or type(values0) is str) or
+            (type(values0) is list and len(values0) is 1)
+        ) and (
             (type(values1) is int or type(values1) is str) or
             (type(values1) is list and len(values1) is 1)
-        ) and (
-            (type(values2) is int or type(values2) is str) or
-            (type(values2) is list and len(values2) is 1)
         ):
             return
         raise ValueError('Call the *_many method with multiple values')
+
 
     @classmethod
     def _validate_keys(cls, keys):
@@ -1835,6 +1880,16 @@ class MappingObject(object):
         left_values = left_values if type(left_values) is list else [left_values]
         right_values = right_values if type(right_values) is list else [right_values]
         return set(itertools.product(left_values, right_values))
+
+    @classmethod
+    def _get_select_single_col_tuple(cls, key, values):
+        return (
+            'SELECT * FROM {table} WHERE {key} IN ({values})'.format(
+                table=cls._table,
+                key=key,
+                values=cls._format_values_bind(values)),
+            [str(v) for v in values])
+
 
     @classmethod
     def _get_select_tuple(cls, **kwargs):
@@ -1856,7 +1911,7 @@ WHERE {table}.{key1} IN ({left_values}) AND
                 key2=cls._keys[1],
                 left_values=cls._format_values_bind(left_values),
                 right_values=cls._format_values_bind(right_values)),
-            [str(v) for v in (left_values + right_values)])
+            [str(v) for v in left_values + right_values])
 
     @classmethod
     def _get_insert_tuple(cls, values):
@@ -1925,9 +1980,14 @@ class Tag(StoredObject):
     '''Tag is a generic relation associating a set of user objects.
 
     Collections of thumbnails of a user is one use case of Tag.'''
-    def __init__(self, key, name=None):
+    def __init__(self, key, account_id=None, name=None):
         self.name = name
+        self.account_id = account_id
         super(Tag, self).__init__(key)
+
+    @staticmethod
+    def _baseclass_name():
+        return Tag.__name__
 
 
 class AbstractHashGenerator(object):
@@ -4790,7 +4850,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, account_id=None):
+                 external_id=None, account_id=None, tag_ids=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4816,6 +4876,7 @@ class ThumbnailMetadata(StoredObject):
             self.do_source_crop = True
             self.do_smart_crop = True
         self.account_id = account_id
+        self.tag_ids = tag_ids or []
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 

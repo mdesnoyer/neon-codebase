@@ -1230,6 +1230,16 @@ class ThumbnailHandler(APIV2Handler):
             yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
             yield self.thumb.save(async=True)
 
+        # Set tags if requested.
+        # TODO Restrict on tag type?
+        if self.args.get('tag_id'):
+            request_tag_ids = self.args.get('tag_id').split(',')
+            tags = [] # yield neondata.Tag.get_many(request_tag_ids)
+            valid_tag_ids = [t.get_id() for t in tags if t.account_id == self.account_id]
+            yield neondata.TagThumbnail.save_many(
+                tag_id=valid_tag_ids,
+                thumbnail_id=self.thumb.get_id())
+
     @tornado.gen.coroutine
     def _set_image(self):
         """Set self.image to a cv2-style image or raise HTTP_BAD_REQUEST."""
@@ -1980,7 +1990,6 @@ class VideoStatsHandler(APIV2Handler):
         if fields:
             fields = set(fields.split(','))
 
-        import pdb; pdb.set_trace()
         video_statuses = yield [self.db2api(x) for x in video_statuses]
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)

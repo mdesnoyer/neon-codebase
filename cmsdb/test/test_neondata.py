@@ -62,6 +62,7 @@ from cmsdb.neondata import (
     OoyalaApiRequest,
     OoyalaPlatform,
     S3CDNHostingMetadata,
+    Tag,
     TagThumbnail,
     ThumbnailID,
     ThumbnailMetadata,
@@ -1998,22 +1999,22 @@ class TestPlatformAndIntegration(NeonDbTestCase):
 
 class TestTagThumbnail(NeonDbTestCase):
     @tornado.testing.gen_test
-    def test_get_save_delete(self):
+    def test_get_has_save_delete(self):
         # Both order of keys.
         given1 = {'tag_id': 100, 'thumbnail_id': '3sdf3rwf'}
         given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 101}
 
         # Start with nothing.
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertFalse(get_result)
+        has_result = yield TagThumbnail.has(**given1)
+        self.assertFalse(has_result)
 
         # Add one row and check.
         save_result = yield TagThumbnail.save(**given1)
         self.assertTrue(save_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertTrue(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertFalse(get_result)
+        has_result = yield TagThumbnail.has(**given1)
+        self.assertTrue(has_result)
+        has_result = yield TagThumbnail.has(**given2)
+        self.assertFalse(has_result)
 
         # Saving again, 0 row count change.
         save_result = yield TagThumbnail.save(**given1)
@@ -2022,23 +2023,23 @@ class TestTagThumbnail(NeonDbTestCase):
         # Saving new tag: one row.
         save_result = yield TagThumbnail.save(**given2)
         self.assertTrue(save_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertTrue(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertTrue(get_result)
+        has_result = yield TagThumbnail.has(**given1)
+        self.assertTrue(has_result)
+        has_result = yield TagThumbnail.has(**given2)
+        self.assertTrue(has_result)
 
         # Delete and check.
         del_result = yield TagThumbnail.delete(**given1)
         self.assertEqual(1, del_result)
         del_result = yield TagThumbnail.delete(**given1)
         self.assertEqual(0, del_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertFalse(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertTrue(get_result)
+        has_result = yield TagThumbnail.has(**given1)
+        self.assertFalse(has_result)
+        has_result = yield TagThumbnail.has(**given2)
+        self.assertTrue(has_result)
 
     @tornado.testing.gen_test
-    def test_get_save_delete_many(self):
+    def test_has_save_delete_many(self):
         given1 = {'tag_id': [100, 101], 'thumbnail_id': ['3sdf3rwf', '23reff']}
         given2 = {'tag_id': [102], 'thumbnail_id': ['4fj', '3fd']}
         pairs1 = {
@@ -2053,15 +2054,21 @@ class TestTagThumbnail(NeonDbTestCase):
         }
 
         # Start with nothing.
-        #get_result = yield TagThumbnail.get_many(**given1)
-        #(self.assertFalse(get_result[pair]) for pair in pairs1)
+        #has_result = yield TagThumbnail.has_many(**given1)
+        #(self.assertFalse(has_result[pair]) for pair in pairs1)
 
         # Add twos row and check.
         save_result = yield TagThumbnail.save_many(**given1)
         self.assertEqual(4, save_result)
-        get_result = yield TagThumbnail.get_many(**given1)
-        [self.assertTrue(get_result[pair]) for pair in pairs1]
-        [self.assertFalse(get_result[pair]) for pair in pairs2]
+        has_result = yield TagThumbnail.has_many(**given1)
+        [self.assertTrue(has_result[pair]) for pair in pairs1]
+        [self.assertFalse(has_result[pair]) for pair in pairs2]
+        get_result = yield TagThumbnail.get_many(tag_id=['101', '109'])
+        self.assertEqual(set(given1['thumbnail_id']), get_result['101'])
+        get_result = yield TagThumbnail.get_many(thumbnail_id=['23reff'])
+        self.assertEqual({'100', '101'}, get_result['23reff'])
+        get_result = yield TagThumbnail.get_many(tag_id=['102'])
+        self.assertEqual(set(), get_result['102'])
 
         # Saving again, 0 row count change.
         save_result = yield TagThumbnail.save_many(**given1)
@@ -2070,10 +2077,10 @@ class TestTagThumbnail(NeonDbTestCase):
         # Saving new tags: two rows.
         save_result = yield TagThumbnail.save_many(**given2)
         self.assertEqual(2, save_result)
-        get_result = yield TagThumbnail.get_many(**given1)
-        [self.assertTrue(get_result[pair]) for pair in pairs1]
-        get_result = yield TagThumbnail.get_many(**given2)
-        [self.assertTrue(get_result[pair]) for pair in pairs2]
+        has_result = yield TagThumbnail.has_many(**given1)
+        [self.assertTrue(has_result[pair]) for pair in pairs1]
+        has_result = yield TagThumbnail.has_many(**given2)
+        [self.assertTrue(has_result[pair]) for pair in pairs2]
 
         # Delete and check.
         delete_args = {'tag_id':100, 'thumbnail_id': ['23reff', '4fj']}
@@ -2091,9 +2098,9 @@ class TestTagThumbnail(NeonDbTestCase):
         given = {
             'tag_id': [100, 101, 102],
             'thumbnail_id': ['3sdf3rwf', '23reff', '4fj', '3fd']}
-        get_result = yield TagThumbnail.get_many(**given)
-        [self.assertTrue(get_result[pair]) for pair in pairs]
-        self.assertFalse(get_result[(100, '23reff')])
+        has_result = yield TagThumbnail.has_many(**given)
+        [self.assertTrue(has_result[pair]) for pair in pairs]
+        self.assertFalse(has_result[(100, '23reff')])
 
     @tornado.testing.gen_test
     def test_bad_call(self):
@@ -2106,6 +2113,9 @@ class TestTagThumbnail(NeonDbTestCase):
         bad_input3 = {'thumbnail_id': None, 'tag_id': 100}
         with self.assertRaises(ValueError):
             yield TagThumbnail.save(**bad_input3)
+        bad_input4 = {'thumbnail_id': 123, 'tag_id': 'asdf'}
+        with self.assertRaises(TypeError):
+            yield TagThumbnail.get(**bad_input4)
 
 
 class BasePGNormalObject(object):
@@ -2543,6 +2553,12 @@ class TestBrightcovePlayer(NeonDbTestCase, BasePGNormalObject):
     @classmethod
     def _get_object_type(cls):
         return BrightcovePlayer
+
+
+class TestTag(NeonDbTestCase, BasePGNormalObject):
+    @classmethod
+    def _get_object_type(cls):
+        return Tag
 
 
 if __name__ == '__main__':

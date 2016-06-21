@@ -1227,21 +1227,21 @@ class TestOoyalaIntegrationHandler(TestControllersBase):
     def test_get_integration_exceptions(self):
         exception_mocker = patch(
             'cmsapiv2.controllers.OoyalaIntegrationHandler.get')
-	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.get_exceptions(url, exception_mocker)
 
     def test_put_integration_exceptions(self):
         exception_mocker = patch(
             'cmsapiv2.controllers.OoyalaIntegrationHandler.put')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.put_exceptions(url, params, exception_mocker)
 
     def test_post_integration_exceptions(self):
         exception_mocker = patch(
             'cmsapiv2.controllers.OoyalaIntegrationHandler.post')
         params = json.dumps({'integration_id': '123123abc'})
-	url = '/api/v2/%s/integrations/ooyala' % '1234234'
+        url = '/api/v2/%s/integrations/ooyala' % '1234234'
         self.post_exceptions(url, params, exception_mocker)
 
 
@@ -3239,6 +3239,16 @@ class TestThumbnailHandler(TestControllersBase):
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
+
+        neondata.Tag(
+            'tag_0',
+            name='A',
+            account_id=self.account_id_api_key).save()
+        neondata.Tag(
+            'tag_2',
+            name='B',
+            account_id=self.account_id_api_key).save()
+        neondata.TagThumbnail.save(tag_id='tag_2', thumbnail_id='testingtid')
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self):
@@ -3252,24 +3262,31 @@ class TestThumbnailHandler(TestControllersBase):
         video_id = 'tn_test_vid1'
         thumbnail_ref = 'kevin'
         image_url = 'blah.jpg'
-        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}'.format(
-            self.account_id_api_key, video_id, thumbnail_ref, 'blah.jpg'))
+        path = '/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}&tag_id={}'
+        url = self.get_url(path.format(
+            self.account_id_api_key,
+            video_id,
+            thumbnail_ref,
+            'blah.jpg',
+            'tag_0,tag_1,tag_2'))
         response = yield self.http_client.fetch(
             url,
             body='',
             method='POST')
-        self.assertEquals(response.code, 202)
+        self.assertEqual(response.code, 202)
         _video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key,'tn_test_vid1')
         video = neondata.VideoMetadata.get(_video_id)
 
-        self.assertEquals(len(video.thumbnail_ids), 1)
-        self.assertEquals(self.im_download_mock.call_args[0][0], 'blah.jpg')
+        self.assertEqual(len(video.thumbnail_ids), 1)
+        self.assertEqual(self.im_download_mock.call_args[0][0], 'blah.jpg')
         thumbnail = yield neondata.ThumbnailMetadata.get(
            video.thumbnail_ids[0],
            async=True)
-        self.assertEquals(thumbnail.external_id, 'kevin')
-        self.assertEquals(thumbnail.video_id, _video_id)
+        self.assertEqual(thumbnail.external_id, 'kevin')
+        self.assertEqual(thumbnail.video_id, _video_id)
+        valid_tag_ids = {'tag_0', 'tag_2'}
+        self.assertEqual(set(thumbnail.tag_ids), valid_tag_ids)
 
     @tornado.testing.gen_test
     def test_add_new_thumbnail_by_body(self):
