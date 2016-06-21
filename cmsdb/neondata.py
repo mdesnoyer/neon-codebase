@@ -1711,14 +1711,25 @@ class MappingObject(object):
     Arguments should match the implementing class's table column names.
     Ids are enforced by foreign key index to be valid references.
     Uniqueness is likewise enforced by a unique index on the id pair.'''
-    def __init__(self, **kwargs):
-        pass
 
-    def get(self, **kwargs):
+    # Set these in the subclass.
+    _keys = [None, None]  # Must match name and order of schema
+    _table = None
+
+    @classmethod
+    @tornado.gen.coroutine
+    def get(cls, **kwargs):
         '''Given a key-pair, returns True if the pair is associated in the db.'''
-        return True
+        cls._validate_keys(kwargs.keys())
+        pairs = cls._get_unique_pairs(**kwargs)
+        sql, bind = cls._get_select_tuple(pairs)
+        fetched = []
+        cursor = yield cls._execute(sql, bind, fetched)
+        raise tornado.gen.Return(len(fetched) == 1)
 
-    def get_many(self, **kwargs):
+    @classmethod
+    @tornado.gen.coroutine
+    def get_many(cls, **kwargs):
         '''Given lists of keys, return dictionary of all pairs to True if in db.'''
         return {(0,1): True}
 
@@ -1728,7 +1739,8 @@ class MappingObject(object):
         '''Given a pair of keys, return True if save results in new row.
 
         Return False if row already exists. Raise exception on other results.'''
-        cls.save_many(**kwargs)
+        rows_changed = yield cls.save_many(**kwargs)
+        raise tornado.gen.Return(rows_changed == 1)
 
     @classmethod
     @tornado.gen.coroutine
@@ -1736,36 +1748,87 @@ class MappingObject(object):
         '''Allow saving of many mapping relations at once.'''
 
         # Validate input
-        if not len(kwargs) == 2:
-            raise Exception('Wrong number of arguments')
-        keys = kwargs.keys()
-        if not keys == cls._keys:
-            raise Exception('Bad key in save %s' % keys)
+        cls._validate_keys(kwargs.keys())
 
-        # Gather unique pairs of input keys.
-        left_values = kwargs[_keys[0]]
-        right_values = kwargs[_keys[1]]
-        product = set(itertools.product(*kwargs.values()))
-        if not product:
+        pairs = cls._get_unique_pairs(**kwargs)
+        if not pairs:
             raise tornado.gen.Return(0)
 
         # Build and execute insert.
-        sql, bind = cls._get_insert_tuple(product)
-        conn = yield db.get_connection()
-        try:
-            rv = yield conn.execute(sql, bind)
-        except Exception as e:
-            _log.error(e.message)
-            statemon.state.increment('postgres_unknown_errors')
-            rv = 0
-        finally:
-            db.return_connection(conn)
-        raise tornado.gen.Return(rv)
+        sql, bind = cls._get_insert_tuple(pairs)
+        cursor = yield cls._execute(sql, bind)
+        raise tornado.gen.Return(cursor.rowcount)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def delete(cls, **kwargs):
+        '''Delete a single mapping object row.'''
+        cls._validate_keys(kwargs.keys())
+        pairs = cls._get_unique_pairs(**kwargs)
+        sql, bind = cls._get_delete_tuple(pairs)
+        cursor = yield cls._execute(sql, bind)
+        raise tornado.gen.Return(cursor.rowcount)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def delete_many(cls, **kwargs):
+        '''Delete many mapping object rows.'''
+        return 0
+
+    @classmethod
+    def _validate_keys(cls, keys):
+        if not len(keys) == 2:
+            raise KeyError('Wrong number of arguments')
+        if not set(keys) == set(cls._keys):
+            raise KeyError('Bad key in save %s' % keys)
+
+    @classmethod
+    def _get_unique_pairs(cls, **kwargs):
+        '''Gather unique pairs of input keys.'''
+        left_values = kwargs[cls._keys[0]]
+        right_values = kwargs[cls._keys[1]]
+        if not left_values or not right_values:
+            raise ValueError('Input be valued')
+        left_values = left_values if type(left_values) is list else [left_values]
+        right_values = right_values if type(right_values) is list else [right_values]
+        return set(itertools.product(left_values, right_values))
 
     @staticmethod
+    @tornado.gen.coroutine
+    def _execute(sql, bind, fetch=None):
+        db = PostgresDB()
+        conn = yield db.get_connection()
+        try:
+            cursor = yield conn.execute(sql, bind)
+            if type(fetch) is list:
+                fetch.extend(cursor.fetchall())
+
+        except Exception as e:
+            statemon.state.increment('postgres_unknown_errors')
+            raise e
+        finally:
+            db.return_connection(conn)
+        raise tornado.gen.Return(cursor)
+
+    @classmethod
+    def _get_select_tuple(cls, values):
+        '''Get select sql string with %s placeholders, and a list of binds.'''
+        return (
+'''
+SELECT *
+FROM {table}
+WHERE {table}.{key1} = %s AND
+      {table}.{key2} = %s;'''.format(
+                table=cls._table,
+                key1=cls._keys[0],
+                key2=cls._keys[1]),
+            [str(v) for v in itertools.chain.from_iterable(values)])
+
+    @classmethod
     def _get_insert_tuple(cls, values):
-        '''Get a sql string with %s placeholders, and a list of binds'''
-        return '''
+        '''Get insert sql string with %s placeholders, and a list of binds.'''
+        return (
+'''
 WITH new_values AS (
     SELECT *
     FROM (
@@ -1779,11 +1842,23 @@ WITH new_values AS (
 )
 INSERT INTO {table}
 SELECT * FROM new_values;'''.format(
-            table=cls._table,
-            key1=cls._keys[0],
-            key2=cls._keys[1],
-            values=cls._format_values_bind(values)),
-        itertools.chain.form_iterable(values)
+                table=cls._table,
+                key1=cls._keys[0],
+                key2=cls._keys[1],
+                values=cls._format_values_bind(values)),
+            [str(v) for v in itertools.chain.from_iterable(values)])
+
+    @classmethod
+    def _get_delete_tuple(cls, values):
+        return (
+'''
+DELETE FROM {table}
+WHERE {table}.{key1} = %s AND
+      {table}.{key2} = %s'''.format(
+                table=cls._table,
+                key1=cls._keys[0],
+                key2=cls._keys[1]),
+            [str(v) for v in itertools.chain.from_iterable(values)])
 
     @staticmethod
     def _format_values_bind(values):
@@ -1792,22 +1867,10 @@ SELECT * FROM new_values;'''.format(
               '(%s,%s),(%s,%s),(%s,%s),(%s,%s)' '''
         return ','.join(['(%s, %s)' for _ in values])
 
-    @classmethod
-    @tornado.gen.coroutine
-    def delete(cls, **kwargs):
-        '''Delete a single mapping object row.'''
-        return cls.delete_many(**kwargs)
-
-    @classmethod
-    @tornado.gen.coroutine
-    def delete_many(cls, **kwargs):
-        '''Delete many mapping object rows.'''
-        return 0
-
 
 class TagThumbnail(MappingObject):
     _table = 'tag_thumbnail'
-    _keys = ['thumbnail_id', 'tag_id']
+    _keys = ['tag_id', 'thumbnail_id']
 
 
 class Tag(StoredObject):

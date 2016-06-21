@@ -42,37 +42,39 @@ import uuid
 import test_utils.mock_boto_s3 as boto_mock
 from StringIO import StringIO
 from cmsdb import neondata
-from cmsdb.neondata import AbstractPlatform, \
-                           AkamaiCDNHostingMetadata, \
-                           BrightcoveApiRequest, \
-                           BrightcovePlayer, \
-                           BrightcovePlatform, \
-                           CDNHostingMetadata, \
-                           CDNHostingMetadataList, \
-                           CloudinaryCDNHostingMetadata, \
-                           ExperimentState, \
-                           ExperimentStrategy, \
-                           InternalVideoID, \
-                           NeonApiKey, \
-                           NeonApiRequest, \
-                           NeonCDNHostingMetadata, \
-                           NeonPlatform, \
-                           NeonUserAccount, \
-                           OoyalaApiRequest, \
-                           OoyalaPlatform, \
-                           S3CDNHostingMetadata, \
-                           ThumbnailID, \
-                           ThumbnailMetadata, \
-                           ThumbnailServingURLs, \
-                           ThumbnailStatus, \
-                           ThumbnailType, \
-                           ThumbnailURLMapper, \
-                           TrackerAccountIDMapper, \
-                           User, \
-                           VideoMetadata, \
-                           VideoStatus, \
-                           YoutubeApiRequest, \
-                           YoutubePlatform
+from cmsdb.neondata import (
+    AbstractPlatform,
+    AkamaiCDNHostingMetadata,
+    BrightcoveApiRequest,
+    BrightcovePlayer,
+    BrightcovePlatform,
+    CDNHostingMetadata,
+    CDNHostingMetadataList,
+    CloudinaryCDNHostingMetadata,
+    ExperimentState,
+    ExperimentStrategy,
+    InternalVideoID,
+    NeonApiKey,
+    NeonApiRequest,
+    NeonCDNHostingMetadata,
+    NeonPlatform,
+    NeonUserAccount,
+    OoyalaApiRequest,
+    OoyalaPlatform,
+    S3CDNHostingMetadata,
+    TagThumbnail,
+    ThumbnailID,
+    ThumbnailMetadata,
+    ThumbnailServingURLs,
+    ThumbnailStatus,
+    ThumbnailType,
+    ThumbnailURLMapper,
+    TrackerAccountIDMapper,
+    User,
+    VideoMetadata,
+    VideoStatus,
+    YoutubeApiRequest,
+    YoutubePlatform )
 from cvutils import smartcrop
 import numpy as np
 
@@ -1995,7 +1997,97 @@ class TestPlatformAndIntegration(NeonDbTestCase):
 
 
 class TestTagThumbnail(NeonDbTestCase):
-    pass
+    @tornado.testing.gen_test
+    def test_get_save_delete(self):
+        # Both order of keys.
+        given1 = {'tag_id': 100, 'thumbnail_id': '3sdf3rwf'}
+        given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 101}
+
+        # Start with nothing.
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertFalse(get_result)
+
+        # Add one row and check.
+        save_result = yield TagThumbnail.save(**given1)
+        self.assertTrue(save_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertTrue(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertFalse(get_result)
+
+        # Saving again, 0 row count change.
+        save_result = yield TagThumbnail.save(**given1)
+        self.assertFalse(save_result)
+
+        # Saving new tag: one row.
+        save_result = yield TagThumbnail.save(**given2)
+        self.assertTrue(save_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertTrue(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertTrue(get_result)
+
+        # Delete and check.
+        del_result = yield TagThumbnail.delete(**given1)
+        self.assertEqual(1, del_result)
+        del_result = yield TagThumbnail.delete(**given1)
+        self.assertEqual(0, del_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertFalse(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertTrue(get_result)
+
+    @tornado.testing.gen_test
+    def test_get_save_delete_many(self):
+        # Both order of keys.
+        given1 = {'tag_id': 100, 'thumbnail_id': '3sdf3rwf'}
+        given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 101}
+
+        # Start with nothing.
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertFalse(get_result)
+
+        # Add one row and check.
+        save_result = yield TagThumbnail.save(**given1)
+        self.assertTrue(save_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertTrue(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertFalse(get_result)
+
+        # Saving again, 0 row count change.
+        save_result = yield TagThumbnail.save(**given1)
+        self.assertFalse(save_result)
+
+        # Saving new tag: one row.
+        save_result = yield TagThumbnail.save(**given2)
+        self.assertTrue(save_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertTrue(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertTrue(get_result)
+
+        # Delete and check.
+        del_result = yield TagThumbnail.delete(**given1)
+        self.assertEqual(1, del_result)
+        del_result = yield TagThumbnail.delete(**given1)
+        self.assertEqual(0, del_result)
+        get_result = yield TagThumbnail.get(**given1)
+        self.assertFalse(get_result)
+        get_result = yield TagThumbnail.get(**given2)
+        self.assertTrue(get_result)
+
+    @tornado.testing.gen_test
+    def test_bad_call(self):
+        bad_input1 = {'bad_id': 100, 'thumbnail_id': '3sdf3rwf'}
+        with self.assertRaises(KeyError):
+            yield TagThumbnail.save(**bad_input1)
+        bad_input2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 100, 'bad_id': 15}
+        with self.assertRaises(KeyError):
+            yield TagThumbnail.save(**bad_input2)
+        bad_input3 = {'thumbnail_id': None, 'tag_id': 100}
+        with self.assertRaises(ValueError):
+            yield TagThumbnail.save(**bad_input3)
 
 
 class BasePGNormalObject(object):
@@ -2313,8 +2405,12 @@ class TestUser(NeonDbTestCase, BasePGNormalObject):
         a_ids = yield new_user.get_associated_account_ids(async=True)
         self.assertEquals(0, len(a_ids))
 
-
 class TestNeonUserAccount(NeonDbTestCase, BasePGNormalObject):
+    @classmethod
+    def setUpClass(cls):
+        super(TestNeonUserAccount, cls).setUpClass()
+        BasePGNormalObject.keys = [('dynamic', 'key')]
+
     @classmethod
     def _get_object_type(cls):
         return NeonUserAccount
