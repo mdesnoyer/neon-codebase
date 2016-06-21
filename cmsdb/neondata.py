@@ -26,7 +26,7 @@ import base64
 import binascii
 import cmsdb.cdnhosting
 import code
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import concurrent.futures
 import copy
 import cv.imhash_index
@@ -1710,7 +1710,11 @@ class MappingObject(object):
 
     Arguments should match the implementing class's table column names.
     Ids are enforced by foreign key index to be valid references.
-    Uniqueness is likewise enforced by a unique index on the id pair.'''
+    Uniqueness is likewise enforced by a unique index on the id pair.
+
+    Assumes the database contains a table with name in cls._table,
+    and that table columns are the values in _keys:
+        e.g., _table = tag_thumbnail and _keys = ['tag_id', 'thumbnail_id']'''
 
     # Set these in the subclass.
     _keys = [None, None]  # Must match name and order of schema
@@ -1720,25 +1724,32 @@ class MappingObject(object):
     @tornado.gen.coroutine
     def get(cls, **kwargs):
         '''Given a key-pair, returns True if the pair is associated in the db.'''
-        cls._validate_keys(kwargs.keys())
-        pairs = cls._get_unique_pairs(**kwargs)
-        sql, bind = cls._get_select_tuple(pairs)
-        fetched = []
-        cursor = yield cls._execute(sql, bind, fetched)
+        '''Delete a single mapping object row.'''
+        cls._validate_scalar_values(*kwargs.values())
+        fetched = yield cls.get_many(**kwargs)
         raise tornado.gen.Return(len(fetched) == 1)
 
     @classmethod
     @tornado.gen.coroutine
     def get_many(cls, **kwargs):
         '''Given lists of keys, return dictionary of all pairs to True if in db.'''
-        return {(0,1): True}
+        cls._validate_keys(kwargs.keys())
+        fetch = []
+        sql, bind = cls._get_select_tuple(**kwargs)
+        yield cls._execute(sql, bind, fetch)
+        result = defaultdict(lambda: False)
+        for row in fetch:
+            result[(row[cls._keys[0]], row[cls._keys[1]])] = True
+        raise tornado.gen.Return(result)
 
     @classmethod
     @tornado.gen.coroutine
     def save(cls, **kwargs):
-        '''Given a pair of keys, return True if save results in new row.
+        '''Given a pair of keys, return True if save creates new row.
 
         Return False if row already exists. Raise exception on other results.'''
+        '''Delete a single mapping object row.'''
+        cls._validate_scalar_values(*kwargs.values())
         rows_changed = yield cls.save_many(**kwargs)
         raise tornado.gen.Return(rows_changed == 1)
 
@@ -1763,35 +1774,18 @@ class MappingObject(object):
     @tornado.gen.coroutine
     def delete(cls, **kwargs):
         '''Delete a single mapping object row.'''
-        cls._validate_keys(kwargs.keys())
-        pairs = cls._get_unique_pairs(**kwargs)
-        sql, bind = cls._get_delete_tuple(pairs)
-        cursor = yield cls._execute(sql, bind)
-        raise tornado.gen.Return(cursor.rowcount)
+        cls._validate_scalar_values(*kwargs.values())
+        rows_changed = yield cls.delete_many(**kwargs)
+        raise tornado.gen.Return(rows_changed == 1)
 
     @classmethod
     @tornado.gen.coroutine
     def delete_many(cls, **kwargs):
         '''Delete many mapping object rows.'''
-        return 0
-
-    @classmethod
-    def _validate_keys(cls, keys):
-        if not len(keys) == 2:
-            raise KeyError('Wrong number of arguments')
-        if not set(keys) == set(cls._keys):
-            raise KeyError('Bad key in save %s' % keys)
-
-    @classmethod
-    def _get_unique_pairs(cls, **kwargs):
-        '''Gather unique pairs of input keys.'''
-        left_values = kwargs[cls._keys[0]]
-        right_values = kwargs[cls._keys[1]]
-        if not left_values or not right_values:
-            raise ValueError('Input be valued')
-        left_values = left_values if type(left_values) is list else [left_values]
-        right_values = right_values if type(right_values) is list else [right_values]
-        return set(itertools.product(left_values, right_values))
+        cls._validate_keys(kwargs.keys())
+        sql, bind = cls._get_delete_tuple(**kwargs)
+        cursor = yield cls._execute(sql, bind)
+        raise tornado.gen.Return(cursor.rowcount)
 
     @staticmethod
     @tornado.gen.coroutine
@@ -1811,18 +1805,58 @@ class MappingObject(object):
         raise tornado.gen.Return(cursor)
 
     @classmethod
-    def _get_select_tuple(cls, values):
+    def _validate_scalar_values(cls, values1, values2):
+        '''Return true if both values1 and values2 are int/str or lists
+        of one element.'''
+        if (
+            (type(values1) is int or type(values1) is str) or
+            (type(values1) is list and len(values1) is 1)
+        ) and (
+            (type(values2) is int or type(values2) is str) or
+            (type(values2) is list and len(values2) is 1)
+        ):
+            return
+        raise ValueError('Call the *_many method with multiple values')
+
+    @classmethod
+    def _validate_keys(cls, keys):
+        if not len(keys) == 2:
+            raise KeyError('Wrong number of arguments')
+        if not set(keys) == set(cls._keys):
+            raise KeyError('Bad key in save %s' % keys)
+
+    @classmethod
+    def _get_unique_pairs(cls, **kwargs):
+        '''Gather unique pairs of input keys.'''
+        left_values = kwargs[cls._keys[0]]
+        right_values = kwargs[cls._keys[1]]
+        if not left_values or not right_values:
+            raise ValueError('Input be valued')
+        left_values = left_values if type(left_values) is list else [left_values]
+        right_values = right_values if type(right_values) is list else [right_values]
+        return set(itertools.product(left_values, right_values))
+
+    @classmethod
+    def _get_select_tuple(cls, **kwargs):
         '''Get select sql string with %s placeholders, and a list of binds.'''
+        left_values = kwargs[cls._keys[0]]
+        right_values = kwargs[cls._keys[1]]
+        if type(left_values) is not list:
+            left_values = [left_values]
+        if type(right_values) is not list:
+            right_values = [right_values]
         return (
 '''
 SELECT *
 FROM {table}
-WHERE {table}.{key1} = %s AND
-      {table}.{key2} = %s;'''.format(
+WHERE {table}.{key1} IN ({left_values}) AND
+      {table}.{key2} IN ({right_values});'''.format(
                 table=cls._table,
                 key1=cls._keys[0],
-                key2=cls._keys[1]),
-            [str(v) for v in itertools.chain.from_iterable(values)])
+                key2=cls._keys[1],
+                left_values=cls._format_values_bind(left_values),
+                right_values=cls._format_values_bind(right_values)),
+            [str(v) for v in (left_values + right_values)])
 
     @classmethod
     def _get_insert_tuple(cls, values):
@@ -1845,23 +1879,37 @@ SELECT * FROM new_values;'''.format(
                 table=cls._table,
                 key1=cls._keys[0],
                 key2=cls._keys[1],
-                values=cls._format_values_bind(values)),
+                values=cls._format_insert_values_bind(values)),
             [str(v) for v in itertools.chain.from_iterable(values)])
 
     @classmethod
-    def _get_delete_tuple(cls, values):
+    def _get_delete_tuple(cls, **kwargs):
+        left_values = kwargs[cls._keys[0]]
+        right_values = kwargs[cls._keys[1]]
+        if type(left_values) is not list:
+            left_values = [left_values]
+        if type(right_values) is not list:
+            right_values = [right_values]
         return (
 '''
 DELETE FROM {table}
-WHERE {table}.{key1} = %s AND
-      {table}.{key2} = %s'''.format(
+WHERE {table}.{key1} IN ({left_values}) AND
+      {table}.{key2} IN ({right_values})'''.format(
                 table=cls._table,
                 key1=cls._keys[0],
-                key2=cls._keys[1]),
-            [str(v) for v in itertools.chain.from_iterable(values)])
+                key2=cls._keys[1],
+                left_values=cls._format_values_bind(left_values),
+                right_values=cls._format_values_bind(right_values)),
+            [str(v) for v in (left_values + right_values)])
 
     @staticmethod
     def _format_values_bind(values):
+        '''Given list of values, get valid IN clause expression.
+        E.g., [0, 1, 2, 3] => '%s,%s,%s,%s' '''
+        return ','.join(['%s' for _ in values])
+
+    @staticmethod
+    def _format_insert_values_bind(values):
         '''Given list of 2-ples, get valid VALUES clause expression.
         E.g., [(0,0), (0,1), (0,1), (0,2)] =>
               '(%s,%s),(%s,%s),(%s,%s),(%s,%s)' '''

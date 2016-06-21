@@ -2039,43 +2039,61 @@ class TestTagThumbnail(NeonDbTestCase):
 
     @tornado.testing.gen_test
     def test_get_save_delete_many(self):
-        # Both order of keys.
-        given1 = {'tag_id': 100, 'thumbnail_id': '3sdf3rwf'}
-        given2 = {'thumbnail_id': '3sdf3rwf', 'tag_id': 101}
+        given1 = {'tag_id': [100, 101], 'thumbnail_id': ['3sdf3rwf', '23reff']}
+        given2 = {'tag_id': [102], 'thumbnail_id': ['4fj', '3fd']}
+        pairs1 = {
+            ('100', '3sdf3rwf'),
+            ('100', '23reff'),
+            ('101', '3sdf3rwf'),
+            ('101', '23reff')
+        }
+        pairs2 = {
+            ('102', '4fj'),
+            ('102', '3fd')
+        }
 
         # Start with nothing.
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertFalse(get_result)
+        #get_result = yield TagThumbnail.get_many(**given1)
+        #(self.assertFalse(get_result[pair]) for pair in pairs1)
 
-        # Add one row and check.
-        save_result = yield TagThumbnail.save(**given1)
-        self.assertTrue(save_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertTrue(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertFalse(get_result)
+        # Add twos row and check.
+        save_result = yield TagThumbnail.save_many(**given1)
+        self.assertEqual(4, save_result)
+        get_result = yield TagThumbnail.get_many(**given1)
+        [self.assertTrue(get_result[pair]) for pair in pairs1]
+        [self.assertFalse(get_result[pair]) for pair in pairs2]
 
         # Saving again, 0 row count change.
-        save_result = yield TagThumbnail.save(**given1)
-        self.assertFalse(save_result)
+        save_result = yield TagThumbnail.save_many(**given1)
+        self.assertEqual(0, save_result)
 
-        # Saving new tag: one row.
-        save_result = yield TagThumbnail.save(**given2)
-        self.assertTrue(save_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertTrue(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertTrue(get_result)
+        # Saving new tags: two rows.
+        save_result = yield TagThumbnail.save_many(**given2)
+        self.assertEqual(2, save_result)
+        get_result = yield TagThumbnail.get_many(**given1)
+        [self.assertTrue(get_result[pair]) for pair in pairs1]
+        get_result = yield TagThumbnail.get_many(**given2)
+        [self.assertTrue(get_result[pair]) for pair in pairs2]
 
         # Delete and check.
-        del_result = yield TagThumbnail.delete(**given1)
+        delete_args = {'tag_id':100, 'thumbnail_id': ['23reff', '4fj']}
+        pairs = {
+            ('100', '3sdf3rwf'),
+            ('101', '3sdf3rwf'),
+            ('101', '23reff'),
+            ('102', '4fj'),
+            ('102', '3fd')
+        }
+        del_result = yield TagThumbnail.delete_many(**delete_args)
         self.assertEqual(1, del_result)
-        del_result = yield TagThumbnail.delete(**given1)
+        del_result = yield TagThumbnail.delete_many(**delete_args)
         self.assertEqual(0, del_result)
-        get_result = yield TagThumbnail.get(**given1)
-        self.assertFalse(get_result)
-        get_result = yield TagThumbnail.get(**given2)
-        self.assertTrue(get_result)
+        given = {
+            'tag_id': [100, 101, 102],
+            'thumbnail_id': ['3sdf3rwf', '23reff', '4fj', '3fd']}
+        get_result = yield TagThumbnail.get_many(**given)
+        [self.assertTrue(get_result[pair]) for pair in pairs]
+        self.assertFalse(get_result[(100, '23reff')])
 
     @tornado.testing.gen_test
     def test_bad_call(self):
