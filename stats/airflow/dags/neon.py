@@ -205,55 +205,81 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
 
     bucket_name, prefix = _get_s3_tuple(input_path)
 
-    # Get the timestamps for our current task
-    dt_start = execution_date
-    ts_start = int((dateutils.timezone(dt_start, timezone='utc') - 
-                    EPOCH).total_seconds())
-    ts_end = int(((dateutils.timezone(dt_start, timezone='utc') + 
-                   clicklogs.schedule_interval) - EPOCH).total_seconds())
-
     s3 = S3Hook(s3_conn_id='s3')
+
+    # # Get the timestamps for our current task
+    # dt_start = execution_date
+    # ts_start = int((dateutils.timezone(dt_start, timezone='utc') - 
+    #                 EPOCH).total_seconds())
+    # ts_end = int(((dateutils.timezone(dt_start, timezone='utc') + 
+    #                clicklogs.schedule_interval) - EPOCH).total_seconds())
+
+    # input_files = []
+    # for tai in _get_s3_tais(input_path):
+    #     tai_prefix = os.path.join(prefix, tai, dt_start.strftime('%Y/%m/%d'),
+    #                               '')
+    #     _log.debug("looking for keys in s3://{bucket}/{prefix}".format(
+    #         bucket=bucket_name, prefix=tai_prefix))
+    #     try:
+    #         for key in s3.list_keys(bucket_name=bucket_name,
+    #                                 prefix=tai_prefix, delimiter='/'):
+    #             # (merged.)clicklog.<TIMESTAMP_MS>.avro
+    #             if key[-1] == '/':
+    #                 # just the "directory" prefix, not an actual object (file)
+    #                 continue  
+    #             tokens = os.path.basename(key).split('.')
+    #             if tokens[-1] == 'avro':
+    #                 try:
+    #                     # timestamp(ms) is just before the .avro extension
+    #                     ts = int(tokens[-2])  
+    #                 except ValueError:
+    #                     _log.warning(("{task}: file {key} lacks a timestamp "
+    #                                  "in its name").format(task=task, key=key))
+    #                     continue
+    #                 _log.debug(("{task}: considering avro file {key} "
+    #                             "({dt})").format(
+    #                                 task=task, key=key,
+    #                                 dt=_ts_to_datetime(ts / 10 ** 3)))
+    #                 if ts_start <= (ts / 10 ** 3) < ts_end:
+    #                     # the timestamp, at second-resolution, is
+    #                     # between our ds
+    #                     input_files.append(key)
+    #                     _log.info(("{task}: file {key} is between {start} and "
+    #                               "{end}").format(task=task, key=key,
+    #                                               start=ts_start,
+    #                                               end=ts_end))
+    #     except TypeError as e:
+    #         _log.warning(("tai {tai} does not have any objects in S3 prefix "
+    #                      "{prefix}").format(tai=tai, prefix=tai_prefix))
+
+    # return input_files
+
+    #Get the current date
+    processing_date = datetime.utcnow().strftime("%Y/%m/%d")
+    _log.info('processing date is %s' % processing_date)
 
     input_files = []
     for tai in _get_s3_tais(input_path):
-        tai_prefix = os.path.join(prefix, tai, dt_start.strftime('%Y/%m/%d'),
-                                  '')
-        _log.debug("looking for keys in s3://{bucket}/{prefix}".format(
-            bucket=bucket_name, prefix=tai_prefix))
-        try:
-            for key in s3.list_keys(bucket_name=bucket_name,
-                                    prefix=tai_prefix, delimiter='/'):
-                # (merged.)clicklog.<TIMESTAMP_MS>.avro
-                if key[-1] == '/':
-                    # just the "directory" prefix, not an actual object (file)
-                    continue  
-                tokens = os.path.basename(key).split('.')
-                if tokens[-1] == 'avro':
-                    try:
-                        # timestamp(ms) is just before the .avro extension
-                        ts = int(tokens[-2])  
-                    except ValueError:
-                        _log.warning(("{task}: file {key} lacks a timestamp "
-                                     "in its name").format(task=task, key=key))
-                        continue
-                    _log.debug(("{task}: considering avro file {key} "
-                                "({dt})").format(
-                                    task=task, key=key,
-                                    dt=_ts_to_datetime(ts / 10 ** 3)))
-                    if ts_start <= (ts / 10 ** 3) < ts_end:
-                        # the timestamp, at second-resolution, is
-                        # between our ds
-                        input_files.append(key)
-                        _log.info(("{task}: file {key} is between {start} and "
-                                  "{end}").format(task=task, key=key,
-                                                  start=ts_start,
-                                                  end=ts_end))
-        except TypeError as e:
-            _log.warning(("tai {tai} does not have any objects in S3 prefix "
-                         "{prefix}").format(tai=tai, prefix=tai_prefix))
+        tai_prefix = os.path.join(prefix, tai, processing_date, '')
+
+        _log.info('tai prefix is %s' % tai_prefix)
+
+        #check if the prefix exists
+        prefix_exists = s3.check_for_prefix(prefix=tai_prefix, 
+                                            bucket_name=bucket_name, 
+                                            delimiter='/')
+
+        # Get the S3 keys only if prefix exists
+        if prefix_exists:
+            for key in s3.list_keys(bucket_name=bucket_name, 
+                                    prefix=tai_prefix, 
+                                    delimiter='/'):
+                input_files.append(key)
+        else:
+            _log.info(("tai {tai} does not have any objects in S3 prefix "
+                          "{prefix}").format(tai=tai, prefix=tai_prefix))
 
     return input_files
-
 
 def _get_s3_staging_prefix(dag, execution_date, prefix=''):
     """
@@ -266,7 +292,7 @@ def _get_s3_staging_prefix(dag, execution_date, prefix=''):
     :return: S3 key prefix string
     :return type: str
     """
-    return _do_s3_prefix_fixup(os.path.join(prefix, dag.dag_id, 'staging',
+    return _do_s3_prefix_fixup(os.path.join(prefix,
                                             execution_date.strftime("%Y/%m/%d/%H"), ''))
 
 
@@ -406,11 +432,55 @@ def _quiet_period(**kwargs):
         time.sleep((deadline - now).total_seconds())
 
 
+# def _stage_files(**kwargs):
+#     """Copy input path files to staging area for the execution date
+
+#     :return:
+#     """
+#     dag = kwargs['dag']
+#     execution_date = kwargs['execution_date']
+#     task = kwargs['task_instance_key_str']
+
+#     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
+#     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
+
+#     s3 = S3Hook(s3_conn_id='s3')
+
+#     _log.info("{task}: staging files for map/reduce".format(task=task))
+#     input_files = _get_s3_input_files(dag=dag,
+#                                       execution_date=execution_date,
+#                                       task=task,
+#                                       input_path=kwargs['input_path'])
+#     output_prefix = _get_s3_staging_prefix(dag=dag,
+#                                            execution_date=execution_date,
+#                                            prefix=staging_prefix)
+
+#     # Copy files to staging location with Reduced Redundancy enabled
+#     if input_files:
+#         for key in input_files:
+#             # namespace prefix with TAI
+#             tai = key.lstrip(input_prefix).split('/')[0]
+#             dst_key = os.path.join(output_prefix, "{tai}.{name}".format(
+#                 tai=tai, name=os.path.basename(key)))
+
+#             _log.info(("copying from s3://{src_bucket}/{src} to "
+#                        "s3://{dst_bucket}/{dst}").format(
+#                            src_bucket=input_bucket,
+#                            src=key,
+#                            dst_bucket=staging_bucket,
+#                            dst=dst_key))
+#             s3.get_key(key, bucket_name=input_bucket).copy(
+#                 dst_bucket=staging_bucket,
+#                 dst_key=dst_key,
+#                 reduced_redundancy=True)
+#     else:
+#         _log.warning("{task}: there were no files to stage".format(task=task))
+
 def _stage_files(**kwargs):
     """Copy input path files to staging area for the execution date
-
-    :return:
     """
+    s3 = S3Hook(s3_conn_id='s3')
+
     dag = kwargs['dag']
     execution_date = kwargs['execution_date']
     task = kwargs['task_instance_key_str']
@@ -418,38 +488,31 @@ def _stage_files(**kwargs):
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
-    s3 = S3Hook(s3_conn_id='s3')
+    _log.info('staging bucket is %s' % staging_bucket)
+    _log.info('staging prefix is %s' % staging_prefix)
 
-    _log.info("{task}: staging files for map/reduce".format(task=task))
-    input_files = _get_s3_input_files(dag=dag,
-                                      execution_date=execution_date,
-                                      task=task,
-                                      input_path=kwargs['input_path'])
+    input_files = _get_s3_input_files(input_path=kwargs['input_path'])
+
     output_prefix = _get_s3_staging_prefix(dag=dag,
                                            execution_date=execution_date,
                                            prefix=staging_prefix)
 
-    # Copy files to staging location with Reduced Redundancy enabled
-    if input_files:
-        for key in input_files:
-            # namespace prefix with TAI
-            tai = key.lstrip(input_prefix).split('/')[0]
-            dst_key = os.path.join(output_prefix, "{tai}.{name}".format(
-                tai=tai, name=os.path.basename(key)))
+    _log.info('output prefix is %s' % output_prefix)
 
-            _log.info(("copying from s3://{src_bucket}/{src} to "
-                       "s3://{dst_bucket}/{dst}").format(
-                           src_bucket=input_bucket,
-                           src=key,
-                           dst_bucket=staging_bucket,
-                           dst=dst_key))
-            s3.get_key(key, bucket_name=input_bucket).copy(
-                dst_bucket=staging_bucket,
-                dst_key=dst_key,
-                reduced_redundancy=True)
+    # Copy files to staging location
+    if input_files:
+        for keys_to_copy in input_files:
+            keys_to_copy_split = keys_to_copy.split('/')
+
+            bucket = s3.get_bucket(input_bucket)
+
+            bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
+                            str(bucket.name), 
+                            keys_to_copy,
+                            reduced_redundancy=True)
     else:
         _log.warning("{task}: there were no files to stage".format(task=task))
-
+        
 
 def _run_mr_cleaning_job(**kwargs):
     """Run the Map/Reduce cleaning job"""
