@@ -491,8 +491,10 @@ def _stage_files(**kwargs):
     _log.info('staging bucket is %s' % staging_bucket)
     _log.info('staging prefix is %s' % staging_prefix)
 
-    input_files = _get_s3_input_files(dag=dag, execution_date=execution_date,
-                                      task=task, input_path=input_path)
+    input_files = _get_s3_input_files(dag=dag,
+                                      execution_date=execution_date,
+                                      task=task,
+                                      input_path=kwargs['input_path'])
 
     output_prefix = _get_s3_staging_prefix(dag=dag,
                                            execution_date=execution_date,
