@@ -1039,10 +1039,29 @@ class TagHandler(APIV2Handler):
     def post(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
+            Required('name'): All(Coerce(unicode), Length(min=1, max=256)),
             'associations': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
-        self.success({})
+        tag = neondata.Tag(
+            None,
+            account_id=self.args['account_id'],
+            name=self.args['name'])
+        yield tag.save(async=True)
+        if self.args.get('associations'):
+            assocs = self.args['associations'].split(',')
+            # Handle just thumbnail association. Implement video later.
+            thumbs = yield neondata.ThumbnailMetadata.get_many(assocs, async=True)
+            valid_thumb_ids = [thumb.get_id() for thumb in thumbs if thumb]
+            yield neondata.TagThumbnail.save_many(
+                tag_id=tag.get_id(),
+                thumbnail_id=valid_thumb_ids)
+        else:
+            valid_thumb_ids = []
+        self.success({
+            'tag_id': tag.get_id(),
+            'account_id':  account_id,
+            'name': tag.name,
+            'thumbnail_ids': valid_thumb_ids})
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -1244,7 +1263,6 @@ class ThumbnailHandler(APIV2Handler):
             yield self.thumb.save(async=True)
 
         # Set tags if requested.
-        # TODO Restrict on tag type?
         if self.args.get('tag_id'):
             request_tag_ids = self.args.get('tag_id').split(',')
             tags = yield neondata.Tag.get_many(request_tag_ids, async=True)

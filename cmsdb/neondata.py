@@ -1853,15 +1853,14 @@ class MappingObject(object):
         values0 = kwargs[cls._keys[0]]
         values1 = kwargs[cls._keys[1]]
         if (
-            (type(values0) is int or type(values0) is str) or
+            (type(values0) in [int, str, unicode]) or
             (type(values0) is list and len(values0) is 1)
         ) and (
-            (type(values1) is int or type(values1) is str) or
+            (type(values1) in [int, str, unicode]) or
             (type(values1) is list and len(values1) is 1)
         ):
             return
-        raise ValueError('Call the *_many method with multiple values')
-
+        raise ValueError('Called with long list or object')
 
     @classmethod
     def _validate_keys(cls, keys):
@@ -1980,10 +1979,11 @@ class Tag(StoredObject):
     '''Tag is a generic relation associating a set of user objects.
 
     Collections of thumbnails of a user is one use case of Tag.'''
-    def __init__(self, key, account_id=None, name=None):
+    def __init__(self, tag_id, account_id=None, name=None):
+        self.tag_id = tag_id or uuid.uuid4().hex
         self.name = name
         self.account_id = account_id
-        super(Tag, self).__init__(key)
+        super(Tag, self).__init__(self.tag_id)
 
     @staticmethod
     def _baseclass_name():
