@@ -512,10 +512,10 @@ def _stage_files(**kwargs):
             bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
                             str(bucket.name), 
                             keys_to_copy,
-                            reduced_redundancy=True)
+                            storage_class=REDUCED_REDUNDANCY)
     else:
         _log.warning("{task}: there were no files to stage".format(task=task))
-        
+
 
 def _run_mr_cleaning_job(**kwargs):
     """Run the Map/Reduce cleaning job"""
