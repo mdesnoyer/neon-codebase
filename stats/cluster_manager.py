@@ -56,7 +56,7 @@ def main():
                     #                          options.dag],
                     #                          stderr=subprocess.STDOUT,
                     #     env=os.environ)
-                    subprocess.check_output(['airflow', 'resetdb'],
+                    subprocess.check_output(['yes','|','airflow', 'resetdb'],
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
                     statemon.state.tasks_cleared = 1
