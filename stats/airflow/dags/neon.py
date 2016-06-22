@@ -726,7 +726,7 @@ has_input_files = BranchPythonOperator(
     python_callable=_execution_date_has_input_files,
     provide_context=True,
     op_kwargs=dict(input_path=options.input_path))
-has_input_files.set_upstream(quiet_period)
+has_input_files.set_upstream(cloudwatch_metrics)
 
 # Copy files for the execution date from S3 source location in to an
 # S3 staging location
