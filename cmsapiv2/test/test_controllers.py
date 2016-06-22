@@ -1980,7 +1980,7 @@ class TestVideoHandler(TestControllersBase):
 
         super(TestVideoHandler, self).tearDown()
 
-    @patch('cmsdb.neondata.VideoMetadata.download_image_from_url')
+    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
     @tornado.testing.gen_test
     def test_post_video(self, cmsdb_download_image_mock):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1&duration=16' % (self.account_id_api_key, self.test_i_id)
@@ -2007,7 +2007,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
         cmsdb_download_image_mocker = patch(
-            'cmsdb.neondata.VideoMetadata.download_image_from_url')
+            'cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
         cmsdb_download_image_mock = self._future_wrap_mock(
             cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
