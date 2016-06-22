@@ -1579,10 +1579,11 @@ class DirectivePublisher(threading.Thread):
             except Exception as e: 
                 statemon.state.increment('unexpected_db_update_error')
                 _log.exception('Unexpected error when getting information to'
-                               'enable video in database %s' % e)
-            finally: 
-                # Throttle the callback spawning
-                yield tornado.gen.sleep(5.0)
+                               'enable videos in database %s' % e)
+                pass 
+
+            # Throttle the callback spawning
+            yield tornado.gen.sleep(5.0)
   
     @tornado.gen.coroutine
     def _enable_video_and_request(self, video, request): 
