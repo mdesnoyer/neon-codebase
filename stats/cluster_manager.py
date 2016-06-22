@@ -50,10 +50,13 @@ def main():
             if not statemon.state.tasks_cleared:
                 _log.info('Clearing airflow tasks %s' % options.task_regex)
                 try:
-                    subprocess.check_output(['airflow', 'clear',
-                                             '-t', options.task_regex,
-                                             '-d',
-                                             options.dag],
+                    # subprocess.check_output(['airflow', 'clear',
+                    #                          '-t', options.task_regex,
+                    #                          '-d',
+                    #                          options.dag],
+                    #                          stderr=subprocess.STDOUT,
+                    #     env=os.environ)
+                    subprocess.check_output(['airflow', 'resetdb'],
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
                     statemon.state.tasks_cleared = 1
