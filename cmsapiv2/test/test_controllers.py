@@ -3618,13 +3618,19 @@ class TestVideoStatsHandler(TestControllersBase):
         vid_status.winner_tid = '%s_t2' % neondata.InternalVideoID.generate(self.account_id_api_key,'vid1')
         vid_status.save()
 
-        url = '/api/v2/%s/stats/videos?video_id=vid1' % (self.account_id_api_key)
+        fields = ['video_id', 'experiment_state', 'winner_thumbnail', 'created']
+
+        url = '/api/v2/%s/stats/videos?video_id=vid1&fields=%s' % (
+            self.account_id_api_key, ','.join(fields))
         response = yield self.http_client.fetch(self.get_url(url),
                                                 method='GET')
         rjson = json.loads(response.body)
         self.assertEquals(rjson['count'], 1)
         statistic_one = rjson['statistics'][0]
         self.assertEquals(statistic_one['experiment_state'], neondata.ExperimentState.COMPLETE)
+        self.assertIn('created', statistic_one)
+        self.assertNotIn('updated', statistic_one)
+
 
     @tornado.testing.gen_test
     def test_two_video_ids(self):
@@ -3941,8 +3947,9 @@ class TestLiftStatsHandler(TestControllersBase):
         self.assertNotIn('a', [i['thumbnail_id'] for i in lift])
         [self.assertIsNone(i['lift']) for i in lift
             if i['thumbnail_id'] in ['b', 'd']]
-        [self.assertIsInstance(i['lift'], float) for i in lift
+        [self.assertEqual(i['lift'], 0.583) for i in lift
             if i['thumbnail_id'] == 'c']
+
 
     @tornado.testing.gen_test
     def test_base_thumb_does_not_exist(self):
