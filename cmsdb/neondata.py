@@ -1971,6 +1971,7 @@ WHERE {table}.{key1} IN ({left_values}) AND
 
 
 class TagThumbnail(MappingObject):
+    '''TagThumbnail represents an association of a tag to a thumbnail.'''
     _table = 'tag_thumbnail'
     _keys = ['tag_id', 'thumbnail_id']
 
@@ -1978,7 +1979,7 @@ class TagThumbnail(MappingObject):
 class Tag(StoredObject):
     '''Tag is a generic relation associating a set of user objects.
 
-    Collections of thumbnails of a user is one use case of Tag.'''
+    Collections of thumbnails of a user is one use-case of Tag.'''
     def __init__(self, tag_id, account_id=None, name=None):
         self.tag_id = tag_id or uuid.uuid4().hex
         self.name = name
@@ -1991,7 +1992,7 @@ class Tag(StoredObject):
 
 
 class AbstractHashGenerator(object):
-    ' Abstract Hash Generator '
+    '''Abstract Hash Generator'''
 
     @staticmethod
     def _api_hash_function(_input):

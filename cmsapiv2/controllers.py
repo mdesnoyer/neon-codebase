@@ -1091,6 +1091,7 @@ class TagHandler(APIV2Handler):
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
 
+
 '''*********************************************************************
 TagSearchExternalHandler : class responsible for searching tags
                            from an external source

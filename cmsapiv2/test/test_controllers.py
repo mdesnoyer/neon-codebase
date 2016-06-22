@@ -3670,7 +3670,7 @@ class TestVideoStatsHandler(TestControllersBase):
         vid_status.winner_tid = '%s_t2' % neondata.InternalVideoID.generate(
             self.account_id_api_key,'vid2')
         vid_status.save()
-        fields = ['video_id', 'created']
+        fields = ['video_id', 'experiment_state', 'winner_thumbnail', 'created']
         url = '/api/v2/%s/stats/videos?video_id=vid1,vid2&fields=%s' % (
             self.account_id_api_key, ','.join(fields))
         response = yield self.http_client.fetch(self.get_url(url),
