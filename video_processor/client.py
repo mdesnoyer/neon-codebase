@@ -93,6 +93,7 @@ statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
 statemon.define('youtube_video_not_found', int) 
 statemon.define('failed_to_send_result_email', int)
+statemon.define('too_long_of_video', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -495,11 +496,11 @@ class VideoProcessor(object):
         
         _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
-
         try:
             # OpenCV doesn't return metadata reliably, so use ffvideo
             # to get that information.
-            fmov = ffvideo.VideoStream(video_file)            
+            fmov = ffvideo.VideoStream(video_file)
+             
             self.video_metadata.duration = fmov.duration
             self.video_metadata.frame_size = fmov.frame_size
             
@@ -518,8 +519,29 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(str(e))
 
-        duration = self.video_metadata.duration or 0.0
 
+        
+        duration = self.video_metadata.duration or 0.0
+        # grab the accoutlimits for this account (if they exist) 
+        account_limits = yield neondata.AccountLimits.get( 
+            self.job_params['api_key'],
+            log_missing=False, 
+            async=True)
+
+        if account_limits: 
+            if duration > account_limits.max_video_size: 
+                statemon.state.increment('too_long_of_video')
+                # lets modify the apirequest to set fail_count
+                # to max fails, so that it doesn't retry this 
+                def _modify_request(r): 
+                    r.fail_count = options.max_fail_count 
+                yield neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'],
+                    self.job_params['api_key'],
+                    _modify_request, 
+                    async=True)
+                raise BadVideoError('Video is too long for account') 
+ 
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
