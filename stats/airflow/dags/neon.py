@@ -262,8 +262,6 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
     for tai in _get_s3_tais(input_path):
         tai_prefix = os.path.join(prefix, tai, processing_date, '')
 
-        _log.info('tai prefix is %s' % tai_prefix)
-
         #check if the prefix exists
         prefix_exists = s3.check_for_prefix(prefix=tai_prefix, 
                                             bucket_name=bucket_name, 
@@ -488,9 +486,6 @@ def _stage_files(**kwargs):
     input_bucket, input_prefix = _get_s3_tuple(kwargs['input_path'])
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
 
-    _log.info('staging bucket is %s' % staging_bucket)
-    _log.info('staging prefix is %s' % staging_prefix)
-
     input_files = _get_s3_input_files(dag=dag,
                                       execution_date=execution_date,
                                       task=task,
@@ -499,8 +494,6 @@ def _stage_files(**kwargs):
     output_prefix = _get_s3_staging_prefix(dag=dag,
                                            execution_date=execution_date,
                                            prefix=staging_prefix)
-
-    _log.info('output prefix is %s' % output_prefix)
 
     # Copy files to staging location
     if input_files:
@@ -526,6 +519,20 @@ def _run_mr_cleaning_job(**kwargs):
     staging_bucket, staging_prefix = _get_s3_tuple(kwargs['staging_path'])
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
 
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+
+    hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
+    hdfs_dir = 'mnt/cleaned'
+    run_time = time.strftime("%Y-%m-%d-%H-%M")
+
+    cleaned_output_path = "%s/%s/%s" % (
+                    hdfs_path,
+                    hdfs_dir,
+                    run_time)
+
+    _log.info('cleaned output path is %s' % cleaned_output_path)
+
     staging_prefix = _get_s3_staging_prefix(dag=dag,
                                             execution_date=execution_date,
                                             prefix=staging_prefix)
@@ -542,15 +549,15 @@ def _run_mr_cleaning_job(**kwargs):
     #                                 output_path=kwargs['output_path'])
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
-    cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+
     jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
                             'target', options.mr_jar)
     try:
         cluster.run_map_reduce_job(jar_path,
                                    'com.neon.stats.RawTrackerMR',
                                    cleaning_job_input_path,
-                                   cleaning_job_output_path,
+#                                   cleaning_job_output_path,
+                                   cleaned_output_path,
                                    map_memory_mb=options.cleaning_mr_memory,
                                    timeout=kwargs['timeout'])
     except Exception as e:
