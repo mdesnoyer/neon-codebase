@@ -81,6 +81,9 @@ import numpy as np
 
 _log = logging.getLogger(__name__)
 
+# Supress momoko debug.
+logging.getLogger('momoko').setLevel(logging.INFO)
+
 
 class NeonDbTestCase(test_utils.neontest.AsyncTestCase):
 
@@ -2556,9 +2559,62 @@ class TestBrightcovePlayer(NeonDbTestCase, BasePGNormalObject):
 
 
 class TestTag(NeonDbTestCase, BasePGNormalObject):
+
+    @classmethod
+    def setUpClass(cls):
+        super(TestTag, cls).setUpClass()
+        cls.account_id = 'acct0'
+
     @classmethod
     def _get_object_type(cls):
         return Tag
+
+    @tornado.testing.gen_test
+    def test_search_no_args(self):
+        tag = Tag()
+        yield tag.save(async=True)
+        keys = yield Tag.keys()
+        self.assertIn(tag.get_id(), keys)
+        tags = yield Tag.objects()
+        self.assertIn(tag.get_id(), [t.get_id() for t in tags])
+
+    @tornado.testing.gen_test
+    def test_search_acct(self):
+        tag = Tag()
+        yield tag.save(async=True)
+        keys = yield Tag.keys(account_id = self.account_id)
+        self.assertFalse(keys)
+        acct_tag = Tag(account_id=self.account_id)
+        yield acct_tag.save(async=True)
+        keys = yield Tag.keys(
+            account_id=self.account_id)
+        self.assertIn(acct_tag.get_id(), keys)
+
+    @tornado.testing.gen_test
+    def test_since(self):
+        tags = [Tag() for _ in range(20)]
+        [tag.save() for tag in tags]
+        cut = random.randint(0, 19)
+        cut_tag = yield Tag.get(tags[cut].key, async=True)
+        since = dateutil.parser.parse(cut_tag.created).strftime('%s.%f')
+        before, after = tags[:cut], tags[cut + 1:]
+        result = yield Tag.objects(since=since)
+        # Expect only tags in after in result.
+        self.assertEqual(len(after), len(result))
+
+    @tornado.testing.gen_test
+    def test_until(self):
+        tags = [Tag() for _ in range(20)]
+        [tag.save() for tag in tags]
+        cut = random.randint(0, 19)
+        cut_tag = yield Tag.get(tags[cut].key, async=True)
+        until = dateutil.parser.parse(cut_tag.created).strftime('%s.%f')
+        before, after = tags[:cut], tags[cut + 1:]
+        result = yield Tag.objects(until=until)
+        # Expect only tags in unti in result.
+        before_keys = [i.get_id() for i in before]
+        result_keys = [i.get_id() for i in result]
+        self.assertEqual(set(before_keys), set(result_keys))
 
 
 if __name__ == '__main__':

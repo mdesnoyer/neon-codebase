@@ -1101,20 +1101,73 @@ class TagSearchExternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
-          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          'limit': All(Coerce(int), Range(min=1, max=100)),
-          'query': Any(CustomVoluptuousTypes.Regex(), str),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(float)),
-          'until': All(Coerce(float)),
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'query': Any(CustomVoluptuousTypes.Regex(), str),
+            'since': Coerce(float),
+            'until': Coerce(float),
+            'skip_deleted': Coerce(bool)
         })(self.args)
-        self.success({})
+        self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
+        searcher = ContentSearcher(**self.args)
+        items, count, prev_page, next_page = yield searcher.get()
+        self.success({
+            'items': items,
+            'count': count,
+            'next_page': next_page,
+            'prev_page': prev_page})
 
     @classmethod
     def get_access_levels(self):
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
+
+class ContentSearcher(object):
+    '''A searcher to run search requests and make results.'''
+
+    def __init__(self, account_id=None, since=None, until=None, query=None,
+                 limit=None, skip_deleted=False, base_url=None):
+        self.account_id = account_id
+        self.since = since
+        self.until = until
+        self.query = query
+        self.limit = limit
+        self.skip_deleted = skip_deleted
+        self.base_url = base_url or '/api/v2/tags/search/'
+
+    @tornado.gen.coroutine
+    def run(self):
+        '''Gets a search result tuple.
+
+        Returns tuple of
+            list of content items,
+            int count of total items,
+            str prev page url,
+            str next page url.'''
+        raw = yield neondata.Tag.search(**self.__dict__)
+        items = yield self._prepare(raw)
+        raise tornado.gen.Return((
+            items,
+            len(items),
+            self._prev_page_url(),
+            self._next_page_url()))
+
+    @tornado.gen.coroutine
+    def _prepare(self, raw):
+        '''Build a result from raw records.
+
+        Input- list raw list of content items
+        Returns- list result'''
+        raise tornado.gen.Return(raw)
+
+    def _prev_page_url(self):
+        '''Build the previous page url.'''
+        return self.base_url
+
+    def _next_page_url(self):
+        '''Build the previous page url.'''
+        return self.base_url
 
 
 '''*********************************************************************
@@ -1622,31 +1675,26 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def get_search_results(account_id=None,
-                           since=None,
-                           until=None,
-                           query=None,
-                           limit=None,
-                           fields=None,
+    def get_search_results(account_id=None, since=None, until=None, query=None,
+                           limit=None, fields=None,
                            base_url='/api/v2/videos/search',
                            skip_deleted=False):
 
         search_res = yield neondata.VideoMetadata.search_videos(
-                         account_id,
-                         since=since,
-                         until=until,
-                         limit=limit,
-                         search_query=query,
-                         skip_deleted=skip_deleted)
+            account_id,
+            since=since,
+            until=until,
+            limit=limit,
+            search_query=query,
+            skip_deleted=skip_deleted)
 
         videos = search_res['videos'] or []
         since_time = search_res['since_time']
         until_time = search_res['until_time']
-        vid_dict = yield VideoHelper.build_video_dict(
-                       videos,
-                       fields)
 
-        next_page_url = VideoHelper.build_page_url(
+        vid_dict = yield VideoHelper.build_video_dict(videos, fields)
+
+        vid_dict['next_page'] = VideoHelper.build_page_url(
             base_url,
             until_time if until_time else 0.0,
             limit=limit,
@@ -1654,8 +1702,7 @@ class VideoHelper(object):
             query=query,
             fields=fields,
             account_id=account_id)
-
-        prev_page_url = VideoHelper.build_page_url(
+        vid_dict['prev_page'] = VideoHelper.build_page_url(
             base_url,
             since_time if since_time else 0.0,
             limit=limit,
@@ -1663,9 +1710,6 @@ class VideoHelper(object):
             query=query,
             fields=fields,
             account_id=account_id)
-
-        vid_dict['next_page'] = next_page_url
-        vid_dict['prev_page'] = prev_page_url
         raise tornado.gen.Return(vid_dict)
 
     @staticmethod
@@ -2387,12 +2431,12 @@ class VideoSearchExternalHandler(APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         schema = Schema({
-          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          'limit': All(Coerce(int), Range(min=1, max=100)),
-          'query': Any(CustomVoluptuousTypes.Regex(), str),
-          'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-          'since': All(Coerce(float)),
-          'until': All(Coerce(float)),
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'query': Any(CustomVoluptuousTypes.Regex(), str),
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'since': All(Coerce(float)),
+            'until': All(Coerce(float)),
         })
         args = self.parse_args()
         args['account_id'] = str(account_id)
@@ -2422,9 +2466,8 @@ class VideoSearchExternalHandler(APIV2Handler):
     @classmethod
     def get_access_levels(self):
         return {
-                 HTTPVerbs.GET: neondata.AccessLevels.READ,
-                 'account_required': [HTTPVerbs.GET]
-               }
+            HTTPVerbs.GET: neondata.AccessLevels.READ,
+            'account_required': [HTTPVerbs.GET]}
 
 
 '''*********************************************************************
@@ -3230,6 +3273,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/estimated_lift/?$',       LiftStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/thumbnails/?$',           ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/statistics/videos/?$',               VideoStatsHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/stats/estimated_lift/?$',            LiftStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/thumbnails/?$',                ThumbnailStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/stats/videos/?$',                    VideoStatsHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/tags/?$',                            TagHandler),

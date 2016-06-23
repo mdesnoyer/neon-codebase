@@ -4818,11 +4818,13 @@ class TestVerifiedControllersBase(TestControllersBase):
         self.user = neondata.NeonUserAccount(uuid.uuid1().hex,name='testingme')
         self.user.save()
         self.account_id_api_key = self.user.neon_api_key
+        self.account_id = self.user.neon_api_key
         self.verify_account_mocker = patch(
             'cmsapiv2.apiv2.APIV2Handler.is_authorized')
         self.verify_account_mock = self._future_wrap_mock(
             self.verify_account_mocker.start())
         self.verify_account_mock.sife_effect = True
+        self.headers = {'Content-Type': 'application/json'}
         super(TestVerifiedControllersBase, self).setUp()
 
     def tearDown(self):
@@ -6952,7 +6954,7 @@ class TestEmailHandler(TestControllersBase):
         self.assertRegexpMatches(rjson['message'],
             'user does not')
 
-class TestTagHandler(TestAuthorizedControllerBase):
+class TestTagHandler(TestVerifiedControllersBase):
     def setUp(self):
         super(TestTagHandler, self).setUp()
         # Create several thumbnails.
@@ -6966,7 +6968,6 @@ class TestTagHandler(TestAuthorizedControllerBase):
         [t.save() for t in thumbnails]
         self.thumbnail_ids = [t.get_id() for t in thumbnails]
         self.url = self.get_url('/api/v2/%s/tags/' % self.account_id)
-        self.headers = {'Content-Type': 'application/json'}
 
     @tornado.testing.gen_test
     def test_post_tag_no_association(self):
@@ -7093,6 +7094,20 @@ class TestTagHandler(TestAuthorizedControllerBase):
         self.assertEqual(name, tag.name)
         tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id())
         self.assertEqual([], list(tts[tag.get_id()]))
+
+class TestTagSearchExternalHandler(TestVerifiedControllersBase):
+
+    def setUp(self):
+        super(TestTagSearchExternalHandler, self).setUp()
+        self.url = self.get_url('/api/v2/%s/tags/search/' % self.account_id)
+
+    @tornado.testing.gen_test
+    def test_search_no_item(self):
+        response = yield self.http_client.fetch(self.url, headers=self.headers)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual([], rjson['items'])
+        self.assertEqual(0, rjson['count'])
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()

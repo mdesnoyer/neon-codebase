@@ -823,7 +823,6 @@ class StoredObject(object):
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None
-        
 
             return obj
 
@@ -1036,7 +1035,6 @@ class StoredObject(object):
         rv = [x.partition('_')[2] for x in keys_list if
                                   x is not None]
         raise tornado.gen.Return(rv) 
-
 
     @classmethod
     @utils.sync.optional_sync
@@ -1447,7 +1445,6 @@ class StoredObject(object):
 
         return query
 
-
     @classmethod
     @tornado.gen.coroutine
     def explain_query(cls, query, wc_params, cursor_factory):
@@ -1479,6 +1476,58 @@ class StoredObject(object):
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
+
+
+class Searchable(object):
+
+    @classmethod
+    @tornado.gen.coroutine
+    def keys(cls, **kwargs):
+        '''Get keys of rows that match arguments.'''
+        rows = yield cls._search(**kwargs)
+        keys = [row[0]['key'] for row in rows]
+        raise tornado.gen.Return(keys)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def objects(cls, **kwargs):
+        '''Get objects that match arguments.'''
+        rows = yield cls._search(**kwargs)
+        objects = [cls._create(row[0]['key'], row[0]) for row in rows]
+        raise tornado.gen.Return(objects)
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _search(cls, **kwargs):
+        '''Get rows that match arguments.'''
+        def _query():
+            return 'SELECT * FROM {table}{where}{limit}{order}'.format(
+                table=cls._baseclass_name().lower(),
+                where=_where(),
+                limit=_limit(),
+                order=_order())
+        def _where():
+            part = '{acct}{until}{since}'.format(
+                acct="_data->>'account_id' = %s" \
+                    if kwargs.get('account_id') else '',
+                until='created_time < to_timestamp(%s)::timestamp' \
+                    if kwargs.get('until') else '',
+                since='created_time > to_timestamp(%s)::timestamp' \
+                    if kwargs.get('since') else '')
+            return ' WHERE %s' % part if part else ''
+        def _limit():
+            return ''
+        def _order():
+            return ' ORDER BY created_time DESC'
+        def _bind():
+            return [v for k,v in kwargs.items() \
+                    if k in ['account_id', 'until', 'since']]
+
+        result = yield cls.execute_select_query(
+            _query(),
+            _bind())
+        raise tornado.gen.Return(result)
+
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -1544,7 +1593,7 @@ class StoredObjectIterator():
 
         self.items_returned += 1
         raise tornado.gen.Return(self.cur_objs.pop())
-        
+
 
 class NamespacedStoredObject(StoredObject):
     '''An abstract StoredObject that is namespaced by the baseclass classname.
@@ -1976,15 +2025,15 @@ class TagThumbnail(MappingObject):
     _keys = ['tag_id', 'thumbnail_id']
 
 
-class Tag(StoredObject):
+class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.
 
     Collections of thumbnails of a user is one use-case of Tag.'''
-    def __init__(self, tag_id, account_id=None, name=None):
-        self.tag_id = tag_id or uuid.uuid4().hex
+    def __init__(self, tag_id=None, account_id=None, name=None):
+        tag_id = tag_id or uuid.uuid4().hex
         self.name = name
         self.account_id = account_id
-        super(Tag, self).__init__(self.tag_id)
+        super(Tag, self).__init__(tag_id)
 
     @staticmethod
     def _baseclass_name():
