@@ -1480,6 +1480,15 @@ class StoredObject(object):
 
 class Searchable(object):
 
+    # Override in the subclass.
+    _allowed_args = [
+        'account_id',
+        'limit',
+        'name',
+        'offset',
+        'since',
+        'until']
+
     @classmethod
     @tornado.gen.coroutine
     def keys(cls, **kwargs):
@@ -1500,29 +1509,50 @@ class Searchable(object):
     @tornado.gen.coroutine
     def _search(cls, **kwargs):
         '''Get rows that match arguments.'''
+
+        def _validate():
+            if filter(lambda k: k in cls._allowed_args, kwargs) != kwargs.keys():
+                raise KeyError('Bad argument to search %s' % kwargs)
         def _query():
-            return 'SELECT * FROM {table}{where}{limit}{order}'.format(
+            return 'SELECT * FROM {table} {where}{order}{limit}{offset}'.format(
                 table=cls._baseclass_name().lower(),
                 where=_where(),
                 limit=_limit(),
+                offset=_offset(),
                 order=_order())
         def _where():
-            part = '{acct}{until}{since}'.format(
-                acct="_data->>'account_id' = %s" \
-                    if kwargs.get('account_id') else '',
-                until='created_time < to_timestamp(%s)::timestamp' \
-                    if kwargs.get('until') else '',
-                since='created_time > to_timestamp(%s)::timestamp' \
-                    if kwargs.get('since') else '')
-            return ' WHERE %s' % part if part else ''
+
+            parts = []
+            if kwargs.get('account_id'):
+                parts.append("_data->>'account_id' = %s")
+            if kwargs.get('name'):
+                # Check if we need to escape regex specials.
+                try:
+                    re.compile(kwargs['name'])
+                except sre_constants.error:
+                    kwargs['name'] = re.escape(kwargs['name'])
+                parts.append("_data->>'name' ~* %s")
+            if kwargs.get('since'):
+                parts.append('created_time > to_timestamp(%s)::timestamp')
+            if kwargs.get('until'):
+                parts.append('created_time < to_timestamp(%s)::timestamp')
+            return ' WHERE %s' % ' AND '.join(parts) if parts else ''
+
         def _limit():
-            return ''
+            return ' LIMIT %d' % kwargs.get('limit') \
+                    if kwargs.get('limit') else ''
+        def _offset():
+            return ' OFFSET %d' % kwargs.get('offset') \
+                    if kwargs.get('offset') else ''
         def _order():
             return ' ORDER BY created_time DESC'
         def _bind():
-            return [v for k,v in kwargs.items() \
-                    if k in ['account_id', 'until', 'since']]
+            args = OrderedDict(sorted(kwargs.items()))
+            return [v for k,v in args.items() \
+                    if k in cls._allowed_args and
+                    k not in ['limit', 'offset']]
 
+        _validate()
         result = yield cls.execute_select_query(
             _query(),
             _bind())

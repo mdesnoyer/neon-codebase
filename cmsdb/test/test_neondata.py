@@ -2591,6 +2591,21 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         self.assertIn(acct_tag.get_id(), keys)
 
     @tornado.testing.gen_test
+    def test_search_acct_and_name(self):
+        Tag(account_id=self.account_id).save()
+        Tag(account_id='someone else').save()
+        Tag(account_id=self.account_id, name='ABC').save()
+        Tag(account_id='someone else', name='ABC').save()
+        Tag(account_id=self.account_id, name='BCD').save()
+        Tag(account_id='someone else', name='BCD').save()
+        result = yield Tag.keys(name='A')
+        self.assertEqual(2, len(result))
+        result = yield Tag.objects(name='A', account_id=self.account_id)
+        self.assertEqual(1, len(result))
+        result = yield Tag.objects(name='BC', account_id=self.account_id)
+        self.assertEqual(2, len(result))
+
+    @tornado.testing.gen_test
     def test_since(self):
         tags = [Tag() for _ in range(20)]
         [tag.save() for tag in tags]
@@ -2615,6 +2630,23 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         before_keys = [i.get_id() for i in before]
         result_keys = [i.get_id() for i in result]
         self.assertEqual(set(before_keys), set(result_keys))
+
+    @tornado.testing.gen_test
+    def test_limit_and_offset(self):
+        [Tag().save() for _ in range(20)]
+        offset = random.randint(0, 18)
+        limit = random.randint(0,19 - offset)
+        result = yield Tag.objects(limit=limit)
+        self.assertEqual(limit, len(result))
+        result = yield Tag.objects(offset=offset)
+        self.assertEqual(20 - offset, len(result))
+        result = yield Tag.keys(limit=limit, offset=offset)
+        self.assertEqual(limit, len(result))
+
+    @tornado.testing.gen_test
+    def test_bad_arg(self):
+        with self.assertRaises(KeyError):
+            yield Tag.keys(title='bad argument')
 
 
 if __name__ == '__main__':
