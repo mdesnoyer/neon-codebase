@@ -529,18 +529,29 @@ class VideoProcessor(object):
             async=True)
 
         if account_limits: 
-            if duration > account_limits.max_video_size: 
+            max_duration = account_limits.max_video_size
+            if duration > max_duration: 
                 statemon.state.increment('too_long_of_video')
                 # lets modify the apirequest to set fail_count
                 # to max fails, so that it doesn't retry this 
                 def _modify_request(r): 
-                    r.fail_count = options.max_fail_count 
+                    r.fail_count = options.max_fail_count
+                def _seconds_to_hms_string(secs): 
+                    m, s = divmod(secs, 60) 
+                    h, m = divmod(m, 60)
+                    return "%d:%d:%d" % (h,m,s)
+
                 yield neondata.NeonApiRequest.modify(
                     self.job_params['job_id'],
                     self.job_params['api_key'],
                     _modify_request, 
                     async=True)
-                raise BadVideoError('Video is too long for account') 
+                
+                raise BadVideoError('Video length %s is too long for this'\
+                                    'account. The maximum video length that'\
+                                    'can be processed for this account is %s.' % (
+                                    _seconds_to_hms_string(duration), 
+                                    _seconds_to_hms_string(max_duration))) 
  
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
