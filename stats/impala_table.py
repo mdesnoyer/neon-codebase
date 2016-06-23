@@ -490,7 +490,7 @@ class ImpalaTableLoader(threading.Thread):
             _log.debug("Closing Impala connection")
             self.table.transport.close()
 
-def update_table_build_times(new_date):
+def update_table_build_times():
     _log.debug("Updating the table build times")
     
     impala_conn = impala.dbapi.connect(host=cluster.master_ip,
