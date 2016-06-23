@@ -93,6 +93,7 @@ statemon.define('centerframe_extraction_error', int)
 statemon.define('randomframe_extraction_error', int)
 statemon.define('youtube_video_not_found', int) 
 statemon.define('failed_to_send_result_email', int)
+statemon.define('too_long_of_video', int)
 
 # ======== Parameters  =======================#
 from utils.options import define, options
@@ -326,21 +327,6 @@ class VideoProcessor(object):
             #Delete the temp video file which was downloaded
             self.tempfile.close()
 
-    @tornado.concurrent.run_on_executor
-    def _urllib_read(self, response, do_throttle, chunk_time):
-        last_time = time.time()
-        data = response.read(VideoProcessor.CHUNK_SIZE)
-        while data != '':
-            if do_throttle:
-                time_spent = time.time() - last_time
-                time.sleep(max(0, chunk_time-time_spent))
-            self.tempfile.write(data)
-            self.tempfile.flush()
-            last_time = time.time()
-            data = response.read(VideoProcessor.CHUNK_SIZE)
-
-        self.tempfile.flush()
-
     @tornado.gen.coroutine
     def download_video_file(self):
         '''
@@ -510,11 +496,11 @@ class VideoProcessor(object):
         
         _log.info('Starting to search video %s' % self.video_url)
         start_process = time.time()
-
         try:
             # OpenCV doesn't return metadata reliably, so use ffvideo
             # to get that information.
-            fmov = ffvideo.VideoStream(video_file)            
+            fmov = ffvideo.VideoStream(video_file)
+             
             self.video_metadata.duration = fmov.duration
             self.video_metadata.frame_size = fmov.frame_size
             
@@ -533,8 +519,40 @@ class VideoProcessor(object):
             statemon.state.increment('video_read_error')
             raise BadVideoError(str(e))
 
-        duration = self.video_metadata.duration or 0.0
 
+        
+        duration = self.video_metadata.duration or 0.0
+        # grab the accoutlimits for this account (if they exist) 
+        account_limits = yield neondata.AccountLimits.get( 
+            self.job_params['api_key'],
+            log_missing=False, 
+            async=True)
+
+        if account_limits: 
+            max_duration = account_limits.max_video_size
+            if duration > max_duration: 
+                statemon.state.increment('too_long_of_video')
+                # lets modify the apirequest to set fail_count
+                # to max fails, so that it doesn't retry this 
+                def _modify_request(r): 
+                    r.fail_count = options.max_fail_count
+                def _seconds_to_hms_string(secs): 
+                    m, s = divmod(secs, 60) 
+                    h, m = divmod(m, 60)
+                    return "%d:%d:%d" % (h,m,s)
+
+                yield neondata.NeonApiRequest.modify(
+                    self.job_params['job_id'],
+                    self.job_params['api_key'],
+                    _modify_request, 
+                    async=True)
+                
+                raise BadVideoError('Video length %s is too long for this'\
+                                    'account. The maximum video length that'\
+                                    'can be processed for this account is %s.' % (
+                                    _seconds_to_hms_string(duration), 
+                                    _seconds_to_hms_string(max_duration))) 
+ 
         if duration <= 1e-3:
             _log.error("Video %s has no length" % (self.video_url))
             statemon.state.increment('video_read_error')
@@ -591,12 +609,13 @@ class VideoProcessor(object):
                 rank += 1 
 
         # Get the baseline frames of the video
-        self._get_center_frame(video_file)
-        self._get_random_frame(video_file)
+        yield self._get_center_frame(video_file)
+        yield self._get_random_frame(video_file)
 
         statemon.state.increment('processed_video')
         _log.info('Sucessfully finished searching video %s' % self.video_url)
 
+    @tornado.gen.coroutine
     def _get_center_frame(self, video_file, nframes=None):
         '''approximation of brightcove logic 
          #Note: Its unclear the exact nature of brighcove thumbnailing,
@@ -614,15 +633,22 @@ class VideoProcessor(object):
                 ttype=neondata.ThumbnailType.CENTERFRAME,
                 frameno=int(nframes / 2),
                 rank=0)
-            #TODO(Sunil): Get valence score once flann global data
-            #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+            yield meta.score_image(self.model.predictor,
+                                   self.model_version,
+                                   image=cv_image)
+        except model.errors.PredictionError as e:
+            _log.warn('Error predicting score for the center frame: %s' %
+                      e)
+            # We don't wait to fail in this case because we don't care
+            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting center frame from %s:"
                        " %s" % (self.video_url, e))
             statemon.state.increment('centerframe_extraction_error')
             raise
 
+    @tornado.gen.coroutine
     def _get_random_frame(self, video_file, nframes=None):
         '''Gets a random frame from the video.
         '''
@@ -639,9 +665,15 @@ class VideoProcessor(object):
                 ttype=neondata.ThumbnailType.RANDOM,
                 frameno=frameno,
                 rank=0)
-            #TODO(Sunil): Get valence score once flann global data
-            #corruption is fixed.
             self.thumbnails.append((meta, PILImageUtils.from_cv(cv_image)))
+            yield meta.score_image(self.model.predictor,
+                                   self.model_version,
+                                   image=cv_image)
+        except model.errors.PredictionError as e:
+            _log.warn('Error predicting score for the random frame: %s' %
+                      e)
+            # We don't wait to fail in this case because we don't care
+            # enough about this score right now.
         except Exception, e:
             _log.error("Unexpected error extracting random frame from %s:"
                            " %s" % (self.video_url, e))
@@ -818,7 +850,19 @@ class VideoProcessor(object):
             # A second attempt to save the default thumb
             api_request.default_thumbnail = (api_request.default_thumbnail or 
                                              self.extracted_default_thumbnail)
-            yield api_request.save_default_thumbnail(cdn_metadata, async=True)
+            thumb = yield api_request.save_default_thumbnail(cdn_metadata,
+                                                             async=True)
+
+            # Score the default thumb
+            if thumb is not None:
+                # TODO(mdesnoyer): This will potentially download the
+                # image twice. It would be better to avoid that, but
+                # the code flow makes it annoying. Given this is a
+                # long process, not a big deal, but we might want to
+                # fix that
+                yield thumb.score_image(self.model.predictor,
+                                        self.model_version,
+                                        save_object=True)
 
         except neondata.ThumbDownloadError, e:
             # If we extracted the default thumb from the url, then
