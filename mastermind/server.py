@@ -1555,27 +1555,33 @@ class DirectivePublisher(threading.Thread):
                        xrange(0, len(video_list), CHUNK_SIZE)]
 
         for video_ids in list_chunks:
-            self._incr_pending_modify(len(video_ids))
-            videos = yield neondata.VideoMetadata.get_many(
-                         video_ids, 
-                         async=True) 
-            videos = [x for x in videos if x]
-            job_ids = [(v.job_id, v.get_account_id())  
-                          for v in videos]
-            requests = yield neondata.NeonApiRequest.get_many(
-                           job_ids,
-                           async=True)
- 
-            for video, request in zip(videos, requests):
-                if video is None or \
-                   request is None or \
-                   request.state != neondata.RequestState.FINISHED: 
-                    self._incr_pending_modify(-1)
-                    continue 
-                tornado.ioloop.IOLoop.current().spawn_callback( 
-                    functools.partial(self._enable_video_and_request, 
-                        video, request))
-                        
+            try: 
+                videos = yield neondata.VideoMetadata.get_many(
+                             video_ids, 
+                             async=True) 
+                videos = [x for x in videos if x]
+                job_ids = [(v.job_id, v.get_account_id())  
+                              for v in videos]
+                requests = yield neondata.NeonApiRequest.get_many(
+                    job_ids,
+                    async=True)
+     
+                for video, request in zip(videos, requests):
+                    self._incr_pending_modify(1)
+                    if video is None or \
+                       request is None or \
+                       request.state != neondata.RequestState.FINISHED: 
+                        self._incr_pending_modify(-1)
+                        continue 
+                    tornado.ioloop.IOLoop.current().spawn_callback( 
+                        functools.partial(self._enable_video_and_request, 
+                            video, request))
+            except Exception as e: 
+                statemon.state.increment('unexpected_db_update_error')
+                _log.exception('Unexpected error when getting information to'
+                               'enable videos in database %s' % e)
+                pass 
+
             # Throttle the callback spawning
             yield tornado.gen.sleep(5.0)
   
