@@ -60,8 +60,8 @@ def main():
                     airflow = subprocess.Popen('airflow resetdb'.split(), stdin=yes.stdout, stdout=subprocess.PIPE)
                     yes.stdout.close()
                     output = airflow.communicate()[0]
-                    subprocess.check_output(['yes', '|', 'airflow', 'initdb'],
-                                              stderr=subprocess.STDOUT)
+                    # subprocess.check_output(['yes', '|', 'airflow', 'initdb'],
+                    #                           stderr=subprocess.STDOUT)
                     statemon.state.tasks_cleared = 1
                 except subprocess.CalledProcessError as e:
                     _log.error('Error clearing airflow jobs: %s' % e.output)
