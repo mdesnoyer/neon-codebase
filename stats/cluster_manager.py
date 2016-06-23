@@ -56,9 +56,8 @@ def main():
                     #                          options.dag],
                     #                          stderr=subprocess.STDOUT,
                     #     env=os.environ)
-                    subprocess.check_output(['yes','|','airflow', 'resetdb'],
-                                             stderr=subprocess.STDOUT,
-                        env=os.environ)
+                    subprocess.check_output(['yes', '|', 'airflow', 'resetdb'],
+                                             stderr=subprocess.STDOUT)
                     statemon.state.tasks_cleared = 1
                 except subprocess.CalledProcessError as e:
                     _log.error('Error clearing airflow jobs: %s' % e.output)
