@@ -1654,8 +1654,12 @@ class VideoHelper(object):
                 account_id_api_key)
 
             # Create a Tag for this video.
-            #tag = Tag(account_id=self.account_id, type='video')
-            #video.tag_id 
+            tag = neondata.Tag(
+                account_id=account_id_api_key,
+                tag_type='video',
+                name=api_request.video_title)
+            tag.save()
+            video.tag_id = tag.get_id()
 
             # add the job id save the video
             video.job_id = api_request.job_id
@@ -1815,7 +1819,7 @@ class VideoHelper(object):
         """
         if fields is None:
             fields = ['state', 'video_id', 'publish_date', 'title', 'url',
-                      'testing_enabled', 'job_id']
+                      'testing_enabled', 'job_id', 'tag_id']
 
         new_video = {}
         for field in fields:
@@ -1850,6 +1854,8 @@ class VideoHelper(object):
                 new_video[field] = video.updated
             elif field == 'url':
                 new_video[field] = video.url
+            elif field == 'tag_id':
+                new_video[field] = video.tag_id
             else:
                 raise BadRequestError('invalid field %s' % field)
 

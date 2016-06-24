@@ -2072,10 +2072,11 @@ class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.
 
     Collections of thumbnails of a user is one use-case of Tag.'''
-    def __init__(self, tag_id=None, account_id=None, name=None):
+    def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex
-        self.name = name
         self.account_id = account_id
+        self.name = name
+        self.tag_type = tag_type
         super(Tag, self).__init__(tag_id)
 
     @staticmethod

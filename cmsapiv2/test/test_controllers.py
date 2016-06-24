@@ -2025,11 +2025,11 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(job.api_param, 5)
 
         # Check for a tag.
-        #tag_id = rjson.get('tag_id')
+        tag_id = rjson['video']['tag_id']
         self.assertIsNotNone(tag_id)
         tag = neondata.Tag.get(tag_id)
-        self.assertEqual(tag.account_id, rjson['account_id'])
-        self.assertEqual(tag.type, 'video')
+        self.assertEqual(tag.account_id, self.account_id_api_key)
+        self.assertEqual(tag.tag_type, 'video')
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
