@@ -755,7 +755,6 @@ class StoredObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
         query_tuple = db.get_insert_json_query_tuple(self)
-        print query_tuple
         try:  
             result = yield conn.execute(query_tuple[0], query_tuple[1])
         except psycopg2.IntegrityError as e:  
@@ -1471,7 +1470,6 @@ class StoredObject(object):
 
             wc_params : any params you need in the where clause
         '''
-        print query, wc_params
         db = PostgresDB()
         conn = yield db.get_connection()
         cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
@@ -1906,7 +1904,6 @@ class MappingObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
         try:
-            print sql, bind
             cursor = yield conn.execute(sql, bind)
             if type(fetch) is list:
                 fetch.extend(cursor.fetchall())

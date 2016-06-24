@@ -2024,6 +2024,13 @@ class TestVideoHandler(TestControllersBase):
         self.assertEquals(cargs[2], 16)
         self.assertEquals(job.api_param, 5)
 
+        # Check for a tag.
+        #tag_id = rjson.get('tag_id')
+        self.assertIsNotNone(tag_id)
+        tag = neondata.Tag.get(tag_id)
+        self.assertEqual(tag.account_id, rjson['account_id'])
+        self.assertEqual(tag.type, 'video')
+
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
         cmsdb_download_image_mocker = patch(

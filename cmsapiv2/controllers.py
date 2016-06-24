@@ -1653,6 +1653,10 @@ class VideoHelper(object):
                 args,
                 account_id_api_key)
 
+            # Create a Tag for this video.
+            #tag = Tag(account_id=self.account_id, type='video')
+            #video.tag_id 
+
             # add the job id save the video
             video.job_id = api_request.job_id
             yield video.save(async=True)
@@ -1865,25 +1869,25 @@ class VideoHandler(ShareableContentHandler):
     def post(self, account_id):
         """handles a Video endpoint post request"""
         schema = Schema({
-          Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-          Required('external_video_ref'): All(Any(Coerce(str), unicode),
-              Length(min=1, max=512)),
-          'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
-          'reprocess': Boolean(),
-          'integration_id': All(Coerce(str), Length(min=1, max=256)),
-          'callback_url': All(Any(Coerce(str), unicode),
-              Length(min=1, max=2048)),
-          'title': All(Any(Coerce(str), unicode),
-              Length(min=1, max=2048)),
-          'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)),
-              None),
-          'publish_date': All(CustomVoluptuousTypes.Date()),
-          'custom_data': All(CustomVoluptuousTypes.Dictionary()),
-          'default_thumbnail_url': All(Any(Coerce(str), unicode),
-              Length(min=1, max=2048)),
-          'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
-          'callback_email': All(Coerce(str), Length(min=1, max=2048)),
-          'n_thumbs': All(Coerce(int), Range(min=1, max=32))
+            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
+            Required('external_video_ref'): All(Any(Coerce(str), unicode),
+                Length(min=1, max=512)),
+            'url': All(Any(Coerce(str), unicode), Length(min=1, max=2048)),
+            'reprocess': Boolean(),
+            'integration_id': All(Coerce(str), Length(min=1, max=256)),
+            'callback_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048)),
+            'title': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048)),
+            'duration': Any(All(Coerce(float), Range(min=0.0, max=86400.0)),
+                None),
+            'publish_date': All(CustomVoluptuousTypes.Date()),
+            'custom_data': All(CustomVoluptuousTypes.Dictionary()),
+            'default_thumbnail_url': All(Any(Coerce(str), unicode),
+                Length(min=1, max=2048)),
+            'thumbnail_ref': All(Coerce(str), Length(min=1, max=512)),
+            'callback_email': All(Coerce(str), Length(min=1, max=2048)),
+            'n_thumbs': All(Coerce(int), Range(min=1, max=32))
         })
 
         args = self.parse_args()
