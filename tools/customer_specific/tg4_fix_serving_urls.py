@@ -37,7 +37,9 @@ def process_one_video(bcapi, video_id):
     video_data = yield bcapi.get_video_images(bc_vid)
 
     poster = video_data['poster']
-    if 'neon-images.com' in poster['src']:
+    if ('neon-images.com' in poster['src'] and 
+        'height=360' in poster['src']):
+        _log.info('Updating poster for video %s' % video_id)
         yield bcapi.update_poster(bc_vid, poster['asset_id'],
                                   new_serving_url)
 
