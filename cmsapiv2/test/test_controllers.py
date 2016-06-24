@@ -234,6 +234,7 @@ class TestAuthorizedControllerBase(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestAuthorizedControllerBase, self).tearDown()
 
+
 class TestNewAccountHandler(TestAuthenticationBase):
     def setUp(self):
         self.verify_account_mocker = patch(
@@ -3328,9 +3329,19 @@ class TestThumbnailHandler(TestControllersBase):
             name='B',
             account_id=self.account_id_api_key).save()
         neondata.TagThumbnail.save(tag_id='tag_2', thumbnail_id='testingtid')
+
+        self.model_connect = patch('model.predictor.DeepnetPredictor.connect')
+        self.model_connect.start()
+        self.model_predict_mocker = patch(
+            'model.predictor.DeepnetPredictor.predict')
+        self.model_predict_mock = self._future_wrap_mock(
+            self.model_predict_mocker.start())
+        self.model_predict_mock.side_effect = [.5]
         super(TestThumbnailHandler, self).setUp()
 
     def tearDown(self):
+        self.model_connect.stop()
+        self.model_predict_mocker.stop()
         self.cdn_mocker.stop()
         self.im_download_mocker.stop()
         self.verify_account_mocker.stop()
@@ -3436,6 +3447,9 @@ class TestThumbnailHandler(TestControllersBase):
         self.assertEqual(self.account_id_api_key, thumbnail_id_parts[0])
         self.assertEqual(neondata.InternalVideoID.NOVIDEO, thumbnail_id_parts[1])
         self.assertIsNotNone(thumbnail_id_parts[2])
+        # Expect that scoring has been done.
+        self.assertIsNotNone(thumbnail.model_score)
+        self.assertIsNotNone(thumbnail.model_version)
 
     @tornado.testing.gen_test
     def test_bad_add_new_thumbnail_no_upload(self):
@@ -6934,6 +6948,7 @@ class TestForgotPasswordHandler(TestAuthenticationBase):
         user = yield neondata.User.get(user.username, async=True)
         self.assertNotEqual(None, user.reset_password_token)
 
+
 class TestEmailHandler(TestControllersBase):
     def setUp(self):
         self.acct = neondata.NeonUserAccount(uuid.uuid1().hex,
@@ -7017,6 +7032,7 @@ class TestEmailHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertRegexpMatches(rjson['message'],
             'user does not')
+
 
 class TestTagHandler(TestVerifiedControllersBase):
     def setUp(self):
@@ -7158,6 +7174,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(name, tag.name)
         tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id())
         self.assertEqual([], list(tts[tag.get_id()]))
+
 
 class TestTagSearchExternalHandler(TestVerifiedControllersBase):
 

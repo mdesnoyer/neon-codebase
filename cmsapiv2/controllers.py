@@ -17,6 +17,8 @@ import StringIO
 import cmsapiv2.client
 import fractions
 import logging
+import model
+import utils.autoscale
 import video_processor.video_processing_queue
 _log = logging.getLogger(__name__)
 
@@ -34,6 +36,17 @@ define("mandrill_base_url",
     default='https://mandrillapp.com/api/1.0', 
     help="mandrill base api url", 
     type=str)
+
+# For scoring non-video thumbnails.
+define('model_file', default='local_search_input_20160523', help='File that contains the model')
+define('model_server_port', default=9000, type=int,
+       help='the port currently being used by model servers')
+define('model_autoscale_groups', default='AquilaOnDemand', type=str,
+       help='Comma separated list of autoscaling group names')
+define('request_concurrency', default=22, type=int,
+       help=('the maximum number of concurrent scoring requests to'
+             ' make at a time. Should be less than or equal to the'
+             ' server batch size.'))
 
 statemon.define('put_account_oks', int)
 statemon.define('get_account_oks', int)
@@ -1375,6 +1388,8 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
         else:
             yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
             yield self.thumb.save(async=True)
+            # Score non-video image here.
+            yield self._score_image()
 
         # Set tags if requested.
         if self.args.get('tag_id'):
@@ -1416,6 +1431,18 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
            Returns- instance of PIL.Image
         """
         return PIL.Image.open(io.BytesIO(httpfile.body))
+
+    @tornado.gen.coroutine
+    def _score_image(self):
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
+        predictor = model.predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aquila_conn)
+        predictor.connect()
+        version = '%s-aqv1.1.250' % os.path.basename(options.model_file)
+        yield self.thumb.score_image(predictor, version, self.image, True)
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
@@ -2024,7 +2051,7 @@ class VideoHandler(ShareableContentHandler):
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
-        # we may need to update the request object as well
+        # we may need to update the request and/or tag object as well
         db2api_fields = {'testing_enabled', 'video_id', 'tag_id'}
         api_request, tag = None, None
         if title is not None:
