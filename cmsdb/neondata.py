@@ -5491,26 +5491,6 @@ class VideoMetadata(StoredObject):
 
         raise tornado.gen.Return(thumb)
 
-    @staticmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def download_image_from_url(image_url):
-        try:
-            image = yield cvutils.imageutils.PILImageUtils.download_image(image_url,
-                    async=True)
-        except IOError, e:
-            msg = "IOError while downloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-        except tornado.httpclient.HTTPError as e:
-            msg = "HTTP Error while dowloading image %s: %s" % (
-                image_url, e)
-            _log.warn(msg)
-            raise ThumbDownloadError(msg)
-
-        raise tornado.gen.Return(image)
-
     @utils.sync.optional_sync
     @tornado.gen.coroutine
     def download_and_add_thumbnail(self,
@@ -5536,8 +5516,9 @@ class VideoMetadata(StoredObject):
                        object.
         '''
         if image is None:
-            image = yield ThumbnailMetadata.download_image_from_url(image_url,
-                                                                    async=True)
+            image = yield ThumbnailMetadata.download_image_from_url(
+                image_url,
+                async=True)
         if thumb is None:
             thumb = ThumbnailMetadata(None,
                           ttype=ThumbnailType.DEFAULT,
