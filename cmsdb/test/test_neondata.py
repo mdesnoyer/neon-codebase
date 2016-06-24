@@ -2106,6 +2106,16 @@ class TestTagThumbnail(NeonDbTestCase):
         self.assertFalse(has_result[(100, '23reff')])
 
     @tornado.testing.gen_test
+    def test_empty_get(self):
+        get_result = yield TagThumbnail.get(tag_id=None)
+        self.assertFalse(get_result)
+
+    @tornado.testing.gen_test
+    def test_empty_get_many(self):
+        get_result = yield TagThumbnail.get_many(tag_id=[])
+        self.assertFalse(get_result)
+
+    @tornado.testing.gen_test
     def test_bad_call(self):
         bad_input1 = {'bad_id': 100, 'thumbnail_id': '3sdf3rwf'}
         with self.assertRaises(KeyError):

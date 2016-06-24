@@ -755,6 +755,7 @@ class StoredObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
         query_tuple = db.get_insert_json_query_tuple(self)
+        print query_tuple
         try:  
             result = yield conn.execute(query_tuple[0], query_tuple[1])
         except psycopg2.IntegrityError as e:  
@@ -1470,6 +1471,7 @@ class StoredObject(object):
 
             wc_params : any params you need in the where clause
         '''
+        print query, wc_params
         db = PostgresDB()
         conn = yield db.get_connection()
         cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
@@ -1487,6 +1489,7 @@ class Searchable(object):
         'name',
         'offset',
         'since',
+        'show_hidden',
         'until']
 
     @classmethod
@@ -1513,6 +1516,7 @@ class Searchable(object):
         def _validate():
             if filter(lambda k: k in cls._allowed_args, kwargs) != kwargs.keys():
                 raise KeyError('Bad argument to search %s' % kwargs)
+
         def _query():
             return 'SELECT * FROM {table} {where}{order}{limit}{offset}'.format(
                 table=cls._baseclass_name().lower(),
@@ -1525,6 +1529,8 @@ class Searchable(object):
             parts = []
             if kwargs.get('account_id'):
                 parts.append("_data->>'account_id' = %s")
+            if kwargs.get('show_hidden'):
+                parts.append("_data->>'hidden'::BOOLEAN IS NOT TRUE")
             if kwargs.get('name'):
                 # Check if we need to escape regex specials.
                 try:
@@ -1533,9 +1539,9 @@ class Searchable(object):
                     kwargs['name'] = re.escape(kwargs['name'])
                 parts.append("_data->>'name' ~* %s")
             if kwargs.get('since'):
-                parts.append('created_time > to_timestamp(%s)::timestamp')
+                parts.append('creased_time > TO_TIMESTAMP(%s)::TIMESTAMP')
             if kwargs.get('until'):
-                parts.append('created_time < to_timestamp(%s)::timestamp')
+                parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
 
         def _limit():
@@ -1550,7 +1556,8 @@ class Searchable(object):
             args = OrderedDict(sorted(kwargs.items()))
             return [v for k,v in args.items() \
                     if k in cls._allowed_args and
-                    k not in ['limit', 'offset']]
+                    k not in ['limit', 'offset', 'show_hidden'] and
+                    v is not None]
 
         _validate()
         result = yield cls.execute_select_query(
@@ -1795,20 +1802,28 @@ class MappingObject(object):
         e.g., _table = tag_thumbnail and _keys = ['tag_id', 'thumbnail_id']'''
 
     # Set these in the subclass.
-    _keys = [None, None]  # Must match name and order of schema
     _table = None
+    _keys = [None, None]  # Must match name and order of schema
 
     @classmethod
     @tornado.gen.coroutine
     def get(cls, **kwargs):
+        '''Given exactly one of the column names and an id,
+        return a list of the values associated to that id.'''
         _, value = cls._get_key_and_value(**kwargs)
+        if not value:
+            raise tornado.gen.Return([])
         fetched = yield cls.get_many(**kwargs)
         raise tornado.gen.Return(fetched[value])
 
     @classmethod
     @tornado.gen.coroutine
     def get_many(cls, **kwargs):
+        '''Given exactly one of the column names and a list of ids
+        return the map of ids to lists of their associated values.'''
         key, values = cls._get_key_and_values(**kwargs)
+        if not values:
+            raise tornado.gen.Return({})
         other_key = cls._keys[0] if cls._keys[1] == key else cls._keys[1]
         fetch = []
         sql, bind = cls._get_select_single_col_tuple(key, values)
@@ -1821,7 +1836,6 @@ class MappingObject(object):
     @tornado.gen.coroutine
     def has(cls, **kwargs):
         '''Given a key-pair, returns True if the pair is associated in the db.'''
-        '''Delete a single mapping object row.'''
         cls._validate_scalar_values(**kwargs)
         fetched = yield cls.has_many(**kwargs)
         raise tornado.gen.Return(len(fetched) == 1)
@@ -1829,7 +1843,7 @@ class MappingObject(object):
     @classmethod
     @tornado.gen.coroutine
     def has_many(cls, **kwargs):
-        '''Given lists of keys, return dictionary of all pairs to True if in db.'''
+        '''Given lists of keys, return dictionary of every pair to boolean.'''
         cls._validate_keys(kwargs.keys())
         fetch = []
         sql, bind = cls._get_select_tuple(**kwargs)
@@ -1853,8 +1867,9 @@ class MappingObject(object):
     @classmethod
     @tornado.gen.coroutine
     def save_many(cls, **kwargs):
-        '''Allow saving of many mapping relations at once.'''
+        '''Allow saving of many mapping relations at once.
 
+        Returns the number of rows created.'''
         # Validate input
         cls._validate_keys(kwargs.keys())
 
@@ -1891,6 +1906,7 @@ class MappingObject(object):
         db = PostgresDB()
         conn = yield db.get_connection()
         try:
+            print sql, bind
             cursor = yield conn.execute(sql, bind)
             if type(fetch) is list:
                 fetch.extend(cursor.fetchall())
@@ -1906,21 +1922,21 @@ class MappingObject(object):
     def _get_key_and_value(cls, **kwargs):
         key, values = cls._get_key_and_values(**kwargs)
         if len(values) is not 1:
-            raise TypeError('Expect exactly on value in get')
+            raise TypeError('Expect exactly one value in get')
         return key, values[0]
 
     @classmethod
     def _get_key_and_values(cls, **kwargs):
         if len(kwargs) is not 1:
             raise TypeError('Expect exactly one key in get kwargs')
-        if kwargs.get(cls._keys[0]):
+        if cls._keys[0] in kwargs.keys():
             values = kwargs[cls._keys[0]]
             key = cls._keys[0]
-        elif kwargs.get(cls._keys[1]):
+        elif cls._keys[1] in kwargs.keys():
             values = kwargs[cls._keys[1]]
             key = cls._keys[1]
         else:
-            raise KeyError('Underecognized key in %s' % kwargs.keys())
+            raise KeyError('Unrecognized key in %s' % kwargs.keys())
         if type(values) is not list:
             values = [values]
         return key, values
@@ -5677,7 +5693,7 @@ class VideoMetadata(StoredObject):
                       until=None,
                       limit=25,
                       search_query=None,
-                      skip_deleted=False):
+                      show_hidden=False):
 
         """Does a basic search over the videometadatas in the DB
 
@@ -5736,7 +5752,7 @@ class VideoMetadata(StoredObject):
             where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
 
-        if skip_deleted:
+        if show_hidden:
             if where_clause:
                 where_clause += " AND "
             where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"

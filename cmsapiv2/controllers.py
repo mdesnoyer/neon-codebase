@@ -8,6 +8,7 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
+from collections import OrderedDict
 import numpy as np
 import PIL.Image
 import cv2
@@ -1091,31 +1092,99 @@ class TagHandler(APIV2Handler):
                                  HTTPVerbs.PUT,
                                  HTTPVerbs.POST]}
 
+class ThumbnailResponse(object):
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return ['video_id', 'thumbnail_id', 'rank', 'frameno',
+                'neon_score', 'enabled', 'url', 'height', 'width',
+                'type', 'external_ref', 'created', 'updated', 'renditions',
+                'tag_ids']
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
+                'created', 'updated']
+
+    @classmethod
+    @tornado.gen.coroutine
+    def _convert_special_field(cls, obj, field):
+        if field == 'video_id':
+            retval = neondata.InternalVideoID.to_external(
+                neondata.InternalVideoID.from_thumbnail_id(obj.key))
+        elif field == 'thumbnail_id':
+            retval = obj.key
+        elif field == 'tag_ids':
+            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key)
+            retval = list(tag_ids)
+        elif field == 'neon_score':
+            retval = obj.get_neon_score()
+        elif field == 'url':
+            retval = obj.urls[0] if obj.urls else []
+        elif field == 'external_ref':
+            retval = obj.external_id
+        elif field == 'renditions':
+            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
+            retval = ThumbnailHelper.renditions_of(urls)
+        else:
+            raise BadRequestError('invalid field %s' % field)
+
+        raise tornado.gen.Return(retval)
+
 
 '''*********************************************************************
 TagSearchExternalHandler : class responsible for searching tags
                            from an external source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchExternalHandler(APIV2Handler):
+class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
     @tornado.gen.coroutine
     def get(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             'limit': All(Coerce(int), Range(min=1, max=100)),
-            'query': Any(CustomVoluptuousTypes.Regex(), str),
+            'name': str,
             'since': Coerce(float),
             'until': Coerce(float),
-            'skip_deleted': Coerce(bool)
+            'show_hidden': Coerce(bool),
+            'fields': CustomVoluptuousTypes.CommaSeparatedList()
         })(self.args)
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
-        items, count, prev_page, next_page = yield searcher.get()
+        tags, count, prev_page, next_page = yield searcher.get()
+
+        _fields = self.args.get('fields')
+        fields = _fields.split(',') if _fields else None
+
+        items = yield self._items(tags, fields)
+
         self.success({
             'items': items,
-            'count': count,
+            'count': len(items),
             'next_page': next_page,
             'prev_page': prev_page})
+
+    @tornado.gen.coroutine
+    def _items(self, tags, fields):
+        '''Build a result from tag keys.
+
+        Input- list tag objects
+        Returns - list of tag with nested thumbnails:
+            [tag dict{name: name, thumbnails: <list of thumbnail dicts>}]'''
+
+        # Get all the Thumbnails mapped by a tag.
+        tag_ids = [tag.get_id() for tag in tags]
+        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids)
+        thumb_ids = list({tid for tids in mapping.values() for tid in tids})
+        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        # Make a map from key to object.
+        tag_map = {tag.get_id(): tag for tag in tags}
+        thumb_map = yield {th.get_id(): self.db2api(th, fields) for th in thumbs}
+        # Replace each tid in mapping with a ThumbnailMetadata.
+        result = [{
+            'name': tag_map[tag_id].name,
+            'thumbnails': [thumb_map[tid] for tid in tids if thumb_map.get(tid)]}
+                for tag_id, tids in mapping.items()]
+        raise tornado.gen.Return(result)
+
 
     @classmethod
     def get_access_levels(self):
@@ -1126,40 +1195,32 @@ class TagSearchExternalHandler(APIV2Handler):
 class ContentSearcher(object):
     '''A searcher to run search requests and make results.'''
 
-    def __init__(self, account_id=None, since=None, until=None, query=None,
-                 limit=None, skip_deleted=False, base_url=None):
+    def __init__(self, account_id=None, since=None, until=None, name=None,
+                 limit=None, show_hidden=False, base_url=None):
         self.account_id = account_id
         self.since = since
         self.until = until
-        self.query = query
+        self.name = name 
         self.limit = limit
-        self.skip_deleted = skip_deleted
+        self.show_hidden = show_hidden
         self.base_url = base_url or '/api/v2/tags/search/'
 
     @tornado.gen.coroutine
-    def run(self):
+    def get(self):
         '''Gets a search result tuple.
 
         Returns tuple of
             list of content items,
-            int count of total items,
+            int count of items in this response,
             str prev page url,
             str next page url.'''
-        raw = yield neondata.Tag.search(**self.__dict__)
-        items = yield self._prepare(raw)
+        tags = yield neondata.Tag.objects(**{k:v for k,v in self.__dict__.items()
+            if k is not 'base_url'})
         raise tornado.gen.Return((
-            items,
-            len(items),
+            tags,
+            len(tags),
             self._prev_page_url(),
             self._next_page_url()))
-
-    @tornado.gen.coroutine
-    def _prepare(self, raw):
-        '''Build a result from raw records.
-
-        Input- list raw list of content items
-        Returns- list result'''
-        raise tornado.gen.Return(raw)
 
     def _prev_page_url(self):
         '''Build the previous page url.'''
@@ -1175,7 +1236,7 @@ TagSearchInternalHandler : class responsible for searching tags
                            from an internal source
    HTTP Verbs     : get
 *********************************************************************'''
-class TagSearchInternalHandler(APIV2Handler):
+class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         Schema({
@@ -1199,7 +1260,7 @@ class TagSearchInternalHandler(APIV2Handler):
 '''*********************************************************************
 ThumbnailHandler
 *********************************************************************'''
-class ThumbnailHandler(APIV2Handler):
+class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1428,42 +1489,6 @@ class ThumbnailHandler(APIV2Handler):
                                         HTTPVerbs.POST]
                }
 
-    @classmethod
-    def _get_default_returned_fields(cls):
-        return ['video_id', 'thumbnail_id', 'rank', 'frameno',
-                'neon_score', 'enabled', 'url', 'height', 'width',
-                'type', 'external_ref', 'created', 'updated', 'renditions',
-                'tag_ids']
-    @classmethod
-    def _get_passthrough_fields(cls):
-        return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
-                'created', 'updated']
-
-    @classmethod
-    @tornado.gen.coroutine
-    def _convert_special_field(cls, obj, field):
-        if field == 'video_id':
-            retval = neondata.InternalVideoID.to_external(
-                neondata.InternalVideoID.from_thumbnail_id(obj.key))
-        elif field == 'thumbnail_id':
-            retval = obj.key
-        elif field == 'tag_ids':
-            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key)
-            retval = list(tag_ids)
-        elif field == 'neon_score':
-            retval = obj.get_neon_score()
-        elif field == 'url':
-            retval = obj.urls[0] or []
-        elif field == 'external_ref':
-            retval = obj.external_id
-        elif field == 'renditions':
-            urls = yield neondata.ThumbnailServingURLs.get(obj.key, async=True)
-            retval = ThumbnailHelper.renditions_of(urls)
-        else:
-            raise BadRequestError('invalid field %s' % field)
-
-        raise tornado.gen.Return(retval)
-
 
 '''*********************************************************************
 ThumbnailHelper
@@ -1678,7 +1703,7 @@ class VideoHelper(object):
     def get_search_results(account_id=None, since=None, until=None, query=None,
                            limit=None, fields=None,
                            base_url='/api/v2/videos/search',
-                           skip_deleted=False):
+                           show_hidden=False):
 
         search_res = yield neondata.VideoMetadata.search_videos(
             account_id,
@@ -1686,7 +1711,7 @@ class VideoHelper(object):
             until=until,
             limit=limit,
             search_query=query,
-            skip_deleted=skip_deleted)
+            show_hidden=show_hidden)
 
         videos = search_res['videos'] or []
         since_time = search_res['since_time']
@@ -2459,7 +2484,7 @@ class VideoSearchExternalHandler(APIV2Handler):
             limit,
             fields,
             base_url=base_url,
-            skip_deleted=True)
+            show_hidden=True)
 
         self.success(vid_dict)
 

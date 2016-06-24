@@ -44,6 +44,10 @@ from utils.options import options
 define('run_stripe_on_test_account', default=0, type=int,
        help='If set, will run tests that hit the real Stripe APIs')
 
+# Supress momoko debug.
+logging.getLogger('momoko').setLevel(logging.INFO)
+
+
 class TestBase(test_utils.neontest.AsyncHTTPTestCase):
     def setUp(self):
         self.send_email_mocker = patch(
@@ -5010,7 +5014,7 @@ class TestVideoSearchInternalHandler(TestVerifiedControllersBase):
 class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
 
     @tornado.testing.gen_test
-    def test_deleted_video(self):
+    def test_hidden_video(self):
         # Add videos and hide one. The hidden doesn't show in a search.
         neondata.VideoMetadata('u_1', request_id='1').save()
         neondata.VideoMetadata('u_2', request_id='2').save()
@@ -7108,6 +7112,47 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         rjson = json.loads(response.body)
         self.assertEqual([], rjson['items'])
         self.assertEqual(0, rjson['count'])
+
+    @tornado.testing.gen_test
+    def test_search_one_tag_some_thumbs(self):
+        thumbnails = [neondata.ThumbnailMetadata(
+                          uuid.uuid1().hex,
+                          account_id=self.account_id)
+                      for _ in xrange(5)]
+        [t.save() for t in thumbnails]
+        tag = neondata.Tag(None, name='My Photos', account_id=self.account_id)
+        tag.save()
+        neondata.TagThumbnail.save_many(
+            tag_id=tag.get_id(),
+            thumbnail_id=[t.get_id() for t in thumbnails])
+
+        response = yield self.http_client.fetch(self.url, headers=self.headers)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual(1, rjson['count'])
+        items = rjson['items']
+        self.assertEqual('My Photos', items[0]['name'])
+        given_ids = {thumb.get_id() for thumb in thumbnails}
+        response_ids = {thumb['thumbnail_id'] for thumb in items[0]['thumbnails']}
+        self.assertEqual(given_ids, response_ids)
+
+
+    @tornado.testing.gen_test
+    def test_search_b(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_search_c(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_search_d(self):
+        pass
+
+    @tornado.testing.gen_test
+    def test_search_e(self):
+        pass
+
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
