@@ -8,7 +8,6 @@ if sys.path[0] != __base_path__:
 
 from apiv2 import *
 import api.brightcove_api
-from collections import OrderedDict
 import numpy as np
 import PIL.Image
 import cv2
