@@ -823,7 +823,6 @@ class StoredObject(object):
                     obj.__dict__[str(k)] = cls._deserialize_field(k, value)
             except ValueError:
                 return None
-
             return obj
 
     @classmethod
@@ -5366,7 +5365,7 @@ class VideoMetadata(StoredObject):
                  experiment_state=ExperimentState.UNKNOWN,
                  experiment_value_remaining=None,
                  serving_enabled=True, custom_data=None,
-                 publish_date=None, hidden=None, share_token=None):
+                 publish_date=None, hidden=None, share_token=None, tag_id=None):
         super(VideoMetadata, self).__init__(video_id) 
         self.thumbnail_ids = tids or []
         self.url = video_url 
@@ -5401,6 +5400,9 @@ class VideoMetadata(StoredObject):
 
         # If user has deleted this video, flag it deleted.
         self.hidden = hidden
+
+        # For associating to thumbnails via a tag.
+        self.tag_id = tag_id
 
     def _set_keyname(self):
         '''Key by the account id'''

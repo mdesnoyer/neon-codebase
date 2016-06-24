@@ -2915,6 +2915,7 @@ class TestVideoHandler(TestControllersBase):
             method='POST',
             allow_nonstandard_methods=True)
         rjson = json.loads(response.body)
+        import pdb; pdb.set_trace()
         job_id = rjson['job_id']
         url = '/api/v2/%s/videos?video_id=vid1&title=vidkevinnew' % (
             self.account_id_api_key)
@@ -2931,6 +2932,58 @@ class TestVideoHandler(TestControllersBase):
             self.account_id_api_key,
             async=True)
         self.assertEquals(request.video_title, 'vidkevinnew')
+
+    @tornado.testing.gen_test
+    def test_put_video_title_with_tag(self):
+        # With no request, nor tag
+        video_id = neondata.InternalVideoID.generate(self.account_id_api_key, 'v0')
+        video = neondata.VideoMetadata(video_id)
+        video.save()
+        url = self.get_url('/api/v2/%s/videos' % self.account_id_api_key)
+        headers = {'Content-Type': 'application/json'}
+        body = json.dumps({
+            'video_id': 'v0',
+            'title': 'New title'})
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+
+        video_id = neondata.InternalVideoID.generate(self.account_id_api_key, 'v1')
+        video = neondata.VideoMetadata(video_id, request_id='j1')
+        video.save()
+        neondata.NeonApiRequest('j1', self.account_id_api_key).save()
+        body = json.dumps({
+            'video_id': 'v1',
+            'title': 'New title'})
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        request = neondata.NeonApiRequest.get('j1', self.account_id_api_key)
+        self.assertEqual('New title', request.video_title)
+
+        tag = neondata.Tag(account_id=self.account_id_api_key, name='Old')
+        tag.save()
+        video_id = neondata.InternalVideoID.generate(self.account_id_api_key, 'v2')
+        video = neondata.VideoMetadata(video_id, tag_id=tag.get_id())
+        video.save()
+        body = json.dumps({
+            'video_id': 'v2',
+            'title': 'New'})
+        response = yield self.http_client.fetch(
+            url,
+            method='PUT',
+            headers=headers,
+            body=body)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
+        rjson = json.loads(response.body)
+        tag = neondata.Tag.get(rjson['tag_id'])
+        self.assertEqual('New', tag.name)
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):

@@ -1806,7 +1806,7 @@ class VideoHelper(object):
 
     @staticmethod
     @tornado.gen.coroutine
-    def db2api(video, request, fields=None):
+    def db2api(video, request, fields=None, tag=None):
         """Converts a database video metadata object to a video
         response dictionary
 
@@ -1836,7 +1836,10 @@ class VideoHelper(object):
             elif field == 'job_id':
                 new_video[field] = video.job_id
             elif field == 'title':
-                new_video[field] = request.video_title
+                if request:
+                    new_video[field] = request.video_title
+                elif tag:
+                    new_video[field] = tag.video_title
             elif field == 'video_id':
                 new_video[field] = \
                   neondata.InternalVideoID.to_external(video.key)
@@ -2005,37 +2008,48 @@ class VideoHandler(ShareableContentHandler):
             account_id_api_key,
             args['video_id'])
 
-        def _update_video(v):
-            v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
-            v.hidden =  Boolean()(args.get('hidden', v.hidden))
+        if 'testing_enable' in args or 'hidden' in args:
+            def _update_video(v):
+                v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
+                v.hidden =  Boolean()(args.get('hidden', v.hidden))
 
-        video = yield neondata.VideoMetadata.modify(
-            internal_video_id,
-            _update_video,
-            async=True)
+            video = yield neondata.VideoMetadata.modify(
+                internal_video_id,
+                _update_video,
+                async=True)
+        else:
+            video = yield neondata.VideoMetadata.get(internal_video_id, async=True)
 
         if not video:
             raise NotFoundError('video does not exist with id: %s' %
                 (args['video_id']))
 
         # we may need to update the request object as well
-        db2api_fields = ['testing_enabled', 'video_id']
-        api_request = None
-        if title is not None and video.job_id is not None:
-            def _update_request(r):
-                r.video_title = title
+        db2api_fields = {'testing_enabled', 'video_id', 'tag_id'}
+        api_request, tag = None, None
+        if title is not None:
+            if video.job_id is not None:
+                def _update_request(r):
+                    r.video_title = title
 
-            api_request = yield neondata.NeonApiRequest.modify(
-                video.job_id,
-                account_id,
-                _update_request,
-                async=True)
-
-            db2api_fields.append('title')
+                api_request = yield neondata.NeonApiRequest.modify(
+                    video.job_id,
+                    account_id,
+                    _update_request,
+                    async=True)
+                db2api_fields.add('title')
+            if video.tag_id is not None:
+                def _update_tag(t):
+                    t.name = title
+                tag = yield neondata.Tag.modify(
+                    video.tag_id,
+                    _update_tag,
+                    async=True)
+                db2api_fields.add('title')
 
         statemon.state.increment('put_video_oks')
         output = yield self.db2api(video, api_request,
-                                   fields=db2api_fields)
+                                   fields=list(db2api_fields), tag=tag)
         self.success(output)
 
     @classmethod
@@ -2069,7 +2083,7 @@ class VideoHandler(ShareableContentHandler):
 
     @staticmethod
     @tornado.gen.coroutine
-    def db2api(video, request, fields=None):
+    def db2api(video, request, fields=None, tag=None):
         video_obj = yield VideoHelper.db2api(video, request, fields)
         raise tornado.gen.Return(video_obj)
 
