@@ -2000,7 +2000,7 @@ class TestVideoHandler(TestControllersBase):
 
         super(TestVideoHandler, self).tearDown()
 
-    @patch('cmsdb.neondata.VideoMetadata.download_image_from_url')
+    @patch('cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
     @tornado.testing.gen_test
     def test_post_video(self, cmsdb_download_image_mock):
         url = '/api/v2/%s/videos?integration_id=%s&external_video_ref=1234ascs&default_thumbnail_url=url.invalid&title=a_title&url=some_url&thumbnail_ref=ref1&duration=16' % (self.account_id_api_key, self.test_i_id)
@@ -2034,7 +2034,7 @@ class TestVideoHandler(TestControllersBase):
     @tornado.testing.gen_test
     def test_post_video_with_limits_refresh_date_reset(self):
         cmsdb_download_image_mocker = patch(
-            'cmsdb.neondata.VideoMetadata.download_image_from_url')
+            'cmsdb.neondata.ThumbnailMetadata.download_image_from_url')
         cmsdb_download_image_mock = self._future_wrap_mock(
             cmsdb_download_image_mocker.start())
         cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2074,7 +2074,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_increase_post_videos(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2144,7 +2144,7 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2167,7 +2167,7 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2192,7 +2192,7 @@ class TestVideoHandler(TestControllersBase):
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key,
                   self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2934,7 +2934,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -2971,7 +2971,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_trialing(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3007,7 +3007,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_no_good(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3038,7 +3038,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_check_subscription_state(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
         stripe_sub = stripe.Subscription()
@@ -3101,7 +3101,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_check_subscription_exception(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3170,7 +3170,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_body_nones(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
            patch(pstr)) as cmock:
             cmock.side_effect = [self.random_image]
@@ -3200,7 +3200,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_too_big_duration(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
            patch(pstr)) as cmock:
             cmock.side_effect = [self.random_image]
