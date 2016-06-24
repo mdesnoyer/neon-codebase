@@ -46,6 +46,10 @@ statemon.define('post_brightcove_oks', int)
 statemon.define('put_brightcove_oks', int)
 statemon.define('get_brightcove_oks', int)
 
+statemon.define('put_brightcove_player_oks', int)
+statemon.define('get_brightcove_player_oks', int)
+statemon.define('brightcove_publish_plugin_error', int)
+
 statemon.define('post_thumbnail_oks', int)
 statemon.define('put_thumbnail_oks', int)
 statemon.define('get_thumbnail_oks', int)
@@ -487,6 +491,7 @@ class BrightcovePlayerHandler(APIV2Handler):
             'players': ret_list,
             'player_count': len(ret_list)
         }
+        statemon.state.increment('get_brightcove_player_oks')
         self.success(response)
 
     @staticmethod
@@ -543,7 +548,11 @@ class BrightcovePlayerHandler(APIV2Handler):
         # Verify player_ref is at Brightcove
         bc = api.brightcove_api.PlayerAPI(integration)
         # This will error (expect 404) if player not found
-        bc_player = yield bc.get_player(ref)
+        try:
+            bc_player = yield bc.get_player(ref)
+        except Exception as e:
+            statemon.state.increment('brightcove_publish_plugin_error')
+            raise e
 
         # Get or create db record
         def _modify(p):
@@ -569,7 +578,11 @@ class BrightcovePlayerHandler(APIV2Handler):
             patch = BrightcovePlayerHelper._install_plugin_patch(
                 bc_player_config,
                 self.account.tracker_account_id)
-            yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+            try:
+                yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+            except Exception as e:
+                statemon.state.increment('brightcove_publish_plugin_error')
+                raise e
             # Published. Update the player with the date and version
             def _modify(p):
                 p.publish_date = datetime.now().isoformat()
@@ -582,13 +595,18 @@ class BrightcovePlayerHandler(APIV2Handler):
             patch = BrightcovePlayerHelper._uninstall_plugin_patch(
                 bc_player_config)
             if patch:
-                yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+                try:
+                    yield BrightcovePlayerHelper.publish_player(ref, patch, bc)
+                except Exception as e:
+                    statemon.state.increment('brightcove_publish_plugin_error')
+                    raise e
 
         # Finally, respond with the current version of the player
         player = yield neondata.BrightcovePlayer.get(
             player.get_id(),
             async=True)
         response = yield self.db2api(player)
+        statemon.state.increment('put_brightcove_player_oks')
         self.success(response)
 
     @classmethod
@@ -1871,7 +1889,7 @@ class VideoStatsHandler(APIV2Handler):
         fields = args.get('fields', None)
         if fields:
             fields = set(fields.split(','))
-        video_statuses = yield [self.db2api(x) for x in video_statuses]
+        video_statuses = yield [self.db2api(x, fields) for x in video_statuses]
         stats_dict['statistics'] = video_statuses
         stats_dict['count'] = len(video_statuses)
 
@@ -2040,7 +2058,7 @@ class LiftStatsHandler(APIV2Handler):
             score = thumb.get_neon_score()
             if default_neon_score is None or score is None:
                 return None
-            return round(score / default_neon_score - 1, 3)
+            return round(score / float(default_neon_score) - 1, 3)
 
         lift = [{'thumbnail_id': k, 'lift': _get_estimated_lift(t) if t else None}
                 for k, t in thumbs.items()]
@@ -2942,12 +2960,12 @@ class EmailHandler(APIV2Handler):
         if cur_user:
             cur_user_email = cur_user.username
 
-        if cur_user_email: 
+        if args_email: 
+            send_to_email = args_email
+        elif cur_user_email: 
             send_to_email = cur_user_email
             if not cur_user.send_emails: 
                 self.success({'message' : 'user does not want emails'})
-        elif args_email: 
-            send_to_email = args_email
         else:  
             raise NotFoundError('Email address is required.')
 
