@@ -76,12 +76,9 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
-        cls.__predictor = patch('model.predictor.DeepnetPredictor')
-        cls.__predictor.start()
 
     @classmethod
     def tearDownClass(cls):
-        cls.__predictor.stop()
         cls.postgresql.stop()
         options._set('cmsdb.neondata.max_io_loop_dict_size',
             cls.max_io_loop_size)
@@ -2633,14 +2630,14 @@ class TestVideoHandler(TestControllersBase):
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
         self.assertEquals({
-            'job_id': 'job1',
-            'testing_enabled' : False,
-            'url' : 'http://someurl.com',
-            'state': neondata.ExternalRequestState.PROCESSED,
-            'video_id': 'vid1',
-            'publish_date' : '2015-06-10',
-            'title' : 'Title'
-            },
+                'job_id': 'job1',
+                'publish_date': '2015-06-10',
+                'state': neondata.ExternalRequestState.PROCESSED,
+                'tag_id': None,
+                'testing_enabled': False,
+                'title': 'Title',
+                'url': 'http://someurl.com',
+                'video_id': 'vid1'},
             rjson['videos'][0])
 
     @tornado.testing.gen_test
@@ -3333,7 +3330,7 @@ class TestThumbnailHandler(TestControllersBase):
         self.model_connect = patch('model.predictor.DeepnetPredictor.connect')
         self.model_connect.start()
         self.model_predict_mocker = patch(
-            'model.predictor.DeepnetPredictor.predict')
+           'model.predictor.DeepnetPredictor.predict')
         self.model_predict_mock = self._future_wrap_mock(
             self.model_predict_mocker.start())
         self.model_predict_mock.side_effect = [.5]
@@ -7229,7 +7226,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         given_ids = {thumb.get_id() for thumb in thumbnails}
         response_ids = {thumb['thumbnail_id'] for thumb in items[0]['thumbnails']}
         self.assertEqual(given_ids, response_ids)
-
 
     @tornado.testing.gen_test
     def test_search_b(self):

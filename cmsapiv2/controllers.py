@@ -1273,12 +1273,16 @@ ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
-    def initalize(self, predictor=None):
-        '''Set a reference to the shared score predictor.'''
-        self.predictor = predictor
+    def _initialize_predictor(self):
+        '''Instantiate and connect an Aquila predictor.'''
+        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+            options.model_autoscale_groups.split(','))
+        self.predictor = model.predictor.DeepnetPredictor(
+            port=options.model_server_port,
+            concurrency=options.request_concurrency,
+            aquila_connection=aquila_conn)
         self.predictor.connect()
         self.model_version = '%s-aqv1.1.250' % os.path.basename(options.model_file)
-        super(ThumbnailHandler, self).initialize()
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1444,6 +1448,8 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def _score_image(self):
+        if not hasattr(self, 'predictor'):
+            self._initialize_predictor()
         yield self.thumb.score_image(
             self.predictor,
             self.model_version,
@@ -3331,14 +3337,6 @@ class EmailHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.POST] 
                }
 
-#  Initialize an Aquila predictor for shared use by ThumbnailHandler.
-aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
-    options.model_autoscale_groups.split(','))
-predictor = model.predictor.DeepnetPredictor(
-    port=options.model_server_port,
-    concurrency=options.request_concurrency,
-    aquila_connection=aquila_conn)
-
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -3368,7 +3366,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/tags/?$',                            TagHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$',                     TagSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$',               TelemetrySnippetHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler, {'predictor': predictor}),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',               ThumbnailSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$',                           UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$',                          VideoHandler),
