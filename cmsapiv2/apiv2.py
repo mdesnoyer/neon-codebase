@@ -617,6 +617,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             return exception.log_message if \
                 hasattr(exception, "log_message") else str(exception)
 
+
         self.clear()
         self.set_status(status_code)
         exception = kwargs["exc_info"][1]

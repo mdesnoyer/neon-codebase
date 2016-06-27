@@ -3361,7 +3361,24 @@ class TestThumbnailHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_bad_add_new_thumbnail_not_image(self):
-        pass
+        video_id = 'tn_test_vid1'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}'.format(
+            self.account_id_api_key, video_id))
+
+        # Make a random, non-image file.
+        buf = StringIO()
+        buf.write(bytearray(os.urandom(100000)))
+        body = MultipartEncoder({
+            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+        headers = {'Content-Type': body.content_type}
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                headers=headers,
+                body=body.to_string(),
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
