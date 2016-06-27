@@ -564,6 +564,24 @@ class TestVideoClient(test_utils.neontest.AsyncTestCase):
                 yield vprocessor.process_video(
                     'a_garbage_video_thats_gone.mov')
 
+    @tornado.testing.gen_test 
+    def test_duration_too_long(self): 
+        vprocessor = self.setup_video_processor('neon')
+        al = neondata.AccountLimits(
+            vprocessor.job_params['api_key'],
+            max_video_size=2.0)
+        yield al.save(async=True) 
+        yield vprocessor.video_metadata.save(async=True)
+        with self.assertRaises(video_processor.client.BadVideoError) as e:
+            yield vprocessor.process_video(self.test_video_file, n_thumbs=5)
+
+        api_request = yield neondata.NeonApiRequest.get(
+            vprocessor.job_params['job_id'],
+            vprocessor.job_params['api_key'],
+            async=True)
+        self.assertEquals(api_request.fail_count,
+                          options.get('video_processor.client.max_fail_count'))
+        
     @tornado.testing.gen_test
     def test_process_all_filtered_video(self):
         '''Test processing a video where every frame is filtered.'''
@@ -936,7 +954,6 @@ class TestFinalizeResponse(test_utils.neontest.AsyncTestCase):
     @classmethod
     def tearDownClass(cls):
         cls.postgresql.stop()
-
 
     @tornado.testing.gen_test 
     def test_send_email_notification_base(self): 

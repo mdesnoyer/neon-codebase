@@ -2765,6 +2765,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
         # A list of image rendition sizes to generate if resize is
         # True. The list is of (w, h) tuples.
         self.rendition_sizes = rendition_sizes or [
+            [100, 100],
             [120, 67],
             [120, 90],
             [160, 90],
@@ -2772,6 +2773,7 @@ class CDNHostingMetadata(NamespacedStoredObject):
             [210, 118],
             [320, 180],
             [320, 240],
+            [350, 350],
             [480, 270],
             [480, 360],
             [640, 360],

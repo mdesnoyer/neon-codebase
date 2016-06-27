@@ -176,10 +176,15 @@ class ServingURLHandler(tornado.web.RequestHandler):
             except TypeError:
                 pass
         else:
-            width = max([x.get('width') for x in image_response['sources']] or
-                        [None])
-            height = max([x.get('height') for x in image_response['sources']]
-                         or [None])
+            # The height and width reported by Brightcove is incorrect
+            # sometimes, so we are going to ignore it for now and go get the
+            # actual image to figure out its size.
+            # TODO: renable once Brightcove fixes this bug
+            #width = max([x.get('width') for x in image_response['sources']] or
+            #            [None])
+            #height = max([x.get('height') for x in image_response['sources']]
+            #             or [None])
+            pass
 
         if (width is None or height is None):
             width, height = yield self._get_size_from_existing_image(
