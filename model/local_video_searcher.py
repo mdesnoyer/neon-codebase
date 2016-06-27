@@ -850,6 +850,7 @@ class ResultsList(object):
         self._max_variety = max_variety
         self.n_thumbs = n_thumbs
         self.failed_scoring = 0 # Number of failed scoring operations
+        self._lock = threading.RLock()
         self.reset()
         self._min_acceptable = min_acceptable
         self._max_rejectable = max_rejectable
@@ -857,7 +858,6 @@ class ResultsList(object):
         self._considered_thumbs = 0
         self._adapt_improve = adapt_improve
         self._combination_function = combination_function
-        self._lock = threading.RLock()
         if adapt_improve:
             self._clipLimit = 1.0
             self._tileGridSize = (8, 8)
