@@ -761,9 +761,11 @@ class TestImageServingPlatformAPI(test_utils.neontest.TestCase):
 
     def test_client_api_no_perfect_match_multiple_approx_match_thumbnail(self):
         '''
-        No perfectly matched scaled image is available, a qualifying approximate
-        one is returned. At this time no specific order is required in the selection
-        when multiple approx choices are available.
+        
+        No perfectly matched scaled image is available, a qualifying
+        approximate one is returned. At this time no specific order is
+        required in the selection when multiple approx choices are
+        available.
 
         verify:
         response code

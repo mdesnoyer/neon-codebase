@@ -180,13 +180,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
     @tornado.testing.gen_test
     def test_post_same_as_put(self):
@@ -201,13 +201,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
     @tornado.testing.gen_test
     def test_not_using_bc_thumbs(self):
@@ -317,7 +317,7 @@ class TestCMSAPIPush(BaseTest):
         # Make sure the poster was updated
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
         # Make sure the thumbnail was updated
         self.add_thumbnail_mock.assert_called_with(
@@ -336,7 +336,7 @@ class TestCMSAPIPush(BaseTest):
         self.assertEquals(response.code, 200)
 
         # Make sure the image was downloaded
-        self.assertEquals(self.im_download_mock.call_count, 1)
+        self.assertEquals(self.im_download_mock.call_count, 3)
 
         # Check that the image was added to the database object
         video = neondata.VideoMetadata.get('acct1_vid1')
@@ -351,13 +351,13 @@ class TestCMSAPIPush(BaseTest):
         self.delete_poster_mock.assert_called_with('vid1', 'poster1')
         self.add_poster_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=480&height=360',)
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480',)
 
         # Make sure the thumb was added
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
+            'http://neon-images.com/neonvid_vid1.jpg?width=640&height=480')
 
     @tornado.testing.gen_test
     def test_state_processed_not_our_url(self):
@@ -695,7 +695,7 @@ class TestCMSAPIPush(BaseTest):
         self.delete_thumbnail_mock.assert_called_with('vid1', 'thumborig')
         self.add_thumbnail_mock.assert_called_with(
             'vid1',
-            'http://neon-images.com/neonvid_vid1.jpg?width=320&height=180')
+            'http://neon-images.com/neonvid_vid1.jpg?width=160&height=90')
         
 class TestMediaAPIPush(BaseTest):
     def setUp(self):
