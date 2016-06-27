@@ -10,7 +10,6 @@ from apiv2 import *
 import api.brightcove_api
 import numpy as np
 import PIL.Image
-import cv2
 import io
 import StringIO
 
@@ -1384,12 +1383,11 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
                 image_url=self.args.get('url'),
                 cdn_metadata=cdn,
                 async=True)
-            yield self.thumb.save(async=True)
         else:
             yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
-            yield self.thumb.save(async=True)
             # Score non-video image here.
             yield self._score_image()
+        yield self.thumb.save(async=True)
 
         # Set tags if requested.
         if self.args.get('tag_id'):
@@ -1403,7 +1401,7 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def _set_image(self):
-        """Set self.image to a cv2-style image or raise HTTP_BAD_REQUEST."""
+        """Set self.image to a PIL image or raise HTTP_BAD_REQUEST."""
 
         # Get from url.
         url = self.args.get('url')
@@ -1418,6 +1416,9 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
                 self.request.files['upload'][0])
             if self.image:
                 return
+        except IOError as e:
+            e.errno = 400
+            raise e
         except KeyError:
             pass
 
