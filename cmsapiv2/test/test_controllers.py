@@ -15,6 +15,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+import model
 import random
 from requests_toolbelt import MultipartEncoder
 import stripe
@@ -75,9 +76,12 @@ class TestBase(test_utils.neontest.AsyncHTTPTestCase):
         options._set('cmsdb.neondata.max_io_loop_dict_size', 10)
         dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
         cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+        cls.__predictor = patch('model.predictor.DeepnetPredictor')
+        cls.__predictor.start()
 
     @classmethod
     def tearDownClass(cls):
+        cls.__predictor.stop()
         cls.postgresql.stop()
         options._set('cmsdb.neondata.max_io_loop_dict_size',
             cls.max_io_loop_size)
@@ -2624,8 +2628,7 @@ class TestVideoHandler(TestControllersBase):
         request.state = neondata.RequestState.FINISHED
         request.save()
         url = '/api/v2/%s/videos?video_id=vid1' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        response = yield self.http_client.fetch(self.get_url(url))
 
         rjson = json.loads(response.body)
         self.assertEquals(response.code, 200)
@@ -2799,8 +2802,7 @@ class TestVideoHandler(TestControllersBase):
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
-            method='PUT',
-            allow_nonstandard_methods=True)
+            method='PUT')
 
         rjson = json.loads(response.body)
         self.assertFalse(rjson['testing_enabled'])
@@ -2811,8 +2813,7 @@ class TestVideoHandler(TestControllersBase):
         response = yield self.http_client.fetch(
             self.get_url(url),
             body='',
-            method='PUT',
-            allow_nonstandard_methods=True)
+            method='PUT')
 
         rjson = json.loads(response.body)
         self.assertTrue(rjson['testing_enabled'])
@@ -2916,7 +2917,6 @@ class TestVideoHandler(TestControllersBase):
             method='POST',
             allow_nonstandard_methods=True)
         rjson = json.loads(response.body)
-        import pdb; pdb.set_trace()
         job_id = rjson['job_id']
         url = '/api/v2/%s/videos?video_id=vid1&title=vidkevinnew' % (
             self.account_id_api_key)

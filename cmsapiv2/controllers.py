@@ -1273,6 +1273,13 @@ ThumbnailHandler
 *********************************************************************'''
 class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
+    def initalize(self, predictor=None):
+        '''Set a reference to the shared score predictor.'''
+        self.predictor = predictor
+        self.predictor.connect()
+        self.model_version = '%s-aqv1.1.250' % os.path.basename(options.model_file)
+        super(ThumbnailHandler, self).initialize()
+
     @tornado.gen.coroutine
     def post(self, account_id):
         """Create a new thumbnail"""
@@ -1387,6 +1394,7 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
             yield self.thumb.add_image_data(self.image, cdn_metadata=cdn, async=True)
             # Score non-video image here.
             yield self._score_image()
+
         yield self.thumb.save(async=True)
 
         # Set tags if requested.
@@ -1417,6 +1425,7 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
             if self.image:
                 return
         except IOError as e:
+            # If an Image() can't be made, the client sent the wrong thing.
             e.errno = 400
             raise e
         except KeyError:
@@ -1435,15 +1444,11 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
 
     @tornado.gen.coroutine
     def _score_image(self):
-        aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
-            options.model_autoscale_groups.split(','))
-        predictor = model.predictor.DeepnetPredictor(
-            port=options.model_server_port,
-            concurrency=options.request_concurrency,
-            aquila_connection=aquila_conn)
-        predictor.connect()
-        version = '%s-aqv1.1.250' % os.path.basename(options.model_file)
-        yield self.thumb.score_image(predictor, version, self.image, True)
+        yield self.thumb.score_image(
+            self.predictor,
+            self.model_version,
+            self.image,
+            True)
 
     @tornado.gen.coroutine
     def _respond_with_thumb(self):
@@ -2022,7 +2027,7 @@ class VideoHandler(ShareableContentHandler):
         schema = Schema({
             Required('account_id'): Any(str, unicode, Length(min=1, max=256)),
             Required('video_id'): Any(str, unicode, Length(min=1, max=256)),
-            'testing_enabled': Boolean(),
+            'testing_enabled': Coerce(Boolean()),
             'title': Any(str, unicode, Length(min=1, max=1024)),
             'hidden': Boolean(),
         })
@@ -2036,7 +2041,7 @@ class VideoHandler(ShareableContentHandler):
             account_id_api_key,
             args['video_id'])
 
-        if 'testing_enable' in args or 'hidden' in args:
+        if 'testing_enabled' in args or 'hidden' in args:
             def _update_video(v):
                 v.testing_enabled =  Boolean()(args.get('testing_enabled', v.testing_enabled))
                 v.hidden =  Boolean()(args.get('hidden', v.hidden))
@@ -3326,6 +3331,14 @@ class EmailHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.POST] 
                }
 
+#  Initialize an Aquila predictor for shared use by ThumbnailHandler.
+aquila_conn = utils.autoscale.MultipleAutoScaleGroups(
+    options.model_autoscale_groups.split(','))
+predictor = model.predictor.DeepnetPredictor(
+    port=options.model_server_port,
+    concurrency=options.request_concurrency,
+    aquila_connection=aquila_conn)
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
@@ -3355,7 +3368,7 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/tags/?$',                            TagHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$',                     TagSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$',               TelemetrySnippetHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler),
+    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler, {'predictor': predictor}),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',               ThumbnailSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$',                           UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$',                          VideoHandler),

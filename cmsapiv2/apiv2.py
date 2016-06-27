@@ -117,7 +117,7 @@ class APIV2Sender(object):
         self.finish()
 
 class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
-    def initialize(self):
+    def initialize(self, **kwargs):
         # stripe stuff
         stripe.api_key = options.stripe_api_key
         self.set_header('Content-Type', 'application/json')
