@@ -1155,9 +1155,8 @@ class ThumbnailHandler(APIV2Handler):
                 self.request.files['upload'][0])
             if self.image:
                 return
-        except IOError as e:
-            e.errno = 400
-            raise e
+        except IOError:
+            raise BadRequestError('File is not image.')
         except KeyError:
             pass
 
