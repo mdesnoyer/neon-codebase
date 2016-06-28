@@ -1052,17 +1052,21 @@ class TagHandler(APIV2Handler):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('name'): All(Coerce(unicode), Length(min=1, max=256)),
-            'associations': CustomVoluptuousTypes.CommaSeparatedList
+            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
+            'type': CustomVoluptuousTypes.TagType
         })(self.args)
+        self.args['type'] = self.args['type'] if self.args.get('type') \
+            else neondata.TagType.GALLERY
         tag = neondata.Tag(
             None,
             account_id=self.args['account_id'],
-            name=self.args['name'])
+            name=self.args['name'],
+            tag_type=self.args['type'])
         yield tag.save(async=True)
-        if self.args.get('associations'):
-            assocs = self.args['associations'].split(',')
+        if self.args.get('thumbnail_ids'):
+            thumb_ids = self.args['thumbnail_ids'].split(',')
             # Handle just thumbnail association. Implement video later.
-            thumbs = yield neondata.ThumbnailMetadata.get_many(assocs, async=True)
+            thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
             valid_thumb_ids = [thumb.get_id() for thumb in thumbs if thumb]
             yield neondata.TagThumbnail.save_many(
                 tag_id=tag.get_id(),
@@ -1080,7 +1084,7 @@ class TagHandler(APIV2Handler):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
-            'associations': CustomVoluptuousTypes.CommaSeparatedList
+            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
         self.success({})
 
@@ -1124,7 +1128,7 @@ class ThumbnailResponse(object):
         elif field == 'thumbnail_id':
             retval = obj.key
         elif field == 'tag_ids':
-            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key)
+            tag_ids = yield neondata.TagThumbnail.get(thumbnail_id=obj.key, async=True)
             retval = list(tag_ids)
         elif field == 'neon_score':
             retval = obj.get_neon_score()
@@ -1211,7 +1215,7 @@ class ContentSearcher(object):
         self.account_id = account_id
         self.since = since
         self.until = until
-        self.name = name 
+        self.name = name
         self.limit = limit
         self.show_hidden = show_hidden
         self.base_url = base_url or '/api/v2/tags/search/'
@@ -1225,8 +1229,9 @@ class ContentSearcher(object):
             int count of items in this response,
             str prev page url,
             str next page url.'''
-        tags = yield neondata.Tag.objects(**{k:v for k,v in self.__dict__.items()
-            if k is not 'base_url'})
+        args = {k:v for k,v in self.__dict__.items() if k is not 'base_url'}
+        args['async'] = True
+        tags = yield neondata.Tag.objects(**args)
         raise tornado.gen.Return((
             tags,
             len(tags),
@@ -1409,7 +1414,8 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
                 if t and t.account_id == self.account_id]
             yield neondata.TagThumbnail.save_many(
                 tag_id=valid_tag_ids,
-                thumbnail_id=self.thumb.get_id())
+                thumbnail_id=self.thumb.get_id(),
+                async=True)
 
     @tornado.gen.coroutine
     def _set_image(self):
@@ -2546,7 +2552,7 @@ class VideoSearchExternalHandler(APIV2Handler):
             limit,
             fields,
             base_url=base_url,
-            show_hidden=True)
+            show_hidden=False)
 
         self.success(vid_dict)
 

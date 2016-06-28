@@ -968,3 +968,12 @@ class CustomVoluptuousTypes():
                 raise Invalid(e.message)
             return query
         return f
+
+    @staticmethod
+    def TagType():
+        '''Check value is valid TagType'''
+        def f(tag_type):
+            if tag_type in [neondata.TagType.VIDEO, neondata.TagType.GALLERY]:
+                return tag_type
+            raise Invalid('Invalid TagType %s' % tag_type)
+        return f

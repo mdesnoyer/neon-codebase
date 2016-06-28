@@ -600,6 +600,11 @@ class ThumbnailType(object):
     DEFAULT     = "default" #sent via api request
     CUSTOMUPLOAD = "customupload" #uploaded by the customer/editor
 
+class TagType(object):
+    '''All valid Tag types'''
+    VIDEO = 'video'
+    GALLERY = 'gallery'
+
 class ExperimentState:
     '''A class that acts like an enum for the state of the experiment.'''
     UNKNOWN = 'unknown'
@@ -1479,28 +1484,44 @@ class StoredObject(object):
 
 class Searchable(object):
 
-    # Override in the subclass.
-    _allowed_args = [
-        'account_id',
-        'limit',
-        'name',
-        'offset',
-        'since',
-        'show_hidden',
-        'until']
+    @staticmethod
+    def _get_allowed_arguments():
+        raise NotImplementedError('Add list of valid args in subclass')
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def keys(cls, **kwargs):
-        '''Get keys of rows that match arguments.'''
+        '''Get list of keys that match search parameters in the database.
+
+        Examples:
+            given search parameters {'account_id': 'a'}
+            and a database state [
+              {'_data': {"key": 1, "account_id": 'a', ...}
+              {'_data': {"key": 2, "account_id": 'b', ...}
+              {'_data': {"key": 3, "account_id": 'a', ...}]
+            yields [1, 3]'''
+
         rows = yield cls._search(**kwargs)
         keys = [row[0]['key'] for row in rows]
         raise tornado.gen.Return(keys)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def objects(cls, **kwargs):
-        '''Get objects that match arguments.'''
+        '''Get list of objects that match search parameters in the database.
+
+        Examples:
+            given search parameters {'account_id': 'a'}
+            and a database state [
+              {'_data': {"key": 1, "account_id": 'a', ...}
+              {'_data': {"key": 2, "account_id": 'b', ...}
+              {'_data': {"key": 3, "account_id": 'a', ...}]
+            yields [
+                <Searchable instance with key 1>,
+                <Searchable instance with key 3>]'''
+
         rows = yield cls._search(**kwargs)
         objects = [cls._create(row[0]['key'], row[0]) for row in rows]
         raise tornado.gen.Return(objects)
@@ -1508,11 +1529,14 @@ class Searchable(object):
     @classmethod
     @tornado.gen.coroutine
     def _search(cls, **kwargs):
-        '''Get rows that match arguments.'''
+        '''Builds and executes query to search on arugments.'''
 
         def _validate():
-            if filter(lambda k: k in cls._allowed_args, kwargs) != kwargs.keys():
-                raise KeyError('Bad argument to search %s' % kwargs)
+            args = kwargs.copy()
+            args.pop('async', None)
+            allowed = cls._get_allowed_arguments()
+            if filter(lambda k: k in allowed, args) != args.keys():
+                raise KeyError('Bad argument to search %s' % args)
 
         def _query():
             return 'SELECT * FROM {table} {where}{order}{limit}{offset}'.format(
@@ -1522,7 +1546,6 @@ class Searchable(object):
                 offset=_offset(),
                 order=_order())
         def _where():
-
             parts = []
             if kwargs.get('account_id'):
                 parts.append("_data->>'account_id' = %s")
@@ -1552,7 +1575,7 @@ class Searchable(object):
         def _bind():
             args = OrderedDict(sorted(kwargs.items()))
             return [v for k,v in args.items() \
-                    if k in cls._allowed_args and
+                    if k in cls._get_allowed_arguments() and
                     k not in ['limit', 'offset', 'show_hidden'] and
                     v is not None]
 
@@ -1616,7 +1639,7 @@ class StoredObjectIterator():
                 e = StopIteration()
                 e.value = StopIteration()
                 raise e
-            
+
             # Get more objects
             self.cur_objs = yield tornado.gen.Task(
                 self.obj_class.get_many,
@@ -1798,30 +1821,61 @@ class MappingObject(object):
     and that table columns are the values in _keys:
         e.g., _table = tag_thumbnail and _keys = ['tag_id', 'thumbnail_id']'''
 
-    # Set these in the subclass.
-    _table = None
-    _keys = [None, None]  # Must match name and order of schema
+    @staticmethod
+    def _get_table():
+        '''Name of table that sits behind this mappingobject.'''
+        raise NotImplementedError('Override in subclass')
+
+    @staticmethod
+    def _get_keys():
+        '''Names of keys, or columns, that back this mappingobject.'''
+        #  Must match name and order of schema
+        raise NotImplementedError('Override in subclass')
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get(cls, **kwargs):
-        '''Given exactly one of the column names and an id,
-        return a list of the values associated to that id.'''
+        '''Get list of matching values for one key.
+
+        Given exactly one key and value, get list of the keys
+        that exist in the database that are associated to it.
+
+        Yields the empty list if no match found.
+
+        Example: for TagThumbnail, kwargs={'tag_id': 'a'}, yields
+        list of thumbnail ids that are associated with 'a' in the db.'''
         _, value = cls._get_key_and_value(**kwargs)
         if not value:
             raise tornado.gen.Return([])
+        kwargs['async'] = True
         fetched = yield cls.get_many(**kwargs)
         raise tornado.gen.Return(fetched[value])
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def get_many(cls, **kwargs):
-        '''Given exactly one of the column names and a list of ids
-        return the map of ids to lists of their associated values.'''
+        '''Get map of keys to lists of associated keys.
+
+        Given exactly one of the column names and a list of ids
+        return the map of ids to lists of their associated values.
+
+        Example: for TagThumbnail, kwargs={'thumbnail_id': ['a', 'b', 'c'],
+        yields {
+            'a': [thumbnail_id_a1, thumbnail_id_a2, ...]
+            'b': [thumbnail_id_b1, thumbnail_id_b2, ...]
+            'c': [thumbnail_id_c1, thumbnail_id_c2, ...]
+        } provided the thumbnails match on id.
+
+        The map includes the empty list if no match found for a
+        particular key. '''
+        kwargs['async'] = True
         key, values = cls._get_key_and_values(**kwargs)
         if not values:
             raise tornado.gen.Return({})
-        other_key = cls._keys[0] if cls._keys[1] == key else cls._keys[1]
+        keys = cls._get_keys()
+        other_key = keys[0] if keys[1] == key else keys[1]
         fetch = []
         sql, bind = cls._get_select_single_col_tuple(key, values)
         yield cls._execute(sql, bind, fetch)
@@ -1830,43 +1884,71 @@ class MappingObject(object):
         raise tornado.gen.Return(result)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def has(cls, **kwargs):
-        '''Given a key-pair, returns True if the pair is associated in the db.'''
+        '''Given a key-pair, returns True if the pair is associated in the db.
+
+        Example: kwargs={'tag_id': 'tag0', 'thumbnail_id': 'thmb0'} => True
+        if (tag0, thumb0 is in the database.'''
         cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
         fetched = yield cls.has_many(**kwargs)
         raise tornado.gen.Return(len(fetched) == 1)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def has_many(cls, **kwargs):
-        '''Given lists of keys, return dictionary of every pair to boolean.'''
+        '''Given lists of keys, return dictionary of every pair to boolean.
+
+        Takes the cartesian product of the input lists.
+
+        Example: kwargs={
+            'tag_id': ['tag0', 'tag1', ...],
+            'thumbnail_id': ['thumb0', 'thumb1', ...]
+        Yields the map {
+            (tag0, thumb0): bool,
+            (tag0, thumb1): bool,
+            (tag1, thumb0): bool,
+            (tag1, thumb1): bool}'''
         cls._validate_keys(kwargs.keys())
         fetch = []
         sql, bind = cls._get_select_tuple(**kwargs)
         yield cls._execute(sql, bind, fetch)
         result = defaultdict(lambda: False)
+        keys = cls._get_keys()
         for row in fetch:
-            result[(row[cls._keys[0]], row[cls._keys[1]])] = True
+            result[(row[keys[0]], row[keys[1]])] = True
         raise tornado.gen.Return(result)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save(cls, **kwargs):
         '''Given a pair of keys, return True if save creates new row.
 
-        Return False if row already exists. Raise exception on other results.'''
-        '''Delete a single mapping object row.'''
+        Yields False if row already exists. Raise exception on other results.
+        Example: kwargs={'tag_id': 'tag0', 'thumbnail_id': 'thumb0'}'''
         cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
         rows_changed = yield cls.save_many(**kwargs)
         raise tornado.gen.Return(rows_changed == 1)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def save_many(cls, **kwargs):
         '''Allow saving of many mapping relations at once.
 
-        Returns the number of rows created.'''
+        Returns the number of rows created.
+
+        Example: kwargs={
+            'tag_id': ['tag0', 'tag1', ...],
+            'thumbnail_id': ['thumb0', 'thumb1', ...]}
+        Saves all the pairs of items in given lists, i.e., saves
+        [(tag0, thumb0), (tag0, thumb1), (tag1, thumb0), (tag1, thumb1)]'''
+
         # Validate input
         cls._validate_keys(kwargs.keys())
 
@@ -1881,17 +1963,27 @@ class MappingObject(object):
         raise tornado.gen.Return(cursor.rowcount)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete(cls, **kwargs):
-        '''Delete a single mapping object row.'''
+        '''Delete a single mapping object row.
+
+        Example kwargs={
+            'tag_id': 'tag0', 'thumbnail_id': 'thumb0'}
+        Yields True if the row exists and is deleted else False.'''
         cls._validate_scalar_values(**kwargs)
+        kwargs['async'] = True
         rows_changed = yield cls.delete_many(**kwargs)
         raise tornado.gen.Return(rows_changed == 1)
 
     @classmethod
+    @utils.sync.optional_sync
     @tornado.gen.coroutine
     def delete_many(cls, **kwargs):
-        '''Delete many mapping object rows.'''
+        '''Delete many mapping object rows.
+
+        Deletes all pairs made from the product of input lists.
+        Yields the number of rows deleted.'''
         cls._validate_keys(kwargs.keys())
         sql, bind = cls._get_delete_tuple(**kwargs)
         cursor = yield cls._execute(sql, bind)
@@ -1916,23 +2008,28 @@ class MappingObject(object):
 
     @classmethod
     def _get_key_and_value(cls, **kwargs):
-        key, values = cls._get_key_and_values(**kwargs)
+        args = kwargs.copy()
+        args.pop('async', None)
+        key, values = cls._get_key_and_values(**args)
         if len(values) is not 1:
             raise TypeError('Expect exactly one value in get')
         return key, values[0]
 
     @classmethod
     def _get_key_and_values(cls, **kwargs):
-        if len(kwargs) is not 1:
+        args = kwargs.copy()
+        args.pop('async', None)
+        if len(args) is not 1:
             raise TypeError('Expect exactly one key in get kwargs')
-        if cls._keys[0] in kwargs.keys():
-            values = kwargs[cls._keys[0]]
-            key = cls._keys[0]
-        elif cls._keys[1] in kwargs.keys():
-            values = kwargs[cls._keys[1]]
-            key = cls._keys[1]
+        keys = cls._get_keys()
+        if keys[0] in args.keys():
+            values = args[keys[0]]
+            key = keys[0]
+        elif keys[1] in args.keys():
+            values = args[keys[1]]
+            key = keys[1]
         else:
-            raise KeyError('Unrecognized key in %s' % kwargs.keys())
+            raise KeyError('Unrecognized key in %s' % args.keys())
         if type(values) is not list:
             values = [values]
         return key, values
@@ -1941,8 +2038,9 @@ class MappingObject(object):
     def _validate_scalar_values(cls, **kwargs):
         '''Return true if both values inputs are int/str or lists
         of one element.'''
-        values0 = kwargs[cls._keys[0]]
-        values1 = kwargs[cls._keys[1]]
+        keys = cls._get_keys()
+        values0 = kwargs[keys[0]]
+        values1 = kwargs[keys[1]]
         if (
             (type(values0) in [int, str, unicode]) or
             (type(values0) is list and len(values0) is 1)
@@ -1957,14 +2055,15 @@ class MappingObject(object):
     def _validate_keys(cls, keys):
         if not len(keys) == 2:
             raise KeyError('Wrong number of arguments')
-        if not set(keys) == set(cls._keys):
+        if not set(keys) == set(cls._get_keys()):
             raise KeyError('Bad key in save %s' % keys)
 
     @classmethod
     def _get_unique_pairs(cls, **kwargs):
         '''Gather unique pairs of input keys.'''
-        left_values = kwargs[cls._keys[0]]
-        right_values = kwargs[cls._keys[1]]
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
         if not left_values or not right_values:
             raise ValueError('Input be valued')
         left_values = left_values if type(left_values) is list else [left_values]
@@ -1975,30 +2074,29 @@ class MappingObject(object):
     def _get_select_single_col_tuple(cls, key, values):
         return (
             'SELECT * FROM {table} WHERE {key} IN ({values})'.format(
-                table=cls._table,
+                table=cls._get_table(),
                 key=key,
                 values=cls._format_values_bind(values)),
             [str(v) for v in values])
 
-
     @classmethod
     def _get_select_tuple(cls, **kwargs):
         '''Get select sql string with %s placeholders, and a list of binds.'''
-        left_values = kwargs[cls._keys[0]]
-        right_values = kwargs[cls._keys[1]]
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
         if type(left_values) is not list:
             left_values = [left_values]
         if type(right_values) is not list:
             right_values = [right_values]
-        return (
-'''
-SELECT *
-FROM {table}
-WHERE {table}.{key1} IN ({left_values}) AND
-      {table}.{key2} IN ({right_values});'''.format(
-                table=cls._table,
-                key1=cls._keys[0],
-                key2=cls._keys[1],
+        return ('''
+            SELECT *
+            FROM {table}
+            WHERE {table}.{key1} IN ({left_values}) AND
+                  {table}.{key2} IN ({right_values});'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
                 left_values=cls._format_values_bind(left_values),
                 right_values=cls._format_values_bind(right_values)),
             [str(v) for v in left_values + right_values])
@@ -2006,43 +2104,43 @@ WHERE {table}.{key1} IN ({left_values}) AND
     @classmethod
     def _get_insert_tuple(cls, values):
         '''Get insert sql string with %s placeholders, and a list of binds.'''
-        return (
-'''
-WITH new_values AS (
-    SELECT *
-    FROM (
-        VALUES {values}
-    ) AS input_values
-    WHERE NOT EXISTS (
-        SELECT 1 FROM {table}
-        WHERE input_values.column1 = {table}.{key1} AND
-              input_values.column2 = {table}.{key2}
-  )
-)
-INSERT INTO {table}
-SELECT * FROM new_values;'''.format(
-                table=cls._table,
-                key1=cls._keys[0],
-                key2=cls._keys[1],
+        keys = cls._get_keys()
+        return ('''
+            WITH new_values AS (
+                SELECT *
+                FROM (
+                    VALUES {values}
+                ) AS input_values
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM {table}
+                    WHERE input_values.column1 = {table}.{key1} AND
+                          input_values.column2 = {table}.{key2}
+                )
+            )
+            INSERT INTO {table}
+            SELECT * FROM new_values;'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
                 values=cls._format_insert_values_bind(values)),
             [str(v) for v in itertools.chain.from_iterable(values)])
 
     @classmethod
     def _get_delete_tuple(cls, **kwargs):
-        left_values = kwargs[cls._keys[0]]
-        right_values = kwargs[cls._keys[1]]
+        keys = cls._get_keys()
+        left_values = kwargs[keys[0]]
+        right_values = kwargs[keys[1]]
         if type(left_values) is not list:
             left_values = [left_values]
         if type(right_values) is not list:
             right_values = [right_values]
-        return (
-'''
-DELETE FROM {table}
-WHERE {table}.{key1} IN ({left_values}) AND
-      {table}.{key2} IN ({right_values})'''.format(
-                table=cls._table,
-                key1=cls._keys[0],
-                key2=cls._keys[1],
+        return ('''
+            DELETE FROM {table}
+            WHERE {table}.{key1} IN ({left_values}) AND
+                  {table}.{key2} IN ({right_values})'''.format(
+                table=cls._get_table(),
+                key1=keys[0],
+                key2=keys[1],
                 left_values=cls._format_values_bind(left_values),
                 right_values=cls._format_values_bind(right_values)),
             [str(v) for v in (left_values + right_values)])
@@ -2063,19 +2161,36 @@ WHERE {table}.{key1} IN ({left_values}) AND
 
 class TagThumbnail(MappingObject):
     '''TagThumbnail represents an association of a tag to a thumbnail.'''
-    _table = 'tag_thumbnail'
-    _keys = ['tag_id', 'thumbnail_id']
+
+    @staticmethod
+    def _get_table():
+        return 'tag_thumbnail'
+
+    @staticmethod
+    def _get_keys():
+        return ['tag_id', 'thumbnail_id']
 
 
 class Tag(Searchable, StoredObject):
-    '''Tag is a generic relation associating a set of user objects.
+    '''Tag is a generic relation associating a set of user objects.'''
 
-    Collections of thumbnails of a user is one use-case of Tag.'''
+    @staticmethod
+    def _get_allowed_arguments():
+        return [
+            'account_id',
+            'limit',
+            'name',
+            'offset',
+            'since',
+            'show_hidden',
+            'until']
+
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex
         self.account_id = account_id
         self.name = name
-        self.tag_type = tag_type
+        self.tag_type = tag_type if tag_type in [
+            TagType.VIDEO, TagType.GALLERY] else None
         super(Tag, self).__init__(tag_id)
 
     @staticmethod
