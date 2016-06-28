@@ -389,15 +389,14 @@ class AccountHelper(object):
         Yields the NeonUserAccount, after save to db
         """
 
-        # Instantiate account from json payload in verifier.
+        # Instantiate account and user from payload in verifier.
         account = neondata.NeonUserAccount.create(
             verifier.extra_info['account'])
-
-        # Create user.
         user_json = json.loads(verifier.extra_info['user'])
         user = neondata.User._create(
             user_json['_data']['key'],
             user_json)
+
         # Let database confirm email's uniqueness.
         try:
             yield user.save(overwrite_existing_object=False, async=True)
@@ -408,6 +407,7 @@ class AccountHelper(object):
         yield AccountHelper.save_default_objects(account)
 
         # Save account and return it.
+        account.email = account.email if account.email else user.username
         yield account.save(async=True)
         raise tornado.gen.Return(account)
 
@@ -471,7 +471,6 @@ class AccountHelper(object):
         yield verifier.save(async=True)
 
         # Send email.
-
         rv = yield AccountHelper.send_verification_email(
             account=account,
             user=user,
@@ -606,33 +605,58 @@ class UserHandler(APIV2Handler):
         """handles user endpoint post request"""
 
         schema = Schema({
-          Required('username') : All(Coerce(str), Length(min=8, max=256)),
-          Required('password') : All(Coerce(str), Length(min=8, max=64)),
-          Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
-          'first_name': All(Coerce(str), Length(min=1, max=256)),
-          'last_name': All(Coerce(str), Length(min=1, max=256)),
-          'secondary_email': All(Coerce(str), Length(min=1, max=256)),
-          'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
-          'title': All(Coerce(str), Length(min=1, max=32))
+            Required('username'): CustomVoluptuousTypes.Email(),
+            Required('password'): All(Coerce(str), Length(min=8, max=64)),
+            Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
+            'first_name': All(Coerce(str), Length(min=1, max=256)),
+            'last_name': All(Coerce(str), Length(min=1, max=256)),
+            'secondary_email': All(Coerce(str), Length(min=1, max=256)),
+            'cell_phone_number': All(Coerce(str), Length(min=1, max=32)),
+            'title': All(Coerce(str), Length(min=1, max=32))
         })
 
         args = self.parse_args()
         schema(args)
 
-        new_user = neondata.User(username=args.get('username'),
-                       password=args.get('password'),
-                       access_level=args.get('access_level'),
-                       first_name=args.get('first_name', None),
-                       last_name=args.get('last_name', None),
-                       secondary_email=args.get('secondary_email', None),
-                       cell_phone_number=args.get('cell_phone_number', None),
-                       title=args.get('title',None))
+        # Validate the email address is not claimed.
+        username = args['username'].lower()
+        is_address_claimed = yield AccountHelper.is_address_claimed(username)
+        if is_address_claimed:
+            raise AlreadyExists('User with that email already exists.')
 
-        yield new_user.save(async=True)
-        new_user = yield neondata.User.get(args.get('username'), async=True)
-        user = yield self.db2api(new_user)
+        # Instantiate a user to store in the verification payload.
+        user = neondata.User(
+            username=username,
+            password=args.get('password'),
+            access_level=args.get('access_level'),
+            first_name=args.get('first_name', None),
+            last_name=args.get('last_name', None),
+            secondary_email=args.get('secondary_email', None),
+            cell_phone_number=args.get('cell_phone_number', None),
+            title=args.get('title', None))
 
-        self.success(user)
+        # Get the account in the authorization token payload.
+        payload = JWTHelper.decode_token(self.access_token)
+        account_id = payload['account_id']
+        account = yield neondata.NeonUserAccount.get(account_id, async=True)
+        if not account:
+            raise BadRequestError('This requires an account.')
+
+        # Tie the account to the user.
+        account.users.append(username)
+        yield account.save(async=True)
+
+        # Send a verification email.
+        account.email = username
+        yield AccountHelper.user_wants_verification(
+            account=account,
+            user=user,
+            origin=self.origin,
+            executor=self.executor)
+
+        # Respond with a sent email message.
+        msg = 'Account verification email sent to %s' % account.email
+        self.success({'message': msg})
 
     @tornado.gen.coroutine
     def put(self):

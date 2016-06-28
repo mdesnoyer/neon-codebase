@@ -720,40 +720,62 @@ class TestAuthUserHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
     def test_create_new_user_query(self):
-        url = '/api/v2/users?username=abcd1234&password=b1234567&access_level=6'
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
+        username = 'abcd1234@gmail.com'
+        url = '/api/v2/users?username=%s&password=b1234567&access_level=6' % username
+        yield neondata.NeonUserAccount(None, 'a0').save(async=True)
+        token = JWTHelper.generate_token({'account_id': 'a0'})
+        headers = {
+            'Authorization': 'Bearer %s' % token
+        }
+        response = yield self.http_client.fetch(
+            self.get_url(url),
+            headers=headers,
+            body='',
+            method='POST')
         self.assertEquals(response.code, 200)
         self.assertIn('application/json', response.headers['Content-Type'])
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['username'], 'abcd1234')
-        user = yield neondata.User.get('abcd1234', async=True)
-        self.assertEquals(user.username, 'abcd1234')
+        self.assertIn('message', rjson)
+        user = yield neondata.User.get(username, async=True)
+        # User hasn't been created yet.
+        self.assertIsNone(user)
+
+        verification = yield neondata.Verification.get(username, async=True)
+        account = json.loads(verification.extra_info['account'])
+        self.assertEqual([username], account['users'])
+        user = json.loads(verification.extra_info['user'])
+        self.assertEqual('6', user['_data']['access_level'])
 
     @tornado.testing.gen_test
     def test_create_new_user_json(self):
-        params = json.dumps({'username': 'abcd1234',
+        username = 'abcd1234@gmail.com'
+        params = json.dumps({
+            'username': username,
             'password': 'b1234567',
             'access_level': '6',
             'cell_phone_number':'867-5309',
             'secondary_email':'rocking@invalid.com'})
-        header = { 'Content-Type':'application/json' }
+        yield neondata.NeonUserAccount(None, 'a0').save(async=True)
+        token = JWTHelper.generate_token({'account_id': 'a0'})
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer %s' % token}
         url = '/api/v2/users'
         response = yield self.http_client.fetch(self.get_url(url),
                                                 body=params,
                                                 method='POST',
-                                                headers=header)
+                                                headers=headers)
         self.assertEquals(response.code, 200)
         rjson = json.loads(response.body)
-        self.assertEquals(rjson['username'], 'abcd1234')
-        self.assertEquals(rjson['cell_phone_number'], '867-5309')
-        self.assertEquals(rjson['secondary_email'], 'rocking@invalid.com')
-        user = yield neondata.User.get('abcd1234', async=True)
-        self.assertEquals(user.username, 'abcd1234')
-        self.assertEquals(user.cell_phone_number, '867-5309')
-        self.assertEquals(user.secondary_email, 'rocking@invalid.com')
+        user = yield neondata.User.get(username, async=True)
+        self.assertIsNone(user)
+        verification = yield neondata.Verification.get(username, async=True)
+        account = json.loads(verification.extra_info['account'])
+        self.assertEqual([username], account['users'])
+        user = json.loads(verification.extra_info['user'])
+        self.assertEqual('6', user['_data']['access_level'])
+        self.assertEqual('867-5309', user['_data']['cell_phone_number'])
+        self.assertEqual('rocking@invalid.com', user['_data']['secondary_email'])
 
     def test_post_user_exceptions(self):
         exception_mocker = patch('cmsapiv2.authentication.UserHandler.post')
@@ -876,6 +898,85 @@ class TestAuthUserHandler(TestAuthenticationBase):
         user = yield user.get('testuser@test.invalid', async=True)
         self.assertTrue(sha256_crypt.verify('newpassword', user.password_hash))
         self.assertEqual(None, user.reset_password_token)
+
+class TestVerifyAccountHandler(TestAuthenticationBase):
+
+    @tornado.testing.gen_test
+    def test_verify_with_account(self):
+        email = 'yo@notgmail.com'
+        account = neondata.NeonUserAccount('name', 'a0', email=email)
+        account.save()
+        cell = '867-5309'
+        email2 = 'rocking@invalid.com'
+        user = neondata.User(email, cell_phone_number=cell, secondary_email=email2)
+        account.users = [email]
+        info = {
+            'account': account.to_json(),
+            'user': user.to_json()
+        }
+        token = JWTHelper.generate_token(
+            {'email': email},
+            token_type=TokenTypes.VERIFY_TOKEN)
+        verifier = neondata.Verification(email, token, extra_info=info)
+        yield verifier.save(async=True)
+
+        # Now verify.
+        url = self.get_url('/api/v2/accounts/verify')
+        headers = {'Content-Type': 'application/json'}
+        body = json.dumps({'token': token})
+        response = yield self.http_client.fetch(
+            url,
+            method='POST',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual('a0', rjson['account_id'])
+        self.assertEqual(email, rjson['email'])
+        self.assertEqual([email], rjson['users'])
+        account = yield neondata.NeonUserAccount.get('a0', async=True)
+        user = yield neondata.User.get(email, async=True)
+        self.assertEqual(email, user.username)
+        self.assertEqual(cell, user.cell_phone_number)
+        self.assertEqual(email2, user.secondary_email)
+
+    @tornado.testing.gen_test
+    def test_verify_without_account(self):
+        email = 'yo@notgmail.com'
+        account = neondata.NeonUserAccount('name', 'a0', email=email)
+        cell = '867-5309'
+        email2 = 'rocking@invalid.com'
+        user = neondata.User(email, cell_phone_number=cell, secondary_email=email2)
+        account.users = [email]
+        info = {
+            'account': account.to_json(),
+            'user': user.to_json()
+        }
+        token = JWTHelper.generate_token(
+            {'email': email},
+            token_type=TokenTypes.VERIFY_TOKEN)
+        verifier = neondata.Verification(email, token, extra_info=info)
+        yield verifier.save(async=True)
+
+        # Now verify.
+        url = self.get_url('/api/v2/accounts/verify')
+        headers = {'Content-Type': 'application/json'}
+        body = json.dumps({'token': token})
+        response = yield self.http_client.fetch(
+            url,
+            method='POST',
+            headers=headers,
+            body=body)
+        self.assertEqual(200, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual('a0', rjson['account_id'])
+        self.assertEqual(email, rjson['email'])
+        self.assertEqual([email], rjson['users'])
+        account = yield neondata.NeonUserAccount.get('a0', async=True)
+        user = yield neondata.User.get(email, async=True)
+        self.assertEqual(email, user.username)
+        self.assertEqual(cell, user.cell_phone_number)
+        self.assertEqual(email2, user.secondary_email)
 
 
 class TestUserHandler(TestControllersBase):
@@ -6819,7 +6920,8 @@ class TestEmailHandler(TestControllersBase):
         rjson = json.loads(response.body) 
         self.assertRegexpMatches(rjson['message'],
             'user does not')
- 
+
+
 if __name__ == "__main__" :
     utils.neon.InitNeon()
     unittest.main()

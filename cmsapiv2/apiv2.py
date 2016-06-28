@@ -210,7 +210,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
            Raises:
              NotAuthorizedErrors if not allowed
         """
-        request.set_access_token_information()
         if access_level_required is neondata.AccessLevels.NONE:
             raise tornado.gen.Return(True)
 
@@ -550,6 +549,7 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
             internal_only = False
 
         try:
+            self.set_access_token_information()
             yield self.is_authorized(access_level_dict[self.request.method],
                                      self.request.method in account_required_list,
                                      internal_only)
