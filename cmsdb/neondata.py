@@ -76,17 +76,24 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
-define("db_address", default="localhost", type=str, help="postgresql database address")
-define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_address", default="localhost", type=str, 
+       help="postgresql database address")
+define("db_user", default="postgres", type=str, 
+       help="postgresql database user")
 define("db_password", default="", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
-define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
+define("max_connection_retries", default=5, type=int, 
+       help="maximum times we should try to connect to db")
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
-define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
-define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
+define("max_pool_size", default=250, type=int, 
+       help="maximum size the connection pools can be")
+define("max_io_loop_dict_size", default=500, type=int, 
+       help="how many io_loop ids we want to store before cleaning")
+define("connection_wait_time", default=2.5, type=float, 
+       help="how long in seconds to wait for a connection from momoko")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -113,6 +120,7 @@ statemon.define('postgres_connection_failed', int)
 statemon.define('postgres_listeners', int) 
 statemon.define('postgres_successful_pubsub_callbacks', int) 
 statemon.define('postgres_pools', int) 
+statemon.define('postgres_pool_full', int)
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -305,7 +313,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 try: 
                     pool_connection = yield pool.connect()
                     break 
-                except Exception as e: 
+                except Exception as e:
                     current_db_info = _get_db_information() 
                     if current_db_info != self.db_info: 
                         self.db_info = current_db_info 
@@ -322,10 +330,11 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a pool of connections')
  
-        @tornado.gen.coroutine 
+        @tornado.gen.coroutine
         def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
             conn = None 
-            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            num_of_tries = options.max_connection_retries
+
             for i in range(int(num_of_tries)):
                 try:
                     if is_pool:
@@ -334,10 +343,20 @@ class PostgresDB(tornado.web.RequestHandler):
                         # if we don't wait long enough 
                         if len(db.conns.dead) > 0:
                             yield tornado.gen.sleep(
-                                self.reconnect_dead / 1000.0) 
-                        conn = yield db.getconn()
+                                self.reconnect_dead / 1000.0)
+
+                        if db.size >= options.max_pool_size:
+                            statemon.state.increment('postgres_pool_full')
+ 
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta(
+                                seconds=options.connection_wait_time), 
+                            db.getconn()) 
                     else: 
-                        conn = yield db.connect()
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta( 
+                                seconds=options.connection_wait_time), 
+                            db.connect()) 
                     break
                 except Exception as e: 
                     current_db_info = _get_db_information()  
