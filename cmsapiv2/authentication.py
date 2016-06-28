@@ -607,7 +607,7 @@ class UserHandler(APIV2Handler):
         schema = Schema({
             Required('username'): CustomVoluptuousTypes.Email(),
             Required('password'): All(Coerce(str), Length(min=8, max=64)),
-            Required('access_level') : All(Coerce(int), Range(min=1, max=31)),
+            'access_level' : All(Coerce(int), Range(min=1, max=31)),
             'first_name': All(Coerce(str), Length(min=1, max=256)),
             'last_name': All(Coerce(str), Length(min=1, max=256)),
             'secondary_email': All(Coerce(str), Length(min=1, max=256)),
