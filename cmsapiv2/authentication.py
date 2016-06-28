@@ -365,7 +365,9 @@ class AccountHelper(object):
         account.users = [account.get_id()]
         yield account.save(async=True)
         # Save the initial admin user.
-        user = neondata.User(account.get_id(), AccessLevels.ADMIN)
+        user = neondata.User(
+            account.get_id(),
+            access_level=neondata.AccessLevels.ADMIN)
         yield user.save(async=True)
 
         # Save other account objects that are based on the Neon api key.
