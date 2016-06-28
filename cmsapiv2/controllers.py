@@ -37,7 +37,6 @@ define("mandrill_base_url",
     type=str)
 
 # For scoring non-video thumbnails.
-define('model_file', default='local_search_input_20160523', help='File that contains the model')
 define('model_server_port', default=9000, type=int,
        help='the port currently being used by model servers')
 define('model_autoscale_groups', default='AquilaOnDemand', type=str,
@@ -1287,7 +1286,7 @@ class ThumbnailHandler(ThumbnailResponse, APIV2Handler):
             concurrency=options.request_concurrency,
             aquila_connection=aquila_conn)
         self.predictor.connect()
-        self.model_version = '%s-aqv1.1.250' % os.path.basename(options.model_file)
+        self.model_version = 'aqv1.1.250'
 
     @tornado.gen.coroutine
     def post(self, account_id):
