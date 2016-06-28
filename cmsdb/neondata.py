@@ -1559,7 +1559,7 @@ class Searchable(object):
                     kwargs['name'] = re.escape(kwargs['name'])
                 parts.append("_data->>'name' ~* %s")
             if kwargs.get('since'):
-                parts.append('creased_time > TO_TIMESTAMP(%s)::TIMESTAMP')
+                parts.append('created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
             if kwargs.get('until'):
                 parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
