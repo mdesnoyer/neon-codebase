@@ -282,7 +282,7 @@ class NewAccountHandler(APIV2Handler):
                 Required('email'): CustomVoluptuousTypes.Email(),
                 Required('admin_user_username'): All(CustomVoluptuousTypes.Email(), Length(min=6, max=512)),
                 Required('admin_user_password'): All(Coerce(str), Length(min=8, max=64)),
-            })
+            }, extra=ALLOW_EXTRA)
             schema(args)
         # If not email, then provide a loginless account.
         else:
@@ -362,7 +362,11 @@ class AccountHelper(object):
 
         # Save anonymous Neon user account.
         account = neondata.NeonUserAccount(uuid.uuid1().hex)
-        account.save(async=True)
+        account.users = [account.get_id()]
+        yield account.save(async=True)
+        # Save the initial admin user.
+        user = neondata.User(account.get_id(), AccessLevels.ADMIN)
+        yield user.save(async=True)
 
         # Save other account objects that are based on the Neon api key.
         yield AccountHelper.save_default_objects(account)
@@ -399,6 +403,10 @@ class AccountHelper(object):
 
         # Let database confirm email's uniqueness.
         try:
+            # Handle the case where this is the initial user account.
+            if user.get_id() == account.get_id() and len(account.users) is 1:
+                yield neondata.User.delete(user.get_id(), async=True)
+                user.key = 'users_%s' % user.username
             yield user.save(overwrite_existing_object=False, async=True)
         except neondata.psycopg2.IntegrityError:
             raise AlreadyExists('User with that email already exists.')
@@ -624,29 +632,33 @@ class UserHandler(APIV2Handler):
         if is_address_claimed:
             raise AlreadyExists('User with that email already exists.')
 
-        # Instantiate a user to store in the verification payload.
-        user = neondata.User(
-            username=username,
-            password=args.get('password'),
-            access_level=args.get('access_level'),
-            first_name=args.get('first_name', None),
-            last_name=args.get('last_name', None),
-            secondary_email=args.get('secondary_email', None),
-            cell_phone_number=args.get('cell_phone_number', None),
-            title=args.get('title', None))
-
         # Get the account in the authorization token payload.
         payload = JWTHelper.decode_token(self.access_token)
         account_id = payload['account_id']
         account = yield neondata.NeonUserAccount.get(account_id, async=True)
         if not account:
             raise BadRequestError('This requires an account.')
+        # Use the placeholder user account's access level if available.
+        user = yield neondata.User.get(account.get_id(), async=True)
+        if user:
+            account.user = [username]
+            access_level = user.access_level
+        else:
+            account.users.append(username)
+            access_level = args.get('access_level')
 
-        # Tie the account to the user.
-        account.users.append(username)
-        yield account.save(async=True)
+        # Instantiate a user to store in the verification payload.
+        user = neondata.User(
+            username=username,
+            password=args.get('password'),
+            access_level=access_level,
+            first_name=args.get('first_name', None),
+            last_name=args.get('last_name', None),
+            secondary_email=args.get('secondary_email', None),
+            cell_phone_number=args.get('cell_phone_number', None),
+            title=args.get('title', None))
 
-        # Send a verification email.
+        # Create and send verification.
         account.email = username
         yield AccountHelper.user_wants_verification(
             account=account,

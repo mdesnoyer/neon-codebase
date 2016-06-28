@@ -904,8 +904,9 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
     @tornado.testing.gen_test
     def test_verify_with_account(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0', email=email)
-        account.save()
+        account = neondata.NeonUserAccount('name', 'a0')
+        yield account.save(async=True)
+        account.email = email
         cell = '867-5309'
         email2 = 'rocking@invalid.com'
         user = neondata.User(email, cell_phone_number=cell, secondary_email=email2)
@@ -941,12 +942,18 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual(email2, user.secondary_email)
 
     @tornado.testing.gen_test
-    def test_verify_without_account(self):
+    def test_verify_with_account_keyed_user(self):
         email = 'yo@notgmail.com'
-        account = neondata.NeonUserAccount('name', 'a0', email=email)
+        account = neondata.NeonUserAccount('name', 'a0')
+        yield account.save(async=True)
+        account.email = email
+        user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN)
+        yield user.save(async=True)
         cell = '867-5309'
         email2 = 'rocking@invalid.com'
-        user = neondata.User(email, cell_phone_number=cell, secondary_email=email2)
+        user.username = email
+        user.cell_phone_number = cell
+        user.secondary_email = email2
         account.users = [email]
         info = {
             'account': account.to_json(),
