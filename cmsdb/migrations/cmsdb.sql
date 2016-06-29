@@ -219,7 +219,8 @@ CREATE TABLE thumbnailmetadata (
     _data jsonb,
     _type character varying(128) NOT NULL,
     created_time timestamp DEFAULT current_timestamp, 
-    updated_time timestamp DEFAULT current_timestamp 
+    updated_time timestamp DEFAULT current_timestamp,
+    features bytea DEFAULT NULL  
 );
 
 

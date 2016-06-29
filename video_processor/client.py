@@ -797,6 +797,7 @@ class VideoProcessor(object):
                 old_thumb.phash = new_thumb.phash
                 old_thumb.frameno = new_thumb.frameno
                 old_thumb.filtered = new_thumb.filtered
+                old_thumb.features = new_thumb.features
         try:
             new_thumb_dict = yield neondata.ThumbnailMetadata.modify_many(
                 [x[0].key for x in self.thumbnails],

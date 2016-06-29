@@ -2601,14 +2601,14 @@ class TestNeonUserAccount(test_utils.neontest.AsyncTestCase, BasePGNormalObject)
         tid = i_vid + "_t1"
         yield ThumbnailMetadata(tid, i_vid).save(async=True)
         yield VideoMetadata(i_vid, [tid],'job1').save(async=True)
-        since_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        video_one = yield VideoMetadata.get(i_vid, async=True)
         yield VideoMetadata(i_vid_two, [tid],'job2').save(async=True)
         video = yield VideoMetadata.get(i_vid_two, async=True)
         so = neondata.NeonUserAccount('key', api_key='key')
         yield so.save(async=True)
         video_ids = yield so.get_internal_video_ids(
             async=True, 
-            since=since_date)
+            since=video_one.created)
         self.assertEquals(len(video_ids), 1)
         self.assertEquals(video_ids[0], 'key_vid2')
 
