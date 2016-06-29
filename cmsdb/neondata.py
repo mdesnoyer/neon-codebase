@@ -807,6 +807,14 @@ class StoredObject(object):
                             obj_dict[k]).strftime("%Y-%m-%d %H:%M:%S.%f")
             except KeyError: 
                 pass
+
+            addcs = cls._additional_columns()
+            if addcs: 
+                for c in addcs: 
+                    try: 
+                        data_dict[c] = obj_dict[c] 
+                    except KeyError: 
+                        pass 
  
             # create basic object using the "default" constructor
             obj = classtype(key)
@@ -824,7 +832,6 @@ class StoredObject(object):
             except ValueError:
                 return None
         
-
             return obj
 
     @classmethod
@@ -1455,7 +1462,10 @@ class StoredObject(object):
         ''' Get database query plan of query.'''
         db = PostgresDB()
         conn = yield db.get_connection()
-        cursor = yield conn.execute('EXPLAIN {}'.format(query), wc_params, cursor_factory=cursor_factory)
+        cursor = yield conn.execute(
+            'EXPLAIN {}'.format(query), 
+            wc_params, 
+            cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
@@ -1476,10 +1486,25 @@ class StoredObject(object):
         '''
         db = PostgresDB()
         conn = yield db.get_connection()
-        cursor = yield conn.execute(query, wc_params, cursor_factory=cursor_factory)
+        cursor = yield conn.execute(
+            query, 
+            wc_params, 
+            cursor_factory=cursor_factory)
         rv = cursor.fetchall()
         db.return_connection(conn)
         raise tornado.gen.Return(rv)
+
+    @classmethod
+    def _additional_columns(cls):
+        '''Returns columns not named _data/_type/created/updated 
+ 
+           Return Value is a list of strings 
+
+           For example, if a StoredObject needs something stored 
+             outside of _data, it will have a widget and a fidget column
+             this should return ['widget', 'fidget']
+        '''
+        return None 
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -4566,7 +4591,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None, account_id=None):
+                 external_id=None, account_id=None, features=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4598,7 +4623,9 @@ class ThumbnailMetadata(StoredObject):
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
-        
+       
+        # the features that caused this thumbnail to be surfaced 
+        self.features = features  
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
 
@@ -4607,6 +4634,10 @@ class ThumbnailMetadata(StoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ThumbnailMetadata.__name__
+
+    @classmethod
+    def _additional_columns(cls):
+        return ['features'] 
 
     def _set_keyname(self):
         '''Key the set by the video id'''
