@@ -653,7 +653,9 @@ def _execution_date_has_input_files(**kwargs):
         return 'no_input_files'
 
 def _update_table_build_times(**kwargs):
-    stats.impala_table.update_table_build_times()
+    cluster = ClusterGetter.get_cluster()
+    cluster.connect()
+    stats.impala_table.update_table_build_times(cluster)
 
 
 def _hdfs_maintenance(**kwargs):
