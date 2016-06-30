@@ -3039,12 +3039,31 @@ class EmailHandler(APIV2Handler):
                  'account_required'  : [HTTPVerbs.POST] 
                }
 
+class FeatureHandler(APIV2Handler):
+    @tornado.gen.coroutine
+    def get(self):
+        schema = Schema({
+            'id' : Any(CustomVoluptuousTypes.CommaSeparatedList()), 
+            'model_name' : All(Coerce(str), Length(min=1, max=512)), 
+            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList())
+        })
+        args = schema(self.parse_args())
+
+        model_name = args.get('model_name', None)
+        feature_ids = args.get('id', None)
+        if (model_name is None) == (feature_id is None):
+            raise Invalid('Exactly one of model_name or feature_id is required')
+
+        # TODO implement this, once the data structure is defined for 
+        # it... 
+
 '''*********************************************************************
 Endpoints
 *********************************************************************'''
 application = tornado.web.Application([
     (r'/healthcheck/?$', HealthCheckHandler),
     (r'/api/v2/batch/?$', BatchHandler),
+    (r'/api/v2/feature/?$', FeatureHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/ooyala/?$',
         OoyalaIntegrationHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/integrations/brightcove/?$',
