@@ -420,17 +420,22 @@ class PostgresDB(tornado.web.RequestHandler):
                   AS changes(key, data)
                 WHERE changes.key = t._data->>'key' 
             '''
-            try: 
+            try:
+                strs = objects[0]._get_umq_sstr_vals_changes(len(objects)) 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
-                query = "UPDATE %s AS t SET _data = changes.data "\
-                        " FROM (VALUES " % table 
+               
+                query = "UPDATE {tn} AS t {setstr} FROM {valstr} AS {changestr} \
+                    WHERE changes.key = t._data->>'key'".format(
+                        tn=table,
+                        setstr=strs[0], 
+                        valstr=strs[1],
+                        changestr=strs[2]) 
                 for obj in objects: 
-                    query += '(%s, %s::jsonb),' 
                     param_list.append(obj.key)
-                    param_list.append(obj.get_json_data()) 
-                query = query[:-1] 
-                query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
+                    param_list.append(obj.get_json_data())
+                    param_list += obj.get_query_extra_params() 
+                                    
                 return (query, tuple(param_list))  
             except KeyError: 
                 return
@@ -1270,7 +1275,7 @@ class StoredObject(object):
                    update_objs.append(obj)
 
         if update_objs:  
-            try: 
+            try:
                 update_query = db.get_update_many_query_tuple(
                     update_objs)
                 yield conn.execute(update_query[0], 
@@ -1532,6 +1537,9 @@ class StoredObject(object):
            For example, if a StoredObject needs something stored 
              outside of _data, it will have a widget and a fidget column
              this should return ['widget', 'fidget']
+
+           NOTE these must follow the order of the get_query_extra_params 
+            tuple from the object itself. 
         '''
         return []
 
@@ -1587,8 +1595,42 @@ class StoredObject(object):
         acs = cls._additional_columns() 
         alls = dcs + acs
         ss = 'SET %s' % ','.join(['%s = %s' % (x, '%s') for x in alls])
-        return ss    
-       
+        return ss
+ 
+    @classmethod 
+    def _get_umq_sstr_vals_changes(cls, object_length): 
+        '''Returns the proper update_many string based on default columns 
+            and the classes extra columns. 
+
+           only override if you need different defaults 
+
+           if you want additional fields override the _additional_columns
+           function in this class 
+ 
+           currently only supports string types TODO add other types
+
+           returns a triple where 
+           0 -> set str SET t._data = changes._data, t._addc1 = changes._addc1
+           1 -> values str VALUES(%s, %s::jsonb, %s, ... , n) 
+           2 -> changes str  changes(key, _data, _addc1, _addc2, _addcn)
+        ''' 
+
+        dcs = ['key', '_data']
+        acs = cls._additional_columns() 
+        alls = dcs + acs
+        ss = 'SET %s' % ','.join(
+            ['%s = changes.%s' % (x, x) for x in alls[1:]])
+        # this is a somewhat horrible one-liner, 
+        # but it builds up the necessary VALUES string, 
+        # based on the length of the acs, as well as 
+        # how many objects we are updating 
+        vs = '(VALUES %s)' % ','.join(
+            ['(%s%s)' % ('%s,%s::jsonb', ''.join(
+                [',%s' for x in range(len(acs))])) for x in range(
+                    object_length)])
+        cs = 'changes(key,_data%s)' % ''.join(
+            [',%s' % (x) for x in acs])
+        return (ss,vs,cs)    
 
     def get_query_extra_params(self): 
         return () 

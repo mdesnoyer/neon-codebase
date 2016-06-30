@@ -2292,6 +2292,23 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
     def _get_object_type(cls): 
         return ThumbnailMetadata
 
+    @tornado.testing.gen_test 
+    def test_modify_many_objects_values(self):     
+        def modify_me(t):
+            for x in t.itervalues():
+                if x is not None: 
+                    x.features = 'kevin is great' 
+        so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
+        so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
+        yield so1.save(async=True)
+        yield so2.save(async=True)
+        rv = yield ThumbnailMetadata.modify_many(
+            [so1.key, so2.key], modify_me, async=True)
+        for x in rv.itervalues(): 
+            self.assertEquals(x.features, 'kevin is great') 
+        so1 = yield ThumbnailMetadata.get(so1.key, async=True) 
+        self.assertEquals(so1.features, 'kevin is great')  
+
 class TestVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 
         super(test_utils.neontest.AsyncTestCase, self).setUp()
