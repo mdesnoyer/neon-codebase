@@ -537,7 +537,7 @@ def _run_mr_cleaning_job(**kwargs):
     #                 hdfs_dir,
     #                 run_time)
 
-    _log.info('cleaned output path is %s' % cleaned_output_path)
+    #_log.info('cleaned output path is %s' % cleaned_output_path)
 
     staging_prefix = _get_s3_staging_prefix(dag=dag,
                                             execution_date=execution_date,
