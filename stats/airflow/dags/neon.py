@@ -503,9 +503,10 @@ def _stage_files(**kwargs):
 
             bucket = s3.get_bucket(input_bucket)
 
-            _log.info("Copying from bucket %s to %s" % keys_to_copy, os.path.join(output_prefix, keys_to_copy_split[-1]))
+            _log.info(("Copying from bucket {src_bucket} to {dest_bucket}").format(src_bucket=keys_to_copy, 
+                                                                                dest_bucket=os.path.join(output_prefix, keys_to_copy_split[-1])))
 
-            _log.info("Output S3 prefix is %s" % output_prefix)
+            _log.info('Output S3 prefix is %s' % output_prefix)
 
             bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
                             str(bucket.name), 
