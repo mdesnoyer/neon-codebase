@@ -235,7 +235,7 @@ class ImpalaTable(object):
         _log.info('Registering event {event} Avro table {table} with Hive'
                   .format(event=self.event, table=table))
         try:
-            self.drop_avro_table(execution_date)
+            #self.drop_avro_table(execution_date)
             sql = """
             CREATE EXTERNAL TABLE %s
             ROW FORMAT SERDE
@@ -471,7 +471,7 @@ class ImpalaTableLoader(threading.Thread):
                            (self.event, parq_table))
                 self.table.load_parquet_table(self.execution_date,
                                               self.hour_interval)
-                self.table.drop_avro_table(self.execution_date)
+                #self.table.drop_avro_table(self.execution_date)
             else:
                 _log.error("Parquet table for event '%s' missing: %s" %
                            (self.event, parq_table))
