@@ -255,7 +255,8 @@ def _get_s3_input_files(dag, execution_date, task, input_path):
     # return input_files
 
     #Get the current date
-    processing_date = datetime.utcnow().strftime("%Y/%m/%d")
+    #processing_date = datetime.utcnow().strftime("%Y/%m/%d")
+    processing_date = execution_date.strftime('%Y/%m/%d')
     _log.info('processing date is %s' % processing_date)
 
     input_files = []
