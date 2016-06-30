@@ -597,6 +597,8 @@ def _load_impala_table(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
     try:
+        _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
+
         builder = stats.impala_table.ImpalaTableLoader(
             cluster=cluster,
             event=event,

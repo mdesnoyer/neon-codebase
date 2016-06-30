@@ -250,7 +250,7 @@ class ImpalaTable(object):
             'avro.schema.url'='%s'
             )""" % (table, os.path.join(input_path, self.event_schema),
                     self._schema_path())
-            _log.debug('CREATE Avro Table SQL: {sql}'.format(sql=sql))
+            _log.info('CREATE Avro Table SQL: {sql}'.format(sql=sql))
             self.hive.execute(sql)
 
         except:
@@ -452,7 +452,7 @@ class ImpalaTableLoader(threading.Thread):
     def run(self):
         self._stopped.clear()
         self.status = 'RUNNING'
-        _log.debug("Event '%s' table build thread running" % self.event)
+        _log.info("Event '%s' table build thread running" % self.event)
 
         try:
             self.table.cluster.connect()
@@ -462,6 +462,7 @@ class ImpalaTableLoader(threading.Thread):
                 _log.error("Avro table for event '%s' exists: %s" % 
                            (self.event, avro_table))
             else:
+                _log.info("Entering to create avro tables")
                 self.table.create_avro_table(self.execution_date,
                                              self.input_path)
 
