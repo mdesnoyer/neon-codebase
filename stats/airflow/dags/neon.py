@@ -503,6 +503,10 @@ def _stage_files(**kwargs):
 
             bucket = s3.get_bucket(input_bucket)
 
+            _log.info("Copying from bucket %s to %s" % keys_to_copy, os.path.join(output_prefix, keys_to_copy_split[-1]))
+
+            _log.info("Output S3 prefix is %s" % output_prefix)
+
             bucket.copy_key(os.path.join(output_prefix, keys_to_copy_split[-1]), 
                             str(bucket.name), 
                             keys_to_copy,
@@ -523,14 +527,14 @@ def _run_mr_cleaning_job(**kwargs):
     cluster = ClusterGetter.get_cluster()
     cluster.connect()
 
-    hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
-    hdfs_dir = 'mnt/cleaned'
-    run_time = time.strftime("%Y-%m-%d-%H-%M")
+    # hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
+    # hdfs_dir = 'mnt/cleaned'
+    # run_time = time.strftime("%Y-%m-%d-%H-%M")
 
-    cleaned_output_path = "%s/%s/%s" % (
-                    hdfs_path,
-                    hdfs_dir,
-                    run_time)
+    # cleaned_output_path = "%s/%s/%s" % (
+    #                 hdfs_path,
+    #                 hdfs_dir,
+    #                 run_time)
 
     _log.info('cleaned output path is %s' % cleaned_output_path)
 
@@ -551,14 +555,18 @@ def _run_mr_cleaning_job(**kwargs):
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
 
+    _log.info("Output of clean up job goes to %s" % cleaning_job_output_path)
+    _log.info("Output bucket is %s" % output_bucket)
+    _log.info("Output prefix is %s" % cleaned_prefix)
+
     jar_path = os.path.join(os.path.dirname(__file__), '..', '..', 'java',
                             'target', options.mr_jar)
     try:
         cluster.run_map_reduce_job(jar_path,
                                    'com.neon.stats.RawTrackerMR',
                                    cleaning_job_input_path,
-#                                   cleaning_job_output_path,
-                                   cleaned_output_path,
+                                   cleaning_job_output_path,
+                                   #cleaned_output_path,
                                    map_memory_mb=options.cleaning_mr_memory,
                                    timeout=kwargs['timeout'])
     except Exception as e:
