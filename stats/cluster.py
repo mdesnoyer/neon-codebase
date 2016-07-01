@@ -226,7 +226,7 @@ class Cluster():
                                            (new_ip, self.master_id))
             self.public_ip = new_ip
 
-    def connect(self):
+    def connect(self, calling_script):
         '''Connects to the cluster.
 
         If it's up, connect to it, otherwise create it
@@ -236,7 +236,12 @@ class Cluster():
                 _log.warn("Could not find cluster %s of type %s. "
                           "Starting a new one instead"
                           % (self.cluster_name, self.cluster_type))
-                self._create()
+                # Below condition is to prevent an airflow task accidentally creating
+                # a cluster when the cluster_manager is bringing one up
+                if calling_script == 'cluster_manager.py':
+                    self._create()
+                else:
+                    _log.info("Only cluster_manager can create the cluster. %s cannot" % calling_script)
             else:
                 _log.info("Found cluster %s of type %s with id %s" %
                           (self.cluster_name, self.cluster_type,

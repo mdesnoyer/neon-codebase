@@ -47,6 +47,7 @@ import urlparse
 import utils.logs
 import utils.monitor
 from utils import statemon
+import os
 
 _log = logging.getLogger('airflow.dag.clicklogs')
 
@@ -149,7 +150,7 @@ def _create_tables(**kwargs):
     """
     event = kwargs['event']
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
 
     builder = stats.impala_table.ImpalaTableBuilder(cluster, event)
     builder.run()
@@ -356,7 +357,7 @@ def _run_cluster_command(cmd, **kwargs):
     :return:
     """
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
     ssh_conn = stats.cluster.ClusterSSHConnection(cluster)
     ssh_conn.execute_remote_command(cmd)
 
@@ -368,7 +369,7 @@ def _check_compute_cluster_capacity(op_kwargs):
     """
     ti = op_kwargs['task_instance']
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
     if False:
         cluster.change_instance_group_size(group_type='TASK', incr_amount=1)
     # else:
@@ -526,7 +527,7 @@ def _run_mr_cleaning_job(**kwargs):
     output_bucket, output_prefix = _get_s3_tuple(kwargs['output_path'])
 
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
 
     # hdfs_path = 'hdfs://%s:9000' % cluster.master_ip
     # hdfs_dir = 'mnt/cleaned'
@@ -595,7 +596,7 @@ def _load_impala_table(**kwargs):
 
     _log.info("{task}: Loading data!".format(task=task))
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
     try:
         _log.info("Path to build for impala is %s" % os.path.join('s3://', output_bucket, cleaned_prefix))
 
@@ -661,7 +662,7 @@ def _execution_date_has_input_files(**kwargs):
 
 def _update_table_build_times(**kwargs):
     cluster = ClusterGetter.get_cluster()
-    cluster.connect()
+    cluster.connect(os.path.basename(__file__))
     stats.impala_table.update_table_build_times(cluster)
 
 

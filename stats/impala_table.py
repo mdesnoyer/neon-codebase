@@ -348,7 +348,7 @@ class ImpalaTable(object):
                           ','.join(x.name for x in self.avro_schema.fields),
                           hour_interval, hour_interval,
                           avro_table)
-            _log.debug('LOAD Impala-Parquet table command: {sql}'.format(
+            _log.info('LOAD Impala-Parquet table command: {sql}'.format(
                 sql=sql))
             self.hive.execute(sql)
             self._refresh_table(parq_table)

@@ -44,7 +44,8 @@ def main():
                 _log.error(
                     'Cluster died. Restarting it and clearing airflow jobs')
                 statemon.state.increment('cluster_deaths')
-                cluster.connect()
+                _log.info('name of calling script is %s' % os.path.basename(__file__))
+                cluster.connect(os.path.basename(__file__))
                 statemon.state.tasks_cleared = 0
 
             if not statemon.state.tasks_cleared:
