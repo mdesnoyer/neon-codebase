@@ -1531,15 +1531,16 @@ class Searchable(object):
     def _search(cls, **kwargs):
         '''Builds and executes query to search on arugments.'''
 
+        args = OrderedDict(sorted(kwargs.items()))
+
         def _validate():
-            args = kwargs.copy()
             args.pop('async', None)
             allowed = cls._get_allowed_arguments()
             if filter(lambda k: k in allowed, args) != args.keys():
                 raise KeyError('Bad argument to search %s' % args)
 
         def _query():
-            return 'SELECT * FROM {table} {where}{order}{limit}{offset}'.format(
+            return 'SELECT * FROM {table}{where}{order}{limit}{offset}'.format(
                 table=cls._baseclass_name().lower(),
                 where=_where(),
                 limit=_limit(),
@@ -1547,21 +1548,25 @@ class Searchable(object):
                 order=_order())
         def _where():
             parts = []
-            if kwargs.get('account_id'):
-                parts.append("_data->>'account_id' = %s")
-            if kwargs.get('show_hidden'):
-                parts.append("_data->>'hidden'::BOOLEAN IS NOT TRUE")
-            if kwargs.get('name'):
-                # Check if we need to escape regex specials.
-                try:
-                    re.compile(kwargs['name'])
-                except sre_constants.error:
-                    kwargs['name'] = re.escape(kwargs['name'])
-                parts.append("_data->>'name' ~* %s")
-            if kwargs.get('since'):
-                parts.append('created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
-            if kwargs.get('until'):
-                parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
+            for key in args:
+                if key in ['limit', 'offset']:
+                    pass
+                elif key == 'show_hidden':
+                    parts.append("_data->>'hidden'::BOOLEAN IS NOT TRUE")
+                elif key == 'name':
+                    # Check if we need to escape regex specials.
+                    try:
+                        re.compile(kwargs['name'])
+                    except sre_constants.error:
+                        kwargs['name'] = re.escape(kwargs['name'])
+                    parts.append("_data->>'name' ~* %s")
+                elif key == 'since':
+                    parts.append('created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
+                elif key == 'until':
+                    parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
+                # Generally just match whole value.
+                else:
+                    parts.append("_data->>'{}' = %s".format(key))
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
 
         def _limit():
@@ -1573,10 +1578,8 @@ class Searchable(object):
         def _order():
             return ' ORDER BY created_time DESC'
         def _bind():
-            args = OrderedDict(sorted(kwargs.items()))
-            return [v for k,v in args.items() \
-                    if k in cls._get_allowed_arguments() and
-                    k not in ['limit', 'offset', 'show_hidden'] and
+            return [v for k, v in args.items() \
+                    if k not in ['limit', 'offset', 'show_hidden'] and
                     v is not None]
 
         _validate()
@@ -2063,7 +2066,7 @@ class MappingObject(object):
         '''Gather unique pairs of input keys.'''
         keys = cls._get_keys()
         left_values = kwargs[keys[0]]
-        right_values = set(kwargs[keys[1]])
+        right_values = kwargs[keys[1]]
         if not left_values or not right_values:
             raise ValueError('Input must be valued')
         if type(left_values) is str or type(left_values) is int:
@@ -2189,7 +2192,8 @@ class Tag(Searchable, StoredObject):
             'offset',
             'since',
             'show_hidden',
-            'until']
+            'until',
+            'tag_type']
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex

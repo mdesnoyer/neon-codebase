@@ -1226,7 +1226,8 @@ class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
             'since': Coerce(float),
             'until': Coerce(float),
             'show_hidden': Coerce(bool),
-            'fields': CustomVoluptuousTypes.CommaSeparatedList()
+            'fields': CustomVoluptuousTypes.CommaSeparatedList(),
+            'tag_type': CustomVoluptuousTypes.TagType
         })(self.args)
         self.args['base_url'] = '/api/v2/%s/tags/search/' % self.account_id
         searcher = ContentSearcher(**self.args)
@@ -1277,7 +1278,7 @@ class ContentSearcher(object):
     '''A searcher to run search requests and make results.'''
 
     def __init__(self, account_id=None, since=None, until=None, name=None,
-                 limit=None, show_hidden=False, base_url=None):
+                 limit=None, show_hidden=False, base_url=None, tag_type=None):
         self.account_id = account_id
         self.since = since
         self.until = until
@@ -1285,6 +1286,7 @@ class ContentSearcher(object):
         self.limit = limit
         self.show_hidden = show_hidden
         self.base_url = base_url or '/api/v2/tags/search/'
+        self.tag_type = tag_type
 
     @tornado.gen.coroutine
     def get(self):
