@@ -220,7 +220,7 @@ CREATE TABLE thumbnailmetadata (
     _type character varying(128) NOT NULL,
     created_time timestamp DEFAULT current_timestamp, 
     updated_time timestamp DEFAULT current_timestamp,
-    features text DEFAULT NULL  
+    features bytea DEFAULT NULL  
 );
 
 

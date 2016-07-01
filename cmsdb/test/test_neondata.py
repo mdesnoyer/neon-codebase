@@ -2296,8 +2296,8 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
     def test_modify_many_objects_values(self):     
         def modify_me(t):
             for x in t.itervalues():
-                if x is not None: 
-                    x.features = 'kevin is great' 
+                if x is not None:
+                    x.features = np.array(1.0)
         so1 = self._get_object_type()(uuid.uuid1().hex, 'test1')
         so2 = self._get_object_type()(uuid.uuid1().hex, 'test2')
         yield so1.save(async=True)
@@ -2305,9 +2305,9 @@ class TestThumbnailMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObjec
         rv = yield ThumbnailMetadata.modify_many(
             [so1.key, so2.key], modify_me, async=True)
         for x in rv.itervalues(): 
-            self.assertEquals(x.features, 'kevin is great') 
-        so1 = yield ThumbnailMetadata.get(so1.key, async=True) 
-        self.assertEquals(so1.features, 'kevin is great')  
+            self.assertEquals(x.features, np.array(1.0)) 
+        so1 = yield ThumbnailMetadata.get(so1.key, async=True)
+        self.assertEquals(so1.features, np.array(1.0))  
 
 class TestVideoMetadata(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def setUp(self): 

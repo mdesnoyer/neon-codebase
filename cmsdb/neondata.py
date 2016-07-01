@@ -38,6 +38,7 @@ import simplejson as json
 import logging
 import model.scores
 import momoko
+import numpy 
 import psycopg2
 from passlib.hash import sha256_crypt
 import random
@@ -174,7 +175,22 @@ class PostgresDB(tornado.web.RequestHandler):
             # this comes from momoko reconnect_interval 
             self.reconnect_dead = 250.0  
             # the starting size of the pool 
-            self.pool_start_size = 3 
+            self.pool_start_size = 3
+            
+            # support numpy array types 
+            psycopg2.extensions.register_adapter(
+                numpy.ndarray, 
+                psycopg2._psycopg.Binary)
+            def typecast_numpy_array(data, cur): 
+                if data is None: 
+                    return None 
+                buf = psycopg2.BINARY(data,cur)
+                return numpy.frombuffer(buf) 
+            np_array_type = psycopg2.extensions.new_type(
+                psycopg2.BINARY.values, 
+                'np_array_type', 
+                typecast_numpy_array)
+            psycopg2.extensions.register_type(np_array_type) 
         
         def _set_current_host(self): 
             self.old_host = self.host 
@@ -693,6 +709,29 @@ class PythonNaNStrings(object):
     NEGINF = '-Infinite' 
     NAN = 'NaN' 
 
+class PostgresColumn(object):
+    '''Gives information on additional columns, and information stored outside 
+         of _data, _type, created, updated on Postgres tables. 
+
+       This is a class instead of a dictionary, just to enforce/explain what 
+         the various things that are needed  
+    ''' 
+    def __init__(self, 
+                 column_name, 
+                 format_string, 
+                 data_stored=None):
+        # name of the additional column
+        self.column_name = column_name
+        # a format string for insert/update operations 
+        # eg %s::jsonb
+        #    %s::bytea
+        #    %s 
+        #    %d 
+        self.format_string = format_string 
+        # where on the object the data is stored 
+        # a string, this will access the __dict__ directly
+        self.data_stored = data_stored 
+
 ##############################################################################
 class StoredObject(object):
     '''Abstract class to represent an object that is stored in the database.
@@ -854,8 +893,8 @@ class StoredObject(object):
             addcs = cls._additional_columns()
             if addcs: 
                 for c in addcs: 
-                    try: 
-                        data_dict[c] = obj_dict[c] 
+                    try:
+                        data_dict[c.column_name] = obj_dict[c.column_name]
                     except KeyError: 
                         pass 
  
@@ -1535,8 +1574,9 @@ class StoredObject(object):
            Return Value is a list 
 
            For example, if a StoredObject needs something stored 
-             outside of _data, it will have a widget and a fidget column
-             this should return ['widget', 'fidget']
+             outside of _data, eg if table t has a widget and a fidget column
+             this should return [PostgresColumn('widget',...), 
+                 PostgresColumn('fidget',...)]
 
            NOTE these must follow the order of the get_query_extra_params 
             tuple from the object itself. 
@@ -1557,8 +1597,11 @@ class StoredObject(object):
                'updated_time AS updated_time_pg']
 
         acs = cls._additional_columns()
+        ac_col_names = [] 
+        for a in acs: 
+            ac_col_names.append(a.column_name) 
  
-        return ','.join(dcs + acs)
+        return ','.join(dcs + ac_col_names)
 
     @classmethod 
     def _get_iq_fields_and_values(cls): 
@@ -1571,11 +1614,14 @@ class StoredObject(object):
            if you want additional fields(columns) added override 
            the _additional_columns function in this class 
         '''
-        dcs = ['_data', '_type', 'created_time', 'updated_time']
+        dcs = [PostgresColumn('_data', '%s::jsonb'), 
+               PostgresColumn('_type', '%s'), 
+               PostgresColumn('created_time', '%s'),
+               PostgresColumn('updated_time', '%s')]
         acs = cls._additional_columns() 
         alls = dcs + acs 
-        fields = '(%s)' % ','.join(alls) 
-        values = 'VALUES(%s)' % ','.join(['%s' for x in range(len(alls))])
+        fields = '(%s)' % ','.join(['%s' % x.column_name for x in alls]) 
+        values = 'VALUES(%s)' % ','.join(['%s' % x.format_string for x in alls])
         return (fields, values)
 
     @classmethod 
@@ -1591,10 +1637,11 @@ class StoredObject(object):
            currently only supports string types TODO add other types 
         ''' 
 
-        dcs = ['_data']
+        dcs = [PostgresColumn('_data', '%s::jsonb')]
         acs = cls._additional_columns() 
         alls = dcs + acs
-        ss = 'SET %s' % ','.join(['%s = %s' % (x, '%s') for x in alls])
+        ss = 'SET %s' % ','.join(
+            ['%s = %s' % (x.column_name, x.format_string) for x in alls])
         return ss
  
     @classmethod 
@@ -1615,21 +1662,22 @@ class StoredObject(object):
            2 -> changes str  changes(key, _data, _addc1, _addc2, _addcn)
         ''' 
 
-        dcs = ['key', '_data']
+        dcs = [PostgresColumn('key', '%s'), 
+               PostgresColumn('_data', '%s::jsonb')]
         acs = cls._additional_columns() 
         alls = dcs + acs
         ss = 'SET %s' % ','.join(
-            ['%s = changes.%s' % (x, x) for x in alls[1:]])
+            ['{cn} = changes.{cn}'.format(cn=x.column_name) for x in alls[1:]])
         # this is a somewhat horrible one-liner, 
         # but it builds up the necessary VALUES string, 
         # based on the length of the acs, as well as 
         # how many objects we are updating 
         vs = '(VALUES %s)' % ','.join(
-            ['(%s%s)' % ('%s,%s::jsonb', ''.join(
-                [',%s' for x in range(len(acs))])) for x in range(
+            ['(%s)' % (','.join(
+                ['%s' % x.format_string for x in alls])) for x in range(
                     object_length)])
-        cs = 'changes(key,_data%s)' % ''.join(
-            [',%s' % (x) for x in acs])
+        cs = 'changes(%s)' % ','.join(
+            ['%s' % x.column_name for x in alls])
         return (ss,vs,cs)    
 
     def get_query_extra_params(self): 
@@ -4766,7 +4814,7 @@ class ThumbnailMetadata(StoredObject):
 
     @classmethod
     def _additional_columns(cls):
-        return ['features']
+        return [PostgresColumn('features', '%s::bytea', 'features')]
 
     def get_query_extra_params(self): 
         return (self.features,)     
