@@ -2451,6 +2451,7 @@ class TestUser(NeonDbTestCase, BasePGNormalObject):
         a_ids = yield new_user.get_associated_account_ids(async=True)
         self.assertEquals(0, len(a_ids))
 
+
 class TestNeonUserAccount(NeonDbTestCase, BasePGNormalObject):
     @classmethod
     def setUpClass(cls):

@@ -1548,24 +1548,27 @@ class Searchable(object):
                 order=_order())
         def _where():
             parts = []
-            for key in args:
+            for key, value in args.items():
                 if key in ['limit', 'offset']:
                     pass
                 elif key == 'show_hidden':
-                    parts.append("_data->>'hidden'::BOOLEAN IS NOT TRUE")
-                elif key == 'name':
+                    if value:
+                        pass
+                    else:
+                        parts.append("(_data->>'hidden')::BOOLEAN IS NOT TRUE")
+                elif key == 'query' and value:
                     # Check if we need to escape regex specials.
                     try:
-                        re.compile(kwargs['name'])
+                        re.compile(args['query'])
                     except sre_constants.error:
-                        kwargs['name'] = re.escape(kwargs['name'])
+                        args['query'] = re.escape(args['query'])
                     parts.append("_data->>'name' ~* %s")
-                elif key == 'since':
+                elif key == 'since' and value:
                     parts.append('created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
-                elif key == 'until':
+                elif key == 'until' and value:
                     parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
                 # Generally just match whole value.
-                else:
+                elif value:
                     parts.append("_data->>'{}' = %s".format(key))
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
 
@@ -1579,8 +1582,7 @@ class Searchable(object):
             return ' ORDER BY created_time DESC'
         def _bind():
             return [v for k, v in args.items() \
-                    if k not in ['limit', 'offset', 'show_hidden'] and
-                    v is not None]
+                    if k not in ['limit', 'offset', 'show_hidden'] and v]
 
         _validate()
         result = yield cls.execute_select_query(
@@ -2069,11 +2071,11 @@ class MappingObject(object):
         right_values = kwargs[keys[1]]
         if not left_values or not right_values:
             raise ValueError('Input must be valued')
-        if type(left_values) is str or type(left_values) is int:
+        if type(left_values) in [str, unicode, int]:
             left_values = [left_values]
         else:
             left_values = list(set(left_values))
-        if type(right_values) is str or type(right_values) is int:
+        if type(right_values) in [str, unicode, int]:
             right_values = [right_values]
         else:
             right_values = list(set(right_values))
@@ -2188,7 +2190,7 @@ class Tag(Searchable, StoredObject):
         return [
             'account_id',
             'limit',
-            'name',
+            'query',
             'offset',
             'since',
             'show_hidden',
@@ -5476,7 +5478,7 @@ class BillingPlans(StoredObject):
         '''
         return BillingPlans.__name__
 
-class VideoMetadata(StoredObject):
+class VideoMetadata(Searchable, StoredObject):
     '''
     Schema for metadata associated with video which gets stored
     when the video is processed
@@ -5530,6 +5532,17 @@ class VideoMetadata(StoredObject):
 
         # For associating to thumbnails via a tag.
         self.tag_id = tag_id
+
+    @staticmethod
+    def _get_allowed_arguments():
+        return [
+            'account_id',
+            'limit',
+            'title',
+            'offset',
+            'since',
+            'show_hidden',
+            'until']
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5860,7 +5873,7 @@ class VideoMetadata(StoredObject):
             where_clause += " v._data->>'key' LIKE %s"
             wc_params.append(account_id+'_%')
 
-        if show_hidden:
+        if not show_hidden:
             if where_clause:
                 where_clause += " AND "
             where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"

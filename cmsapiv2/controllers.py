@@ -1277,12 +1277,14 @@ class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
 class ContentSearcher(object):
     '''A searcher to run search requests and make results.'''
 
-    def __init__(self, account_id=None, since=None, until=None, name=None,
-                 limit=None, show_hidden=False, base_url=None, tag_type=None):
+    def __init__(self, account_id=None, since=None, until=None, query=None,
+                 fields=None, limit=None, show_hidden=False, base_url=None,
+                 tag_type=None):
         self.account_id = account_id
-        self.since = since
-        self.until = until
-        self.name = name
+        self.since = since or 0.0
+        self.until = until or 0.0
+        self.query = query
+        self.fields = fields
         self.limit = limit
         self.show_hidden = show_hidden
         self.base_url = base_url or '/api/v2/tags/search/'
@@ -1297,7 +1299,7 @@ class ContentSearcher(object):
             int count of items in this response,
             str prev page url,
             str next page url.'''
-        args = {k:v for k,v in self.__dict__.items() if k is not 'base_url'}
+        args = {k:v for k,v in self.__dict__.items() if k not in ['base_url', 'fields']}
         args['async'] = True
         tags = yield neondata.Tag.objects(**args)
         raise tornado.gen.Return((
@@ -1308,11 +1310,21 @@ class ContentSearcher(object):
 
     def _prev_page_url(self):
         '''Build the previous page url.'''
-        return self.base_url
+        return self._page_url('since')
 
     def _next_page_url(self):
         '''Build the previous page url.'''
-        return self.base_url
+        return self._page_url('until')
+
+    def _page_url(self, time_type):
+        return '{base}?{time_type}={ts}&limit={limit}{query}{fields}{acct}'.format(
+            base=self.base_url,
+            time_type=time_type,
+            ts=self.until if time_type == 'until' else self.since,
+            limit=self.limit,
+            query='&query=%s' % self.query if self.query else '',
+            fields='&fields=%s' % ','.join(self.fields) if self.fields else '',
+            acct='&account_id=%s' % self.account_id if self.account_id else '')
 
 
 '''*********************************************************************
@@ -1902,11 +1914,11 @@ class VideoHelper(object):
                        query=None,
                        fields=None,
                        account_id=None):
-
-        next_page_url = '%s?%s=%f&limit=%d' % (base_url,
-                                               page_type,
-                                               time_stamp,
-                                               limit)
+        next_page_url = '%s?%s=%f&limit=%d' % (
+            base_url,
+            page_type,
+            time_stamp,
+            limit)
         if query:
             next_page_url += '&query=%s' % query
         if fields:
@@ -2629,57 +2641,6 @@ class VideoSearchExternalHandler(APIV2Handler):
         return {
             HTTPVerbs.GET: neondata.AccessLevels.READ,
             'account_required': [HTTPVerbs.GET]}
-
-
-'''*********************************************************************
-ThumbnailSearchExternalHandler : class responsible for searching thumbs
-                                 from an external source
-   HTTP Verbs     : get
-*********************************************************************'''
-class ThumbnailSearchExternalHandler(APIV2Handler):
-    @tornado.gen.coroutine
-    def get(self, account_id):
-        Schema({
-            'limit': All(Coerce(int), Range(min=1, max=100)),
-            Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            'query': str,
-            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            'since': All(Coerce(float)),
-            'until': All(Coerce(float))
-        })(self.args)
-        self.success({})
-
-    @classmethod
-    def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            'account_required': [HTTPVerbs.GET]}
-
-
-'''*********************************************************************
-ThumbnailSearchInternalHandler : class responsible for searching thumbs
-                                 from an internal source
-   HTTP Verbs     : get
-*********************************************************************'''
-class ThumbnailSearchInternalHandler(APIV2Handler):
-    @tornado.gen.coroutine
-    def get(self):
-        Schema({
-            'limit': All(Coerce(int), Range(min=1, max=100)),
-            'account_id': All(Coerce(str), Length(min=1, max=256)),
-            'query': str,
-            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
-            'since': All(Coerce(float)),
-            'until': All(Coerce(float))
-        })(self.args)
-        self.success({})
-
-    @classmethod
-    def get_access_levels(self):
-        return {
-            HTTPVerbs.GET: neondata.AccessLevels.READ,
-            'internal_only': True,
-            'account_required': []}
 
 
 '''*****************************************************************
@@ -3417,7 +3378,6 @@ Endpoints
 application = tornado.web.Application([
     (r'/api/v2/batch/?$',                                          BatchHandler),
     (r'/api/v2/tags/search/?$',                                    TagSearchInternalHandler),
-    (r'/api/v2/thumbnails/search/?$',                              ThumbnailSearchInternalHandler),
     (r'/api/v2/videos/search/?$',                                  VideoSearchInternalHandler),
     (r'/api/v2/(\d+)/live_stream',                                 LiveStreamHandler),
 
@@ -3441,7 +3401,6 @@ application = tornado.web.Application([
     (r'/api/v2/([a-zA-Z0-9]+)/tags/search/?$',                     TagSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/telemetry/snippet/?$',               TelemetrySnippetHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/?$',                      ThumbnailHandler),
-    (r'/api/v2/([a-zA-Z0-9]+)/thumbnails/search/?$',               ThumbnailSearchExternalHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/users/?$',                           UserHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/?$',                          VideoHandler),
     (r'/api/v2/([a-zA-Z0-9]+)/videos/search/?$',                   VideoSearchExternalHandler),
