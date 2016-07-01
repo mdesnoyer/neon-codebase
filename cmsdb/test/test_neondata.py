@@ -2613,12 +2613,14 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         Tag(account_id='someone else', name='ABC').save()
         Tag(account_id=self.account_id, name='BCD').save()
         Tag(account_id='someone else', name='BCD').save()
-        result = yield Tag.keys(name='A', async=True)
+        result = yield Tag.keys(query='A', async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.objects(name='A', account_id=self.account_id, async=True)
+        result = yield Tag.objects(query='A', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
-        result = yield Tag.objects(name='BC', account_id=self.account_id, async=True)
+        result = yield Tag.objects(query='BC', account_id=self.account_id, async=True)
         self.assertEqual(2, len(result))
+        result = yield Tag.objects(query='BCD', account_id=self.account_id, async=True)
+        self.assertEqual(1, len(result))
 
     @tornado.testing.gen_test
     def test_since(self):

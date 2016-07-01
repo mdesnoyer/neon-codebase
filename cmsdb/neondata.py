@@ -2190,8 +2190,9 @@ class Tag(Searchable, StoredObject):
         return [
             'account_id',
             'limit',
-            'query',
+            'name',
             'offset',
+            'query',
             'since',
             'show_hidden',
             'until',
