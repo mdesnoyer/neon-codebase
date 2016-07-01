@@ -605,8 +605,12 @@ def _load_impala_table(**kwargs):
             execution_date=executation_date,
             hour_interval=dag.schedule_interval.total_seconds()/3600,
             input_path=os.path.join('s3://', output_bucket, cleaned_prefix))
+
+        _log.info("Before run")
     
         builder.run()
+
+        _log.info("After run")
     except:
         statemon.state.increment('impala_table_load_failure')
     return "Impala tables loaded"

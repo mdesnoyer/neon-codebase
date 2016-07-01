@@ -453,7 +453,9 @@ class ImpalaTableLoader(threading.Thread):
     _log.info("After stop")
 
     def run(self):
+        _log.info("before clear")
         self._stopped.clear()
+        _log.info("after clear")
         self.status = 'RUNNING'
         _log.info("Event '%s' table build thread running" % self.event)
 
