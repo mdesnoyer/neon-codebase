@@ -814,7 +814,7 @@ class StoredObject(object):
             # to prevent the duplication of data
             for c in addcs:
                 try:  
-                    del obj[c]
+                    del obj[c.column_name]
                 except KeyError: 
                     pass 
             return obj
