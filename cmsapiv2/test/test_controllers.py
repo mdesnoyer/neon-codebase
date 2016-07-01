@@ -323,6 +323,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
                    async=True)
         self.assertEquals(user.username, 'a@a.com')
         self.assertEquals(user.first_name, 'kevin')
+        self.assertFalse(user.is_email_verified())
 
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id)
@@ -897,6 +898,7 @@ class TestAuthUserHandler(TestAuthenticationBase):
         self.assertTrue(sha256_crypt.verify('newpassword', user.password_hash))
         self.assertEqual(None, user.reset_password_token)
 
+
 class TestVerifyAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
@@ -939,6 +941,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         user = yield neondata.User.get(email, async=True)
         self.assertEqual(email, user.username)
         self.assertEqual(cell, user.cell_phone_number)
+        self.assertTrue(user.is_email_verified())
 
     @tornado.testing.gen_test
     def test_verify_with_account_keyed_user(self):
@@ -946,7 +949,8 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         account = neondata.NeonUserAccount('name', 'a0')
         yield account.save(async=True)
         account.email = email
-        user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN)
+        user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN, email_verified=False)
+        self.assertFalse(user.is_email_verified())
         yield user.save(async=True)
         cell = '867-5309'
         email2 = 'rocking@invalid.com'
@@ -980,6 +984,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         self.assertEqual([email], rjson['users'])
         account = yield neondata.NeonUserAccount.get('a0', async=True)
         user = yield neondata.User.get(email, async=True)
+        self.assertTrue(user.is_email_verified())
         self.assertEqual(email, user.username)
         self.assertEqual(cell, user.cell_phone_number)
         self.assertEqual(email2, user.secondary_email)

@@ -1971,6 +1971,7 @@ class User(NamespacedStoredObject):
         self.send_emails = send_emails 
 
         # If the user has verified their email address.
+        # If set to None, assume the address is verified to support legacy.
         self.email_verified = email_verified
 
     def is_email_verified(self):
