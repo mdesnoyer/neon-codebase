@@ -7064,8 +7064,63 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.url = self.get_url('/api/v2/%s/tags/' % self.account_id)
 
     @tornado.testing.gen_test
-    def test_post_tag_no_association(self):
-        '''Create a tag without any association.'''
+    def test_get(self):
+        tag_1 = neondata.Tag(
+            account_id=self.account_id,
+            name='Green',
+            tag_type=neondata.TagType.GALLERY)
+        tag_1.save()
+        thumb_1 = neondata.ThumbnailMetadata('t1', account_id=self.account_id)
+        thumb_2 = neondata.ThumbnailMetadata('t2', account_id=self.account_id)
+        neondata.TagThumbnail.save_many(
+            tag_id=tag_1.get_id(),
+            thumbnail_id=[thumb_1.get_id(), thumb_2.get_id()])
+        tag_2 = neondata.Tag(
+            account_id=self.account_id,
+            name='Blue',
+            tag_type='INVALID')
+        tag_2.save()
+        tag_id = ','.join([tag_1.get_id(), tag_2.get_id(), 'invalid'])
+        url = '%s?tag_id=%s' % (self.url, tag_id)
+        response = yield self.http_client.fetch(url, headers=self.headers)
+        self.assertEqual(ResponseCode.HTTP_OK, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual({tag_1.get_id(), tag_2.get_id()}, set(rjson.keys()))
+        green_gallery_tag = rjson[tag_1.get_id()]
+        self.assertEqual('Green', green_gallery_tag['name'])
+        self.assertEqual(neondata.TagType.GALLERY, green_gallery_tag['tag_type'])
+        self.assertEqual(
+            {thumb_1.get_id(), thumb_2.get_id()},
+            {t['thumbnail_id'] for t in green_gallery_tag['thumbnails']})
+        blue_tag = rjson[tag_2.get_id()]
+        self.assertEqual('Blue', blue_tag['name'])
+        self.assertEqual(None, blue_tag['tag_type'])
+
+    @tornado.testing.gen_test
+    def test_put(self):
+        tag = neondata.Tag(
+            account_id=self.account_id,
+            name='Green',
+            tag_type=neondata.TagType.GALLERY)
+        tag.save()
+        thumbnails = [neondata.ThumbnailMetadata(
+            't%d' % i,
+            account_id=self.account_id) for i in range(20)]
+        [t.save() for t in thumbnails]
+        thumb_ids = [t.get_id() for t in thumbnails]
+        body = json.dumps({
+            'tag_id': tag.get_id(),
+            'thumbnail_ids': ','.join(thumb_ids)})
+        response = yield self.http_client.fetch(
+            self.url,
+            method='PUT',
+            headers=self.headers,
+            body=body)
+        import pdb; pdb.set_trace()
+
+    @tornado.testing.gen_test
+    def test_post_tag_no_thumbnail_id(self):
+        '''Create a tag without any thumbnail_id.'''
         name = 'My Vacation in Djibouti 2016/05/01'
         body = json.dumps({'name': name})
         response = yield self.http_client.fetch(
@@ -7081,11 +7136,11 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(name, tag.name)
 
     @tornado.testing.gen_test
-    def test_post_tag_one_association(self):
-        '''Create a tag with one association.'''
+    def test_post_tag_one_thumbnail_id(self):
+        '''Create a tag with one thumbnail_id.'''
         name = u'Photos from مسجد سليمان 2015/11/02'
-        association = random.choice(self.thumbnail_ids)
-        body = json.dumps({'name': name, 'associations': association})
+        thumbnail_id = random.choice(self.thumbnail_ids)
+        body = json.dumps({'name': name, 'thumbnail_ids': thumbnail_id})
         response = yield self.http_client.fetch(
             self.url,
             method='POST',
@@ -7095,18 +7150,19 @@ class TestTagHandler(TestVerifiedControllersBase):
         rjson = json.loads(response.body)
         self.assertIsNotNone(rjson['tag_id'])
         self.assertEqual(name, rjson['name'])
-        self.assertIn(association, rjson['thumbnail_ids'])
+        self.assertIn(thumbnail_id, rjson['thumbnail_ids'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
         has_result = yield neondata.TagThumbnail.has(
             tag_id=tag.get_id(),
-            thumbnail_id=association)
+            thumbnail_id=thumbnail_id,
+            async=True)
         self.assertTrue(has_result)
 
         name = u'That time in Baden-Württemberg'
-        association = 'some_invalid_id'
-        body = json.dumps({'name': name, 'associations': association})
+        thumbnail_id = 'some_invalid_id'
+        body = json.dumps({'name': name, 'thumbnail_ids': thumbnail_id})
         response = yield self.http_client.fetch(
             self.url,
             method='POST',
@@ -7115,24 +7171,25 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertNotIn(association, rjson['thumbnail_ids'])
+        self.assertNotIn(thumbnail_id, rjson['thumbnail_ids'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
         has_result = yield neondata.TagThumbnail.has(
             tag_id=tag.get_id(),
-            thumbnail_id=association)
+            thumbnail_id=thumbnail_id,
+            async=True)
         self.assertFalse(has_result)
 
     @tornado.testing.gen_test
-    def test_post_tag_many_associations(self):
-        '''Post a tag with a mix of valid and invalid associations.'''
+    def test_post_tag_many_thumbnail_ids(self):
+        '''Post a tag with a mix of valid and invalid thumbnail_ids.'''
         name = u'서울'
-        associations = list({
+        thumbnail_ids = list({
             random.choice(self.thumbnail_ids),
             random.choice(self.thumbnail_ids),
             random.choice(self.thumbnail_ids)})
-        body = json.dumps({'name': name, 'associations': ','.join(associations)})
+        body = json.dumps({'name': name, 'thumbnail_ids': ','.join(thumbnail_ids)})
         response = yield self.http_client.fetch(
             self.url,
             method='POST',
@@ -7141,21 +7198,22 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertEqual(set(associations), set(rjson['thumbnail_ids']))
+        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnail_ids']))
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
         has_result = yield neondata.TagThumbnail.has_many(
             tag_id=tag.get_id(),
-            thumbnail_id=associations)
-        for a in associations:
+            thumbnail_id=thumbnail_ids,
+            async=True)
+        for a in thumbnail_ids:
             self.assertTrue(has_result[(tag.get_id(), a)])
 
-        # Try with some invalid associations.
+        # Try with some invalid thumbnail_ids.
         invalid_assocs = ['invalid_id_1', 'invalid_id_2']
-        mixed_assocs = associations + invalid_assocs
+        mixed_assocs = thumbnail_ids + invalid_assocs
         name = 'That time in Paris... <we both say> Jean-Luc!'
-        body = json.dumps({'name': name, 'associations': ','.join(mixed_assocs)})
+        body = json.dumps({'name': name, 'thumbnail_ids': ','.join(mixed_assocs)})
         response = yield self.http_client.fetch(
             self.url,
             method='POST',
@@ -7164,16 +7222,16 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertEqual(set(associations), set(rjson['thumbnail_ids']))
+        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnail_ids']))
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
-        tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id())
-        self.assertEqual(set(associations), tts[tag.get_id()])
+        tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id(), async=True)
+        self.assertEqual(set(thumbnail_ids), tts[tag.get_id()])
 
-        # Try with only invalid associations.
+        # Try with only invalid thumbnail_ids.
         name = 'Poughkeepsie'
-        body = json.dumps({'name': name, 'associations': ','.join(invalid_assocs)})
+        body = json.dumps({'name': name, 'thumbnail_ids': ','.join(invalid_assocs)})
         response = yield self.http_client.fetch(
             self.url,
             method='POST',
@@ -7186,7 +7244,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
-        tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id())
+        tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id(), async=True)
         self.assertEqual([], list(tts[tag.get_id()]))
 
 

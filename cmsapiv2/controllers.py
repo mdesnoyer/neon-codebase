@@ -1041,10 +1041,23 @@ class TagHandler(APIV2Handler):
     def get(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
-            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
-            'fields': CustomVoluptuousTypes.CommaSeparatedList
+            Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
-        self.success({})
+        tag_ids = self.args['tag_id'].split(',')
+        tags = yield neondata.Tag.get_many(tag_ids, async=True)
+        thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
+        rv = yield {tag.get_id(): self.db2api(tag) for tag in tags if tag}
+        rv = {
+            tag.get_id(): {
+                'tag_id': tag.get_id(),
+                'account_id': tag.account_id,
+                'name': tag.name,
+                'thumbnails': thumbs[tag.get_id()],
+                'tag_type': tag.tag_type
+            } for tag in tags if tag
+        }
+        import pdb; pdb.set_trace()
+        self.success(rv)
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1054,29 +1067,30 @@ class TagHandler(APIV2Handler):
             'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
             'type': CustomVoluptuousTypes.TagType
         })(self.args)
-        self.args['type'] = self.args['type'] if self.args.get('type') \
+        tag_type = self.args['type'] if self.args.get('type') \
             else neondata.TagType.GALLERY
         tag = neondata.Tag(
             None,
             account_id=self.args['account_id'],
             name=self.args['name'],
-            tag_type=self.args['type'])
+            tag_type=tag_type)
         yield tag.save(async=True)
         if self.args.get('thumbnail_ids'):
             thumb_ids = self.args['thumbnail_ids'].split(',')
-            # Handle just thumbnail association. Implement video later.
             thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
             valid_thumb_ids = [thumb.get_id() for thumb in thumbs if thumb]
             yield neondata.TagThumbnail.save_many(
                 tag_id=tag.get_id(),
-                thumbnail_id=valid_thumb_ids)
+                thumbnail_id=valid_thumb_ids,
+                async=True)
         else:
-            valid_thumb_ids = []
+            thumbs = []
         self.success({
             'tag_id': tag.get_id(),
             'account_id':  account_id,
             'name': tag.name,
-            'thumbnail_ids': valid_thumb_ids})
+            'thumbnails': thumbs,
+            'tag_type': tag_type})
 
     @tornado.gen.coroutine
     def put(self, account_id):
@@ -1085,6 +1099,20 @@ class TagHandler(APIV2Handler):
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
             'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
+        tag = yield neondata.Tag.get(self.args['tag_id'], async=True)
+        if not tag:
+            raise NotFoundError('No tag for {}'.format(self.args['tag_id']))
+        db_ids = yield neondata.TagThumbnail.get(
+            tag_id=self.args['tag_id'],
+            async=True)
+        args_ids = list(set(self.args['thumbnail_ids'].split(',')))
+        thumbnails = yield neondata.ThumbnailMetadata.get_many(args_ids, async=True)
+        valid_ids = {t.get_id() for t in thumbnails}
+        yield neondata.TagThumbnail.save_many(
+            tag_id=tag.get_id(),
+            thumbnail_id=valid_ids,
+            async=True)
+        import pdb; pdb.set_trace()
         self.success({})
 
     @tornado.gen.coroutine
@@ -1094,6 +1122,14 @@ class TagHandler(APIV2Handler):
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
         })(self.args)
         self.success({})
+
+    @classmethod
+    def _get_default_returned_fields(cls):
+        return {'tag_id', 'name', 'tag_type'}
+
+    @classmethod
+    def _get_passthrough_fields(cls):
+        return cls._get_default_returned_fields()
 
     @classmethod
     def get_access_levels(self):
