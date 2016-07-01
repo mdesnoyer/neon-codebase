@@ -1044,20 +1044,14 @@ class TagHandler(APIV2Handler):
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList
         })(self.args)
         tag_ids = self.args['tag_id'].split(',')
+        # Filter on account.
+        account_id = self.args['account_id']
         tags = yield neondata.Tag.get_many(tag_ids, async=True)
+        tags = [tag for tag in tags if tag and tag.account_id == account_id]
         thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        rv = yield {tag.get_id(): self.db2api(tag) for tag in tags if tag}
-        rv = {
-            tag.get_id(): {
-                'tag_id': tag.get_id(),
-                'account_id': tag.account_id,
-                'name': tag.name,
-                'thumbnails': thumbs[tag.get_id()],
-                'tag_type': tag.tag_type
-            } for tag in tags if tag
-        }
-        import pdb; pdb.set_trace()
-        self.success(rv)
+        result = yield {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()])
+                for tag in tags if tag}
+        self.success(result)
 
     @tornado.gen.coroutine
     def post(self, account_id):
@@ -1075,45 +1069,41 @@ class TagHandler(APIV2Handler):
             name=self.args['name'],
             tag_type=tag_type)
         yield tag.save(async=True)
-        if self.args.get('thumbnail_ids'):
-            thumb_ids = self.args['thumbnail_ids'].split(',')
-            thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
-            valid_thumb_ids = [thumb.get_id() for thumb in thumbs if thumb]
-            yield neondata.TagThumbnail.save_many(
-                tag_id=tag.get_id(),
-                thumbnail_id=valid_thumb_ids,
-                async=True)
-        else:
-            thumbs = []
-        self.success({
-            'tag_id': tag.get_id(),
-            'account_id':  account_id,
-            'name': tag.name,
-            'thumbnails': thumbs,
-            'tag_type': tag_type})
+
+        thumb_ids = yield self._set_thumb_ids(
+            tag,
+            self.args.get('thumbnail_ids', '').split(','))
+        result = yield self.db2api(tag, thumb_ids)
+        self.success(result)
 
     @tornado.gen.coroutine
     def put(self, account_id):
         Schema({
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
-            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList
+            'thumbnail_ids': CustomVoluptuousTypes.CommaSeparatedList,
+            'name': All(Coerce(unicode), Length(min=1, max=256)),
+            'type': CustomVoluptuousTypes.TagType
         })(self.args)
-        tag = yield neondata.Tag.get(self.args['tag_id'], async=True)
-        if not tag:
-            raise NotFoundError('No tag for {}'.format(self.args['tag_id']))
-        db_ids = yield neondata.TagThumbnail.get(
-            tag_id=self.args['tag_id'],
+
+        # Update the tag itself.
+        def _update(tag):
+            if self.args['account_id'] != tag.account_id:
+                raise NotAuthorizedError('Account does not own tag')
+            if self.args.get('name'):
+                tag.name = self.args['name']
+            if self.args.get('type'):
+                tag.type = self.args['type']
+        tag = yield neondata.Tag.modify(
+            self.args['tag_id'],
+            _update,
             async=True)
-        args_ids = list(set(self.args['thumbnail_ids'].split(',')))
-        thumbnails = yield neondata.ThumbnailMetadata.get_many(args_ids, async=True)
-        valid_ids = {t.get_id() for t in thumbnails}
-        yield neondata.TagThumbnail.save_many(
-            tag_id=tag.get_id(),
-            thumbnail_id=valid_ids,
-            async=True)
-        import pdb; pdb.set_trace()
-        self.success({})
+
+        thumb_ids = yield self._set_thumb_ids(
+            tag,
+            self.args.get('thumbnail_ids', '').split(','))
+        result = yield self.db2api(tag, thumb_ids)
+        self.success(result)
 
     @tornado.gen.coroutine
     def delete(self, account_id):
@@ -1121,7 +1111,48 @@ class TagHandler(APIV2Handler):
             Required('account_id'): All(Coerce(str), Length(min=1, max=256)),
             Required('tag_id'): CustomVoluptuousTypes.CommaSeparatedList,
         })(self.args)
-        self.success({})
+        tag = yield neondata.Tag.get(tag_id=args['tag_id'])
+        if not tag:
+            raise NotFoundError('That tag is not found')
+        if not tag.account_id == self.args['account_id']:
+            raise NotAuthorizedError('Tag not owned by this account')
+        thumbnail_ids = yield neondata.TagThumbnail.get(
+            args['tag_id'],
+            async=True)
+        # Delete associations.
+        if thumbnail_ids:
+            yield neondata.TagThumbnail.delete_many(
+                tag_id=args['tag_id'],
+                thumbnail_id=thumbnail_ids,
+                async=True)
+        # Delete the tag.
+        yield neondata.Tag.delete(tag.get_id(), async=True)
+        self.success({'tag_id': tag.get_id()})
+
+    @tornado.gen.coroutine
+    def db2api(self, tag, thumb_ids):
+        return {
+            'tag_id': tag.get_id(),
+            'account_id':  tag.account_id,
+            'name': tag.name,
+            'thumbnails': thumb_ids,
+            'tag_type': tag.tag_type}
+
+    @tornado.gen.coroutine
+    def _set_thumb_ids(self, tag, thumb_ids):
+        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        if thumbs:
+            valid_thumb_ids = [
+                thumb.get_id() for thumb in thumbs
+                if thumb and thumb.account_id == tag.account_id]
+            if valid_thumb_ids:
+                result = yield neondata.TagThumbnail.save_many(
+                    tag_id=tag.get_id(),
+                    thumbnail_id=valid_thumb_ids,
+                    async=True)
+        # Get the current list of thumbnails.
+        thumb_ids = yield neondata.TagThumbnail.get(tag_id=tag.get_id(), async=True)
+        raise tornado.gen.Return(thumb_ids)
 
     @classmethod
     def _get_default_returned_fields(cls):
@@ -1222,7 +1253,7 @@ class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
 
         # Get all the Thumbnails mapped by a tag.
         tag_ids = [tag.get_id() for tag in tags]
-        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids)
+        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
         thumb_ids = list({tid for tids in mapping.values() for tid in tids})
         thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
         # Make a map from key to object.

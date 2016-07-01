@@ -7089,9 +7089,8 @@ class TestTagHandler(TestVerifiedControllersBase):
         green_gallery_tag = rjson[tag_1.get_id()]
         self.assertEqual('Green', green_gallery_tag['name'])
         self.assertEqual(neondata.TagType.GALLERY, green_gallery_tag['tag_type'])
-        self.assertEqual(
-            {thumb_1.get_id(), thumb_2.get_id()},
-            {t['thumbnail_id'] for t in green_gallery_tag['thumbnails']})
+        ids = set([thumb_1.get_id(), thumb_2.get_id()])
+        self.assertEqual(ids, set(green_gallery_tag['thumbnails']))
         blue_tag = rjson[tag_2.get_id()]
         self.assertEqual('Blue', blue_tag['name'])
         self.assertEqual(None, blue_tag['tag_type'])
@@ -7116,7 +7115,18 @@ class TestTagHandler(TestVerifiedControllersBase):
             method='PUT',
             headers=self.headers,
             body=body)
-        import pdb; pdb.set_trace()
+        self.assertEqual(200, response.code)
+        rjson = json.loads(response.body)
+        self.assertEqual(tag.get_id(), rjson['tag_id'])
+        self.assertEqual(tag.account_id, rjson['account_id'])
+        self.assertEqual(set(thumb_ids), set(rjson['thumbnails']))
+        self.assertEqual(tag.name, rjson['name'])
+        tag = neondata.Tag.get(tag.get_id())
+        thumb_ids = neondata.TagThumbnail.get(tag_id=tag.get_id())
+        self.assertEqual(tag.get_id(), rjson['tag_id'])
+        self.assertEqual(tag.account_id, rjson['account_id'])
+        self.assertEqual(set(thumb_ids), set(rjson['thumbnails']))
+        self.assertEqual(tag.name, rjson['name'])
 
     @tornado.testing.gen_test
     def test_post_tag_no_thumbnail_id(self):
@@ -7150,7 +7160,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         rjson = json.loads(response.body)
         self.assertIsNotNone(rjson['tag_id'])
         self.assertEqual(name, rjson['name'])
-        self.assertIn(thumbnail_id, rjson['thumbnail_ids'])
+        self.assertIn(thumbnail_id, rjson['thumbnails'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
@@ -7171,7 +7181,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertNotIn(thumbnail_id, rjson['thumbnail_ids'])
+        self.assertNotIn(thumbnail_id, rjson['thumbnails'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
@@ -7198,7 +7208,7 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnail_ids']))
+        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnails']))
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
@@ -7222,12 +7232,12 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnail_ids']))
+        self.assertEqual(set(thumbnail_ids), set(rjson['thumbnails']))
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
         tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id(), async=True)
-        self.assertEqual(set(thumbnail_ids), tts[tag.get_id()])
+        self.assertEqual(set(thumbnail_ids), set(tts[tag.get_id()]))
 
         # Try with only invalid thumbnail_ids.
         name = 'Poughkeepsie'
@@ -7240,12 +7250,26 @@ class TestTagHandler(TestVerifiedControllersBase):
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, response.code)
         rjson = json.loads(response.body)
         self.assertEqual(name, rjson['name'])
-        self.assertEqual([], rjson['thumbnail_ids'])
+        self.assertEqual([], rjson['thumbnails'])
         tag = yield neondata.Tag.get(rjson['tag_id'], async=True)
         self.assertEqual(rjson['tag_id'], tag.get_id())
         self.assertEqual(name, tag.name)
         tts = yield neondata.TagThumbnail.get_many(tag_id=tag.get_id(), async=True)
         self.assertEqual([], list(tts[tag.get_id()]))
+
+    @tornado.testing.gen_test
+    def test_delete(self):
+
+        tag = neondata.Tag(account_id=self.account_id, name='Red')
+        tag.save()
+        thumbnail_ids = list({
+            random.choice(self.thumbnail_ids),
+            random.choice(self.thumbnail_ids),
+            random.choice(self.thumbnail_ids)})
+        neondata.TagThumbnail.save_many(
+            tag_id=tag.get_id(),
+            thumbnail_id=thumbnail_ids)
+        self.http_client.fetch(self.url, headers=self.headers, method='DELETE')
 
 
 class TestTagSearchExternalHandler(TestVerifiedControllersBase):

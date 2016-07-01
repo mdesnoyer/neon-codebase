@@ -1879,8 +1879,8 @@ class MappingObject(object):
         fetch = []
         sql, bind = cls._get_select_single_col_tuple(key, values)
         yield cls._execute(sql, bind, fetch)
-        result = {str(v): {item[other_key] for item in fetch
-                  if item[key] == str(v)} for v in values}
+        result = {str(v): [item[other_key] for item in fetch
+                  if item[key] == str(v)] for v in values}
         raise tornado.gen.Return(result)
 
     @classmethod
@@ -2063,11 +2063,17 @@ class MappingObject(object):
         '''Gather unique pairs of input keys.'''
         keys = cls._get_keys()
         left_values = kwargs[keys[0]]
-        right_values = kwargs[keys[1]]
+        right_values = set(kwargs[keys[1]])
         if not left_values or not right_values:
-            raise ValueError('Input be valued')
-        left_values = left_values if type(left_values) is list else [left_values]
-        right_values = right_values if type(right_values) is list else [right_values]
+            raise ValueError('Input must be valued')
+        if type(left_values) is str or type(left_values) is int:
+            left_values = [left_values]
+        else:
+            left_values = list(set(left_values))
+        if type(right_values) is str or type(right_values) is int:
+            right_values = [right_values]
+        else:
+            right_values = list(set(right_values))
         return set(itertools.product(left_values, right_values))
 
     @classmethod
