@@ -445,9 +445,12 @@ class ImpalaTableLoader(threading.Thread):
         # Cleanup after ourselves on a failure?
         self._drop_avro_on_failure = False
 
+    _log.info("Before stop")
 
     def stop(self):
         self._stopped.set()
+
+    _log.info("After stop")
 
     def run(self):
         self._stopped.clear()
