@@ -744,7 +744,6 @@ class TestAuthUserHandler(TestAuthenticationBase):
         account = json.loads(verification.extra_info['account'])
         self.assertEqual([username], account['users'])
         user = json.loads(verification.extra_info['user'])
-        self.assertEqual('6', user['_data']['access_level'])
 
     @tornado.testing.gen_test
     def test_create_new_user_json(self):
@@ -773,7 +772,6 @@ class TestAuthUserHandler(TestAuthenticationBase):
         account = json.loads(verification.extra_info['account'])
         self.assertEqual([username], account['users'])
         user = json.loads(verification.extra_info['user'])
-        self.assertEqual('6', user['_data']['access_level'])
         self.assertEqual('867-5309', user['_data']['cell_phone_number'])
         self.assertEqual('rocking@invalid.com', user['_data']['secondary_email'])
 
@@ -902,14 +900,15 @@ class TestAuthUserHandler(TestAuthenticationBase):
 class TestVerifyAccountHandler(TestAuthenticationBase):
 
     @tornado.testing.gen_test
-    def test_verify_with_account(self):
+    def test_verify_with_no_user_saved(self):
         email = 'yo@notgmail.com'
         account = neondata.NeonUserAccount('name', 'a0')
         yield account.save(async=True)
         account.email = email
         cell = '867-5309'
-        email2 = 'rocking@invalid.com'
-        user = neondata.User(email, cell_phone_number=cell, secondary_email=email2)
+
+        # User wants to verify yo@notgmail.com.
+        user = neondata.User(email, cell_phone_number=cell)
         account.users = [email]
         info = {
             'account': account.to_json(),
@@ -930,6 +929,7 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
             method='POST',
             headers=headers,
             body=body)
+
         self.assertEqual(200, response.code)
         rjson = json.loads(response.body)
         self.assertEqual('a0', rjson['account_id'])
@@ -939,7 +939,6 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         user = yield neondata.User.get(email, async=True)
         self.assertEqual(email, user.username)
         self.assertEqual(cell, user.cell_phone_number)
-        self.assertEqual(email2, user.secondary_email)
 
     @tornado.testing.gen_test
     def test_verify_with_account_keyed_user(self):

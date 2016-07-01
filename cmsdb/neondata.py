@@ -380,7 +380,7 @@ class PostgresDB(tornado.web.RequestHandler):
             params = (obj.get_json_data(), obj.key)   
             return (query, params)
  
-        def get_update_many_query_tuple(self, objects): 
+        def get_update_many_query_tuple(self, objects, keys): 
             ''' helper function to build up an update multiple 
                    query  
                 builds queries of the form 
@@ -392,11 +392,12 @@ class PostgresDB(tornado.web.RequestHandler):
             try: 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
+                keys_objects = zip(keys, objects)
                 query = "UPDATE %s AS t SET _data = changes.data "\
                         " FROM (VALUES " % table 
-                for obj in objects: 
+                for key, obj in keys_objects: 
                     query += '(%s, %s::jsonb),' 
-                    param_list.append(obj.key)
+                    param_list.append(key)
                     param_list.append(obj.get_json_data()) 
                 query = query[:-1] 
                 query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
@@ -1173,9 +1174,10 @@ class StoredObject(object):
         if update_objs:  
             try: 
                 update_query = db.get_update_many_query_tuple(
-                    update_objs)
+                    update_objs, keys)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
+
             except Exception as e: 
                 _log.error('unknown error when running \
                             update_query %s : %s' % 
@@ -1919,7 +1921,8 @@ class User(NamespacedStoredObject):
                  reset_password_token=None, 
                  secondary_email=None, 
                  cell_phone_number=None, 
-                 send_emails=True):
+                 send_emails=True,
+                 email_verified=None):
  
         super(User, self).__init__(username)
 
@@ -1966,6 +1969,12 @@ class User(NamespacedStoredObject):
 
         # whether or not we should send this user emails 
         self.send_emails = send_emails 
+
+        # If the user has verified their email address.
+        self.email_verified = email_verified
+
+    def is_email_verified(self):
+        return self.email_verified is not False
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine

@@ -69,8 +69,6 @@ class AuthenticateHandler(APIV2Handler):
         password = args.get('password')
 
         api_accessor = yield neondata.User.get(username, async=True)
-        result = None
-
         access_token, refresh_token = AccountHelper.get_auth_tokens(
             {'username': username})
 
@@ -78,7 +76,11 @@ class AuthenticateHandler(APIV2Handler):
             x.access_token = access_token
             x.refresh_token = refresh_token
 
+        result = None
         if api_accessor:
+            if not api_accessor.is_email_verified():
+                raise NotAuthorizedError('Email needs verification')
+
             if sha256_crypt.verify(password, api_accessor.password_hash):
                 user = yield neondata.User.modify(username,
                     _update_tokens,
@@ -367,7 +369,8 @@ class AccountHelper(object):
         # Save the initial admin user.
         user = neondata.User(
             account.get_id(),
-            access_level=neondata.AccessLevels.ADMIN)
+            access_level=neondata.AccessLevels.ADMIN,
+            email_verified=False)
         yield user.save(async=True)
 
         # Save other account objects that are based on the Neon api key.
@@ -402,14 +405,22 @@ class AccountHelper(object):
         user = neondata.User._create(
             user_json['_data']['key'],
             user_json)
+        user.email_verified = True
 
         # Let database confirm email's uniqueness.
         try:
             # Handle the case where this is the initial user account.
             if user.get_id() == account.get_id() and len(account.users) is 1:
-                yield neondata.User.delete(user.get_id(), async=True)
-                user.key = 'users_%s' % user.username
-            yield user.save(overwrite_existing_object=False, async=True)
+                def _modify(u):
+                    for (k, v) in user.__dict__.items():
+                        u.__dict__[k] = v
+                    u.key = user.format_key(user.username)
+                yield neondata.User.modify(
+                    user.key,
+                    _modify,
+                    async=True)
+            else:
+                yield user.save(overwrite_existing_object=False, async=True)
         except neondata.psycopg2.IntegrityError:
             raise AlreadyExists('User with that email already exists.')
 
@@ -639,28 +650,23 @@ class UserHandler(APIV2Handler):
         account_id = payload['account_id']
         account = yield neondata.NeonUserAccount.get(account_id, async=True)
         if not account:
-            raise BadRequestError('This requires an account.')
-        # Use the placeholder user account's access level if available.
-        user = yield neondata.User.get(account.get_id(), async=True)
-        if user:
-            account.user = [username]
-            access_level = user.access_level
-        else:
-            account.users.append(username)
-            access_level = args.get('access_level')
+            raise NotAuthorizedError('This requires an account.')
+        if account.users and len(account.users) > 1:
+            raise BadRequestError('Only allow first user to be created')
 
         # Instantiate a user to store in the verification payload.
         user = neondata.User(
             username=username,
             password=args.get('password'),
-            access_level=access_level,
-            first_name=args.get('first_name', None),
-            last_name=args.get('last_name', None),
-            secondary_email=args.get('secondary_email', None),
-            cell_phone_number=args.get('cell_phone_number', None),
-            title=args.get('title', None))
+            access_level=neondata.AccessLevels.ADMIN,
+            first_name=args.get('first_name'),
+            last_name=args.get('last_name'),
+            secondary_email=args.get('secondary_email'),
+            cell_phone_number=args.get('cell_phone_number'),
+            title=args.get('title'))
 
         # Create and send verification.
+        account.users = [username]
         account.email = username
         yield AccountHelper.user_wants_verification(
             account=account,
