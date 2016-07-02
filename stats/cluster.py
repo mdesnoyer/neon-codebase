@@ -239,6 +239,7 @@ class Cluster():
                 # Below condition is to prevent an airflow task accidentally creating
                 # a cluster when the cluster_manager is bringing one up
                 if calling_script == 'cluster_manager.py':
+                    _log.info("creating the cluster")
                     self._create()
                 else:
                     _log.info("Only cluster_manager can create the cluster. %s cannot" % calling_script)
