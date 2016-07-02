@@ -1185,6 +1185,30 @@ class ThumbnailResponse(object):
         return ['rank', 'frameno', 'enabled', 'type', 'width', 'height',
                 'created', 'updated']
 
+    @tornado.gen.coroutine
+    def _items(self, tags, fields):
+        '''Build a result from tag keys.
+
+        Input- list tag objects
+        Returns - list of tag with nested thumbnails:
+            [tag dict{name: name, thumbnails: <list of thumbnail dicts>}]'''
+
+        # Get all the Thumbnails mapped by a tag.
+        tag_ids = [tag.get_id() for tag in tags]
+        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
+        thumb_ids = list({tid for tids in mapping.values() for tid in tids})
+        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
+        # Make a map from key to object.
+        tag_map = {tag.get_id(): tag for tag in tags}
+        thumb_map = yield {th.get_id(): self.db2api(th, fields) for th in thumbs}
+        # Replace each tid in mapping with a ThumbnailMetadata.
+        result = [{
+            'name': tag_map[tag_id].name,
+            'thumbnails': [thumb_map[tid] for tid in tids if thumb_map.get(tid)]}
+                for tag_id, tids in mapping.items()]
+        raise tornado.gen.Return(result)
+
+
     @classmethod
     @tornado.gen.coroutine
     def _convert_special_field(cls, obj, field):
@@ -1244,30 +1268,6 @@ class TagSearchExternalHandler(ThumbnailResponse, APIV2Handler):
             'next_page': next_page,
             'prev_page': prev_page})
 
-    @tornado.gen.coroutine
-    def _items(self, tags, fields):
-        '''Build a result from tag keys.
-
-        Input- list tag objects
-        Returns - list of tag with nested thumbnails:
-            [tag dict{name: name, thumbnails: <list of thumbnail dicts>}]'''
-
-        # Get all the Thumbnails mapped by a tag.
-        tag_ids = [tag.get_id() for tag in tags]
-        mapping = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        thumb_ids = list({tid for tids in mapping.values() for tid in tids})
-        thumbs = yield neondata.ThumbnailMetadata.get_many(thumb_ids, async=True)
-        # Make a map from key to object.
-        tag_map = {tag.get_id(): tag for tag in tags}
-        thumb_map = yield {th.get_id(): self.db2api(th, fields) for th in thumbs}
-        # Replace each tid in mapping with a ThumbnailMetadata.
-        result = [{
-            'name': tag_map[tag_id].name,
-            'thumbnails': [thumb_map[tid] for tid in tids if thumb_map.get(tid)]}
-                for tag_id, tids in mapping.items()]
-        raise tornado.gen.Return(result)
-
-
     @classmethod
     def get_access_levels(self):
         return {
@@ -1301,26 +1301,26 @@ class ContentSearcher(object):
             str next page url.'''
         args = {k:v for k,v in self.__dict__.items() if k not in ['base_url', 'fields']}
         args['async'] = True
-        tags = yield neondata.Tag.objects(**args)
+        tags, min_time, max_time = yield neondata.Tag.objects(**args)
         raise tornado.gen.Return((
             tags,
             len(tags),
-            self._prev_page_url(),
-            self._next_page_url()))
+            self._prev_page_url(min_time),
+            self._next_page_url(max_time)))
 
-    def _prev_page_url(self):
+    def _prev_page_url(self, timestamp):
         '''Build the previous page url.'''
-        return self._page_url('since')
+        return self._page_url('since', timestamp)
 
-    def _next_page_url(self):
+    def _next_page_url(self, timestamp):
         '''Build the previous page url.'''
-        return self._page_url('until')
+        return self._page_url('until', timestamp)
 
-    def _page_url(self, time_type):
+    def _page_url(self, time_type, timestamp):
         return '{base}?{time_type}={ts}&limit={limit}{query}{fields}{acct}'.format(
             base=self.base_url,
             time_type=time_type,
-            ts=self.until if time_type == 'until' else self.since,
+            ts=timestamp,
             limit=self.limit,
             query='&query=%s' % self.query if self.query else '',
             fields='&fields=%s' % ','.join(self.fields) if self.fields else '',
@@ -1336,14 +1336,30 @@ class TagSearchInternalHandler(ThumbnailResponse, APIV2Handler):
     @tornado.gen.coroutine
     def get(self):
         Schema({
-            'limit': All(Coerce(int), Range(min=1, max=100)),
             'account_id': All(Coerce(str), Length(min=1, max=256)),
-            'query': str,
-            'fields': Any(CustomVoluptuousTypes.CommaSeparatedList()),
+            'limit': All(Coerce(int), Range(min=1, max=100)),
+            'name': str,
             'since': All(Coerce(float)),
-            'until': All(Coerce(float))
+            'until': All(Coerce(float)),
+            'show_hidden': Coerce(bool),
+            'fields': CustomVoluptuousTypes.CommaSeparatedList(),
+            'tag_type': CustomVoluptuousTypes.TagType
         })(self.args)
-        self.success({})
+
+        self.args['base_url'] = '/api/v2/tags/search/'
+        searcher = ContentSearcher(**self.args)
+        tags, count, prev_page, next_page = yield searcher.get()
+
+        _fields = self.args.get('fields')
+        fields = _fields.split(',') if _fields else None
+
+        items = yield self._items(tags, fields)
+
+        self.success({
+            'items': items,
+            'count': len(items),
+            'next_page': next_page,
+            'prev_page': prev_page})
 
     @classmethod
     def get_access_levels(self):
@@ -1837,17 +1853,14 @@ class VideoHelper(object):
                            base_url='/api/v2/videos/search',
                            show_hidden=False):
 
-        search_res = yield neondata.VideoMetadata.search_videos(
-            account_id,
+        videos, until_time, since_time = yield neondata.VideoMetadata.objects(
+            account_id=account_id,
             since=since,
             until=until,
             limit=limit,
-            search_query=query,
-            show_hidden=show_hidden)
-
-        videos = search_res['videos'] or []
-        since_time = search_res['since_time']
-        until_time = search_res['until_time']
+            query=query,
+            show_hidden=show_hidden,
+            async=True)
 
         vid_dict = yield VideoHelper.build_video_dict(videos, fields)
 

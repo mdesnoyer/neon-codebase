@@ -1485,8 +1485,29 @@ class StoredObject(object):
 class Searchable(object):
 
     @staticmethod
-    def _get_allowed_arguments():
+    def _get_search_arguments():
         raise NotImplementedError('Add list of valid args in subclass')
+
+    @staticmethod
+    def _get_join_part():
+        '''Add join clause if needed
+
+        Example: "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"'''
+        return ''
+
+
+    @staticmethod
+    def _get_where_part(key, args):
+        '''Support custom "query" searches
+
+        This funcion should return a string that implements a custom query in the where
+        for whichever data fields make sense for your subclass.
+
+        For example, Tag having _name uses:
+
+            return "_data->>'name' ~* %s"
+        '''
+        raise NotImplementedError('If using query search, define a query handler')
 
     @classmethod
     @utils.sync.optional_sync
@@ -1503,8 +1524,13 @@ class Searchable(object):
             yields [1, 3]'''
 
         rows = yield cls._search(**kwargs)
-        keys = [row[0]['key'] for row in rows]
-        raise tornado.gen.Return(keys)
+        keys = [row['_data']['key'] for row in rows]
+        min_time = cls._get_min_time(rows)
+        max_time = cls._get_max_time(rows)
+        raise tornado.gen.Return((
+            keys,
+            min_time,
+            max_time))
 
     @classmethod
     @utils.sync.optional_sync
@@ -1523,8 +1549,34 @@ class Searchable(object):
                 <Searchable instance with key 3>]'''
 
         rows = yield cls._search(**kwargs)
-        objects = [cls._create(row[0]['key'], row[0]) for row in rows]
-        raise tornado.gen.Return(objects)
+        objects = [cls._create(row['_data']['key'], row) for row in rows]
+        min_time = cls._get_min_time(rows)
+        max_time = cls._get_max_time(rows)
+        raise tornado.gen.Return((
+            objects,
+            min_time,
+            max_time))
+
+    @classmethod
+    def _get_min_time(cls, results):
+        if not results:
+            return None
+        return min([cls._get_time(r) for r in results])
+
+    @classmethod
+    def _get_max_time(cls, results):
+        if not results:
+            return None
+        return max([cls._get_time(r) for r in results])
+
+    @staticmethod
+    def _get_time(result):
+        # need micros here
+        created_time = result['created_time_pg']
+        cc_tt = time.mktime(created_time.timetuple())
+        _time = (cc_tt + created_time.microsecond / 1000000.0)
+        return _time
+
 
     @classmethod
     @tornado.gen.coroutine
@@ -1535,17 +1587,21 @@ class Searchable(object):
 
         def _validate():
             args.pop('async', None)
-            allowed = cls._get_allowed_arguments()
+            allowed = cls._get_search_arguments()
             if filter(lambda k: k in allowed, args) != args.keys():
                 raise KeyError('Bad argument to search %s' % args)
 
         def _query():
-            return 'SELECT * FROM {table}{where}{order}{limit}{offset}'.format(
+            return 'SELECT {c} FROM {table} AS t {join}{where}{order}{limit}{offset}'.format(
+                c=_columns(),
                 table=cls._baseclass_name().lower(),
+                join=cls._get_join_part(),
                 where=_where(),
                 limit=_limit(),
                 offset=_offset(),
                 order=_order())
+        def _columns():
+            return 't._data, t._type, t.created_time as created_time_pg, t.updated_time as updated_time_pg'
         def _where():
             parts = []
             for key, value in args.items():
@@ -1555,21 +1611,23 @@ class Searchable(object):
                     if value:
                         pass
                     else:
-                        parts.append("(_data->>'hidden')::BOOLEAN IS NOT TRUE")
+                        parts.append("(t._data->>'hidden')::BOOLEAN IS NOT TRUE")
                 elif key == 'query' and value:
                     # Check if we need to escape regex specials.
                     try:
-                        re.compile(args['query'])
+                        re.compile(args[key])
                     except sre_constants.error:
-                        args['query'] = re.escape(args['query'])
-                    parts.append("_data->>'name' ~* %s")
+                        args[key] = re.escape(args[key])
+                    parts.append(cls._get_where_part(key, args))
+                elif cls._get_where_part(key) and value:
+                    parts.append(cls._get_where_part(key, args))
                 elif key == 'since' and value:
-                    parts.append('created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
+                    parts.append('t.created_time > TO_TIMESTAMP(%s)::TIMESTAMP')
                 elif key == 'until' and value:
-                    parts.append('created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
+                    parts.append('t.created_time < TO_TIMESTAMP(%s)::TIMESTAMP')
                 # Generally just match whole value.
                 elif value:
-                    parts.append("_data->>'{}' = %s".format(key))
+                    parts.append("t._data->>'{}' = %s".format(key))
             return ' WHERE %s' % ' AND '.join(parts) if parts else ''
 
         def _limit():
@@ -1579,7 +1637,7 @@ class Searchable(object):
             return ' OFFSET %d' % kwargs.get('offset') \
                     if kwargs.get('offset') else ''
         def _order():
-            return ' ORDER BY created_time DESC'
+            return ' ORDER BY t.created_time DESC'
         def _bind():
             return [v for k, v in args.items() \
                     if k not in ['limit', 'offset', 'show_hidden'] and v]
@@ -1587,7 +1645,8 @@ class Searchable(object):
         _validate()
         result = yield cls.execute_select_query(
             _query(),
-            _bind())
+            _bind(),
+            cursor_factory=psycopg2.extras.RealDictCursor)
         raise tornado.gen.Return(result)
 
 
@@ -2186,7 +2245,7 @@ class Tag(Searchable, StoredObject):
     '''Tag is a generic relation associating a set of user objects.'''
 
     @staticmethod
-    def _get_allowed_arguments():
+    def _get_search_arguments():
         return [
             'account_id',
             'limit',
@@ -2197,6 +2256,10 @@ class Tag(Searchable, StoredObject):
             'show_hidden',
             'until',
             'tag_type']
+    @staticmethod
+    def _get_where_part(key, args={}):
+        if key == 'query':
+            return "_data->>'name' ~* %s"
 
     def __init__(self, tag_id=None, account_id=None, name=None, tag_type=None):
         tag_id = tag_id or uuid.uuid4().hex
@@ -2584,7 +2647,7 @@ class NeonUserAccount(NamespacedStoredObject):
         # the key on the billing site that we need to get information 
         # about this customer 
         self.billing_provider_ref = billing_provider_ref  
-        
+
     @classmethod
     def _baseclass_name(cls):
         '''Returns the class name of the base class of the hierarchy.
@@ -5535,15 +5598,29 @@ class VideoMetadata(Searchable, StoredObject):
         self.tag_id = tag_id
 
     @staticmethod
-    def _get_allowed_arguments():
+    def _get_search_arguments():
         return [
             'account_id',
             'limit',
             'title',
             'offset',
+            'query',
             'since',
             'show_hidden',
             'until']
+
+    @staticmethod
+    def _get_join_part():
+        return "JOIN request AS r ON t._data->>'job_id' = r._data->>'job_id'"
+
+    @staticmethod
+    def _get_where_part(key, args={}):
+        if key == 'query':
+            return "r._data->>'video_title' ~* %s"
+        if key == 'account_id':
+            if args.get(key):
+                args[key] = '{}%'.format(args[key])
+            return "t._data->>'key' LIKE %s"
 
     def _set_keyname(self):
         '''Key by the account id'''
@@ -5806,143 +5883,6 @@ class VideoMetadata(Searchable, StoredObject):
             yield ThumbnailMetadata.delete_related_data(tid, async=True)
 
         yield VideoMetadata.delete(key, async=True)
-
-    @classmethod
-    @tornado.gen.coroutine
-    def search_videos(cls,
-                      account_id=None,
-                      since=None,
-                      until=None,
-                      limit=25,
-                      search_query=None,
-                      show_hidden=False):
-
-        """Does a basic search over the videometadatas in the DB
-
-           account_id  : if specified will only search videos for that account,
-                         defaults to None, meaning it will search all accounts
-                         for videos
-           since       : if specified will find videos since this date,
-                         defaults to None, meaning it will grab the 25 most
-                         recent videos
-           until       : if specified will find videos until this date,
-                         defaults to None
-           limit       : if specified it limits the search to this many
-                        videos, defaults to 25
-           search_query: A string that, if valid regex, is applied via PG's
-                         ~* (case insensitive posix regex) operator to title and,
-                         if not valid regex, applied as a simple %<search_query>%
-                         expression. For the latter, terms must all appear
-                         and appear in order in a title to match.
-           show_hidden : A boolean. Default true. If false, add criterion to
-                         where clause not to include hidden videos.
-
-
-           Returns : a dictionary of the following
-               videos - the videos that the search returned
-               since_time - this is the time of the most recent video that
-                            the search returned, it's mainly here to prevent
-                            consumers from having to do this
-        """
-        where_clause = ""
-        videos = []
-        since_time = None
-        until_time = None
-        wc_params = []
-        rv = {}
-
-        where_clause = "v._data->'job_id' != 'null'"
-        order_clause = "ORDER BY v.created_time DESC"
-        join_clause = None
-        if since:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v.created_time > to_timestamp(%s)::timestamp"
-            # switch up the order clause so the page starts at the right spot
-            order_clause = "ORDER BY v.created_time ASC"
-            wc_params.append(since)
-
-        if until:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v.created_time < to_timestamp(%s)::timestamp"
-            wc_params.append(until)
-
-        if account_id:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " v._data->>'key' LIKE %s"
-            wc_params.append(account_id+'_%')
-
-        if not show_hidden:
-            if where_clause:
-                where_clause += " AND "
-            where_clause += " (v._data->>'hidden')::BOOLEAN IS NOT TRUE"
-
-        columns = ["v._data",
-                   "v._type",
-                   "v.created_time AS created_time_pg",
-                   "v.updated_time AS updated_time_pg"]
-
-        # Join request to query searches on video title.
-        if search_query is not None:
-
-            join_clause  = "request AS r ON v._data->>'job_id' = r._data->>'job_id'"
-            if where_clause:
-                where_clause += " AND "
-
-            # Assume it's a regex.
-            try:
-                re.compile(search_query)
-            except sre_constants.error:
-                # Escape its special characters if not valid.
-                search_query = re.escape(search_query)
-            where_clause += " r._data->>'video_title' ~* %s"
-            wc_params.append(search_query)
-
-        query = cls.get_select_query(
-            columns,
-            where_clause,
-            join_clause=join_clause,
-            table_name="videometadata AS v",
-            limit_clause="LIMIT %d" % limit,
-            order_clause=order_clause)
-
-        results = yield cls.execute_select_query(
-            query,
-            wc_params=wc_params,
-            cursor_factory=psycopg2.extras.RealDictCursor)
-
-        def _get_time(result):
-            # need micros here
-            created_time = result['created_time_pg']
-            cc_tt = time.mktime(created_time.timetuple())
-            _time = (cc_tt + created_time.microsecond / 1000000.0)
-            return _time
-
-        try:
-            do_reverse = False
-            if since:
-                since_time = _get_time(results[-1])
-                until_time = _get_time(results[0])
-                do_reverse = True
-            else:
-                since_time = _get_time(results[0])
-                until_time = _get_time(results[-1])
-        except (KeyError,IndexError):
-            pass
-
-        for result in results:
-            video = cls._create(result['_data']['key'], result)
-            videos.append(video)
-
-        if do_reverse:
-            videos.reverse()
-
-        rv['videos'] = videos
-        rv['since_time'] = since_time
-        rv['until_time'] = until_time
-        raise tornado.gen.Return(rv)
 
 
 class VideoStatus(DefaultedStoredObject):

@@ -5202,8 +5202,7 @@ class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
             title='kevins best video yet').save(async=True)
         url = '/api/v2/kevin/videos/search?fields='\
               'video_id,title,created,updated'
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        response = yield self.http_client.fetch(self.get_url(url))
 
         video = neondata.VideoMetadata('kevin_vid3', request_id='job3')
         yield video.save(async=True)
@@ -5211,8 +5210,7 @@ class TestVideoSearchExternalHandler(TestVerifiedControllersBase):
                   title='really kevins best video yet').save(async=True)
         rjson1 = json.loads(response.body)
         url = rjson1['prev_page']
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                method='GET')
+        response = yield self.http_client.fetch(self.get_url(url))
         rjson = json.loads(response.body)
         self.assertEquals(rjson['video_count'], 1)
         video = rjson['videos'][0]

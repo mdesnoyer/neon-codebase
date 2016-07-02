@@ -2366,8 +2366,10 @@ class TestVideoMetadata(NeonDbTestCase, BasePGNormalObject):
         video_info = VideoMetadata('acct1_vid1', request_id='r1')
         yield video_info.save(async=True)
 
-        results = yield neondata.VideoMetadata.search_videos()
-        self.assertEquals(len(results['videos']), 1)
+        video_ids, _, _ = yield neondata.VideoMetadata.keys(async=True)
+        self.assertEqual(1, len(video_ids))
+        videos, _, _ = yield neondata.VideoMetadata.objects(async=True)
+        self.assertEqual(1, len(videos))
 
 
 class TestVerification(NeonDbTestCase, BasePGNormalObject):
@@ -2589,20 +2591,20 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
     def test_search_no_args(self):
         tag = Tag()
         yield tag.save(async=True)
-        keys = yield Tag.keys(async=True)
+        keys, _, _ = yield Tag.keys(async=True)
         self.assertIn(tag.get_id(), keys)
-        tags = yield Tag.objects(async=True)
+        tags, _, _ = yield Tag.objects(async=True)
         self.assertIn(tag.get_id(), [t.get_id() for t in tags])
 
     @tornado.testing.gen_test
     def test_search_acct(self):
         tag = Tag()
         yield tag.save(async=True)
-        keys = yield Tag.keys(account_id=self.account_id, async=True)
+        keys, _, _ = yield Tag.keys(account_id=self.account_id, async=True)
         self.assertFalse(keys)
         acct_tag = Tag(account_id=self.account_id)
         yield acct_tag.save(async=True)
-        keys = yield Tag.keys(account_id=self.account_id, async=True)
+        keys, _, _ = yield Tag.keys(account_id=self.account_id, async=True)
         self.assertIn(acct_tag.get_id(), keys)
 
     @tornado.testing.gen_test
@@ -2613,13 +2615,13 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         Tag(account_id='someone else', name='ABC').save()
         Tag(account_id=self.account_id, name='BCD').save()
         Tag(account_id='someone else', name='BCD').save()
-        result = yield Tag.keys(query='A', async=True)
+        result, _, _ = yield Tag.keys(query='A', async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.objects(query='A', account_id=self.account_id, async=True)
+        result, _, _ = yield Tag.objects(query='A', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
-        result = yield Tag.objects(query='BC', account_id=self.account_id, async=True)
+        result, _, _ = yield Tag.objects(query='BC', account_id=self.account_id, async=True)
         self.assertEqual(2, len(result))
-        result = yield Tag.objects(query='BCD', account_id=self.account_id, async=True)
+        result, _, _ = yield Tag.objects(name='BCD', account_id=self.account_id, async=True)
         self.assertEqual(1, len(result))
 
     @tornado.testing.gen_test
@@ -2630,7 +2632,7 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         cut_tag = yield Tag.get(tags[cut].key, async=True)
         since = dateutil.parser.parse(cut_tag.created).strftime('%s.%f')
         before, after = tags[:cut], tags[cut + 1:]
-        result = yield Tag.objects(since=since, async=True)
+        result, _, _ = yield Tag.objects(since=since, async=True)
         # Expect only tags in after in result.
         self.assertEqual(len(after), len(result))
 
@@ -2638,11 +2640,11 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
     def test_until(self):
         tags = [Tag() for _ in range(20)]
         [tag.save() for tag in tags]
-        cut = random.randint(0, 19)
+        cut = random.randint(1, 19)
         cut_tag = yield Tag.get(tags[cut].key, async=True)
         until = dateutil.parser.parse(cut_tag.created).strftime('%s.%f')
         before, after = tags[:cut], tags[cut + 1:]
-        result = yield Tag.objects(until=until, async=True)
+        result, _, _ = yield Tag.objects(until=until, async=True)
         # Expect only tags in unti in result.
         before_keys = [i.get_id() for i in before]
         result_keys = [i.get_id() for i in result]
@@ -2653,11 +2655,11 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         [Tag().save() for _ in range(20)]
         offset = random.randint(0, 18)
         limit = random.randint(1, 19 - offset)
-        result = yield Tag.objects(limit=limit, async=True)
+        result, _, _ = yield Tag.objects(limit=limit, async=True)
         self.assertEqual(limit, len(result))
-        result = yield Tag.objects(offset=offset, async=True)
+        result, _, _ = yield Tag.objects(offset=offset, async=True)
         self.assertEqual(20 - offset, len(result))
-        result = yield Tag.keys(limit=limit, offset=offset, async=True)
+        result, _, _ = yield Tag.keys(limit=limit, offset=offset, async=True)
         self.assertEqual(limit, len(result))
 
     @tornado.testing.gen_test
@@ -2666,27 +2668,27 @@ class TestTag(NeonDbTestCase, BasePGNormalObject):
         [Tag(tag_type=neondata.TagType.VIDEO).save() for _ in range(5)]
 
         # Search for all.
-        result = yield Tag.keys(async=True)
+        result, _, _ = yield Tag.keys(async=True)
         self.assertEqual(3 + 5, len(result))
-        result = yield Tag.objects(async=True)
+        result, _, _ = yield Tag.objects(async=True)
         self.assertEqual(3 + 5, len(result))
 
         # Search for GALLERY.
-        result = yield Tag.keys(tag_type=neondata.TagType.GALLERY, async=True)
+        result, _, _ = yield Tag.keys(tag_type=neondata.TagType.GALLERY, async=True)
         self.assertEqual(3, len(result))
-        result = yield Tag.objects(tag_type=neondata.TagType.GALLERY, async=True)
+        result, _, _ = yield Tag.objects(tag_type=neondata.TagType.GALLERY, async=True)
         self.assertEqual(3, len(result))
 
         # Search for VIDEO.
-        result = yield Tag.keys(tag_type=neondata.TagType.VIDEO, async=True)
+        result, _, _ = yield Tag.keys(tag_type=neondata.TagType.VIDEO, async=True)
         self.assertEqual(5, len(result))
-        result = yield Tag.objects(tag_type=neondata.TagType.VIDEO, async=True)
+        result, _, _ = yield Tag.objects(tag_type=neondata.TagType.VIDEO, async=True)
         self.assertEqual(5, len(result))
 
         # Search for something unknown.
-        result = yield Tag.keys(tag_type='UNKNOWN', async=True)
+        result, _, _ = yield Tag.keys(tag_type='UNKNOWN', async=True)
         self.assertEqual(0, len(result))
-        result = yield Tag.objects(tag_type='UNKNOWN', async=True)
+        result, _, _ = yield Tag.objects(tag_type='UNKNOWN', async=True)
         self.assertEqual(0, len(result))
 
     @tornado.testing.gen_test
