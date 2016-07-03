@@ -183,7 +183,7 @@ class Cluster():
         with self._lock:
             if self.cluster_type != new_type:
                 self.cluster_id = None
-                self.connect()
+                self.connect(os.path.basename(__file__))
 
     def set_public_ip(self, new_ip):
         if new_ip is None or self.public_ip == new_ip:
@@ -318,7 +318,7 @@ class Cluster():
             extra_ops['mapreduce.reduce.memory.mb'] = 5000
             extra_ops['mapreduce.reduce.java.opts'] = '-Xmx4000m'
 
-        self.connect()
+        self.connect(os.path.basename(__file__))
         stdout = self.send_job_to_cluster(jar, main_class, extra_ops,
                                           input_path, output_path)
 
@@ -585,7 +585,7 @@ class Cluster():
                              ' be set')
 
         with self._lock:
-            self.connect()
+            self.connect(os.path.basename(__file__))
             
             # First find the instance group
             conn = EmrConnection(self.cluster_region)
