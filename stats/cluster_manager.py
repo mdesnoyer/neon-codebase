@@ -42,9 +42,17 @@ def main():
             statemon.state.cluster_is_alive = 1 if is_alive else 0
             if not is_alive:
                 _log.error(
-                    'Cluster died. Restarting it and clearing airflow jobs')
+                    'Cluster died. Bringing up a new one')
                 statemon.state.increment('cluster_deaths')
-                _log.info('name of calling script is %s' % os.path.basename(__file__))
+                try:
+                	_log.info('Pausing the Airflow Dag for the cluster to come up')
+                	subprocess.check_output(['airflow', 'pause',
+                                             options.dag],
+                                             stderr=subprocess.STDOUT,
+                        env=os.environ)
+                except subprocess.CalledProcessError as e:
+                    _log.error('Error pausing the dag: %s' % e.output)
+
                 cluster.connect(os.path.basename(__file__))
                 statemon.state.tasks_cleared = 0
 
@@ -59,6 +67,12 @@ def main():
                                              stderr=subprocess.STDOUT,
                         env=os.environ)
                     statemon.state.tasks_cleared = 1
+                    _log.info('Airflow jobs cleared successfully')
+                    subprocess.check_output(['airflow', 'unpause',
+                                             options.dag],
+                                             stderr=subprocess.STDOUT,
+                        env=os.environ)
+                    _log.info('Dag unpaused, set to running')
                 except subprocess.CalledProcessError as e:
                     _log.error('Error clearing airflow jobs: %s' % e.output)
                     statemon.state.tasks_cleared = 0
