@@ -323,11 +323,11 @@ class ImpalaTable(object):
             self.hive.execute('SET mapreduce.reduce.memory.mb=%d' %
                               options.parquet_memory)
             self.hive.execute('SET mapreduce.reduce.java.opts=-Xmx%dm' %
-                              options.heap_size)
+                              heap_size)
             self.hive.execute('SET mapreduce.map.memory.mb=%d' %
                               options.parquet_memory)
             self.hive.execute('SET mapreduce.map.java.opts=-Xmx%dm' %
-                              options.heap_size)
+                              heap_size)
 
             # Hour calculation is used with Airflow and maps to a DAGs
             #  schedule_interval.  
