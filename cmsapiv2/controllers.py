@@ -1191,7 +1191,10 @@ class ThumbnailResponse(object):
 
         Input- list tag objects
         Returns - list of tag with nested thumbnails:
-            [tag dict{name: name, thumbnails: <list of thumbnail dicts>}]'''
+            [tag dict{
+                id: tag id,
+                name: tag name,
+                thumbnails: <list of thumbnail dicts>}]'''
 
         # Get all the Thumbnails mapped by a tag.
         tag_ids = [tag.get_id() for tag in tags]
@@ -1203,6 +1206,7 @@ class ThumbnailResponse(object):
         thumb_map = yield {th.get_id(): self.db2api(th, fields) for th in thumbs}
         # Replace each tid in mapping with a ThumbnailMetadata.
         result = [{
+            'id': tag_id,
             'name': tag_map[tag_id].name,
             'thumbnails': [thumb_map[tid] for tid in tids if thumb_map.get(tid)]}
                 for tag_id, tids in mapping.items()]

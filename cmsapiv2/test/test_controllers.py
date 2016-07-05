@@ -7307,6 +7307,50 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         response_ids = {thumb['thumbnail_id'] for thumb in items[0]['thumbnails']}
         self.assertEqual(given_ids, response_ids)
 
+    @tornado.testing.gen_test
+    def test_search_on_many(self):
+
+        # Make some thumbnails.
+        thumbnails = [neondata.ThumbnailMetadata(
+                          uuid.uuid1().hex,
+                          account_id=self.account_id)
+                      for _ in range(5)]
+        removed_thumb = random.choice(thumbnails)
+        [t.save() for t in thumbnails]
+        given_thumb_ids = {t.get_id() for t in thumbnails
+            if t.get_id() != removed_thumb.get_id()}
+
+        # Make some tags.
+        tags = [neondata.Tag(i, name='name' + i, account_id=self.account_id)
+            for i in 'abced']
+        [t.save() for t in tags]
+        removed_tag = random.choice(tags)
+        given_tag_ids = {t.get_id() for t in tags
+            if t.get_id() != removed_tag.get_id()}
+
+        # Map each tag to each thumbnail, minus the removed one.
+        neondata.TagThumbnail.save_many(
+            tag_id=given_tag_ids,
+            thumbnail_id=given_thumb_ids)
+
+        # Do search.
+        r = yield self.http_client.fetch(self.url, headers=self.headers)
+        self.assertEqual(utils.http.ResponseCode.HTTP_OK, r.code)
+
+        # Each item is a tag->thumbs mapping.
+        r = json.loads(r.body)
+        # Even the empty tag is in the response.
+        self.assertEqual(len(tags), r['count'])
+        items = r['items']
+        for item in r['items']:
+            if item['id'] == removed_tag.get_id():
+                self.assertEqual('name' + item['id'], item['name'])
+                self.assertFalse(item['thumbnails'])
+            else:
+                self.assertEqual('name' + item['id'], item['name'])
+                response_thumb_ids = {t['thumbnail_id'] for t in item['thumbnails']}
+                self.assertEqual(given_thumb_ids, response_thumb_ids)
+
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
