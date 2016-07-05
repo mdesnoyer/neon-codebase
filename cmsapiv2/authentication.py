@@ -201,31 +201,21 @@ class RefreshTokenHandler(APIV2Handler):
         refresh_token = args.get('token')
         try:
             payload = JWTHelper.decode_token(refresh_token)
-            if payload.get('username'):
-                username = payload['username'].lower()
-                user = yield neondata.User.get(username, async=True)
-                account_ids = yield user.get_associated_account_ids(async=True)
 
-                access_token = JWTHelper.generate_token(
-                    {'username': username},
-                    token_type=TokenTypes.ACCESS_TOKEN)
+            username = payload['username'].lower()
+            user = yield neondata.User.get(username, async=True)
+            account_ids = yield user.get_associated_account_ids(async=True)
 
-                def _update_user(u):
-                    u.access_token = access_token
+            access_token = JWTHelper.generate_token(
+                {'username': username},
+                token_type=TokenTypes.ACCESS_TOKEN)
 
-                yield neondata.User.modify(username,
-                    _update_user,
-                    async=True)
-            elif payload.get('account_id'):
-                account_id = payload.get('account_id')
-                account = yield neondata.NeonUserAccount.get(account_id, async=True)
-                if not account:
-                    raise jwt.NotFoundError('Account does not exist.')
-                account_ids = [account.get_id()]
+            def _update_user(u):
+                u.access_token = access_token
 
-                access_token = JWTHelper.generate_token(
-                    {'account_id': account.get_id()},
-                    token_type=TokenTypes.ACCESS_TOKEN)
+            yield neondata.User.modify(username,
+                _update_user,
+                async=True)
 
             result = {
                 'access_token': access_token,
@@ -236,7 +226,7 @@ class RefreshTokenHandler(APIV2Handler):
 
         except jwt.ExpiredSignatureError:
             raise NotAuthorizedError('refresh token has expired, please authenticate again')
-        except jwt.InvalidTokenError:
+        except (jwt.InvalidTokenError, KeyError):
             raise NotAuthorizedError('refresh token invalid, please authenticate again')
 
     @classmethod
@@ -292,7 +282,7 @@ class NewAccountHandler(APIV2Handler):
 
             # Generate and return tokens.
             access_token, refresh_token = AccountHelper.get_auth_tokens(
-                {'username': user.get_id()})
+                {'username': account.get_id()})
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
