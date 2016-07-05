@@ -440,7 +440,6 @@ class PostgresDB(tornado.web.RequestHandler):
                 strs = objects[0]._get_umq_sstr_vals_changes(len(objects)) 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
-                import pdb; pdb.set_trace()   
                 query = "UPDATE {tn} AS t {setstr} FROM {valstr} AS {changestr} \
                     WHERE changes.key = t._data->>'key'".format(
                         tn=table,
@@ -2867,7 +2866,37 @@ class ExperimentStrategy(DefaultedStoredObject):
         '''Returns the class name of the base class of the hierarchy.
         '''
         return ExperimentStrategy.__name__
+
+class Feature(DefaultedStoredObject):
+    def __init__(self, key, name='unknown', variance_explained=0.0):
+        super(Feature, self).__init__(key)
+        splits = self.get_id().split('_') 
+        if self.get_id() and len(splits) != 2:
+            raise ValueError('Invalid key %s. Must be generated using '
+                             'create_key()' % self.get_id())
+
+        # the 'real' name of the model this references 
+        self.model_name = splits[0] 
+
+        # where in the feature vector this is at 
+        self.index = splits[1] 
+
+        # the 'human' name of the model 
+        self.name = name 
+
+        # a float explaining the variance of this feature 
+        self.variance_explained = variance_explained 
         
+    @classmethod
+    def create_key(cls, model_name, index):
+        '''Create a key for using in this table'''
+        return '%s_%s' % (model_name, index)
+
+    @classmethod
+    def _baseclass_name(cls):
+        '''Returns the class name of the base class of the hierarchy.
+        '''
+        return Feature.__name__
 
 class CDNHostingMetadataList(DefaultedStoredObject):
     '''A list of CDNHostingMetadata objects.

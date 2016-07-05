@@ -110,6 +110,17 @@ CREATE TABLE experimentstrategy (
     updated_time timestamp DEFAULT current_timestamp 
 );
 
+--
+-- Name: feature; Type: TABLE; Schema: public; Owner: pgadmin; Tablespace: 
+--
+
+CREATE TABLE feature (
+    _data jsonb,
+    _type character varying(128) NOT NULL,
+    created_time timestamp DEFAULT current_timestamp, 
+    updated_time timestamp DEFAULT current_timestamp 
+);
+
 
 ALTER TABLE experimentstrategy OWNER TO pgadmin;
 
