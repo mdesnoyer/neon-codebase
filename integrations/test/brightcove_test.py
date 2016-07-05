@@ -12,6 +12,7 @@ from cmsdb import neondata
 from cmsdb.neondata import ThumbnailMetadata, ThumbnailType, VideoMetadata
 from cvutils.imageutils import PILImageUtils
 import datetime
+import integrations
 import integrations.brightcove
 import json
 import logging
@@ -1886,6 +1887,91 @@ class TestSubmitSpecificVideos(test_utils.neontest.AsyncTestCase):
             with self.assertRaises(integrations.ovp.OVPError):
                 yield self.integration.lookup_and_submit_videos(
                     [1234567, 'v2'])
+
+class TestCMSAPIIntegration(test_utils.neontest.AsyncTestCase):
+    def setUp(self):
+        # Mock out the call to services
+        self.submit_mocker = patch('integrations.ovp.cmsapiv2.client')
+        self.submit_mock = self._future_wrap_mock(
+            self.submit_mocker.start().Client().send_request)
+        self.submit_mock.side_effect = \
+          lambda x, **kwargs: tornado.httpclient.HTTPResponse(
+              x, 201, buffer=StringIO('{"job_id": "job1"}'))
+        
+
+        # Mock out the find_modified_videos and create the platform object
+        def _create(x):
+            x.application_client_id = 'clientid'
+            x.application_client_secret = 'secret'
+        self.platform = neondata.BrightcoveIntegration.modify(
+            'acct1', _create, create_missing=True)
+        self.integration = integrations.create_ovp_integration(
+            'a1', self.platform)
+        self.integration.bc_api.get_videos = MagicMock()
+        self.mock_get_videos =  self._future_wrap_mock(
+            self.integration.bc_api.get_videos)
+        self.integration.bc_api.get_video_sources = MagicMock()
+        self.mock_get_video_sources =  self._future_wrap_mock(
+            self.integration.bc_api.get_video_sources)
+
+        super(TestCMSAPIIntegration, self).setUp()
+
+    def tearDown(self):
+        self.submit_mocker.stop()
+        self.postgresql.clear_all_tables() 
+        super(TestCMSAPIIntegration, self).tearDown()
+
+    @classmethod
+    def setUpClass(cls):
+        dump_file = '%s/cmsdb/migrations/cmsdb.sql' % (__base_path__)
+        cls.postgresql = test_utils.postgresql.Postgresql(dump_file=dump_file)
+
+    @classmethod
+    def tearDownClass(cls): 
+        cls.postgresql.stop()
+
+    @tornado.testing.gen_test
+    def test_lookup_video(self):
+        self.mock_get_videos.side_effect = [[{
+            'id': 'vid1',
+            'name' : 'some video'
+            }]]
+        self.mock_get_video_sources.side_effect = [[{
+            'src' : 'some_url.mp4',
+            'width' : 1280
+            }]]
+
+        vid_info = yield self.integration.lookup_video('vid1')
+
+        self.mock_get_videos.assert_called_with(q='id:vid1')
+        self.mock_get_video_sources.assert_called_with('vid1')
+
+        self.assertEquals(vid_info, {
+            'id': 'vid1',
+            'name' : 'some video',
+            'sources' : [{
+                'src' : 'some_url.mp4',
+                'width' : 1280
+                }]
+            })
+
+    @tornado.testing.gen_test
+    def test_lookup_video_errors(self):
+        self.mock_get_videos.side_effect = [
+            [],
+            api.brightcove_api.BrightcoveApiServerError,
+            api.brightcove_api.BrightcoveApiClientError]
+
+        with self.assertRaises(integrations.ovp.OVPError):
+            yield self.integration.lookup_video('vid1')
+
+        with self.assertLogExists(logging.ERROR, 'Brightcove Error occurred'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.lookup_video('vid1')
+
+        with self.assertLogExists(logging.ERROR, 'Brightcove Error occurred'):
+            with self.assertRaises(integrations.ovp.OVPError):
+                yield self.integration.lookup_video('vid1')
 
 if __name__ == '__main__':
     utils.neon.InitNeon()

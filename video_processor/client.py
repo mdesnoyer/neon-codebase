@@ -29,6 +29,7 @@ import cv2
 import dateutil.parser
 import ffvideo
 import hashlib
+import integrations
 import json
 import model
 import model.errors
@@ -77,6 +78,7 @@ statemon.define('no_thumbs', int)
 statemon.define('model_load_error', int)
 statemon.define('unknown_exception', int)
 statemon.define('video_download_error', int)
+statemon.define('integration_error', int)
 statemon.define('default_thumb_error', int)
 statemon.define('ffvideo_metadata_error', int)
 statemon.define('video_duration_30m', int)
@@ -449,10 +451,37 @@ class VideoProcessor(object):
 
             _log.info('Finished downloading video %s' % self.video_url)
 
-        except (youtube_dl.utils.DownloadError,
+        except (youtube_dl.utils.DownloadError
                 youtube_dl.utils.ExtractorError, 
                 youtube_dl.utils.UnavailableVideoError,
                 socket.error) as e:
+            # If this video came from an integration, then try to
+            # refresh the url and re-download.
+            if (self.video_metadata.integration_id is not None and 
+                self.video_metadata.integration_id != '0'):
+                new_url = None
+                try:
+                    db_integration = yield neondata.AbstractIntegration.get(
+                        self.video_metadata.integration_id)
+                    integration = integrations.create_ovp_integration(
+                        self.job_params['api_key'], db_integration)
+                    video_info = yield integration.lookup_video(
+                        self.job_params['video_id'])
+                    new_url = integration.get_video_url(video_info)
+                except Exception as integ_exception:
+                    _log.warn('Unable to build OVP integration %s: %s' %
+                              (self.video_metadata.integration_id,
+                               integ_exception))
+                    statemon.state.increment('integration_error')
+                if new_url is not None and new_url != self.video_url:
+                    _log.info('Video %s has moved to %s. '
+                              'Trying to download at its new location' % 
+                              (self.video_metadata.key, new_url))
+                    self.video_url = new_url
+                    self.video_metadata.url = new_url
+                    yield self.download_video_file()
+                    return
+
             msg = "Error downloading video from %s: %s" % (self.video_url, e)
             _log.error(msg)
             statemon.state.increment('video_download_error')
