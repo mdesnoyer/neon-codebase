@@ -7307,22 +7307,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         response_ids = {thumb['thumbnail_id'] for thumb in items[0]['thumbnails']}
         self.assertEqual(given_ids, response_ids)
 
-    @tornado.testing.gen_test
-    def test_search_b(self):
-        pass
-
-    @tornado.testing.gen_test
-    def test_search_c(self):
-        pass
-
-    @tornado.testing.gen_test
-    def test_search_d(self):
-        pass
-
-    @tornado.testing.gen_test
-    def test_search_e(self):
-        pass
-
 
 if __name__ == "__main__" :
     utils.neon.InitNeon()
