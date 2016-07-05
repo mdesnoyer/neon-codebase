@@ -7257,7 +7257,6 @@ class TestTagHandler(TestVerifiedControllersBase):
 
     @tornado.testing.gen_test
     def test_delete(self):
-
         tag = neondata.Tag(account_id=self.account_id, name='Red')
         tag.save()
         thumbnail_ids = list({
@@ -7267,7 +7266,52 @@ class TestTagHandler(TestVerifiedControllersBase):
         neondata.TagThumbnail.save_many(
             tag_id=tag.get_id(),
             thumbnail_id=thumbnail_ids)
-        self.http_client.fetch(self.url, headers=self.headers, method='DELETE')
+
+        r = yield self.http_client.fetch(
+            '%s?tag_id=%s' % (self.url, tag.get_id()),
+            headers=self.headers,
+            method='DELETE')
+        self.assertEqual(200, r.code)
+        r = json.loads(r.body)
+        self.assertEqual(tag.get_id(), r['tag_id'])
+        no_tag = neondata.Tag.get(tag.get_id())
+        self.assertIsNone(no_tag)
+        no_thumbs = neondata.TagThumbnail.get(tag_id=tag.get_id())
+        self.assertFalse(no_thumbs)
+
+    @tornado.testing.gen_test
+    def test_cant_delete(self):
+        tag = neondata.Tag(account_id='somebody else', name='Green')
+        tag.save()
+        thumbnail_ids = list({
+            random.choice(self.thumbnail_ids),
+            random.choice(self.thumbnail_ids),
+            random.choice(self.thumbnail_ids)})
+        neondata.TagThumbnail.save_many(
+            tag_id=tag.get_id(),
+            thumbnail_id=thumbnail_ids)
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                '%s?tag_id=%s' % (self.url, tag.get_id()),
+                headers=self.headers,
+                method='DELETE')
+        self.assertEqual(ResponseCode.HTTP_UNAUTHORIZED, e.exception.code)
+        tag = neondata.Tag.get(tag.get_id())
+        self.assertIsNotNone(tag)
+        thumbs = neondata.TagThumbnail.get(tag_id=tag.get_id())
+        self.assertEqual(set(thumbs), set(thumbnail_ids))
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                '%s?tag_id=%s' % (self.url, 'not_a_id'),
+                headers=self.headers,
+                method='DELETE')
+        self.assertEqual(ResponseCode.HTTP_NOT_FOUND, e.exception.code)
+        tag = neondata.Tag.get(tag.get_id())
+        self.assertIsNotNone(tag)
+        thumbs = neondata.TagThumbnail.get(tag_id=tag.get_id())
+        self.assertEqual(set(thumbs), set(thumbnail_ids))
 
 
 class TestTagSearchExternalHandler(TestVerifiedControllersBase):
