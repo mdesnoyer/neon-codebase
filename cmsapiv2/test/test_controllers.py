@@ -726,7 +726,10 @@ class TestAuthUserHandler(TestAuthenticationBase):
         username = 'abcd1234@gmail.com'
         url = '/api/v2/users?username=%s&password=b1234567&access_level=6' % username
         yield neondata.NeonUserAccount(None, 'a0').save(async=True)
-        token = JWTHelper.generate_token({'account_id': 'a0'})
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
         headers = {
             'Authorization': 'Bearer %s' % token
         }
@@ -758,7 +761,10 @@ class TestAuthUserHandler(TestAuthenticationBase):
             'cell_phone_number':'867-5309',
             'secondary_email':'rocking@invalid.com'})
         yield neondata.NeonUserAccount(None, 'a0').save(async=True)
-        token = JWTHelper.generate_token({'account_id': 'a0'})
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
         headers = {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer %s' % token}
@@ -4797,25 +4803,6 @@ class TestRefreshTokenHandler(TestAuthenticationBase):
         self.assertEquals(user.access_token, rjson2['access_token'])
         # verify refresh tokens stay the same
         self.assertEquals(user.refresh_token, rjson1['refresh_token'])
-
-    @tornado.testing.gen_test
-    def test_get_token_with_account_id(self):
-        """Test refresh token where the payload is account not user."""
-        account = neondata.NeonUserAccount('key')
-        account_id = account.neon_api_key
-        yield account.save(async=True)
-        _, refresh_token = authentication.AccountHelper.get_auth_tokens(
-            {'account_id': account_id})
-        url = self.get_url('/api/v2/refresh_token')
-        headers = {'Content-Type': 'application/json'}
-        body = json.dumps({'token': refresh_token})
-        response = yield self.http_client.fetch(url, headers=headers,
-                                                method='POST', body=body)
-        body = json.loads(response.body)
-        self.assertEqual(account_id, body['account_ids'][0])
-        payload = JWTHelper.decode_token(body['access_token'])
-        self.assertEqual(account_id, payload['account_id'])
-        self.assertEqual(refresh_token, body['refresh_token'])
 
 
 class TestLogoutHandler(TestAuthenticationBase):
