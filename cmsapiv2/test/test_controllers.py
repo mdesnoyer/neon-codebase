@@ -7319,7 +7319,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         [t.save() for t in thumbnails]
         given_thumb_ids = {t.get_id() for t in thumbnails
             if t.get_id() != removed_thumb.get_id()}
-
         # Make some tags.
         tags = [neondata.Tag(i, name='name' + i, account_id=self.account_id)
             for i in 'abced']
@@ -7327,7 +7326,6 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         removed_tag = random.choice(tags)
         given_tag_ids = {t.get_id() for t in tags
             if t.get_id() != removed_tag.get_id()}
-
         # Map each tag to each thumbnail, minus the removed one.
         neondata.TagThumbnail.save_many(
             tag_id=given_tag_ids,
@@ -7336,12 +7334,13 @@ class TestTagSearchExternalHandler(TestVerifiedControllersBase):
         # Do search.
         r = yield self.http_client.fetch(self.url, headers=self.headers)
         self.assertEqual(utils.http.ResponseCode.HTTP_OK, r.code)
-
-        # Each item is a tag->thumbs mapping.
         r = json.loads(r.body)
+        self.assertIn('next_page', r)
+        self.assertIn('prev_page', r)
+        self.assertNotEqual(r['next_page'], r['prev_page'])
         # Even the empty tag is in the response.
         self.assertEqual(len(tags), r['count'])
-        items = r['items']
+        # Each item is a tag->thumbs mapping.
         for item in r['items']:
             if item['id'] == removed_tag.get_id():
                 self.assertEqual('name' + item['id'], item['name'])
