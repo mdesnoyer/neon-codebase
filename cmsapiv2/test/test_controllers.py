@@ -726,7 +726,10 @@ class TestAuthUserHandler(TestAuthenticationBase):
         username = 'abcd1234@gmail.com'
         url = '/api/v2/users?username=%s&password=b1234567&access_level=6' % username
         yield neondata.NeonUserAccount(None, 'a0').save(async=True)
-        token = JWTHelper.generate_token({'account_id': 'a0'})
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
         headers = {
             'Authorization': 'Bearer %s' % token
         }
@@ -758,7 +761,10 @@ class TestAuthUserHandler(TestAuthenticationBase):
             'cell_phone_number':'867-5309',
             'secondary_email':'rocking@invalid.com'})
         yield neondata.NeonUserAccount(None, 'a0').save(async=True)
-        token = JWTHelper.generate_token({'account_id': 'a0'})
+        yield neondata.User('a0').save(async=True)
+        token = JWTHelper.generate_token({
+            'account_id': 'a0',
+            'username': 'a0'})
         headers = {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer %s' % token}

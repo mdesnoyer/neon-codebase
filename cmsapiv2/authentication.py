@@ -281,8 +281,9 @@ class NewAccountHandler(APIV2Handler):
             account, user = yield AccountHelper.save_loginless_account()
 
             # Generate and return tokens.
-            access_token, refresh_token = AccountHelper.get_auth_tokens(
-                {'username': account.get_id()})
+            access_token, refresh_token = AccountHelper.get_auth_tokens({
+                'username': account.get_id(),
+                'account_id': account.get_id()})
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
@@ -646,8 +647,6 @@ class UserHandler(APIV2Handler):
         account = yield neondata.NeonUserAccount.get(account_id, async=True)
         if not account:
             raise NotAuthorizedError('This requires an account.')
-        if account.users and len(account.users) > 1:
-            raise BadRequestError('Only allow first user to be created')
 
         # Instantiate a user to store in the verification payload.
         user = neondata.User(
