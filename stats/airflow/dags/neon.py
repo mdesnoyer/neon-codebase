@@ -715,7 +715,7 @@ default_args = {
 # clicklogs - stage and clean event clickstream logs (aka 'clicklogs')
 # ----------------------------------
 clicklogs = DAG('clicklogs', default_args=default_args,
-                schedule_interval=timedelta(hours=options.clicklog_period))
+                schedule_interval=timedelta(minutes=options.clicklog_period))
 
 # TODO(mdesnoyer): Delete this because a separate process should
 # handle bringing the cluster back up.
@@ -781,7 +781,7 @@ mr_cleaning_job = PythonOperator(
     provide_context=True,
     op_kwargs=dict(staging_path=options.staging_path,
                    output_path=options.output_path, timeout=60 * 60),
-    retry_delay=timedelta(seconds=random.randrange(30,300,step=30)),
+    retry_delay=timedelta(seconds=random.randrange(30,300,step=10)),
     execution_timeout=timedelta(minutes=75),
     on_failure_callback=_check_compute_cluster_capacity,
     on_success_callback=_check_compute_cluster_capacity,
