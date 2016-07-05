@@ -387,16 +387,16 @@ def _delete_previously_cleaned_files(dag, execution_date, output_path):
     cleaned_prefix = _get_s3_cleaned_prefix(dag=dag,
                                             execution_date=execution_date,
                                             prefix=output_prefix)
-    _log.info('output bucket is %s' % output_bucket)
-    _log.info('cleaned prefix is %s' % cleaned_prefix)
-    _log.info('output prefix is %s' % output_prefix)
+    _log.info('d output bucket is %s' % output_bucket)
+    _log.info('d cleaned prefix is %s' % cleaned_prefix)
+    _log.info('d output prefix is %s' % output_prefix)
 
     s3 = S3Hook(s3_conn_id='s3')
 
     _log.debug('deleting previously cleaned files from prefix {prefix}'.format(
         prefix=cleaned_prefix))
     for key in s3.get_bucket(output_bucket).list(prefix=cleaned_prefix):
-        _log.debug('key {key} found'.format(key=key.name))
+        _log.info('key {key} found'.format(key=key.name))
         if not re.search('cleaned', key.name):
             _log.error(('key prefix, {key}, does not contain the string '
                        '\'cleaned\'').format(key=key.name))
@@ -552,8 +552,8 @@ def _run_mr_cleaning_job(**kwargs):
     cleaning_job_output_path = os.path.join("s3://", output_bucket,
                                             cleaned_prefix)
 
-    #_delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
-    #                                 output_path=kwargs['output_path'])
+    _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
+                                     output_path=kwargs['output_path'])
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
 
