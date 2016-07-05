@@ -1522,7 +1522,15 @@ class Searchable(object):
               {'_data': {"key": 2, "account_id": 'b', ...}
               {'_data': {"key": 3, "account_id": 'a', ...}]
             yields [1, 3]'''
+        kwargs['async'] = True
+        keys_and_times = yield cls.keys_and_times(**kwargs)
+        raise tornado.gen.Return(keys_and_times[0])
 
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def keys_and_times(cls, **kwargs):
+        '''Like keys but returns min and max time of set, in 3-tuple.'''
         rows = yield cls._search(**kwargs)
         keys = [row['_data']['key'] for row in rows]
         min_time = cls._get_min_time(rows)
@@ -1547,6 +1555,15 @@ class Searchable(object):
             yields [
                 <Searchable instance with key 1>,
                 <Searchable instance with key 3>]'''
+        kwargs['async'] = True
+        objects_and_times = yield cls.objects_and_times(**kwargs)
+        raise tornado.gen.Return(objects_and_times[0])
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def objects_and_times(cls, **kwargs):
+        '''Like objects but returns the min / max times of the set, as 3-tuple.'''
 
         rows = yield cls._search(**kwargs)
         objects = [cls._create(row['_data']['key'], row) for row in rows]
@@ -1576,7 +1593,6 @@ class Searchable(object):
         cc_tt = time.mktime(created_time.timetuple())
         _time = (cc_tt + created_time.microsecond / 1000000.0)
         return _time
-
 
     @classmethod
     @tornado.gen.coroutine
@@ -1826,6 +1842,7 @@ class NamespacedStoredObject(StoredObject):
         rv = yield super(NamespacedStoredObject, cls).delete_many(
                                [cls.format_key(k) for k in keys], async=True)
         raise tornado.gen.Return(rv) 
+
 
 class DefaultedStoredObject(NamespacedStoredObject):
     '''Namespaced object where a get-like operation will never returns None.

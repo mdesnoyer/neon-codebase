@@ -1301,7 +1301,7 @@ class ContentSearcher(object):
             str next page url.'''
         args = {k:v for k,v in self.__dict__.items() if k not in ['base_url', 'fields']}
         args['async'] = True
-        tags, min_time, max_time = yield neondata.Tag.objects(**args)
+        tags, min_time, max_time = yield neondata.Tag.objects_and_times(**args)
         raise tornado.gen.Return((
             tags,
             len(tags),
@@ -1853,7 +1853,7 @@ class VideoHelper(object):
                            base_url='/api/v2/videos/search',
                            show_hidden=False):
 
-        videos, until_time, since_time = yield neondata.VideoMetadata.objects(
+        videos, until_time, since_time = yield neondata.VideoMetadata.objects_and_times(
             account_id=account_id,
             since=since,
             until=until,
