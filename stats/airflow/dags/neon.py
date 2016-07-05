@@ -552,8 +552,8 @@ def _run_mr_cleaning_job(**kwargs):
     cleaning_job_output_path = os.path.join("s3://", output_bucket,
                                             cleaned_prefix)
 
-    _delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
-                                     output_path=kwargs['output_path'])
+    #_delete_previously_cleaned_files(dag=dag, execution_date=execution_date,
+    #                                 output_path=kwargs['output_path'])
     _log.info("{task}: calling Neon Map/Reduce clicklogs cleaning job".format(
         task=task))
 
@@ -715,7 +715,7 @@ default_args = {
 # clicklogs - stage and clean event clickstream logs (aka 'clicklogs')
 # ----------------------------------
 clicklogs = DAG('clicklogs', default_args=default_args,
-                schedule_interval=timedelta(minutes=options.clicklog_period))
+                schedule_interval=timedelta(hours=options.clicklog_period))
 
 # TODO(mdesnoyer): Delete this because a separate process should
 # handle bringing the cluster back up.
