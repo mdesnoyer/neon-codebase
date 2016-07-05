@@ -164,15 +164,24 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
                                               data['xtra_conv_at_sig'])
     all_data = data[(data['extra_conversions'] != 0) | data['is_base']]
 
+    index_names = all_data.index.names
 
     # Get the data from videos where there was a statistically
     # significant lift
     sig_data = all_data.copy()
-    sig_data = sig_data.reset_index().groupby(sig_data.index.names).filter(
-        lambda x: np.any(x['p_value']>0.95)).set_index(sig_data.index.names)
+    sig_data = sig_data.reset_index().groupby(index_names).filter(
+        lambda x: np.any(x['p_value']>0.95))
 
-    neon_winners = sig_data[(sig_data['extra_conversions'] > 0) & 
-                            (sig_data['p_value'] > 0.95)]
+    base_winners = sig_data.groupby(index_names).filter(
+        lambda x: np.all(x[x['type']=='neon']['lift'] < 0)).set_index(
+            index_names)
+
+    nwins = sig_data[(sig_data['extra_conversions'] > 0) & 
+                     (sig_data['p_value'] > 0.95)].set_index(index_names)
+    
+    agg_stats = dict([('total_neon_winners_%i' % i, 
+                       count_unique_index(nwins[
+                           nwins['rank'] <= i])) for i in range(5)])
 
     lots_of_clicks = all_data.reset_index().groupby(
         all_data.index.names).filter(
@@ -183,22 +192,24 @@ def calc_aggregate_click_based_stats_from_dataframe(data):
     #no_runaways = cap_runaways.groupby(level=1).filter(
     #    lambda x: np.sum(x['extra_conversions']) > -50 or
     #    np.sum(x['conv']) < 50)
-    
-    index=None
-    if len(data.index.names) == 1:
-        index = [0]
 
-    return pandas.DataFrame(
+    sig_data = sig_data.set_index(data.index.names)
+    agg_stats.update(
         {'significant_video_count': count_unique_index(sig_data, 'video_id'),
          'total_video_count' : count_unique_index(all_data, 'video_id'),
-         'total_neon_winners' : count_unique_index(neon_winners, 'video_id'),
          'all_lift' : calc_lift_from_dataframe(all_data),
          'significant lift': calc_lift_from_dataframe(sig_data),
          'lots_clicks_lift' : calc_lift_from_dataframe(lots_of_clicks),
          'shutdown_bad_thumbs' : calc_lift_from_dataframe(
              all_data, 'xtra_conv_with_clamp'),
-         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)},
-         index=index)
+         'cap_runaways' : calc_lift_from_dataframe(cap_runaways)})
+    
+    
+    index=None
+    if len(data.index.names) == 1:
+        index = [0]
+
+    return pandas.DataFrame(agg_stats, index=index)
 
 def count_unique_index(data, level='video_id'):
     groups = [x for x in data.index.names if x not in level]
