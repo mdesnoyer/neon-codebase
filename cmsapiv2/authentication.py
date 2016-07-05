@@ -409,18 +409,12 @@ class AccountHelper(object):
 
         # Let database confirm email's uniqueness.
         try:
-            # Handle the case where this is the initial user account.
-            if user.get_id() == account.get_id() and len(account.users) is 1:
-                def _modify(u):
-                    for (k, v) in user.__dict__.items():
-                        u.__dict__[k] = v
-                    u.key = user.format_key(user.username)
-                yield neondata.User.modify(
-                    user.key,
-                    _modify,
-                    async=True)
-            else:
-                yield user.save(overwrite_existing_object=False, async=True)
+            yield user.save(overwrite_existing_object=False, async=True)
+
+            # Clean up any placeholder.
+            if(user.get_id() in account.users):
+                account.users.remove(user.get_id())
+                yield user.delete(account.get_id(), async=True)
         except neondata.psycopg2.IntegrityError:
             raise AlreadyExists('User with that email already exists.')
 
@@ -428,6 +422,7 @@ class AccountHelper(object):
         yield AccountHelper.save_default_objects(account)
 
         # Save account and return it.
+        account.users.append(user.get_id())
         account.email = account.email if account.email else user.username
         yield account.save(async=True)
         raise tornado.gen.Return(account)
@@ -455,18 +450,28 @@ class AccountHelper(object):
             neondata.TrackerAccountIDMapper.STAGING)
         yield tracker_s_aid_mapper.save(async=True)
 
-        # Create or update account with the demo billing plan and limits.
+        # Set account to have the demo billing plan and limits.
         billing_plan = yield neondata.BillingPlans.get(
             'demo',
             async=True)
         account_limits = neondata.AccountLimits(account.neon_api_key)
         account_limits.populate_with_billing_plan(billing_plan)
-        yield account_limits.save(async=True)
+        try:
+            yield account_limits.save(
+                overwrite_existing_object=False,
+                async=True)
+        except neondata.psycopg2.IntegrityError:
+            pass
 
         # Add the default experiment strategy.
         experiment_strategy = neondata.ExperimentStrategy(
             account.neon_api_key)
-        yield experiment_strategy.save(async=True)
+        try:
+            yield experiment_strategy.save(
+                overwrite_existing_object=False,
+                async=True)
+        except neondata.psycopg2.IntegrityError:
+            pass
 
     @staticmethod
     @tornado.gen.coroutine

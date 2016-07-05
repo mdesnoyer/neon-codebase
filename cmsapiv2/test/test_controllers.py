@@ -300,6 +300,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
 
         # verifier row gets created
         verifier = yield neondata.Verification.get('a@a.bc', async=True)
+        self.assertIsNotNone(verifier)
 
         url = '/api/v2/accounts/verify?token=%s' % verifier.token
         response = yield self.http_client.fetch(self.get_url(url),
@@ -323,7 +324,7 @@ class TestNewAccountHandler(TestAuthenticationBase):
                    async=True)
         self.assertEquals(user.username, 'a@a.com')
         self.assertEquals(user.first_name, 'kevin')
-        self.assertFalse(user.is_email_verified())
+        self.assertTrue(user.is_email_verified())
 
         limits = yield neondata.AccountLimits.get(account_id, async=True)
         self.assertEquals(limits.key, account_id)
@@ -952,8 +953,10 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
         user = neondata.User('a0', access_level=neondata.AccessLevels.ADMIN, email_verified=False)
         self.assertFalse(user.is_email_verified())
         yield user.save(async=True)
+
         cell = '867-5309'
         email2 = 'rocking@invalid.com'
+        user.key = user.format_key(email)
         user.username = email
         user.cell_phone_number = cell
         user.secondary_email = email2
@@ -967,6 +970,8 @@ class TestVerifyAccountHandler(TestAuthenticationBase):
             token_type=TokenTypes.VERIFY_TOKEN)
         verifier = neondata.Verification(email, token, extra_info=info)
         yield verifier.save(async=True)
+        user = yield neondata.User.get('a0', async=True)
+        self.assertFalse(user.is_email_verified())
 
         # Now verify.
         url = self.get_url('/api/v2/accounts/verify')

@@ -2401,21 +2401,6 @@ class TestUser(test_utils.neontest.AsyncTestCase, BasePGNormalObject):
     def _get_object_type(cls): 
         return User
 
-    @tornado.testing.gen_test
-    def test_change_user_key(self):
-        original = 'a0'
-        email = 'a0@gmail.com'
-        user = User(username=original)
-        user.save()
-        def _modify(u):
-            u.username = email
-            u.key = user.format_key(u.username)
-        neondata.User.modify(original, _modify)
-        user = neondata.User.get(original)
-        self.assertIsNone(user)
-        user = neondata.User.get(email)
-        self.assertEqual(user.username, email)
-
     @tornado.testing.gen_test 
     def test_get_associated_account_ids_single(self):
         new_user = User(username='test_user') 

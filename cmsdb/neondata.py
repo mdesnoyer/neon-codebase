@@ -380,7 +380,7 @@ class PostgresDB(tornado.web.RequestHandler):
             params = (obj.get_json_data(), obj.key)   
             return (query, params)
  
-        def get_update_many_query_tuple(self, objects, keys): 
+        def get_update_many_query_tuple(self, objects): 
             ''' helper function to build up an update multiple 
                    query  
                 builds queries of the form 
@@ -392,12 +392,11 @@ class PostgresDB(tornado.web.RequestHandler):
             try: 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
-                keys_objects = zip(keys, objects)
                 query = "UPDATE %s AS t SET _data = changes.data "\
                         " FROM (VALUES " % table 
-                for key, obj in keys_objects: 
+                for obj in objects: 
                     query += '(%s, %s::jsonb),' 
-                    param_list.append(key)
+                    param_list.append(obj.key)
                     param_list.append(obj.get_json_data()) 
                 query = query[:-1] 
                 query += ") AS changes(key, data) WHERE changes.key = t._data->>'key'"
@@ -1174,7 +1173,7 @@ class StoredObject(object):
         if update_objs:  
             try: 
                 update_query = db.get_update_many_query_tuple(
-                    update_objs, keys)
+                    update_objs)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
 
