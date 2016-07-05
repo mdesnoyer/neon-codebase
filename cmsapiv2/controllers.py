@@ -1049,8 +1049,7 @@ class TagHandler(APIV2Handler):
         tags = yield neondata.Tag.get_many(tag_ids, async=True)
         tags = [tag for tag in tags if tag and tag.account_id == account_id]
         thumbs = yield neondata.TagThumbnail.get_many(tag_id=tag_ids, async=True)
-        result = yield {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()])
-                for tag in tags if tag}
+        result = {tag.get_id(): self.db2api(tag, thumbs[tag.get_id()]) for tag in tags if tag}
         self.success(result)
 
     @tornado.gen.coroutine
@@ -1073,7 +1072,7 @@ class TagHandler(APIV2Handler):
         thumb_ids = yield self._set_thumb_ids(
             tag,
             self.args.get('thumbnail_ids', '').split(','))
-        result = yield self.db2api(tag, thumb_ids)
+        result = self.db2api(tag, thumb_ids)
         self.success(result)
 
     @tornado.gen.coroutine
@@ -1102,7 +1101,7 @@ class TagHandler(APIV2Handler):
         thumb_ids = yield self._set_thumb_ids(
             tag,
             self.args.get('thumbnail_ids', '').split(','))
-        result = yield self.db2api(tag, thumb_ids)
+        result = self.db2api(tag, thumb_ids)
         self.success(result)
 
     @tornado.gen.coroutine
@@ -1129,7 +1128,6 @@ class TagHandler(APIV2Handler):
         yield neondata.Tag.delete(tag.get_id(), async=True)
         self.success({'tag_id': tag.get_id()})
 
-    @tornado.gen.coroutine
     def db2api(self, tag, thumb_ids):
         return {
             'tag_id': tag.get_id(),
