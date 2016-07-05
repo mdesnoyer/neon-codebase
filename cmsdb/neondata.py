@@ -1258,6 +1258,7 @@ class StoredObject(object):
                     update_objs)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
+
             except Exception as e: 
                 _log.error('unknown error when running \
                             update_query %s : %s' % 
@@ -1939,7 +1940,8 @@ class User(NamespacedStoredObject):
                  reset_password_token=None, 
                  secondary_email=None, 
                  cell_phone_number=None, 
-                 send_emails=True):
+                 send_emails=True,
+                 email_verified=None):
  
         super(User, self).__init__(username)
 
@@ -1986,6 +1988,13 @@ class User(NamespacedStoredObject):
 
         # whether or not we should send this user emails 
         self.send_emails = send_emails 
+
+        # If the user has verified their email address.
+        # If set to None, assume the address is verified to support legacy.
+        self.email_verified = email_verified
+
+    def is_email_verified(self):
+        return self.email_verified is not False
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
