@@ -1114,7 +1114,7 @@ class TagHandler(APIV2Handler):
         tag = yield neondata.Tag.get(self.args['tag_id'], async=True)
         if not tag:
             raise NotFoundError('That tag is not found')
-        if not tag.account_id == self.args['account_id']:
+        if tag.account_id != self.args['account_id']:
             raise NotAuthorizedError('Tag not owned by this account')
         thumbnail_ids = yield neondata.TagThumbnail.get(
             tag_id=self.args['tag_id'],
