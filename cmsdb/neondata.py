@@ -76,17 +76,24 @@ define("video_server", default="127.0.0.1", type=str, help="Neon video server")
 define('async_pool_size', type=int, default=10,
        help='Number of processes that can talk simultaneously to the db')
 
-define("db_address", default="localhost", type=str, help="postgresql database address")
-define("db_user", default="postgres", type=str, help="postgresql database user")
+define("db_address", default="localhost", type=str, 
+       help="postgresql database address")
+define("db_user", default="postgres", type=str, 
+       help="postgresql database user")
 define("db_password", default="", type=str, help="postgresql database user")
 define("db_port", default=5432, type=int, help="postgresql port")
 define("db_name", default="cmsdb", type=str, help="postgresql database name")
 define("wants_postgres", default=0, type=int, help="should we use postgres")
-define("max_connection_retries", default=5, type=int, help="maximum times we should try to connect to db")
+define("max_connection_retries", default=5, type=int, 
+       help="maximum times we should try to connect to db")
 # this basically means how many open pubsubs we can have at once, most other pools will be relatively 
 # small, and not get to this size. see momoko pool for more info. 
-define("max_pool_size", default=250, type=int, help="maximum size the connection pools can be")
-define("max_io_loop_dict_size", default=500, type=int, help="how many io_loop ids we want to store before cleaning")
+define("max_pool_size", default=250, type=int, 
+       help="maximum size the connection pools can be")
+define("max_io_loop_dict_size", default=500, type=int, 
+       help="how many io_loop ids we want to store before cleaning")
+define("connection_wait_time", default=2.5, type=float, 
+       help="how long in seconds to wait for a connection from momoko")
 
 ## Parameters for thumbnail perceptual hashing
 define("hash_type", default="dhash", type=str,
@@ -113,6 +120,7 @@ statemon.define('postgres_connection_failed', int)
 statemon.define('postgres_listeners', int) 
 statemon.define('postgres_successful_pubsub_callbacks', int) 
 statemon.define('postgres_pools', int) 
+statemon.define('postgres_pool_full', int)
 
 class ThumbDownloadError(IOError):pass
 class DBStateError(ValueError):pass
@@ -305,7 +313,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 try: 
                     pool_connection = yield pool.connect()
                     break 
-                except Exception as e: 
+                except Exception as e:
                     current_db_info = _get_db_information() 
                     if current_db_info != self.db_info: 
                         self.db_info = current_db_info 
@@ -322,10 +330,11 @@ class PostgresDB(tornado.web.RequestHandler):
                 statemon.state.increment('postgres_connection_failed')
                 raise Exception('Unable to get a pool of connections')
  
-        @tornado.gen.coroutine 
+        @tornado.gen.coroutine
         def _get_momoko_connection(self, db, is_pool=False, dict_item=None):
             conn = None 
-            num_of_tries = options.get('cmsdb.neondata.max_connection_retries')
+            num_of_tries = options.max_connection_retries
+
             for i in range(int(num_of_tries)):
                 try:
                     if is_pool:
@@ -334,10 +343,20 @@ class PostgresDB(tornado.web.RequestHandler):
                         # if we don't wait long enough 
                         if len(db.conns.dead) > 0:
                             yield tornado.gen.sleep(
-                                self.reconnect_dead / 1000.0) 
-                        conn = yield db.getconn()
+                                self.reconnect_dead / 1000.0)
+
+                        if db.size >= options.max_pool_size:
+                            statemon.state.increment('postgres_pool_full')
+ 
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta(
+                                seconds=options.connection_wait_time), 
+                            db.getconn()) 
                     else: 
-                        conn = yield db.connect()
+                        conn = yield tornado.gen.with_timeout(
+                            datetime.timedelta( 
+                                seconds=options.connection_wait_time), 
+                            db.connect()) 
                     break
                 except Exception as e: 
                     current_db_info = _get_db_information()  
@@ -978,6 +997,69 @@ class StoredObject(object):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
+    def get_all(cls):
+        ''' Get all the objects in the database of this type
+
+        Inputs:
+        callback - Optional callback function to call
+
+        Returns:
+        A list of cls objects.
+        '''
+        retval = []
+        i = cls.iterate_all()
+        while True:
+            item = yield i.next(async=True)
+            if isinstance(item, StopIteration):
+                break
+            retval.append(item)
+
+        raise tornado.gen.Return(retval)
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def iterate_all(cls, max_request_size=100, max_results=None):
+        '''Return an iterator for all the ojects of this type.
+
+        The set of keys to grab happens once so if the db changes while
+        the iteration is going, so neither new or deleted objects will
+
+        You can use it asynchronously like:
+        iter = cls.get_iterator()
+        while True:
+          item = yield iter.next(async=True)
+          if isinstance(item, StopIteration):
+            break
+
+        or just use it synchronously like a normal iterator.
+        '''
+        keys = yield cls.get_all_keys(async=True)
+        raise tornado.gen.Return(
+            StoredObjectIterator(cls, keys, page_size=max_request_size,
+                                 max_results=max_results, skip_missing=True))
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
+    def get_all_keys(cls):
+        '''Return all the keys in the database for this object type.'''
+        rv = True  
+        db = PostgresDB()
+        conn = yield db.get_connection()
+
+        query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
+        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
+        keys_list = [i[0] for i in cursor.fetchall()]
+        db.return_connection(conn)
+        rv = [x.partition('_')[2] for x in keys_list if
+                                  x is not None]
+        raise tornado.gen.Return(rv) 
+
+
+    @classmethod
+    @utils.sync.optional_sync
+    @tornado.gen.coroutine
     def _get_many_with_raw_keys(cls, keys, create_default=False,
                                 log_missing=True, func_level_wpg=True,
                                 as_dict=False):
@@ -1557,68 +1639,6 @@ class NamespacedStoredObject(StoredObject):
     @classmethod
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def get_all(cls):
-        ''' Get all the objects in the database of this type
-
-        Inputs:
-        callback - Optional callback function to call
-
-        Returns:
-        A list of cls objects.
-        '''
-        retval = []
-        i = cls.iterate_all()
-        while True:
-            item = yield i.next(async=True)
-            if isinstance(item, StopIteration):
-                break
-            retval.append(item)
-
-        raise tornado.gen.Return(retval)
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def iterate_all(cls, max_request_size=100, max_results=None):
-        '''Return an iterator for all the ojects of this type.
-
-        The set of keys to grab happens once so if the db changes while
-        the iteration is going, so neither new or deleted objects will
-
-        You can use it asynchronously like:
-        iter = cls.get_iterator()
-        while True:
-          item = yield iter.next(async=True)
-          if isinstance(item, StopIteration):
-            break
-
-        or just use it synchronously like a normal iterator.
-        '''
-        keys = yield cls.get_all_keys(async=True)
-        raise tornado.gen.Return(
-            StoredObjectIterator(cls, keys, page_size=max_request_size,
-                                 max_results=max_results, skip_missing=True))
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
-    def get_all_keys(cls):
-        '''Return all the keys in the database for this object type.'''
-        rv = True  
-        db = PostgresDB()
-        conn = yield db.get_connection()
-
-        query = "SELECT _data->>'key' FROM %s" % cls._baseclass_name().lower()
-        cursor = yield conn.execute(query, cursor_factory=psycopg2.extensions.cursor)
-        keys_list = [i[0] for i in cursor.fetchall()]
-        db.return_connection(conn)
-        rv = [x.partition('_')[2] for x in keys_list if
-                                  x is not None]
-        raise tornado.gen.Return(rv) 
-
-    @classmethod
-    @utils.sync.optional_sync
-    @tornado.gen.coroutine
     def modify(cls, key, func, create_missing=False):
         rv = yield super(NamespacedStoredObject, cls).modify(
                                  cls.format_key(key),
@@ -1814,7 +1834,7 @@ class NeonApiKey(NamespacedStoredObject):
 
 class InternalVideoID(object):
     ''' Internal Video ID Generator '''
-    NOVIDEO = 'NOVIDEO' # External video id to specify that there is no video
+    NOVIDEO = 'nvd' # External video id to specify that there is no video
 
     VALID_EXTERNAL_REGEX = '[0-9a-zA-Z\-\.~]+'
     VALID_INTERNAL_REGEX = ('[0-9a-zA-Z]+_%s' % VALID_EXTERNAL_REGEX)
@@ -4574,7 +4594,7 @@ class ThumbnailMetadata(StoredObject):
                  model_score=None, model_version=None, enabled=True,
                  chosen=False, rank=None, refid=None, phash=None,
                  serving_frac=None, frameno=None, filtered=None, ctr=None,
-                 external_id=None):
+                 external_id=None, account_id=None):
         super(ThumbnailMetadata,self).__init__(tid)
         self.video_id = internal_vid #api_key + platform video id
         self.external_id = external_id # External id if appropriate
@@ -4599,6 +4619,7 @@ class ThumbnailMetadata(StoredObject):
         if self.type is ThumbnailType.NEON:
             self.do_source_crop = True
             self.do_smart_crop = True
+        self.account_id = account_id
 
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.serving_frac = serving_frac 
@@ -4683,11 +4704,9 @@ class ThumbnailMetadata(StoredObject):
         Inputs:
         image - A PIL image
         cdn_metadata - A list CDNHostingMetadata objects for how to upload the
-                       images. If this is None, it is looked up, which is 
+                       images. If this is None, it is looked up, which is
                        slow. If a source_crop is requested, the image is also
-                       cropped here.
-        
-        '''        
+                       cropped here.'''
         image = PILImageUtils.convert_to_rgb(image)
         # Update the image metadata
         self.width = image.size[0]
@@ -4697,20 +4716,20 @@ class ThumbnailMetadata(StoredObject):
         # Convert the image to JPG
         fmt = 'jpeg'
         filestream = StringIO()
-        image.save(filestream, fmt, quality=90) 
+        image.save(filestream, fmt, quality=90)
         filestream.seek(0)
         imgdata = filestream.read()
 
         self.key = ThumbnailID.generate(imgdata, self.video_id)
 
-        # Host the primary copy of the image 
+        # Host the primary copy of the image
         primary_hoster = cmsdb.cdnhosting.CDNHosting.create(
             PrimaryNeonHostingMetadata())
         s3_url_list = yield primary_hoster.upload(
-            image, self.key, async=True, 
+            image, self.key, async=True,
             do_source_crop=self.do_source_crop,
             do_smart_crop=self.do_smart_crop)
-        
+
         # TODO (Sunil):  Add redirect for the image
 
         # Add the primary image to Thumbmetadata
@@ -4722,7 +4741,7 @@ class ThumbnailMetadata(StoredObject):
         # Host the image on the CDN
         if cdn_metadata is None:
             # Lookup the cdn metadata
-            if video_info is None: 
+            if video_info is None:
                 video_info = yield tornado.gen.Task(VideoMetadata.get,
                                                     self.video_id)
 
@@ -4733,9 +4752,9 @@ class ThumbnailMetadata(StoredObject):
             if cdn_metadata is None:
                 # Default to hosting on the Neon CDN if we don't know about it
                 cdn_metadata = [NeonCDNHostingMetadata()]
-        
+
         hosters = [cmsdb.cdnhosting.CDNHosting.create(x) for x in cdn_metadata]
-        yield [x.upload(image, self.key, s3_url, async=True, 
+        yield [x.upload(image, self.key, s3_url, async=True,
                         do_source_crop=self.do_source_crop,
                         do_smart_crop=self.do_smart_crop) for x in hosters]
 
@@ -5122,32 +5141,33 @@ class VideoMetadata(StoredObject):
 
     @utils.sync.optional_sync
     @tornado.gen.coroutine
-    def download_and_add_thumbnail(self, 
-                                   thumb=None, 
+    def download_and_add_thumbnail(self,
+                                   thumb=None,
                                    image_url=None,
                                    cdn_metadata=None,
-                                   image=None, 
-                                   external_thumbnail_id=None, 
+                                   image=None,
+                                   external_thumbnail_id=None,
                                    save_objects=False):
         '''
         Download the image and add it to this video metadata
 
         Inputs:
         @thumb: ThumbnailMetadata object. Should be incomplete
-                because image based data will be added along with 
+                because image based data will be added along with
                 information about the video. The object will be updated with
                 the proper key and other information
         @image_url: url of the image to download
         @cdn_metadata: A list CDNHostingMetadata objects for how to upload the
                        images. If this is None, it is looked up, which is slow.
-        @save_objects: If true, the database is updated. Otherwise, 
+        @save_objects: If true, the database is updated. Otherwise,
                        just this object is updated along with the thumbnail
                        object.
         '''
-        if image is None: 
-            image = yield ThumbnailMetadata.download_image_from_url(image_url,
-                                                                    async=True) 
-        if thumb is None: 
+        if image is None:
+            image = yield ThumbnailMetadata.download_image_from_url(
+                image_url,
+                async=True)
+        if thumb is None:
             thumb = ThumbnailMetadata(None,
                           ttype=ThumbnailType.DEFAULT,
                           external_id=external_thumbnail_id)

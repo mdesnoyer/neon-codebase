@@ -14,6 +14,7 @@ from cmsapiv2 import controllers
 from cmsapiv2 import authentication
 from datetime import datetime, timedelta
 import json
+from requests_toolbelt import MultipartEncoder
 import stripe
 import tornado.gen
 import tornado.testing
@@ -2164,7 +2165,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_with_limits_increase_post_videos(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2234,7 +2235,7 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2257,7 +2258,7 @@ class TestVideoHandler(TestControllersBase):
               '&external_video_ref=1234ascs'\
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key, self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -2282,7 +2283,7 @@ class TestVideoHandler(TestControllersBase):
               '&default_thumbnail_url=url.invalid'\
               '&url=some_url' % (self.account_id_api_key,
                   self.test_i_id)
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
              patch(pstr)) as cmsdb_download_image_mock:
             cmsdb_download_image_mock.side_effect = [self.random_image]
@@ -3024,7 +3025,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_active(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3061,7 +3062,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_trialing(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3097,7 +3098,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_required_no_good(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3128,7 +3129,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_check_subscription_state(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
         stripe_sub = stripe.Subscription()
@@ -3191,7 +3192,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_sub_check_subscription_exception(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         so = neondata.NeonUserAccount('kevinacct')
         so.billed_elsewhere = False
 
@@ -3260,7 +3261,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_body_nones(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
            patch(pstr)) as cmock:
             cmock.side_effect = [self.random_image]
@@ -3290,7 +3291,7 @@ class TestVideoHandler(TestControllersBase):
 
     @tornado.testing.gen_test
     def test_post_video_too_big_duration(self):
-        pstr = 'cmsdb.neondata.VideoMetadata.download_image_from_url'
+        pstr = 'cmsdb.neondata.ThumbnailMetadata.download_image_from_url'
         with self._future_wrap_mock(
            patch(pstr)) as cmock:
             cmock.side_effect = [self.random_image]
@@ -3363,19 +3364,21 @@ class TestThumbnailHandler(TestControllersBase):
         self.verify_account_mocker.stop()
         super(TestThumbnailHandler, self).tearDown()
 
-
     @tornado.testing.gen_test
-    def test_add_new_thumbnail(self):
-        url = '/api/v2/%s/thumbnails?video_id=tn_test_vid1'\
-              '&url=blah.jpg&thumbnail_ref=kevin' % (self.account_id_api_key)
-        response = yield self.http_client.fetch(self.get_url(url),
-                                                body='',
-                                                method='POST',
-                                                allow_nonstandard_methods=True)
-        self.assertEquals(response.code,202)
-        internal_video_id = neondata.InternalVideoID.generate(
+    def test_add_new_thumbnail_by_url(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        image_url = 'blah.jpg'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}&url={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref, 'blah.jpg'))
+        response = yield self.http_client.fetch(
+            url,
+            body='',
+            method='POST')
+        self.assertEquals(response.code, 202)
+        _video_id = neondata.InternalVideoID.generate(
             self.account_id_api_key,'tn_test_vid1')
-        video = neondata.VideoMetadata.get(internal_video_id)
+        video = neondata.VideoMetadata.get(_video_id)
 
         self.assertEquals(len(video.thumbnail_ids), 1)
         self.assertEquals(self.im_download_mock.call_args[0][0], 'blah.jpg')
@@ -3383,8 +3386,116 @@ class TestThumbnailHandler(TestControllersBase):
            video.thumbnail_ids[0],
            async=True)
         self.assertEquals(thumbnail.external_id, 'kevin')
-        self.assertEquals(thumbnail.video_id,
-            '%s_%s' % (self.account_id_api_key, 'tn_test_vid1'))
+        self.assertEquals(thumbnail.video_id, _video_id)
+
+    @tornado.testing.gen_test
+    def test_add_new_thumbnail_by_body(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        body = MultipartEncoder({
+            'video_id': video_id,
+            'upload': ('image1.jpg', buf.getvalue())})
+        headers = {'Content-Type': body.content_type}
+
+        self.im_download_mock.side_effect = Exception('No download allowed')
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEquals(response.code, 202)
+
+        _video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key,'tn_test_vid1')
+        video = neondata.VideoMetadata.get(_video_id)
+        self.assertEquals(len(video.thumbnail_ids), 1)
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           video.thumbnail_ids[0],
+           async=True)
+        self.assertEquals(thumbnail.external_id, 'kevin')
+        self.assertEquals(thumbnail.video_id, _video_id)
+
+    @tornado.testing.gen_test
+    def test_add_new_thumbnail_by_body_no_video(self):
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
+        buf = StringIO()
+        self.random_image.save(buf, 'JPEG')
+        body = MultipartEncoder({
+            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+        headers = {'Content-Type': body.content_type}
+
+        self.im_download_mock.side_effect = Exception('No download allowed')
+        response = yield self.http_client.fetch(
+            url,
+            headers=headers,
+            body=body.to_string(),
+            method='POST')
+        self.assertEquals(response.code, 202)
+        r = json.loads(response.body)
+
+        thumbnail = yield neondata.ThumbnailMetadata.get(
+           r['thumbnail_id'], async=True)
+        expect_video_id = neondata.InternalVideoID.generate(
+            self.account_id_api_key)
+        self.assertEqual(expect_video_id, thumbnail.video_id)
+        self.assertEqual(thumbnail.external_id, thumbnail_ref)
+        self.assertIn('some_cdn_url.jpg', thumbnail.urls)
+        thumbnail_id_parts = r['thumbnail_id'].split('_')
+        self.assertEqual(3, len(thumbnail_id_parts))
+        self.assertEqual(self.account_id_api_key, thumbnail_id_parts[0])
+        self.assertEqual(neondata.InternalVideoID.NOVIDEO, thumbnail_id_parts[1])
+        self.assertIsNotNone(thumbnail_id_parts[2])
+
+    @tornado.testing.gen_test
+    def test_bad_add_new_thumbnail_no_upload(self):
+        video_id = 'tn_test_vid1'
+        thumbnail_ref = 'kevin'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}&thumbnail_ref={}'.format(
+            self.account_id_api_key, video_id, thumbnail_ref))
+        self.im_download_mock.side_effect = Exception('No download')
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body='',
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
+
+        url = self.get_url('/api/v2/{}/thumbnails?thumbnail_ref={}'.format(
+            self.account_id_api_key, thumbnail_ref))
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                body='',
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
+
+    @tornado.testing.gen_test
+    def test_bad_add_new_thumbnail_not_image(self):
+        video_id = 'tn_test_vid1'
+        url = self.get_url('/api/v2/{}/thumbnails?video_id={}'.format(
+            self.account_id_api_key, video_id))
+
+        # Make a random, non-image file.
+        buf = StringIO()
+        buf.write(bytearray(os.urandom(100000)))
+        body = MultipartEncoder({
+            'upload': ('image1.jpg', buf.getvalue(), 'multipart/form-data')})
+        headers = {'Content-Type': body.content_type}
+
+        with self.assertRaises(tornado.httpclient.HTTPError) as e:
+            yield self.http_client.fetch(
+                url,
+                headers=headers,
+                body=body.to_string(),
+                method='POST')
+        self.assertEquals(e.exception.code, 400)
 
     @tornado.testing.gen_test
     def test_add_two_new_thumbnails(self):
