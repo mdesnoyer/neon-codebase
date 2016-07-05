@@ -351,7 +351,7 @@ class Cluster():
             if timeout is not None and budget_time < datetime.datetime.now():
                 _log.info('timeout is %s' % timeout)
                 _log.info('budget time is %s' % str(budget_time))
-                _log.info('datetime now is %s' % str(datetime.datetime.now())
+                _log.info('datetime now is %s' % str(datetime.datetime.now()))
                 raise MapReduceError("Map Reduce Job timed out.")
 
             try:
