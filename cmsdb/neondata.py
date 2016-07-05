@@ -404,7 +404,7 @@ class PostgresDB(tornado.web.RequestHandler):
             fields = fv[0]
             values = fv[1] 
 
-            extra_params = obj.get_query_extra_params()
+            extra_params = obj._get_query_extra_params()
             params = (
                 obj.get_json_data(), 
                 obj.__class__.__name__, 
@@ -423,7 +423,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 tn=obj._baseclass_name().lower(),
                 sets=obj._get_uq_set_string())
             params = (obj.get_json_data(),)
-            extra_params = obj.get_query_extra_params()
+            extra_params = obj._get_query_extra_params()
             params += extra_params + (obj.key,) 
             return (query, params)
  
@@ -440,7 +440,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 strs = objects[0]._get_umq_sstr_vals_changes(len(objects)) 
                 param_list = []
                 table = objects[0]._baseclass_name().lower()
-               
+                import pdb; pdb.set_trace()   
                 query = "UPDATE {tn} AS t {setstr} FROM {valstr} AS {changestr} \
                     WHERE changes.key = t._data->>'key'".format(
                         tn=table,
@@ -450,7 +450,7 @@ class PostgresDB(tornado.web.RequestHandler):
                 for obj in objects: 
                     param_list.append(obj.key)
                     param_list.append(obj.get_json_data())
-                    param_list += obj.get_query_extra_params() 
+                    param_list += obj._get_query_extra_params() 
                                     
                 return (query, tuple(param_list))  
             except KeyError: 
@@ -802,23 +802,26 @@ class StoredObject(object):
             override this if you need something custom to get _data
         '''
         def _json_fixer(obj): 
-            for key, value in obj.items(): 
-                if value == float('-inf'):
-                    obj[key] = PythonNaNStrings.NEGINF
-                if value == float('inf'):
-                    obj[key] = PythonNaNStrings.INF
-                if value == float('nan'):
-                    obj[key] = PythonNaNStrings.NAN
-            addcs = self._additional_columns() 
+            for key, value in obj.items():
+                try:  
+                    if value == float('-inf'):
+                        obj[key] = PythonNaNStrings.NEGINF
+                    if value == float('inf'):
+                        obj[key] = PythonNaNStrings.INF
+                    if value == float('nan'):
+                        obj[key] = PythonNaNStrings.NAN
+                except ValueError: 
+                    pass 
             # we want to remove these extras from the _data object 
             # to prevent the duplication of data
+            addcs = self._additional_columns() 
             for c in addcs:
                 try:  
                     del obj[c.column_name]
                 except KeyError: 
                     pass 
             return obj
-        obj = _json_fixer(copy.deepcopy(self.to_dict()['_data'])) 
+        obj = _json_fixer(copy.copy(self.to_dict()['_data'])) 
         def json_serial(obj):
             if isinstance(obj, datetime.datetime):
                 serial = obj.isoformat()
@@ -1319,7 +1322,7 @@ class StoredObject(object):
                     update_objs)
                 yield conn.execute(update_query[0], 
                                    update_query[1]) 
-            except Exception as e: 
+            except Exception as e:
                 _log.error('unknown error when running \
                             update_query %s : %s' % 
                             (update_query, e))
@@ -1578,7 +1581,7 @@ class StoredObject(object):
              this should return [PostgresColumn('widget',...), 
                  PostgresColumn('fidget',...)]
 
-           NOTE these must follow the order of the get_query_extra_params 
+           NOTE these must follow the order of the _get_query_extra_params 
             tuple from the object itself. 
         '''
         return []
@@ -1680,8 +1683,13 @@ class StoredObject(object):
             ['%s' % x.column_name for x in alls])
         return (ss,vs,cs)    
 
-    def get_query_extra_params(self): 
-        return () 
+    def _get_query_extra_params(self):
+        '''Returns a tuple of the data meant to be inserted/updated 
+             into the database. Works off of the additional_columns 
+             which should be defined in the baseclass 
+        '''
+        acs = self._additional_columns()  
+        return tuple([self.__dict__[x.data_stored] for x in acs])
 
 class StoredObjectIterator():
     '''An iterator that generates objects of a specific type.
@@ -4781,7 +4789,7 @@ class ThumbnailMetadata(StoredObject):
         self.height = height
         self.type = ttype #neon1../ brightcove / youtube
         self.rank = 0 if not rank else rank  #int 
-        self.model_score = model_score #string
+        self.model_score = model_score # DEPRECATED use features instead
         self.model_version = model_version #string
         self.frameno = frameno #int Frame Number
         self.filtered = filtered # String describing how it was filtered
@@ -4801,7 +4809,9 @@ class ThumbnailMetadata(StoredObject):
         # DEPRECATED: Use the ThumbnailStatus table instead
         self.ctr = ctr
        
-        # the features that caused this thumbnail to be surfaced 
+        # This is a full feature vector. It stores a numpy array of floats. 
+        # Each index is dependent on the model used. Human readable versions of 
+        # this exist in the Features table. 
         self.features = features  
         # NOTE: If you add more fields here, modify the merge code in
         # video_processor/client, Add unit test to check this
@@ -4816,9 +4826,6 @@ class ThumbnailMetadata(StoredObject):
     def _additional_columns(cls):
         return [PostgresColumn('features', '%s::bytea', 'features')]
 
-    def get_query_extra_params(self): 
-        return (self.features,)     
-  
     def _set_keyname(self):
         '''Key the set by the video id'''
         return 'objset:%s' % self.key.rpartition('_')[0]
