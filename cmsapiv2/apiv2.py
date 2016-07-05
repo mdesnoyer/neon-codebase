@@ -228,7 +228,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
         try:
             payload = JWTHelper.decode_token(access_token)
             username = payload.get('username')
-            account_id = payload.get('account_id')
 
             if username:
                 user = yield neondata.User.get(username, async=True)
@@ -265,17 +264,6 @@ class APIV2Handler(tornado.web.RequestHandler, APIV2Sender):
 
                     raise NotAuthorizedError('You cannot access this resource.')
                 raise NotAuthorizedError('user does not exist')
-            elif account_id:
-                # Handle account not associated with any user.
-                if account_id != account.get_id():
-                    # Mismatch of token and path.
-                    raise NotAuthorizedError('You cannot access this resource.')
-                if request.account:
-                    # No account-only acccessor is an internal account.
-                    if internal_only:
-                        raise NotAuthorizedError('Internal only resource.')
-                    raise tornado.gen.Return(True)
-                raise NotAuthorizedError('Account does not exist.')
             else:
                 raise jwt.InvalidTokenError
 

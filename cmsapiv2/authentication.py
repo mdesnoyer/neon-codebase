@@ -288,11 +288,11 @@ class NewAccountHandler(APIV2Handler):
             schema(args)
         # If not email, then provide a loginless account.
         else:
-            account = yield AccountHelper.save_loginless_account()
+            account, user = yield AccountHelper.save_loginless_account()
 
             # Generate and return tokens.
             access_token, refresh_token = AccountHelper.get_auth_tokens(
-                {'account_id': account.get_id()})
+                {'username': user.get_id()})
             self.success({
                 'account_ids': [account.get_id()],
                 'access_token': access_token,
@@ -376,7 +376,7 @@ class AccountHelper(object):
         # Save other account objects that are based on the Neon api key.
         yield AccountHelper.save_default_objects(account)
 
-        raise tornado.gen.Return(account)
+        raise tornado.gen.Return((account, user))
 
     @staticmethod
     @tornado.gen.coroutine
